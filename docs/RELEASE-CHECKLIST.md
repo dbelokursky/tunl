@@ -9,6 +9,41 @@ a few quick cross-platform confirmations.
 Tag only after the `v*`-tagged `release.yml` run is green and all installers
 are attached to the release.
 
+## Cutting the release (tagging)
+
+`release.yml` triggers on any `v*` tag push and writes the GitHub Release's
+**title and notes from the annotated tag's message** — subject line → title,
+message body → notes. The tag *is* the release notes; write them there.
+
+Create the tag with `--cleanup=verbatim`, or Git strips every `## Section`
+header (it treats `#` lines as comments):
+
+```sh
+git tag -a --cleanup=verbatim -F notes.txt vX.Y.Z
+git push origin vX.Y.Z
+```
+
+`notes.txt` layout (see the v1.4.0 release for the house style — Russian, these
+sections). The first line is the title, then a blank line, then the body:
+
+```text
+vX.Y.Z — короткий заголовок
+                                  <- blank line
+## Что нового
+- ...
+## Исправления
+- ...
+## Установка
+- macOS (Apple Silicon): `tunl_X.Y.Z.dmg`
+- Windows 10/11 x64: `tunl_X.Y.Z.msi`
+- Debian/Ubuntu amd64: `tunl_X.Y.Z_amd64.deb`
+- Debian/Ubuntu arm64: `tunl_X.Y.Z_arm64.deb`
+```
+
+The version comes wholly from the tag (`pom.xml` stays `-SNAPSHOT`). To fix notes
+after the fact: `gh release edit vX.Y.Z --notes-file notes.txt` — immune to the
+`#` stripping, since it doesn't go through Git.
+
 ## Windows (manual — no CI/VM covers this)
 
 Run on a real Windows 10/11 x64 box, ideally a clean user profile.
