@@ -108,6 +108,18 @@ On Arch-based distros an [AUR](https://aur.archlinux.org) package is available
 yay -S tunl-bin
 ```
 
+### Upgrading from VLESS Client (1.4.x and older)
+
+The app was renamed to Tunl in 1.5.0. Your servers, subscriptions, routing
+rules and saved passwords carry over untouched — only the app's name changed,
+not where it stores things.
+
+| OS | What happens | What you do |
+|---|---|---|
+| Windows | the MSI upgrades the existing install in place | nothing |
+| macOS | `Tunl.app` installs **next to** the old `VLESS Client.app` | delete the old app once Tunl works |
+| Linux | apt sees `tunl` as a new package, not an upgrade | `sudo apt remove vless-client` after installing |
+
 ---
 
 ## First connection
@@ -231,6 +243,11 @@ Where the data lives (`settings.json`, `servers.json`, `subscriptions.json`,
 | macOS | `~/Library/Application Support/VlessClient` |
 | Windows | `%APPDATA%\VlessClient` |
 | Linux | `~/.local/share/vless-client` |
+
+These paths still carry the app's old name (it was "VLESS Client" before the
+Tunl rename). That is deliberate: keeping them means an update finds your
+servers, subscriptions and saved passwords exactly where they already are,
+with nothing to migrate by hand.
 
 ### System Proxy per OS
 
