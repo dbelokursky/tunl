@@ -3,7 +3,41 @@ on:
   push:
     tags: ['v*']
 jobs:
+  # Derive the release's title and body from the pushed annotated tag's message
+  # (subject line -> title, message body -> notes) so a release is fully written
+  # the moment the tag lands. softprops/action-gh-release does not read the tag
+  # itself, so we extract it once here and every release job below passes these
+  # outputs as name/body — idempotent, since each job sets the same values.
+  prepare-release:
+    runs-on: ubuntu-latest
+    outputs:
+      title: ${{ steps.tag.outputs.title }}
+      notes: ${{ steps.tag.outputs.notes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - id: tag
+        name: Extract title and notes from the annotated tag
+        # %(contents:subject) is the tag message's first line -> release title;
+        # %(contents:body) is everything after the blank line -> release notes,
+        # with any signature stripped.
+        # IMPORTANT: create the tag with `git tag -a --cleanup=verbatim -F notes`.
+        # The default cleanup drops lines starting with '#', which would silently
+        # eat the `## Section` headers in the notes (see docs/RELEASE-CHECKLIST.md).
+        # Tags here are always annotated; a lightweight tag would yield its
+        # commit message instead.
+        run: |
+          subject="$(git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(contents:subject)')"
+          body="$(git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(contents:body)')"
+          {
+            printf 'title=%s\n' "$subject"
+            printf 'notes<<NOTES_EOF_28f1\n%s\nNOTES_EOF_28f1\n' "$body"
+          } >> "$GITHUB_OUTPUT"
+
   release-macos:
+    needs: prepare-release
     runs-on: macos-latest
     permissions:
       contents: write
@@ -67,12 +101,15 @@ jobs:
           xcrun stapler staple dist/*.dmg
       - uses: softprops/action-gh-release@v2
         with:
+          name: ${{ needs.prepare-release.outputs.title }}
+          body: ${{ needs.prepare-release.outputs.notes }}
           files: dist/*.dmg
 
   # Windows twin of the job above: same gates (fat JAR, real-binary smoke),
   # same shared packaging script as the per-merge build, MSI instead of DMG.
   # Both jobs upload to the same tag's release; action-gh-release appends.
   release-windows:
+    needs: prepare-release
     runs-on: windows-latest
     permissions:
       contents: write
@@ -106,11 +143,14 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1 -Version "$($env:GITHUB_REF_NAME -replace '^v', '')"
       - uses: softprops/action-gh-release@v2
         with:
+          name: ${{ needs.prepare-release.outputs.title }}
+          body: ${{ needs.prepare-release.outputs.notes }}
           files: dist/*.msi
 
   # Linux twin: same gates (fat JAR, real-binary smoke), same shared
   # packaging script as the per-merge build, DEB instead of DMG/MSI.
   release-linux:
+    needs: prepare-release
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -130,12 +170,15 @@ jobs:
         run: scripts/package-linux.sh "${GITHUB_REF_NAME#v}"
       - uses: softprops/action-gh-release@v2
         with:
+          name: ${{ needs.prepare-release.outputs.title }}
+          body: ${{ needs.prepare-release.outputs.notes }}
           files: dist/*.deb
 
   # arm64 twin of release-linux on GitHub's free arm runners: same gates
   # (fat JAR, real-binary smoke on the linux-arm64 core), same script —
   # jpackage derives the deb architecture from the host.
   release-linux-arm64:
+    needs: prepare-release
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: write
@@ -153,6 +196,8 @@ jobs:
         run: scripts/package-linux.sh "${GITHUB_REF_NAME#v}"
       - uses: softprops/action-gh-release@v2
         with:
+          name: ${{ needs.prepare-release.outputs.title }}
+          body: ${{ needs.prepare-release.outputs.notes }}
           files: dist/*.deb
 
   # Fill the Homebrew cask and AUR PKGBUILD templates with this release's
@@ -160,7 +205,7 @@ jobs:
   # release. A tap/AUR maintainer copies them into their package repo (see
   # docs/DISTRIBUTION.md); the repo keeps the templates unfilled.
   update-packaging:
-    needs: [release-macos, release-windows, release-linux, release-linux-arm64]
+    needs: [prepare-release, release-macos, release-windows, release-linux, release-linux-arm64]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -180,8 +225,12 @@ jobs:
           DEB_AMD64=$(sha_of "tunl_${V}_amd64.deb")
           DEB_ARM64=$(sha_of "tunl_${V}_arm64.deb")
           scripts/update-packaging.sh "$V" "$DMG" "$DEB_AMD64" "$DEB_ARM64"
+      # Re-assert name/body alongside the packaging uploads so this final call
+      # can never blank the notes the platform jobs set.
       - uses: softprops/action-gh-release@v2
         with:
+          name: ${{ needs.prepare-release.outputs.title }}
+          body: ${{ needs.prepare-release.outputs.notes }}
           files: |
             packaging/homebrew/tunl.rb
             packaging/aur/PKGBUILD
