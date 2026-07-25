@@ -34,10 +34,10 @@ vX.Y.Z — короткий заголовок
 ## Исправления
 - ...
 ## Установка
-- macOS (Apple Silicon): `vless-client_X.Y.Z.dmg`
-- Windows 10/11 x64: `vless-client_X.Y.Z.msi`
-- Debian/Ubuntu amd64: `vless-client_X.Y.Z_amd64.deb`
-- Debian/Ubuntu arm64: `vless-client_X.Y.Z_arm64.deb`
+- macOS (Apple Silicon): `tunl_X.Y.Z.dmg`
+- Windows 10/11 x64: `tunl_X.Y.Z.msi`
+- Debian/Ubuntu amd64: `tunl_X.Y.Z_amd64.deb`
+- Debian/Ubuntu arm64: `tunl_X.Y.Z_arm64.deb`
 ```
 
 The version comes wholly from the tag (`pom.xml` stays `-SNAPSHOT`). To fix notes
