@@ -15,12 +15,24 @@ are attached to the release.
 **title and notes from the annotated tag's message** — subject line → title,
 message body → notes. The tag *is* the release notes; write them there.
 
-Create the tag with `--cleanup=verbatim`, or Git strips every `## Section`
-header (it treats `#` lines as comments):
+Two things must both hold, or the notes silently degrade:
+
+- **The tag must be annotated** (`git tag -a`). The workflow reads the tag
+  object through the GitHub API; a lightweight tag has no annotation, and the
+  release then falls back to a bare `vX.Y.Z` title with an empty body.
+- **Create it with `--cleanup=verbatim`**, or Git strips every `## Section`
+  header on the way in (it treats `#` lines as comments), and the headers never
+  reach the tag object at all.
 
 ```sh
 git tag -a --cleanup=verbatim -F notes.txt vX.Y.Z
 git push origin vX.Y.Z
+```
+
+Verify what the workflow will actually read, before or after pushing:
+
+```sh
+gh api "repos/dbelokursky/tunl/git/tags/$(gh api repos/dbelokursky/tunl/git/ref/tags/vX.Y.Z -q .object.sha)" -q .message
 ```
 
 `notes.txt` layout (see the v1.4.0 release for the house style — Russian, these
