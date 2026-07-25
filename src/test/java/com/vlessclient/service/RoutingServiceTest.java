@@ -23,6 +23,66 @@ class RoutingServiceTest {
         routingService = new RoutingService(tempDir);
     }
 
+    /**
+     * routing.json records which countries and domains the user bypasses — it
+     * fingerprints their traffic, so it must not be world-readable like it was
+     * (0644, while every sibling config was 0600).
+     */
+    @Test
+    void saveConfig_writesTheFileOwnerOnly() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix"));
+
+        routingService.saveConfig(routingService.getConfig());
+
+        java.util.Set<java.nio.file.attribute.PosixFilePermission> perms =
+                java.nio.file.Files.getPosixFilePermissions(tempDir.resolve("routing.json"));
+        assertThat(perms).containsExactlyInAnyOrder(
+                java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+                java.nio.file.attribute.PosixFilePermission.OWNER_WRITE);
+    }
+
+    /**
+     * Pre-port installs wrote routing.json mac-style on every OS. Moving to
+     * PlatformPaths must carry that file over, or a Windows/Linux user silently
+     * starts from empty routing rules.
+     */
+    @Test
+    void migrateLegacyDataDir_movesAPrePortFileToThePlatformDir() throws Exception {
+        Path legacy = tempDir.resolve("legacy");
+        Path platform = tempDir.resolve("platform");
+        java.nio.file.Files.createDirectories(legacy);
+        java.nio.file.Files.writeString(legacy.resolve("routing.json"),
+                "{\"bypass_countries\":[\"kz\"],\"bypass_list\":[],\"rules\":[]}");
+
+        Path result = RoutingService.migrateLegacyDataDir(platform, legacy);
+
+        assertThat(result).isEqualTo(platform);
+        assertThat(platform.resolve("routing.json")).exists();
+        assertThat(legacy.resolve("routing.json")).doesNotExist();
+        assertThat(new RoutingService(platform).getConfig().getBypassCountries())
+                .containsExactly("kz");
+    }
+
+    @Test
+    void migrateLegacyDataDir_keepsAnExistingPlatformFile() throws Exception {
+        Path legacy = tempDir.resolve("legacy");
+        Path platform = tempDir.resolve("platform");
+        java.nio.file.Files.createDirectories(legacy);
+        java.nio.file.Files.createDirectories(platform);
+        // Real ISO-3166 codes: setBypassCountries drops anything not in the
+        // catalog, so placeholder strings would read as an empty list.
+        java.nio.file.Files.writeString(legacy.resolve("routing.json"),
+                "{\"bypass_countries\":[\"fr\"],\"bypass_list\":[],\"rules\":[]}");
+        java.nio.file.Files.writeString(platform.resolve("routing.json"),
+                "{\"bypass_countries\":[\"de\"],\"bypass_list\":[],\"rules\":[]}");
+
+        RoutingService.migrateLegacyDataDir(platform, legacy);
+
+        assertThat(new RoutingService(platform).getConfig().getBypassCountries())
+                .containsExactly("de");
+    }
+
     @Test
     void defaultConfig_hasEmptySections() {
         RoutingConfig config = routingService.getConfig();
