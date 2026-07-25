@@ -87,9 +87,49 @@ public class ConfigStore {
         return servers;
     }
 
+    /**
+     * Adds a server and persists it, activating it when nothing else is active.
+     *
+     * <p>The auto-activation is what makes a fresh install usable: {@code active}
+     * defaults to false and no import path sets it, so without this the first
+     * server a user adds leaves them with a full list and no active server —
+     * Connect then fails with "no server is selected" and the only cure is a
+     * list gesture the UI never mentions.</p>
+     */
     public synchronized void addServer(ServerConfig server) {
+        if (servers.stream().noneMatch(ServerConfig::isActive)) {
+            server.setActive(true);
+        }
         servers.add(server);
         saveServers();
+    }
+
+    /**
+     * Makes the given server the active one and persists the change.
+     *
+     * <p>The single place that owns the "exactly one active" invariant. Callers
+     * used to flip the flags themselves, which diverged: the tray wrote through
+     * to disk while the server list only mutated memory, so a choice made in
+     * the list was lost on restart. Elements are re-{@code set} rather than
+     * mutated in place so the {@code ObservableList} fires a change and
+     * listeners (e.g. the Connect button's availability) see the new state.</p>
+     *
+     * @param serverId id of the server to activate; unknown ids deactivate all
+     */
+    public synchronized void setActiveServer(String serverId) {
+        boolean changed = false;
+        for (int i = 0; i < servers.size(); i++) {
+            ServerConfig s = servers.get(i);
+            boolean shouldBeActive = s.getId().equals(serverId);
+            if (s.isActive() != shouldBeActive) {
+                s.setActive(shouldBeActive);
+                servers.set(i, s);
+                changed = true;
+            }
+        }
+        if (changed) {
+            saveServers();
+        }
     }
 
     /**

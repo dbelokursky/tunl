@@ -203,10 +203,9 @@ public class ServersViewController {
     }
 
     private void setActiveServer(ServerConfig server) {
-        ObservableList<ServerConfig> servers = configStore.getServers();
-        for (ServerConfig s : servers) {
-            s.setActive(s.getId().equals(server.getId()));
-        }
+        // Delegates so the choice is persisted; flipping the flags here left it
+        // in memory only and it was lost on restart.
+        configStore.setActiveServer(server.getId());
         serverListView.refresh();
         log.info("Active server set to: {}", server.getName());
     }
