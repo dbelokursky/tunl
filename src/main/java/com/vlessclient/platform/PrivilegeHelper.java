@@ -34,12 +34,28 @@ import org.slf4j.LoggerFactory;
  * the next Connect re-runs {@link #configure} — one admin prompt, which is
  * also the human checkpoint that gates <em>what</em> becomes root-runnable.</p>
  *
- * <p><b>Residual.</b> The rule still lets the user run the trusted sing-box as
- * root with an arbitrary config; a fully isolated design (a code-signed
- * privileged XPC helper that owns the config) needs notarization/signing and
- * is tracked separately. If installation is declined or fails, the caller
- * falls back to the osascript-per-connect path (password each time, no
- * standing rule).</p>
+ * <p><b>Why the argument list is pinned too.</b> Authorizing the binary alone
+ * ({@code NOPASSWD: .../sing-box}) lets any process running as the user pass
+ * their <em>own</em> arguments — including {@code run -c attacker.json}, whose
+ * {@code log.output} names any path on disk. That is a general
+ * write-a-file-as-root primitive available without interaction once TUN has
+ * been used once. The rule therefore pins the full command line, down to a
+ * fixed config path ({@link #ELEVATED_CONFIG}); {@code sudo} matches arguments
+ * literally, so any other invocation is refused and falls back to a password
+ * prompt.</p>
+ *
+ * <p>The config lives in {@link #ELEVATED_RUN_DIR} — a user-owned 0700
+ * directory inside the root-owned parent — so the app can still rewrite it per
+ * connection without a prompt, but its <em>path</em> is not caller-controlled
+ * and contains no spaces to escape in the sudoers line.</p>
+ *
+ * <p><b>Residual.</b> The user still controls the <em>contents</em> of that one
+ * config, so code already running as the user can influence what the root
+ * sing-box does while a TUN connection is being started. Closing that needs a
+ * code-signed privileged helper that owns the config outright, which requires
+ * notarization and is tracked separately. If installation is declined or fails,
+ * the caller falls back to the osascript-per-connect path (password each time,
+ * no standing rule).</p>
  */
 public final class PrivilegeHelper {
 
@@ -50,6 +66,16 @@ public final class PrivilegeHelper {
     /** Root-owned copy of sing-box the sudoers rule authorizes for {@code sudo -n}. */
     static final Path ELEVATED_BINARY = Path.of("/usr/local/libexec/vless-client/sing-box");
 
+    /** User-owned 0700 directory holding the one config the rule allows. */
+    static final Path ELEVATED_RUN_DIR = Path.of("/usr/local/libexec/vless-client/run");
+
+    /**
+     * The only config path {@code sudo -n} will accept. Deliberately fixed and
+     * space-free: it is written verbatim into the sudoers line, and pinning it
+     * is what stops a caller from pointing root at a config of their choosing.
+     */
+    static final Path ELEVATED_CONFIG = ELEVATED_RUN_DIR.resolve("tun-config.json");
+
     private static final int CANARY_TIMEOUT_SECONDS = 3;
     private static final int CONFIGURE_TIMEOUT_SECONDS = 60;
 
@@ -59,6 +85,14 @@ public final class PrivilegeHelper {
     /** The root-owned binary to invoke with {@code sudo -n} once configured. */
     public static Path elevatedBinary() {
         return ELEVATED_BINARY;
+    }
+
+    /**
+     * The fixed config path the sudoers rule authorizes. Callers must copy the
+     * generated config here before {@code sudo -n}; any other path is refused.
+     */
+    public static Path elevatedConfig() {
+        return ELEVATED_CONFIG;
     }
 
     /**
@@ -77,11 +111,18 @@ public final class PrivilegeHelper {
         return sameContent(userBinary, ELEVATED_BINARY);
     }
 
-    /** {@code sudo -n <binary> version} succeeds without a password prompt. */
+    /**
+     * Whether {@code sudo -n} would accept the exact TUN command line, asked
+     * with {@code -l} so nothing is executed. A plain canary like
+     * {@code sudo -n <binary> version} cannot be used any more: the rule pins
+     * the argument list, so {@code version} is (correctly) refused.
+     */
     private static boolean sudoCanRun(Path binary) {
         try {
             ProcessBuilder pb = new ProcessBuilder(
-                    "sudo", "-n", binary.toAbsolutePath().toString(), "version");
+                    "sudo", "-n", "-l",
+                    binary.toAbsolutePath().toString(),
+                    "run", "-c", ELEVATED_CONFIG.toString());
             pb.redirectErrorStream(true);
             Process proc = pb.start();
             if (!proc.waitFor(CANARY_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
@@ -117,7 +158,7 @@ public final class PrivilegeHelper {
         Path stage = Files.createTempFile("vless-sudoers-", ".tmp");
         try {
             Files.writeString(stage, sudoersRule(user));
-            String shellCommand = configureShellCommand(userBinary, stage);
+            String shellCommand = configureShellCommand(userBinary, stage, user);
 
             ProcessBuilder pb = new ProcessBuilder(
                     "osascript",
@@ -156,26 +197,37 @@ public final class PrivilegeHelper {
     }
 
     /**
-     * The sudoers line — pinned to the fixed root-owned path, so no
-     * user-controlled path is interpolated (and no space-escaping is needed).
+     * The sudoers line. Both the binary and its full argument list are fixed
+     * constants — no user-controlled path is interpolated (so nothing needs
+     * space-escaping), and sudo matches the arguments literally, so this
+     * authorizes exactly one command and nothing else.
      */
     static String sudoersRule(String user) {
-        return user + " ALL=(root) NOPASSWD: " + ELEVATED_BINARY + "\n";
+        return user + " ALL=(root) NOPASSWD: "
+                + ELEVATED_BINARY + " run -c " + ELEVATED_CONFIG + "\n";
     }
 
     /**
      * The privileged shell command: install the current sing-box as a
-     * root-owned copy, install the validated rule, and syntax-check it —
+     * root-owned copy, create the user-owned run directory that holds the one
+     * authorized config, install the validated rule, and syntax-check it —
      * removing the rule if the check fails so sudo never gets wedged.
+     *
+     * <p>The run directory is 0700 and owned by {@code user} so the app can
+     * rewrite the config per connection without another prompt, while its
+     * root-owned parent keeps anyone else from swapping the directory itself.</p>
      */
-    static String configureShellCommand(Path userBinary, Path stagedRule) {
+    static String configureShellCommand(Path userBinary, Path stagedRule, String user) {
         String src = singleQuote(userBinary.toAbsolutePath().toString());
         String dst = singleQuote(ELEVATED_BINARY.toString());
         String dstDir = singleQuote(ELEVATED_BINARY.getParent().toString());
+        String runDir = singleQuote(ELEVATED_RUN_DIR.toString());
+        String owner = singleQuote(user);
         String rule = singleQuote(stagedRule.toAbsolutePath().toString());
         String target = singleQuote(SUDOERS_FILE.toString());
         return "mkdir -p " + dstDir
                 + " && install -m 0755 -o root -g wheel " + src + " " + dst
+                + " && install -d -m 0700 -o " + owner + " -g staff " + runDir
                 + " && install -m 0440 -o root -g wheel " + rule + " " + target
                 + " && visudo -c -f " + target
                 + " || { rm -f " + target + "; exit 1; }";
