@@ -63,7 +63,12 @@ public final class MacTunLauncher implements TunLauncher {
         // user-writable binary — invoke that path under sudo -n.
         String singBoxCmd = shellQuote(
                 PrivilegeHelper.elevatedBinary().toAbsolutePath().toString());
-        String configPath = shellQuote(configFile.toAbsolutePath().toString());
+        // The rule pins the config path as well, so the generated config has to
+        // be published at that exact location; any other path is refused by
+        // sudo. Written 0600 in the user-owned run dir — it carries the
+        // server's credentials.
+        Path published = publishConfig(configFile);
+        String configPath = shellQuote(published.toString());
         String stopPath = shellQuote(stopSignalFile.toAbsolutePath().toString());
 
         // sudo forwards TERM/INT to its child (sing-box), so killing the
@@ -124,6 +129,24 @@ public final class MacTunLauncher implements TunLauncher {
         Process process = pb.start();
         log.info("Started sing-box via osascript (password prompt expected)");
         return process;
+    }
+
+    /**
+     * Copies the generated config to the one path the sudoers rule authorizes,
+     * replacing whatever the previous connection left there.
+     *
+     * <p>The destination directory is created by the privileged setup step as
+     * user-owned 0700; it is recreated here only as a best-effort fallback so a
+     * missing directory surfaces as a normal start failure (and the osascript
+     * path) rather than an opaque sudo refusal.</p>
+     *
+     * @return the published config path, ready to pass to {@code sudo -n}
+     */
+    private static Path publishConfig(Path configFile) throws IOException {
+        Path target = PrivilegeHelper.elevatedConfig();
+        SecureFiles.createPrivateDir(target.getParent());
+        SecureFiles.writePrivately(target, Files.readAllBytes(configFile));
+        return target;
     }
 
     /**

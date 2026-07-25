@@ -30,9 +30,29 @@ class PrivilegeHelperTest {
         String rule = PrivilegeHelper.sudoersRule("alice");
 
         assertThat(rule).isEqualTo(
-                "alice ALL=(root) NOPASSWD: /usr/local/libexec/vless-client/sing-box\n");
+                "alice ALL=(root) NOPASSWD: /usr/local/libexec/vless-client/sing-box"
+                        + " run -c /usr/local/libexec/vless-client/run/tun-config.json\n");
         // The escalation this fixes: no user-home path may be authorized.
         assertThat(rule).doesNotContain("/Users/").doesNotContain("Library");
+    }
+
+    /**
+     * The rule must authorize ONE command line, not a binary. Authorizing the
+     * bare binary lets any process running as the user pass `run -c own.json`,
+     * whose log.output writes any file as root — a local root primitive with no
+     * interaction. sudo matches arguments literally, so pinning them is the fix.
+     */
+    @Test
+    void sudoersRulePinsTheArgumentsSoAnArbitraryConfigCannotBePassed() {
+        String rule = PrivilegeHelper.sudoersRule("alice");
+
+        String authorized = rule.substring(rule.indexOf("NOPASSWD: ") + "NOPASSWD: ".length()).trim();
+        // Not just the binary: the config path is part of what sudo matches.
+        assertThat(authorized).isNotEqualTo("/usr/local/libexec/vless-client/sing-box");
+        assertThat(authorized).endsWith("run -c " + PrivilegeHelper.elevatedConfig());
+        // The pinned config path must be space-free: sudoers splits on spaces,
+        // so a path needing escapes would silently widen what matches.
+        assertThat(PrivilegeHelper.elevatedConfig().toString()).doesNotContain(" ");
     }
 
     @Test
@@ -40,7 +60,7 @@ class PrivilegeHelperTest {
         Path userBinary = Path.of("/Users/alice/Library/Application Support/VlessClient/bin/sing-box");
         Path stagedRule = tempDir.resolve("rule.tmp");
 
-        String cmd = PrivilegeHelper.configureShellCommand(userBinary, stagedRule);
+        String cmd = PrivilegeHelper.configureShellCommand(userBinary, stagedRule, "alice");
 
         // Creates the root-owned dir and installs the binary root:wheel 0755
         // at the elevated path — so the user can no longer swap what runs as root.
@@ -49,6 +69,11 @@ class PrivilegeHelperTest {
                 "install -m 0755 -o root -g wheel "
                         + "'/Users/alice/Library/Application Support/VlessClient/bin/sing-box' "
                         + "'/usr/local/libexec/vless-client/sing-box'");
+        // The run dir holding the one authorized config: user-owned so the app
+        // can rewrite it per connection, 0700 so nobody else can read the
+        // credentials in it, inside the root-owned parent.
+        assertThat(cmd).contains(
+                "install -d -m 0700 -o 'alice' -g staff '/usr/local/libexec/vless-client/run'");
         // Then the rule, validated with visudo, removed on failure.
         assertThat(cmd).contains("install -m 0440 -o root -g wheel");
         assertThat(cmd).contains("'/etc/sudoers.d/vless-client'");
@@ -60,6 +85,17 @@ class PrivilegeHelperTest {
     void elevatedBinaryIsTheRootOwnedLocation() {
         assertThat(PrivilegeHelper.elevatedBinary())
                 .isEqualTo(Path.of("/usr/local/libexec/vless-client/sing-box"));
+    }
+
+    @Test
+    void elevatedConfigLivesInTheRunDirUnderTheRootOwnedParent() {
+        assertThat(PrivilegeHelper.elevatedConfig())
+                .isEqualTo(Path.of("/usr/local/libexec/vless-client/run/tun-config.json"));
+        // Same parent as the binary, so the privileged setup owns both.
+        // Compared as paths, not via AssertJ's startsWith, which resolves
+        // against the real filesystem and would need the file to exist.
+        assertThat(PrivilegeHelper.elevatedConfig()
+                .startsWith(PrivilegeHelper.elevatedBinary().getParent())).isTrue();
     }
 
     @Test
