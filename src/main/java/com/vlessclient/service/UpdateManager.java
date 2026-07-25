@@ -33,8 +33,21 @@ public class UpdateManager {
 
     static final String RELEASES_URL =
             "https://api.github.com/repos/dbelokursky/tunl/releases/latest";
+
+    /**
+     * Installer downloads must come from here. The API response names the URL,
+     * so without this bound a tampered response could redirect the download.
+     */
+    static final String RELEASE_DOWNLOAD_PREFIX =
+            "https://github.com/dbelokursky/tunl/releases/download/";
     private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(15);
     private static final long CHECK_INTERVAL_HOURS = 24;
+
+    /**
+     * SHA-256 published for the pending update's installer, captured alongside
+     * its URL so the download is checked against the digest of the same asset.
+     */
+    private volatile String expectedDigest = "";
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
@@ -125,10 +138,13 @@ public class UpdateManager {
             String tagName = root.path("tag_name").asText("");
             String version = stripVersionPrefix(tagName);
 
-            String installerUrl = findInstallerAssetUrl(root.path("assets"));
+            InstallerAsset asset = findInstallerAsset(
+                    root.path("assets"), installerExtension(), currentArchToken());
+            String installerUrl = asset.url();
 
             if (isNewerVersion(version, AppVersion.VERSION)) {
                 log.info("Update available: {} -> {}", AppVersion.VERSION, version);
+                expectedDigest = asset.digest();
                 Platform.runLater(() -> {
                     latestVersion.set(version);
                     downloadUrl.set(installerUrl);
@@ -143,14 +159,49 @@ public class UpdateManager {
     }
 
     /**
-     * Downloads the installer (DMG/MSI) from the given URL to the user's
-     * Downloads directory.
+     * Downloads the installer (DMG/MSI/DEB) for the pending update to the
+     * user's Downloads directory, verifying it before keeping it.
      *
      * @return the saved file path, or {@code null} if the download failed
      */
     public Path downloadUpdate(String url) {
+        return downloadUpdate(url, expectedDigest);
+    }
+
+    /**
+     * Downloads and verifies the installer.
+     *
+     * <p>The app ships unsigned, so users are already trained to click past
+     * Gatekeeper/SmartScreen — an installer that reaches their Downloads folder
+     * is likely to be run. Two checks make that safe to rely on, mirroring
+     * {@link CoreUpdateService}:</p>
+     *
+     * <ul>
+     *   <li>The URL must sit under the official releases prefix, so a tampered
+     *       API response cannot point the download somewhere else.</li>
+     *   <li>The bytes must hash to the {@code sha256:} digest the Releases API
+     *       published for that same asset. No digest, no install — a release
+     *       without one is not offered rather than trusted.</li>
+     * </ul>
+     *
+     * <p>A failed check deletes the partial file: a rejected installer must
+     * never be left sitting in Downloads where it could still be opened.</p>
+     *
+     * @param url            the asset URL to fetch
+     * @param expectedDigest {@code sha256:<hex>} for that asset
+     * @return the saved file path, or {@code null} if download or verification failed
+     */
+    Path downloadUpdate(String url, String expectedDigest) {
         if (url == null || url.isBlank()) {
             log.warn("No download URL provided");
+            return null;
+        }
+        if (!url.startsWith(RELEASE_DOWNLOAD_PREFIX)) {
+            log.error("Refusing update download outside {}: {}", RELEASE_DOWNLOAD_PREFIX, url);
+            return null;
+        }
+        if (expectedDigest == null || !expectedDigest.startsWith("sha256:")) {
+            log.error("Refusing update download with no sha256 digest: {}", url);
             return null;
         }
 
@@ -174,13 +225,27 @@ public class UpdateManager {
             Path downloadsDir = com.vlessclient.platform.PlatformPaths.current().downloadsDir();
             Path target = downloadsDir.resolve(fileName);
 
-            try (InputStream in = response.body()) {
-                Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+            String actualDigest;
+            try (InputStream in = response.body();
+                 java.security.DigestInputStream digesting = new java.security.DigestInputStream(
+                         in, java.security.MessageDigest.getInstance("SHA-256"))) {
+                Files.copy(digesting, target, StandardCopyOption.REPLACE_EXISTING);
+                actualDigest = "sha256:" + java.util.HexFormat.of()
+                        .formatHex(digesting.getMessageDigest().digest());
             }
 
-            log.info("Update downloaded to {}", target);
+            if (!actualDigest.equalsIgnoreCase(expectedDigest)) {
+                // Don't leave a rejected installer where the user could open it.
+                Files.deleteIfExists(target);
+                log.error("Update rejected: sha256 mismatch for {} (expected {}, got {})",
+                        fileName, expectedDigest, actualDigest);
+                return null;
+            }
+
+            log.info("Update downloaded and verified: {}", target);
             return target;
-        } catch (IOException | InterruptedException e) {
+        } catch (IOException | InterruptedException
+                 | java.security.NoSuchAlgorithmException e) {
             log.error("Failed to download update: {}", e.getMessage());
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
@@ -260,8 +325,28 @@ public class UpdateManager {
         };
     }
 
+    /**
+     * A release asset plus the SHA-256 the API publishes for it. The two travel
+     * together so the bytes that get downloaded are always checked against the
+     * digest of the <em>same</em> asset the URL came from.
+     *
+     * @param url    the browser download URL
+     * @param digest the {@code sha256:<hex>} digest, or empty when absent
+     */
+    record InstallerAsset(String url, String digest) {
+        static final InstallerAsset NONE = new InstallerAsset("", "");
+
+        boolean isEmpty() {
+            return url.isEmpty();
+        }
+    }
+
     static String findInstallerAssetUrl(JsonNode assets) {
-        return findInstallerAssetUrl(assets, installerExtension(), currentArchToken());
+        return findInstallerAsset(assets, installerExtension(), currentArchToken()).url();
+    }
+
+    static String findInstallerAssetUrl(JsonNode assets, String extension, String arch) {
+        return findInstallerAsset(assets, extension, arch).url();
     }
 
     /**
@@ -270,21 +355,24 @@ public class UpdateManager {
      * an arm64 deb), falling back to the first extension match for releases
      * that predate multi-arch assets.
      */
-    static String findInstallerAssetUrl(JsonNode assets, String extension, String arch) {
+    static InstallerAsset findInstallerAsset(JsonNode assets, String extension, String arch) {
         if (assets == null || !assets.isArray()) {
-            return "";
+            return InstallerAsset.NONE;
         }
-        String fallback = "";
+        InstallerAsset fallback = InstallerAsset.NONE;
         for (JsonNode asset : assets) {
             String name = asset.path("name").asText("");
             if (!name.endsWith(extension)) {
                 continue;
             }
+            InstallerAsset candidate = new InstallerAsset(
+                    asset.path("browser_download_url").asText(""),
+                    asset.path("digest").asText(""));
             if (name.contains(arch)) {
-                return asset.path("browser_download_url").asText("");
+                return candidate;
             }
             if (fallback.isEmpty()) {
-                fallback = asset.path("browser_download_url").asText("");
+                fallback = candidate;
             }
         }
         return fallback;
