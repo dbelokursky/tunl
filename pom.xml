@@ -9,8 +9,8 @@
     <version>1.0.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 
-    <name>VLESS Client</name>
-    <description>A macOS VLESS/proxy client wrapping sing-box with JavaFX GUI</description>
+    <name>Tunl</name>
+    <description>Cross-platform multi-protocol proxy client wrapping sing-box with a JavaFX GUI</description>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -157,7 +157,7 @@
                         <!--
                             macOS: make the application name shown in the
                             menu bar ("Quit <name>", "Hide <name>") and
-                            the Dock title read "VLESS Client".
+                            the Dock title read "Tunl".
 
                             JavaFX's glass bridge ignores
                             apple.awt.application.name, so we must pass

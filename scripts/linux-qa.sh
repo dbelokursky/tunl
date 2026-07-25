@@ -66,6 +66,6 @@ xvfb-run -a -s "-screen 0 1280x800x24" bash -c "
   kill \$APP 2>/dev/null || true
   sleep 2
 "
-grep -E "VLESS Client started|ERROR" /out/app-stdout.log | tail -3 || true
+grep -E "Tunl started|ERROR" /out/app-stdout.log | tail -3 || true
 echo "[linux-qa] done — see target/linux-qa/"
 '

@@ -32,7 +32,7 @@ public class UpdateManager {
     private static final Logger log = LoggerFactory.getLogger(UpdateManager.class);
 
     static final String RELEASES_URL =
-            "https://api.github.com/repos/dbelokursky/vless-client/releases/latest";
+            "https://api.github.com/repos/dbelokursky/tunl/releases/latest";
     private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(15);
     private static final long CHECK_INTERVAL_HOURS = 24;
 

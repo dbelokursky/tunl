@@ -75,7 +75,7 @@ cert's validity:
 
 ```powershell
 signtool sign /f cert.pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD `
-  /fd sha256 /tr http://timestamp.digicert.com /td sha256 dist\vless-client_*.msi
+  /fd sha256 /tr http://timestamp.digicert.com /td sha256 dist\tunl_*.msi
 ```
 
 Note: an **OV** cert is valid but SmartScreen still shows "Windows protected
@@ -87,13 +87,13 @@ the warning from the first signed build.
 macOS (against the installed app and the DMG):
 
 ```bash
-codesign --verify --deep --strict --verbose=2 "/Applications/VLESS Client.app"
-spctl -a -t open --context context:primary-signature dist/vless-client_*.dmg
-xcrun stapler validate dist/vless-client_*.dmg
+codesign --verify --deep --strict --verbose=2 "/Applications/Tunl.app"
+spctl -a -t open --context context:primary-signature dist/tunl_*.dmg
+xcrun stapler validate dist/tunl_*.dmg
 ```
 
 Windows:
 
 ```powershell
-signtool verify /pa dist\vless-client_*.msi
+signtool verify /pa dist\tunl_*.msi
 ```

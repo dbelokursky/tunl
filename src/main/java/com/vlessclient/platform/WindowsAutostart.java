@@ -94,7 +94,7 @@ public final class WindowsAutostart implements Autostart {
      * Builds the command line stored in the Run value.
      *
      * <p>Under jpackage the process command is the installed native launcher
-     * ({@code VLESS Client.exe}) — registering it directly survives app
+     * ({@code Tunl.exe}) — registering it directly survives app
      * updates and starts without a console. Only a dev run (started by
      * {@code java.exe}) falls back to the reconstructed JVM invocation, with
      * {@code javaw} substituted so no console window flashes at login.</p>

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Stamps a released version and its asset checksums into the packaging
-# templates: the Homebrew cask (packaging/homebrew/vless-client.rb) and the AUR
+# templates: the Homebrew cask (packaging/homebrew/tunl.rb) and the AUR
 # PKGBUILD (packaging/aur/PKGBUILD), then regenerates packaging/aur/.SRCINFO to
 # match. Run by the release workflow after the DMG/deb assets are built and
 # their SHA-256 sums are known; also safe to run by hand.
@@ -10,9 +10,9 @@
 #   scripts/update-packaging.sh <version> <dmg_sha256> <deb_amd64_sha256> <deb_arm64_sha256>
 #
 #   version           — release version, no leading 'v' (e.g. 1.2.0)
-#   dmg_sha256        — SHA-256 of vless-client_<version>.dmg
-#   deb_amd64_sha256  — SHA-256 of vless-client_<version>_amd64.deb
-#   deb_arm64_sha256  — SHA-256 of vless-client_<version>_arm64.deb
+#   dmg_sha256        — SHA-256 of tunl_<version>.dmg
+#   deb_amd64_sha256  — SHA-256 of tunl_<version>_amd64.deb
+#   deb_arm64_sha256  — SHA-256 of tunl_<version>_arm64.deb
 #
 # Idempotent: re-running with the same arguments is a no-op. Portable across
 # macOS bash 3.2 (BSD sed) and Linux (GNU sed) — it never relies on `sed -i`.
@@ -52,7 +52,7 @@ DEB_AMD64_SHA="$(to_hex64 "$DEB_AMD64_SHA")"; check_sha "$DEB_AMD64_SHA" "deb_am
 DEB_ARM64_SHA="$(to_hex64 "$DEB_ARM64_SHA")"; check_sha "$DEB_ARM64_SHA" "deb_arm64_sha256"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-HOMEBREW_FILE="${REPO_ROOT}/packaging/homebrew/vless-client.rb"
+HOMEBREW_FILE="${REPO_ROOT}/packaging/homebrew/tunl.rb"
 PKGBUILD_FILE="${REPO_ROOT}/packaging/aur/PKGBUILD"
 SRCINFO_FILE="${REPO_ROOT}/packaging/aur/.SRCINFO"
 

@@ -1,4 +1,4 @@
-// Generates the VLESS Client app icon at multiple resolutions using AWT.
+// Generates the Tunl app icon at multiple resolutions using AWT.
 // Run with: java scripts/GenerateAppIcon.java
 //
 // Writes PNG files to src/main/resources/icons/ and — on macOS, when

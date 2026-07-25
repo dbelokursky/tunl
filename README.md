@@ -1,22 +1,22 @@
-# VLESS Client
+# Tunl
 
 <p align="center">
-  <img src="src/main/resources/icons/app-icon-256.png" width="128" alt="VLESS Client icon"/>
+  <img src="src/main/resources/icons/app-icon-256.png" width="128" alt="Tunl icon"/>
 </p>
 
 <p align="center">
-  <a href="https://github.com/dbelokursky/vless-client/actions/workflows/build.yml"><img src="https://github.com/dbelokursky/vless-client/actions/workflows/build.yml/badge.svg" alt="Build"/></a>
-  <a href="https://github.com/dbelokursky/vless-client/releases/latest"><img src="https://img.shields.io/github/v/release/dbelokursky/vless-client" alt="Latest release"/></a>
-  <a href="https://github.com/dbelokursky/vless-client/releases"><img src="https://img.shields.io/github/downloads/dbelokursky/vless-client/total" alt="Downloads"/></a>
-  <a href="https://github.com/dbelokursky/vless-client/releases/latest"><img src="https://img.shields.io/github/downloads/dbelokursky/vless-client/latest/total?label=downloads@latest" alt="Latest release downloads"/></a>
+  <a href="https://github.com/dbelokursky/tunl/actions/workflows/build.yml"><img src="https://github.com/dbelokursky/tunl/actions/workflows/build.yml/badge.svg" alt="Build"/></a>
+  <a href="https://github.com/dbelokursky/tunl/releases/latest"><img src="https://img.shields.io/github/v/release/dbelokursky/tunl" alt="Latest release"/></a>
+  <a href="https://github.com/dbelokursky/tunl/releases"><img src="https://img.shields.io/github/downloads/dbelokursky/tunl/total" alt="Downloads"/></a>
+  <a href="https://github.com/dbelokursky/tunl/releases/latest"><img src="https://img.shields.io/github/downloads/dbelokursky/tunl/latest/total?label=downloads@latest" alt="Latest release downloads"/></a>
 </p>
 
 <p align="center">🇬🇧 <b>English</b> · 🇷🇺 <a href="README.ru.md">Русский</a></p>
 
-Cross-platform client (macOS / Windows / Linux) for
-VLESS/VMess/Trojan/Shadowsocks built on JavaFX — wraps
-[sing-box](https://github.com/SagerNet/sing-box) in a friendly GUI with live
-traffic stats, share-link import, subscriptions, routing rules and a
+**Tunl** — cross-platform desktop client (macOS / Windows / Linux) for
+VLESS, VMess, Trojan, Shadowsocks, Hysteria2 and WireGuard, built on JavaFX —
+wraps [sing-box](https://github.com/SagerNet/sing-box) in a friendly GUI with
+live traffic stats, share-link import, subscriptions, routing rules and a
 tray/menu-bar icon.
 
 <!-- TODO(screenshots): docs/screenshots/dashboard.png — Phase 3 of plans/readme.md -->
@@ -26,17 +26,17 @@ tray/menu-bar icon.
 ## Download
 
 Ready-made installers are on the
-[**Releases**](https://github.com/dbelokursky/vless-client/releases/latest) page:
+[**Releases**](https://github.com/dbelokursky/tunl/releases/latest) page:
 
 | OS | File | Note |
 |---|---|---|
-| macOS (Apple Silicon) | `vless-client_x.y.z.dmg` | |
-| Windows 10/11 (x64) | `vless-client_x.y.z.msi` | installs per-user, no admin rights needed |
-| Debian/Ubuntu (amd64) | `vless-client_x.y.z_amd64.deb` | |
-| Debian/Ubuntu (arm64) | `vless-client_x.y.z_arm64.deb` | Raspberry Pi 5 and other ARM machines |
+| macOS (Apple Silicon) | `tunl_x.y.z.dmg` | |
+| Windows 10/11 (x64) | `tunl_x.y.z.msi` | installs per-user, no admin rights needed |
+| Debian/Ubuntu (amd64) | `tunl_x.y.z_amd64.deb` | |
+| Debian/Ubuntu (arm64) | `tunl_x.y.z_arm64.deb` | Raspberry Pi 5 and other ARM machines |
 
 A build of the newest merge to `main` (possibly rough) lives in the
-[**dev-latest**](https://github.com/dbelokursky/vless-client/releases/tag/dev-latest)
+[**dev-latest**](https://github.com/dbelokursky/tunl/releases/tag/dev-latest)
 prerelease.
 
 ---
@@ -49,12 +49,12 @@ Builds are **not signed** with an Apple Developer certificate yet, so
 Gatekeeper blocks the app on first launch. Unblocking is a one-time trip
 through System Settings:
 
-1. Open the DMG and drag **VLESS Client** into **Applications**.
+1. Open the DMG and drag **Tunl** into **Applications**.
 2. Launch the app. macOS will say it cannot verify the app is free of
    malware — click **Done** (*not* "Move to Trash").
 3. Open **System Settings → Privacy & Security**.
 4. Scroll down to the **Security** section — you'll see
-   '"VLESS Client" was blocked to protect your Mac'.
+   '"Tunl" was blocked to protect your Mac'.
 5. Click **Open Anyway** and confirm with your password or Touch ID.
 6. In the dialog that follows, click **Open**. Done — from now on the app
    launches normally.
@@ -72,14 +72,14 @@ Notes:
 - Terminal equivalent (strips the quarantine attribute):
 
   ```bash
-  xattr -d com.apple.quarantine "/Applications/VLESS Client.app"
+  xattr -d com.apple.quarantine "/Applications/Tunl.app"
   ```
 
 Or install via [Homebrew](https://brew.sh) once the tap is set up (see
 [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)):
 
 ```bash
-brew install --cask dbelokursky/tap/vless-client
+brew install --cask dbelokursky/tap/tunl
 ```
 
 ### Windows
@@ -95,17 +95,17 @@ in TUN mode.
 ### Linux (Debian/Ubuntu)
 
 ```bash
-sudo apt install ./vless-client_*.deb
+sudo apt install ./tunl_*.deb
 ```
 
-The app installs into `/opt/vless-client` and shows up in the application
+The app installs into `/opt/tunl` and shows up in the application
 menu (Network category).
 
 On Arch-based distros an [AUR](https://aur.archlinux.org) package is available
 (see [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)):
 
 ```bash
-yay -S vless-client-bin
+yay -S tunl-bin
 ```
 
 ---
@@ -284,8 +284,8 @@ ship sing-box inside.
 ### Quick start
 
 ```bash
-git clone https://github.com/dbelokursky/vless-client.git
-cd vless-client
+git clone https://github.com/dbelokursky/tunl.git
+cd tunl
 mvn clean javafx:run
 ```
 
@@ -403,8 +403,8 @@ scripts/
 
 ### Features (full list)
 
-- **Protocols:** VLESS, VMess, Trojan, Shadowsocks (via sing-box)
-- **Transports:** TCP, WebSocket, gRPC, HTTP/2
+- **Protocols:** VLESS, VMess, Trojan, Shadowsocks, Hysteria2, WireGuard (via sing-box)
+- **Transports:** TCP, WebSocket, gRPC, HTTP/2, QUIC
 - **TLS / Reality / XTLS-Vision**
 - **Modes:** System Proxy, TUN
 - **Subscriptions** — auto-refreshing server lists from a URL
