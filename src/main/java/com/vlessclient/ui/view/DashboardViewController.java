@@ -490,6 +490,12 @@ public class DashboardViewController {
             if (servers == null || servers.isEmpty()) {
                 connectButton.setDisable(true);
                 connectButton.setTooltip(new Tooltip(I18n.get("dashboard.no.servers")));
+            } else if (findActiveServer() == null) {
+                // Gate on activation, not list size: enabling Connect with no
+                // active server turns a click into a modal error telling the
+                // user to "mark it active" — a gesture the UI never offers.
+                connectButton.setDisable(true);
+                connectButton.setTooltip(new Tooltip(I18n.get("dashboard.no.server")));
             } else {
                 connectButton.setDisable(false);
                 connectButton.setTooltip(null);

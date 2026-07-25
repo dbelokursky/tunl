@@ -265,12 +265,9 @@ public class TrayIconService {
         if (configStore == null) {
             return;
         }
-        for (ServerConfig server : List.copyOf(configStore.getServers())) {
-            if (server.isActive() != server.getId().equals(serverId)) {
-                server.setActive(server.getId().equals(serverId));
-                configStore.updateServer(server);
-            }
-        }
+        // Same single owner of the "exactly one active" invariant as the server
+        // list, and one save instead of one per changed entry.
+        configStore.setActiveServer(serverId);
         refreshTrayState();
     }
 

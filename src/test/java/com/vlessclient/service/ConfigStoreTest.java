@@ -35,6 +35,60 @@ class ConfigStoreTest {
         assertThat(reloaded.getServers().get(0).getName()).isEqualTo("Test Server");
     }
 
+    /**
+     * The first-run dead end: `active` defaults to false and no import path
+     * sets it, so a user who added their only server had no active server —
+     * Connect then failed with "mark it active", a gesture the UI never offers.
+     */
+    @Test
+    void addServer_activatesTheFirstServerSoAFreshInstallCanConnect() {
+        store.addServer(createTestServer("First"));
+
+        assertThat(store.getServers().get(0).isActive()).isTrue();
+        // Survives a restart — the flag has to reach disk, not just memory.
+        assertThat(new ConfigStore(tempDir).getServers().get(0).isActive()).isTrue();
+    }
+
+    @Test
+    void addServer_doesNotStealActivationFromAnAlreadyActiveServer() {
+        store.addServer(createTestServer("First"));
+        store.addServer(createTestServer("Second"));
+
+        assertThat(store.getServers().get(0).isActive()).isTrue();
+        assertThat(store.getServers().get(1).isActive()).isFalse();
+    }
+
+    @Test
+    void setActiveServer_persistsTheChoiceAndKeepsExactlyOneActive() {
+        ServerConfig first = createTestServer("First");
+        ServerConfig second = createTestServer("Second");
+        store.addServer(first);
+        store.addServer(second);
+
+        store.setActiveServer(second.getId());
+
+        ConfigStore reloaded = new ConfigStore(tempDir);
+        assertThat(reloaded.getServers())
+                .filteredOn(ServerConfig::isActive)
+                .extracting(ServerConfig::getName)
+                .containsExactly("Second");
+    }
+
+    @Test
+    void setActiveServer_firesAListChangeSoTheConnectButtonCanReact() {
+        ServerConfig first = createTestServer("First");
+        ServerConfig second = createTestServer("Second");
+        store.addServer(first);
+        store.addServer(second);
+        boolean[] notified = {false};
+        store.getServers().addListener(
+                (javafx.collections.ListChangeListener<ServerConfig>) c -> notified[0] = true);
+
+        store.setActiveServer(second.getId());
+
+        assertThat(notified[0]).isTrue();
+    }
+
     @Test
     void updateServer_modifiesExistingServer() {
         ServerConfig server = createTestServer("Original");
