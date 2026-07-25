@@ -91,7 +91,7 @@ public class TrayIconService {
             try {
                 popupMenu = buildPopupMenu();
                 Image icon = createStatusIcon(currentState());
-                trayIcon = new TrayIcon(icon, "VLESS Client", popupMenu);
+                trayIcon = new TrayIcon(icon, "Tunl", popupMenu);
                 trayIcon.setImageAutoSize(true);
                 trayIcon.addActionListener(e -> showMainWindow());
 
@@ -213,7 +213,7 @@ public class TrayIconService {
             ConnectionState state = currentState();
 
             trayIcon.setImage(createStatusIcon(state));
-            trayIcon.setToolTip("VLESS Client - " + statusLabel(state));
+            trayIcon.setToolTip("Tunl - " + statusLabel(state));
 
             if (statusItem != null) {
                 statusItem.setLabel(statusLabel(state));

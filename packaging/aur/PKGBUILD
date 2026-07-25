@@ -1,12 +1,12 @@
 # Maintainer: Dmitry Belokursky <dbelokursky@gmail.com>
 #
-# vless-client-bin — AUR "-bin" repackage of VLESS Client.
+# tunl-bin — AUR "-bin" repackage of Tunl.
 #
 # This is a binary repackage: instead of building from source it downloads the
 # official release .deb (produced by the project's release workflow with
 # jpackage) and unpacks it, so Arch users get the exact same artifact — bundled
 # JRE and sing-box binary included. The .deb installs the app under
-# /opt/vless-client with a launcher and a /usr/share/applications/*.desktop
+# /opt/tunl with a launcher and a /usr/share/applications/*.desktop
 # menu entry; package() extracts that tree verbatim into $pkgdir.
 #
 # pkgver and the sha256sums_* lines are rewritten by scripts/update-packaging.sh
@@ -16,31 +16,31 @@
 # The bundled sing-box binary is GPL-3.0; the app's own license is not yet
 # declared upstream (README: TBD), hence license=('custom').
 
-pkgname=vless-client-bin
+pkgname=tunl-bin
 pkgver=0.0.0
 pkgrel=1
-pkgdesc="Desktop VLESS/proxy client wrapping sing-box with a JavaFX GUI (binary release)"
+pkgdesc="Tunl — desktop multi-protocol proxy client wrapping sing-box with a JavaFX GUI (binary release)"
 arch=('x86_64' 'aarch64')
-url="https://github.com/dbelokursky/vless-client"
+url="https://github.com/dbelokursky/tunl"
 license=('custom')
 # The JRE and sing-box ship inside the .deb, so no java or sing-box deps. The
 # JavaFX GUI links GTK3 at runtime; hicolor-icon-theme owns the icon theme dirs
 # the bundled .desktop entry integrates into.
 depends=('gtk3' 'hicolor-icon-theme')
-provides=('vless-client')
-conflicts=('vless-client')
+provides=('tunl')
+conflicts=('tunl')
 # Prebuilt artifact: don't strip the bundled JRE/sing-box, and emit no debug
 # package (there is nothing to split out).
 options=('!strip' '!debug')
 # Rename the downloaded assets to arch-tagged local names so package() can find
 # the right one via $CARCH. Only the source matching the build host's arch is
 # fetched; the other line is inert.
-source_x86_64=("vless-client-${pkgver}-x86_64.deb::${url}/releases/download/v${pkgver}/vless-client_${pkgver}_amd64.deb")
-source_aarch64=("vless-client-${pkgver}-aarch64.deb::${url}/releases/download/v${pkgver}/vless-client_${pkgver}_arm64.deb")
+source_x86_64=("tunl-${pkgver}-x86_64.deb::${url}/releases/download/v${pkgver}/tunl_${pkgver}_amd64.deb")
+source_aarch64=("tunl-${pkgver}-aarch64.deb::${url}/releases/download/v${pkgver}/tunl_${pkgver}_arm64.deb")
 # Keep makepkg from auto-unpacking the .deb; package() does the two-step
 # extraction itself for deterministic behaviour.
-noextract=("vless-client-${pkgver}-x86_64.deb"
-           "vless-client-${pkgver}-aarch64.deb")
+noextract=("tunl-${pkgver}-x86_64.deb"
+           "tunl-${pkgver}-aarch64.deb")
 sha256sums_x86_64=('0000000000000000000000000000000000000000000000000000000000000000')
 sha256sums_aarch64=('0000000000000000000000000000000000000000000000000000000000000000')
 
@@ -48,8 +48,8 @@ package() {
     # A .deb is an `ar` archive wrapping data.tar.<zst|xz|gz>. bsdtar (from
     # libarchive, always present on Arch) reads both layers: first unpack the
     # arch-matching .deb, then extract its data tree into $pkgdir so every file
-    # keeps its path (/opt/vless-client, /usr/share/applications, the hicolor
+    # keeps its path (/opt/tunl, /usr/share/applications, the hicolor
     # icons and the launcher symlink).
-    bsdtar -xf "vless-client-${pkgver}-${CARCH}.deb"
+    bsdtar -xf "tunl-${pkgver}-${CARCH}.deb"
     bsdtar -xf data.tar.* -C "$pkgdir/"
 }

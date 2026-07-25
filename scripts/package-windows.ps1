@@ -59,7 +59,7 @@ Copy-Item "target/$jarName" staging/
 # prompt, matching how the app manages everything else per-user.
 & jpackage `
     --type msi `
-    --name 'VLESS Client' `
+    --name 'Tunl' `
     --app-version $MsiVersion `
     --input staging `
     --main-jar $jarName `
@@ -68,7 +68,7 @@ Copy-Item "target/$jarName" staging/
     --dest dist `
     --win-upgrade-uuid 'ff1f0b21-e3d2-420f-80ce-95d5d9ab61fb' `
     --win-menu `
-    --win-menu-group 'VLESS Client' `
+    --win-menu-group 'Tunl' `
     --win-shortcut `
     --win-per-user-install `
     --java-options "-Dapp.version=$Version"
@@ -81,10 +81,9 @@ if (-not $msi) {
     throw '[package-windows] jpackage reported success but no MSI in dist/'
 }
 # Normalise the file name. jpackage names the MSI after --name
-# ("VLESS Client-<v>.msi"); rename it to the lowercase form the .deb already
-# uses so all three installers share one scheme. Only the file on the Releases
-# page changes -- the installed app's display name stays "VLESS Client".
-$asset = Join-Path 'dist' "vless-client_$MsiVersion.msi"
+# ("Tunl-<v>.msi"); rename it to the lowercase, underscore-versioned form the
+# .deb and .dmg share so all three installers use one scheme.
+$asset = Join-Path 'dist' "tunl_$MsiVersion.msi"
 Move-Item -Force $msi.FullName $asset
 
 # Code signing (optional, off by default): when WINDOWS_SIGN_PFX points at a
@@ -98,7 +97,7 @@ if ($env:WINDOWS_SIGN_PFX -and (Test-Path $env:WINDOWS_SIGN_PFX)) {
         /f $env:WINDOWS_SIGN_PFX `
         /p $env:WINDOWS_SIGN_PASSWORD `
         /fd SHA256 /tr $timestamp /td SHA256 `
-        /d 'VLESS Client' `
+        /d 'Tunl' `
         $asset
     if ($LASTEXITCODE -ne 0) {
         throw "[package-windows] signtool failed with exit code $LASTEXITCODE"

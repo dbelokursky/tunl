@@ -61,23 +61,22 @@ fi
 
 jpackage \
     --type dmg \
-    --name "VLESS Client" \
+    --name "Tunl" \
     --app-version "${MAC_VERSION}" \
     --input staging \
     --main-jar "${JAR_NAME}" \
     --main-class com.vlessclient.app.Launcher \
     --icon src/main/resources/icons/app-icon.icns \
     --dest dist \
-    --mac-package-name "VLESSClient" \
+    --mac-package-name "Tunl" \
     --java-options "-Dapp.version=${VERSION}" \
     "${SIGN_ARGS[@]+"${SIGN_ARGS[@]}"}" \
     --verbose
 
 # Normalise the file name. jpackage names the DMG after --name
-# ("VLESS Client-<v>.dmg"); rename it to the lowercase form the .deb already
-# uses so all three installers share one scheme. Only the file on the Releases
-# page changes — the .app's display name stays "VLESS Client".
-ASSET="dist/vless-client_${MAC_VERSION}.dmg"
+# ("Tunl-<v>.dmg"); rename it to the lowercase, underscore-versioned form the
+# .deb and .msi share so all three installers use one scheme.
+ASSET="dist/tunl_${MAC_VERSION}.dmg"
 mv dist/*.dmg "${ASSET}"
 
 echo "[package-dmg] built: ${ASSET} (app-version=${VERSION}, CFBundleVersion=${MAC_VERSION})"

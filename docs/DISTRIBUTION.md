@@ -1,9 +1,9 @@
 # Distribution channels
 
 Primary distribution is **direct download** from the
-[Releases](https://github.com/dbelokursky/vless-client/releases/latest) page:
-`vless-client_x.y.z.dmg` (macOS), `vless-client_x.y.z.msi` (Windows), and
-`vless-client_x.y.z_{amd64,arm64}.deb` (Linux), all built by `release.yml` on
+[Releases](https://github.com/dbelokursky/tunl/releases/latest) page:
+`tunl_x.y.z.dmg` (macOS), `tunl_x.y.z.msi` (Windows), and
+`tunl_x.y.z_{amd64,arm64}.deb` (Linux), all built by `release.yml` on
 each `v*` tag. Everything below is a convenience layer on top of those same
 assets — no channel is the source of the binaries.
 
@@ -18,14 +18,14 @@ released assets' SHA-256) so the published channels track the latest tag.
 Installed via a personal tap:
 
 ```bash
-brew install --cask dbelokursky/tap/vless-client
+brew install --cask dbelokursky/tap/tunl
 ```
 
 One-time setup of the external tap repo:
 
 1. Create a public GitHub repo named **`dbelokursky/homebrew-tap`** (the
    `homebrew-` prefix is what lets `dbelokursky/tap` resolve to it).
-2. Add the cask at `Casks/vless-client.rb` — a copy of `packaging/`'s
+2. Add the cask at `Casks/tunl.rb` — a copy of `packaging/`'s
    source-of-truth cask, pointing `url` at the release DMG with its `sha256`.
 3. On each release, `scripts/update-packaging.sh` refreshes the cask and it is
    pushed to the tap.
@@ -36,7 +36,7 @@ an unsigned app, so first launch needs the Gatekeeper unblock from the README.
 ### AUR (Arch Linux)
 
 ```bash
-yay -S vless-client-bin
+yay -S tunl-bin
 ```
 
 `-bin` because the package installs the pre-built `.deb` payload from Releases
@@ -44,7 +44,7 @@ rather than compiling from source. One-time setup of the AUR package repo:
 
 1. Create an AUR account and register your SSH public key.
 2. Clone the (empty) package repo:
-   `git clone ssh://aur@aur.archlinux.org/vless-client-bin.git`.
+   `git clone ssh://aur@aur.archlinux.org/tunl-bin.git`.
 3. Add the `PKGBUILD` (from `packaging/`) and generate `.SRCINFO`
    (`makepkg --printsrcinfo > .SRCINFO`), then commit and push.
 4. On each release, `scripts/update-packaging.sh` bumps `pkgver` + the source

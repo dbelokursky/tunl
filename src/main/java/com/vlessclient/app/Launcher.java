@@ -7,12 +7,12 @@ package com.vlessclient.app;
  *
  * <p>Also the place to set system properties that must be applied before
  * AWT / JavaFX initialize — for example the macOS application name that
- * shows up in the menu bar ("VLESS Client" instead of the fully qualified
+ * shows up in the menu bar ("Tunl" instead of the fully qualified
  * main-class name).</p>
  */
 public final class Launcher {
 
-    private static final String APP_NAME = "VLESS Client";
+    private static final String APP_NAME = "Tunl";
 
     private Launcher() {
     }

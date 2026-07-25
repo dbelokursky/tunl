@@ -32,7 +32,7 @@ class LinuxAutostartTest {
         String entry = Files.readString(tempDir.resolve(ENTRY));
         assertThat(entry).startsWith("[Desktop Entry]");
         assertThat(entry).contains("Type=Application");
-        assertThat(entry).contains("Name=VLESS Client");
+        assertThat(entry).contains("Name=Tunl");
         assertThat(entry).contains("Exec=");
         assertThat(entry).contains("X-GNOME-Autostart-enabled=true");
     }

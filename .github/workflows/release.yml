@@ -176,14 +176,14 @@ jobs:
             gh release download "$GITHUB_REF_NAME" -p "$1" -O "$RUNNER_TEMP/$1" --clobber
             sha256sum "$RUNNER_TEMP/$1" | awk '{print $1}'
           }
-          DMG=$(sha_of "vless-client_${V}.dmg")
-          DEB_AMD64=$(sha_of "vless-client_${V}_amd64.deb")
-          DEB_ARM64=$(sha_of "vless-client_${V}_arm64.deb")
+          DMG=$(sha_of "tunl_${V}.dmg")
+          DEB_AMD64=$(sha_of "tunl_${V}_amd64.deb")
+          DEB_ARM64=$(sha_of "tunl_${V}_arm64.deb")
           scripts/update-packaging.sh "$V" "$DMG" "$DEB_AMD64" "$DEB_ARM64"
       - uses: softprops/action-gh-release@v2
         with:
           files: |
-            packaging/homebrew/vless-client.rb
+            packaging/homebrew/tunl.rb
             packaging/aur/PKGBUILD
             packaging/aur/.SRCINFO
 

@@ -1,20 +1,20 @@
-# VLESS Client
+# Tunl
 
 <p align="center">
-  <img src="src/main/resources/icons/app-icon-256.png" width="128" alt="VLESS Client icon"/>
+  <img src="src/main/resources/icons/app-icon-256.png" width="128" alt="Tunl icon"/>
 </p>
 
 <p align="center">
-  <a href="https://github.com/dbelokursky/vless-client/actions/workflows/build.yml"><img src="https://github.com/dbelokursky/vless-client/actions/workflows/build.yml/badge.svg" alt="Build"/></a>
-  <a href="https://github.com/dbelokursky/vless-client/releases/latest"><img src="https://img.shields.io/github/v/release/dbelokursky/vless-client" alt="Latest release"/></a>
-  <a href="https://github.com/dbelokursky/vless-client/releases"><img src="https://img.shields.io/github/downloads/dbelokursky/vless-client/total" alt="Downloads"/></a>
-  <a href="https://github.com/dbelokursky/vless-client/releases/latest"><img src="https://img.shields.io/github/downloads/dbelokursky/vless-client/latest/total?label=downloads@latest" alt="Latest release downloads"/></a>
+  <a href="https://github.com/dbelokursky/tunl/actions/workflows/build.yml"><img src="https://github.com/dbelokursky/tunl/actions/workflows/build.yml/badge.svg" alt="Build"/></a>
+  <a href="https://github.com/dbelokursky/tunl/releases/latest"><img src="https://img.shields.io/github/v/release/dbelokursky/tunl" alt="Latest release"/></a>
+  <a href="https://github.com/dbelokursky/tunl/releases"><img src="https://img.shields.io/github/downloads/dbelokursky/tunl/total" alt="Downloads"/></a>
+  <a href="https://github.com/dbelokursky/tunl/releases/latest"><img src="https://img.shields.io/github/downloads/dbelokursky/tunl/latest/total?label=downloads@latest" alt="Latest release downloads"/></a>
 </p>
 
 <p align="center">🇬🇧 <a href="README.md">English</a> · 🇷🇺 <b>Русский</b></p>
 
-Кроссплатформенный клиент (macOS / Windows / Linux) для
-VLESS/VMess/Trojan/Shadowsocks на JavaFX — оборачивает
+**Tunl** — кроссплатформенный десктоп-клиент (macOS / Windows / Linux) для
+VLESS, VMess, Trojan, Shadowsocks, Hysteria2 и WireGuard на JavaFX — оборачивает
 [sing-box](https://github.com/SagerNet/sing-box) и даёт ему удобный GUI с живой
 статистикой трафика, импортом share-ссылок, подписками, правилами маршрутизации
 и иконкой в трее/меню-баре.
@@ -26,17 +26,17 @@ VLESS/VMess/Trojan/Shadowsocks на JavaFX — оборачивает
 ## Скачать
 
 Готовые установщики — на странице
-[**Releases**](https://github.com/dbelokursky/vless-client/releases/latest):
+[**Releases**](https://github.com/dbelokursky/tunl/releases/latest):
 
 | ОС | Файл | Примечание |
 |---|---|---|
-| macOS (Apple Silicon) | `vless-client_x.y.z.dmg` | |
-| Windows 10/11 (x64) | `vless-client_x.y.z.msi` | ставится per-user, без прав администратора |
-| Debian/Ubuntu (amd64) | `vless-client_x.y.z_amd64.deb` | |
-| Debian/Ubuntu (arm64) | `vless-client_x.y.z_arm64.deb` | Raspberry Pi 5 и другие ARM-машины |
+| macOS (Apple Silicon) | `tunl_x.y.z.dmg` | |
+| Windows 10/11 (x64) | `tunl_x.y.z.msi` | ставится per-user, без прав администратора |
+| Debian/Ubuntu (amd64) | `tunl_x.y.z_amd64.deb` | |
+| Debian/Ubuntu (arm64) | `tunl_x.y.z_arm64.deb` | Raspberry Pi 5 и другие ARM-машины |
 
 Сборка самого свежего мержа в `main` (может быть сырой) — в prerelease
-[**dev-latest**](https://github.com/dbelokursky/vless-client/releases/tag/dev-latest).
+[**dev-latest**](https://github.com/dbelokursky/tunl/releases/tag/dev-latest).
 
 ---
 
@@ -48,13 +48,13 @@ VLESS/VMess/Trojan/Shadowsocks на JavaFX — оборачивает
 запуске Gatekeeper заблокирует приложение. Разблокируется один раз через
 системные настройки:
 
-1. Открой DMG и перетащи **VLESS Client** в папку **Программы** (Applications).
+1. Открой DMG и перетащи **Tunl** в папку **Программы** (Applications).
 2. Запусти приложение. macOS сообщит, что не может проверить его на
    вредоносное ПО — нажми **«Готово»** (Done), *не* «Переместить в Корзину».
 3. Открой **Системные настройки → Конфиденциальность и безопасность**
    (System Settings → Privacy & Security).
 4. Прокрути до раздела **«Безопасность»** (Security) — там будет сообщение
-   «Приложение "VLESS Client" было заблокировано для защиты Mac».
+   «Приложение "Tunl" было заблокировано для защиты Mac».
 5. Нажми **«Все равно открыть»** (Open Anyway) и подтверди паролем или Touch ID.
 6. В появившемся диалоге нажми **«Открыть»** (Open). Готово — дальше
    приложение запускается как обычно.
@@ -72,14 +72,14 @@ VLESS/VMess/Trojan/Shadowsocks на JavaFX — оборачивает
 - Эквивалент для терминала (снимает карантинный атрибут):
 
   ```bash
-  xattr -d com.apple.quarantine "/Applications/VLESS Client.app"
+  xattr -d com.apple.quarantine "/Applications/Tunl.app"
   ```
 
 Либо через [Homebrew](https://brew.sh), когда tap настроен (см.
 [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)):
 
 ```bash
-brew install --cask dbelokursky/tap/vless-client
+brew install --cask dbelokursky/tap/tunl
 ```
 
 ### Windows
@@ -96,17 +96,17 @@ brew install --cask dbelokursky/tap/vless-client
 ### Linux (Debian/Ubuntu)
 
 ```bash
-sudo apt install ./vless-client_*.deb
+sudo apt install ./tunl_*.deb
 ```
 
-Приложение ставится в `/opt/vless-client` и появляется в меню приложений
+Приложение ставится в `/opt/tunl` и появляется в меню приложений
 (категория «Интернет»/Network).
 
 На Arch-дистрибутивах доступен пакет [AUR](https://aur.archlinux.org) (см.
 [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)):
 
 ```bash
-yay -S vless-client-bin
+yay -S tunl-bin
 ```
 
 ---
@@ -286,8 +286,8 @@ sing-box уже внутри.
 ### Быстрый старт
 
 ```bash
-git clone https://github.com/dbelokursky/vless-client.git
-cd vless-client
+git clone https://github.com/dbelokursky/tunl.git
+cd tunl
 mvn clean javafx:run
 ```
 
@@ -392,8 +392,8 @@ scripts/
 
 ### Возможности (полный список)
 
-- **Протоколы:** VLESS, VMess, Trojan, Shadowsocks (через sing-box)
-- **Транспорты:** TCP, WebSocket, gRPC, HTTP/2
+- **Протоколы:** VLESS, VMess, Trojan, Shadowsocks, Hysteria2, WireGuard (через sing-box)
+- **Транспорты:** TCP, WebSocket, gRPC, HTTP/2, QUIC
 - **TLS / Reality / XTLS-Vision**
 - **Режимы:** System Proxy, TUN
 - **Подписки** — автообновление списков серверов по URL

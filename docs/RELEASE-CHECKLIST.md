@@ -15,7 +15,7 @@ Run on a real Windows 10/11 x64 box, ideally a clean user profile.
 
 - [ ] **Install** the MSI — it installs **per-user** into
       `%LOCALAPPDATA%\Programs`, **no admin prompt** during install.
-- [ ] **Launch** from the Start-menu shortcut (group "VLESS Client").
+- [ ] **Launch** from the Start-menu shortcut (group "Tunl").
 - [ ] **System-proxy connect** — connect an active server in **SYSTEM_PROXY**
       mode; confirm the Windows proxy is set (Settings → Network & Internet →
       Proxy, or a browser now routes through the server).
@@ -53,7 +53,7 @@ Run on a real Windows 10/11 x64 box, ideally a clean user profile.
 
 ## Linux
 
-- [ ] `.deb` (amd64 and arm64) installs to `/opt/vless-client`; app appears in
+- [ ] `.deb` (amd64 and arm64) installs to `/opt/tunl`; app appears in
       the menu (Network) and launches.
 - [ ] SYSTEM_PROXY connect/disconnect on GNOME; TUN connect via pkexec/setcap.
 - [ ] Quit-while-connected leaves no orphaned core / TUN (covered by

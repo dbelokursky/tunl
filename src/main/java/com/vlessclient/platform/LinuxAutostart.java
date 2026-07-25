@@ -126,11 +126,11 @@ public final class LinuxAutostart implements Autostart {
         return String.join("\n", List.of(
                 "[Desktop Entry]",
                 "Type=Application",
-                "Name=VLESS Client",
+                "Name=Tunl",
                 "Exec=" + exec,
                 "Terminal=false",
                 "X-GNOME-Autostart-enabled=true",
-                "Comment=Start VLESS Client at login",
+                "Comment=Start Tunl at login",
                 ""));
     }
 }

@@ -226,7 +226,7 @@ public class VlessClientApp extends Application {
         themeManager.setTheme(settings.getTheme());
         themeManager.applyTheme(scene);
 
-        primaryStage.setTitle("VLESS Client");
+        primaryStage.setTitle("Tunl");
         primaryStage.setMinWidth(760);
         primaryStage.setMinHeight(460);
         primaryStage.setScene(scene);
@@ -250,7 +250,7 @@ public class VlessClientApp extends Application {
         });
 
         primaryStage.show();
-        log.info("VLESS Client started");
+        log.info("Tunl started");
 
         installTrayIcon(primaryStage);
 
@@ -383,7 +383,7 @@ public class VlessClientApp extends Application {
     }
 
     private void shutdown() {
-        log.info("Shutting down VLESS Client");
+        log.info("Shutting down Tunl");
         try {
             ServiceLocator.shutdown();
         } catch (Exception e) {

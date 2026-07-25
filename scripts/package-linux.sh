@@ -46,21 +46,21 @@ mkdir -p staging
 cp "target/${JAR_NAME}" staging/
 
 # Per-user data lives under XDG paths at runtime; the package itself installs
-# to /opt/vless-client with a menu entry and launcher symlink.
+# to /opt/tunl with a menu entry and launcher symlink.
 jpackage \
     --type deb \
-    --name vless-client \
+    --name tunl \
     --app-version "${DEB_VERSION}" \
     --input staging \
     --main-jar "${JAR_NAME}" \
     --main-class com.vlessclient.app.Launcher \
     --icon src/main/resources/icons/app-icon-512.png \
     --dest dist \
-    --linux-package-name vless-client \
+    --linux-package-name tunl \
     --linux-menu-group Network \
     --linux-shortcut \
     --linux-deb-maintainer "dbelokursky@gmail.com" \
-    --vendor "VLESS Client" \
+    --vendor "Tunl" \
     --java-options "-Dapp.version=${VERSION}" \
     --java-options "-Djava.awt.headless=false" \
     --verbose

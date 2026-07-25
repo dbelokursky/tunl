@@ -17,9 +17,9 @@ mkdir -p "$(dirname "${OUT}")"
 # stops the JVM from starting on Linux.
 if [[ "$(uname -s)" == "Darwin" ]]; then
     cat > "${OUT}" <<'ARGFILE'
--Xdock:name="VLESS Client"
--Dapple.awt.application.name="VLESS Client"
--Dcom.apple.mrj.application.apple.menu.about.name="VLESS Client"
+-Xdock:name="Tunl"
+-Dapple.awt.application.name="Tunl"
+-Dcom.apple.mrj.application.apple.menu.about.name="Tunl"
 -Dvless.log.level=DEBUG
 ARGFILE
 else
