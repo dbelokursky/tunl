@@ -157,8 +157,10 @@ public class DashboardViewController {
         try {
             ConfigStore configStore = ServiceLocator.get(ConfigStore.class);
             configStore.getServers().addListener(
-                    (javafx.collections.ListChangeListener<ServerConfig>) change ->
-                            refreshConnectButtonAvailability());
+                    (javafx.collections.ListChangeListener<ServerConfig>) change -> {
+                        refreshConnectButtonAvailability();
+                        reconnectIfActiveServerChanged();
+                    });
         } catch (IllegalArgumentException e) {
             log.debug("ConfigStore not available while wiring server-list listener");
         }
@@ -442,6 +444,40 @@ public class DashboardViewController {
         } else {
             connectionState.set(ConnectionState.DISCONNECTED);
         }
+    }
+
+    /**
+     * Restarts the tunnel when the active server changes while connected.
+     *
+     * <p>Switching servers used to move the flag and the tray checkmark while
+     * traffic kept flowing through the <em>old</em> server: the UI claimed one
+     * destination and the tunnel used another, with no warning. In a privacy
+     * tool that is a trust bug, not a convenience one.</p>
+     *
+     * <p>Hangs off the server-list change event, so it covers both switch
+     * paths (list and tray) — they both go through
+     * {@code ConfigStore.setActiveServer}, which re-sets the elements and
+     * therefore fires a change. The gap before reconnecting lets the old
+     * process exit first, mirroring {@code HealthCheckCoordinator}'s
+     * auto-reconnect.</p>
+     */
+    private void reconnectIfActiveServerChanged() {
+        if (singBoxEngine == null
+                || singBoxEngine.connectionStateProperty().get() != ConnectionState.CONNECTED) {
+            return;
+        }
+        ServerConfig nowActive = findActiveServer();
+        if (nowActive == null || activeServer == null
+                || nowActive.getId().equals(activeServer.getId())) {
+            return;
+        }
+        log.info("Active server changed while connected ({} -> {}); restarting tunnel",
+                activeServer.getName(), nowActive.getName());
+        disconnect();
+        javafx.animation.PauseTransition gap =
+                new javafx.animation.PauseTransition(javafx.util.Duration.millis(700));
+        gap.setOnFinished(e -> connect());
+        gap.play();
     }
 
     // ===== Service availability / auto-reconnect =====
