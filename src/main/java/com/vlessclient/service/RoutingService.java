@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.RoutingRule;
+import com.vlessclient.platform.PlatformPaths;
+import com.vlessclient.platform.SecureFiles;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,6 +18,12 @@ import org.slf4j.LoggerFactory;
  * Loads and persists the routing configuration (bypass countries, bypass
  * list, and custom rules) as JSON in the application data directory,
  * migrating pre-composition preset files on first load.
+ *
+ * <p>Storage goes through {@link PlatformPaths} and {@link SecureFiles} like
+ * every other config file: the routing rules reveal what the user chooses to
+ * tunnel, so the file is owner-only and written atomically. Both were missed
+ * when the Windows/Linux ports landed — this service kept writing a macOS path
+ * on every OS at 0644 with a non-atomic write.</p>
  */
 public class RoutingService {
 
@@ -28,8 +36,42 @@ public class RoutingService {
     private RoutingConfig config;
 
     public RoutingService() {
-        this(Path.of(System.getProperty("user.home"),
-                "Library", "Application Support", "VlessClient"));
+        this(migrateLegacyDataDir(PlatformPaths.current().dataDir(), legacyMacDataDir()));
+    }
+
+    /** The pre-port location: routing.json used to be written mac-style on every OS. */
+    private static Path legacyMacDataDir() {
+        return Path.of(System.getProperty("user.home"),
+                "Library", "Application Support", "VlessClient");
+    }
+
+    /**
+     * Moves a pre-port {@code routing.json} to the platform data dir, once.
+     * Mirrors {@code SubscriptionService.migrateLegacyDataDir}: a file already
+     * at the platform path wins, and a failed move is survivable — the user
+     * starts from defaults rather than losing the app.
+     *
+     * @return {@code platformDir}, always — the caller's data dir either way
+     */
+    static Path migrateLegacyDataDir(Path platformDir, Path legacyDir) {
+        if (platformDir.equals(legacyDir)) {
+            return platformDir;
+        }
+        Path platformFile = platformDir.resolve(ROUTING_FILE);
+        Path legacyFile = legacyDir.resolve(ROUTING_FILE);
+        if (Files.exists(platformFile) || !Files.exists(legacyFile)) {
+            return platformDir;
+        }
+        try {
+            SecureFiles.createPrivateDir(platformDir);
+            Files.move(legacyFile, platformFile);
+            log.info("Migrated routing config from legacy path {} to {}",
+                    legacyFile, platformFile);
+        } catch (IOException e) {
+            log.warn("Could not migrate legacy routing file from {}; "
+                    + "continuing with {}", legacyFile, platformDir, e);
+        }
+        return platformDir;
     }
 
     RoutingService(Path dataDir) {
@@ -52,7 +94,10 @@ public class RoutingService {
         this.config = config;
         Path file = dataDir.resolve(ROUTING_FILE);
         try {
-            objectMapper.writeValue(file.toFile(), config);
+            // Owner-only and atomic, like the other config files: these rules
+            // fingerprint the user's traffic, and a crash mid-write used to be
+            // able to truncate them.
+            SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(config));
             log.info("Saved routing config to {}", file);
         } catch (IOException e) {
             log.error("Failed to save routing config to {}", file, e);
@@ -99,7 +144,7 @@ public class RoutingService {
 
     private void ensureDataDir() {
         try {
-            Files.createDirectories(dataDir);
+            SecureFiles.createPrivateDir(dataDir);
         } catch (IOException e) {
             log.error("Failed to create data directory: {}", dataDir, e);
         }
