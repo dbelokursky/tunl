@@ -8,32 +8,52 @@ jobs:
   # the moment the tag lands. softprops/action-gh-release does not read the tag
   # itself, so we extract it once here and every release job below passes these
   # outputs as name/body — idempotent, since each job sets the same values.
+  # Extraction goes through the GitHub API; see the step comment for why git
+  # cannot be trusted for this.
   prepare-release:
     runs-on: ubuntu-latest
     outputs:
       title: ${{ steps.tag.outputs.title }}
       notes: ${{ steps.tag.outputs.notes }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
       - id: tag
-        name: Extract title and notes from the annotated tag
-        # %(contents:subject) is the tag message's first line -> release title;
-        # %(contents:body) is everything after the blank line -> release notes,
-        # with any signature stripped.
-        # IMPORTANT: create the tag with `git tag -a --cleanup=verbatim -F notes`.
-        # The default cleanup drops lines starting with '#', which would silently
-        # eat the `## Section` headers in the notes (see docs/RELEASE-CHECKLIST.md).
-        # Tags here are always annotated; a lightweight tag would yield its
-        # commit message instead.
+        name: Read title and notes from the annotated tag object
+        # Read the annotation through the API rather than git: actions/checkout
+        # materializes the pushed tag as a LIGHTWEIGHT ref, so `git for-each-ref
+        # %(contents:*)` silently falls back to the tagged COMMIT's message —
+        # which is how v1.5.0 shipped titled after its last commit. The API
+        # always returns the real tag object, and needs no checkout at all.
+        #
+        # A lightweight tag has ref.object.type == "commit" and carries no
+        # annotation; leave both outputs empty then, so action-gh-release falls
+        # back to its own defaults instead of pasting in a commit message.
+        #
+        # IMPORTANT when tagging: `git tag -a --cleanup=verbatim -F notes`.
+        # The default cleanup drops lines starting with '#', which would strip
+        # the `## Section` headers before they ever reach the tag object
+        # (see docs/RELEASE-CHECKLIST.md).
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          subject="$(git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(contents:subject)')"
-          body="$(git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(contents:body)')"
+          set -euo pipefail
+          ref_json="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${GITHUB_REF_NAME}")"
+          obj_type="$(printf '%s' "$ref_json" | jq -r '.object.type')"
+          obj_sha="$(printf '%s' "$ref_json" | jq -r '.object.sha')"
+
+          message=""
+          if [ "$obj_type" = "tag" ]; then
+            message="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${obj_sha}" -q '.message')"
+          else
+            echo "::warning::${GITHUB_REF_NAME} is a lightweight tag — release notes left empty"
+          fi
+
+          # First line is the title; everything after the blank line is the body.
+          title="$(printf '%s\n' "$message" | head -n 1)"
+          notes="$(printf '%s\n' "$message" | tail -n +2 | sed '1{/^$/d;}')"
+
           {
-            printf 'title=%s\n' "$subject"
-            printf 'notes<<NOTES_EOF_28f1\n%s\nNOTES_EOF_28f1\n' "$body"
+            printf 'title=%s\n' "$title"
+            printf 'notes<<NOTES_EOF_28f1\n%s\nNOTES_EOF_28f1\n' "$notes"
           } >> "$GITHUB_OUTPUT"
 
   release-macos:
