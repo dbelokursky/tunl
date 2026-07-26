@@ -270,14 +270,22 @@
                                          History: 2026-07 introduction, macOS
                                          54.6% / Windows 46%; after the parser,
                                          dashboard and i18n test additions
-                                         macOS measures 59.3%. Raise this as
+                                         macOS measures 59.3%. Windows was the
+                                         binding constraint until the engine
+                                         lifecycle suite stopped being Unix-only
+                                         (its fixtures, not the code, were the
+                                         limit) — that leg now runs 568 tests
+                                         instead of ~524, so the floor moves off
+                                         0.45, where it sat ~14pp below the
+                                         measured value and could not have
+                                         caught a real regression. Raise this as
                                          coverage grows. -->
                                     <element>BUNDLE</element>
                                     <limits>
                                         <limit>
                                             <counter>LINE</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.45</minimum>
+                                            <minimum>0.52</minimum>
                                         </limit>
                                     </limits>
                                 </rule>
