@@ -35,13 +35,13 @@
             <Label fx:id="appearanceLabel" text="Appearance" styleClass="form-section-title"/>
 
             <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="themeLabel" text="Theme" styleClass="form-label" prefWidth="120"/>
-                <ComboBox fx:id="themeCombo" styleClass="form-field" prefWidth="200"/>
+                <Label fx:id="themeLabel" text="Theme" styleClass="form-label" prefWidth="210"/>
+                <ComboBox fx:id="themeCombo" styleClass="form-field" prefWidth="300"/>
             </HBox>
 
             <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="languageLabel" text="Language" styleClass="form-label" prefWidth="120"/>
-                <ComboBox fx:id="languageCombo" styleClass="form-field" prefWidth="200"/>
+                <Label fx:id="languageLabel" text="Language" styleClass="form-label" prefWidth="210"/>
+                <ComboBox fx:id="languageCombo" styleClass="form-field" prefWidth="300"/>
             </HBox>
         </VBox>
 
@@ -62,22 +62,22 @@
             <Label fx:id="proxyPortsLabel" text="Proxy Ports" styleClass="form-label"/>
 
             <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="socksPortLabel" text="SOCKS Port" styleClass="form-label" prefWidth="120"/>
-                <TextField fx:id="socksPortField" styleClass="form-field" prefWidth="120"
+                <Label fx:id="socksPortLabel" text="SOCKS Port" styleClass="form-label" prefWidth="210"/>
+                <TextField fx:id="socksPortField" styleClass="form-field" prefWidth="110"
                            promptText="1080"/>
             </HBox>
 
             <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="httpPortLabel" text="HTTP Port" styleClass="form-label" prefWidth="120"/>
-                <TextField fx:id="httpPortField" styleClass="form-field" prefWidth="120"
+                <Label fx:id="httpPortLabel" text="HTTP Port" styleClass="form-label" prefWidth="210"/>
+                <TextField fx:id="httpPortField" styleClass="form-field" prefWidth="110"
                            promptText="1081"/>
             </HBox>
 
             <Separator styleClass="sidebar-separator"/>
 
             <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="proxyModeLabel" text="Proxy Mode" styleClass="form-label" prefWidth="120"/>
-                <ComboBox fx:id="proxyModeCombo" styleClass="form-field" prefWidth="200"/>
+                <Label fx:id="proxyModeLabel" text="Proxy Mode" styleClass="form-label" prefWidth="210"/>
+                <ComboBox fx:id="proxyModeCombo" styleClass="form-field" prefWidth="300"/>
             </HBox>
 
             <CheckBox fx:id="systemProxyAutoConfigCheck" text="Set system proxy automatically"
@@ -102,15 +102,15 @@
 
             <HBox spacing="12" alignment="CENTER_LEFT">
                 <Label fx:id="healthCheckIntervalLabel" text="Check interval (sec)"
-                       styleClass="form-label" prefWidth="200"/>
-                <TextField fx:id="healthCheckIntervalField" styleClass="form-field" prefWidth="120"
+                       styleClass="form-label" prefWidth="210"/>
+                <TextField fx:id="healthCheckIntervalField" styleClass="form-field" prefWidth="110"
                            promptText="5"/>
             </HBox>
 
             <HBox spacing="12" alignment="CENTER_LEFT">
                 <Label fx:id="healthCheckReconnectDelayLabel" text="Reconnect delay (sec)"
-                       styleClass="form-label" prefWidth="200"/>
-                <TextField fx:id="healthCheckReconnectDelayField" styleClass="form-field" prefWidth="120"
+                       styleClass="form-label" prefWidth="210"/>
+                <TextField fx:id="healthCheckReconnectDelayField" styleClass="form-field" prefWidth="110"
                            promptText="10"/>
             </HBox>
         </VBox>
@@ -124,28 +124,28 @@
             <Label fx:id="advancedLabel" text="Advanced" styleClass="form-section-title"/>
 
             <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="proxyDnsLabel" text="Proxy DNS" styleClass="form-label" prefWidth="160"/>
-                <TextField fx:id="proxyDnsField" styleClass="form-field" prefWidth="280"
+                <Label fx:id="proxyDnsLabel" text="Proxy DNS" styleClass="form-label" prefWidth="210"/>
+                <TextField fx:id="proxyDnsField" styleClass="form-field" prefWidth="300"
                            promptText="https://1.1.1.1/dns-query"/>
             </HBox>
 
             <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="directDnsLabel" text="Direct DNS" styleClass="form-label" prefWidth="160"/>
-                <TextField fx:id="directDnsField" styleClass="form-field" prefWidth="280"
+                <Label fx:id="directDnsLabel" text="Direct DNS" styleClass="form-label" prefWidth="210"/>
+                <TextField fx:id="directDnsField" styleClass="form-field" prefWidth="300"
                            promptText="https://223.5.5.5/dns-query"/>
             </HBox>
 
             <HBox spacing="12" alignment="CENTER_LEFT">
                 <Label fx:id="tunInterfaceNameLabel" text="TUN Interface Name"
-                       styleClass="form-label" prefWidth="160"/>
-                <TextField fx:id="tunInterfaceNameField" styleClass="form-field" prefWidth="200"
+                       styleClass="form-label" prefWidth="210"/>
+                <TextField fx:id="tunInterfaceNameField" styleClass="form-field" prefWidth="300"
                            promptText="utun99"/>
             </HBox>
 
             <HBox spacing="12" alignment="CENTER_LEFT">
                 <Label fx:id="tunIpv4Label" text="TUN IPv4 Address"
-                       styleClass="form-label" prefWidth="160"/>
-                <TextField fx:id="tunIpv4Field" styleClass="form-field" prefWidth="200"
+                       styleClass="form-label" prefWidth="210"/>
+                <TextField fx:id="tunIpv4Field" styleClass="form-field" prefWidth="300"
                            promptText="172.19.0.1/30"/>
             </HBox>
 
@@ -162,14 +162,14 @@
             <Label fx:id="aboutLabel" text="About" styleClass="form-section-title"/>
 
             <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="appVersionLabel" text="App Version" styleClass="form-label" prefWidth="120"/>
+                <Label fx:id="appVersionLabel" text="App Version" styleClass="form-label" prefWidth="210"/>
                 <Label fx:id="appVersionValue" text="1.0.0" styleClass="stats-value"
                        style="-fx-font-size: 13px;"/>
             </HBox>
 
             <HBox spacing="12" alignment="CENTER_LEFT">
                 <Label fx:id="singboxVersionLabel" text="sing-box Version" styleClass="form-label"
-                       prefWidth="120"/>
+                       prefWidth="210"/>
                 <Label fx:id="singboxVersionValue" text="Unknown" styleClass="stats-value"
                        style="-fx-font-size: 13px;"/>
             </HBox>
