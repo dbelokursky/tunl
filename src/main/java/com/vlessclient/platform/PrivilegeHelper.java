@@ -96,45 +96,84 @@ public final class PrivilegeHelper {
     }
 
     /**
-     * Whether the NOPASSWD rule is active <em>and</em> the root-owned copy
-     * still matches {@code userBinary}. A content mismatch (first run, or a
-     * core update that rewrote the user binary) reports not-configured so the
+     * Whether the <em>pinned</em> NOPASSWD rule is active and the root-owned
+     * copy still matches {@code userBinary}. A content mismatch (first run, or
+     * a core update that rewrote the user binary) reports not-configured so the
      * caller re-runs {@link #configure} to refresh the privileged copy.
      *
+     * <p>Checking only that the TUN command line is permitted is not enough to
+     * decide the rule is the pinned one: the older, unrestricted rule
+     * ({@code NOPASSWD: <binary>}) authorized the binary with <em>any</em>
+     * arguments, so it permits the TUN line too and would read as configured.
+     * An upgraded install would then never re-run {@code configure} and would
+     * keep the wide rule forever — the hardening would silently never apply.
+     * So an install counts as configured only when the wide form is also
+     * <em>refused</em>.</p>
+     *
      * @param userBinary the current (user-writable) sing-box binary
-     * @return true if {@code sudo -n} can run the up-to-date root copy
+     * @return true if the pinned rule is live and the root copy is current
      */
     public static boolean isConfigured(Path userBinary) {
-        if (userBinary == null || !sudoCanRun(ELEVATED_BINARY)) {
+        if (userBinary == null || !hasPinnedRule(sudoListing())) {
             return false;
         }
         return sameContent(userBinary, ELEVATED_BINARY);
     }
 
     /**
-     * Whether {@code sudo -n} would accept the exact TUN command line, asked
-     * with {@code -l} so nothing is executed. A plain canary like
-     * {@code sudo -n <binary> version} cannot be used any more: the rule pins
-     * the argument list, so {@code version} is (correctly) refused.
+     * Whether {@code listing} grants NOPASSWD to exactly the pinned TUN command
+     * line — the full argument list, not just the binary.
+     *
+     * <p>Asking {@code sudo -l <command>} whether a command is permitted cannot
+     * answer this: on an admin account the blanket {@code (ALL) ALL} entry
+     * permits everything (with a password), so that check succeeds no matter
+     * what — it reports the wide rule, the pinned rule, and no rule at all as
+     * equally fine. Parsing the NOPASSWD entry is what actually distinguishes
+     * them.</p>
+     *
+     * @param listing raw {@code sudo -n -l} output
      */
-    private static boolean sudoCanRun(Path binary) {
+    static boolean hasPinnedRule(String listing) {
+        if (listing == null) {
+            return false;
+        }
+        String expected = ELEVATED_BINARY + " run -c " + ELEVATED_CONFIG;
+        for (String line : listing.lines().toList()) {
+            String trimmed = line.trim();
+            int marker = trimmed.indexOf("NOPASSWD:");
+            if (marker < 0 || !trimmed.contains(ELEVATED_BINARY.toString())) {
+                continue;
+            }
+            String authorized = trimmed.substring(marker + "NOPASSWD:".length()).trim();
+            if (authorized.equals(expected)) {
+                return true;
+            }
+            // The pre-hardening rule authorized the bare binary, i.e. any
+            // arguments. Report not-configured so the caller re-runs configure
+            // and the wide rule is replaced instead of living on forever.
+            log.info("Found a pre-hardening sudoers entry ({}); the privileged setup "
+                    + "will re-run to pin the command line", authorized);
+            return false;
+        }
+        return false;
+    }
+
+    /** Raw {@code sudo -n -l} output, or empty when sudo declines to answer. */
+    private static String sudoListing() {
         try {
-            ProcessBuilder pb = new ProcessBuilder(
-                    "sudo", "-n", "-l",
-                    binary.toAbsolutePath().toString(),
-                    "run", "-c", ELEVATED_CONFIG.toString());
+            ProcessBuilder pb = new ProcessBuilder("sudo", "-n", "-l");
             pb.redirectErrorStream(true);
             Process proc = pb.start();
             if (!proc.waitFor(CANARY_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                 proc.destroyForcibly();
-                return false;
+                return "";
             }
-            return proc.exitValue() == 0;
+            return new String(proc.getInputStream().readAllBytes());
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
-            return false;
+            return "";
         }
     }
 

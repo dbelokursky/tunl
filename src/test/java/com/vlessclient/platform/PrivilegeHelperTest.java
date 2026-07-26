@@ -81,6 +81,64 @@ class PrivilegeHelperTest {
         assertThat(cmd).contains("rm -f '/etc/sudoers.d/vless-client'; exit 1");
     }
 
+    /**
+     * Readiness must be decided from the NOPASSWD entry itself. Asking
+     * {@code sudo -l <command>} cannot work: an admin account carries a blanket
+     * {@code (ALL) ALL}, so every command reports as permitted (with a
+     * password) and the check passes even with no rule installed at all.
+     * Sample output below is the real format from a live macOS box.
+     */
+    @Test
+    void pinnedRuleIsRecognizedInRealSudoOutput() {
+        String listing = """
+                Matching Defaults entries for dima on Dmitrijs-MacBook-Pro:
+                    env_reset, env_keep+=BLOCKSIZE
+
+                User dima may run the following commands on Dmitrijs-MacBook-Pro:
+                    (ALL) ALL
+                    (root) NOPASSWD: /usr/local/libexec/vless-client/sing-box run -c \
+                /usr/local/libexec/vless-client/run/tun-config.json""";
+
+        assertThat(PrivilegeHelper.hasPinnedRule(listing)).isTrue();
+    }
+
+    /**
+     * The upgrade path that would otherwise never happen: an install carrying
+     * the old wide rule must read as NOT configured, so the privileged setup
+     * re-runs and replaces it. Reporting it as configured would leave the
+     * escalation in place forever on every existing install.
+     */
+    @Test
+    void preHardeningWideRuleReadsAsNotConfigured() {
+        String listing = """
+                User dima may run the following commands on host:
+                    (ALL) ALL
+                    (root) NOPASSWD: /usr/local/libexec/vless-client/sing-box""";
+
+        assertThat(PrivilegeHelper.hasPinnedRule(listing)).isFalse();
+    }
+
+    @Test
+    void blanketAdminAccessAloneIsNotEnough() {
+        // No entry for our binary at all — an admin's (ALL) ALL must not count.
+        String listing = """
+                User dima may run the following commands on host:
+                    (ALL) ALL""";
+
+        assertThat(PrivilegeHelper.hasPinnedRule(listing)).isFalse();
+        assertThat(PrivilegeHelper.hasPinnedRule("")).isFalse();
+        assertThat(PrivilegeHelper.hasPinnedRule(null)).isFalse();
+    }
+
+    @Test
+    void aRuleForADifferentConfigPathDoesNotCount() {
+        String listing = """
+                User dima may run the following commands on host:
+                    (root) NOPASSWD: /usr/local/libexec/vless-client/sing-box run -c /tmp/evil.json""";
+
+        assertThat(PrivilegeHelper.hasPinnedRule(listing)).isFalse();
+    }
+
     @Test
     void elevatedBinaryIsTheRootOwnedLocation() {
         assertThat(PrivilegeHelper.elevatedBinary())
