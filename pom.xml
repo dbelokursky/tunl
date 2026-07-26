@@ -57,6 +57,15 @@
         </dependency>
 
         <!-- SLF4J + Logback -->
+        <!-- MMDB reader only (Apache-2.0); the country database itself is
+             DB-IP Lite (CC BY 4.0), downloaded at runtime rather than bundled
+             so the installer does not carry data that expires monthly. -->
+        <dependency>
+            <groupId>com.maxmind.db</groupId>
+            <artifactId>maxmind-db</artifactId>
+            <version>3.1.0</version>
+        </dependency>
+
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>

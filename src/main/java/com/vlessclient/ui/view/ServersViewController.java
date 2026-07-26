@@ -4,12 +4,14 @@ import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.service.CountryResolver;
 import com.vlessclient.service.ShareLinkExporter;
 import com.vlessclient.service.ShareLinkParser;
 import com.vlessclient.service.ThemeManager;
 import com.vlessclient.service.WireguardConfigParser;
 import java.io.IOException;
 import java.util.Optional;
+import javafx.application.Platform;
 import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
@@ -29,6 +31,7 @@ import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
@@ -157,6 +160,29 @@ public class ServersViewController {
                 alert.showAndWait();
             }
         });
+    }
+
+    /**
+     * Fills the flag slot for a row: instantly when the country is already
+     * known, otherwise once the background lookup answers. An unresolved or
+     * unknown country leaves the slot empty rather than showing a placeholder
+     * — a row without a flag reads as "no information", which is the truth.
+     */
+    private void showFlag(StackPane slot, ServerConfig server) {
+        CountryResolver resolver;
+        try {
+            resolver = ServiceLocator.get(CountryResolver.class);
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+        resolver.countryOf(server)
+                .ifPresent(code -> slot.getChildren().setAll(Flags.of(code, 15)));
+        resolver.resolveAsync(server, code -> Platform.runLater(() -> {
+            // The cell may have been recycled onto another server by now.
+            if (server.getAddress() != null && slot.getScene() != null) {
+                slot.getChildren().setAll(Flags.of(code, 15));
+            }
+        }));
     }
 
     /** Picks the parser from the text's own shape rather than asking the user. */
@@ -290,6 +316,13 @@ public class ServersViewController {
             row.getStyleClass().add("server-list-item");
             row.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
 
+            // Fixed-width slot so rows stay aligned whether or not a country
+            // is known — a flag appearing later must not shift the layout.
+            StackPane flagSlot = new StackPane();
+            flagSlot.setMinWidth(24);
+            flagSlot.setPrefWidth(24);
+            showFlag(flagSlot, server);
+
             VBox info = new VBox(2);
             Label nameLabel = new Label(
                     server.getName() != null ? server.getName() : I18n.get("servers.unnamed"));
@@ -309,7 +342,7 @@ public class ServersViewController {
                     : "VLESS");
             protocolBadge.getStyleClass().add("protocol-badge");
 
-            row.getChildren().addAll(info, spacer, protocolBadge);
+            row.getChildren().addAll(flagSlot, info, spacer, protocolBadge);
 
             if (server.isActive()) {
                 Label activeBadge = new Label(I18n.get("servers.active.badge"));
