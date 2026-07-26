@@ -32,6 +32,6 @@
           VBox.vgrow="ALWAYS" managed="true" visible="true">
         <Label text="&#x1F5A5;" styleClass="empty-state-icon"/>
         <Label text="No servers configured" styleClass="empty-state-title"/>
-        <Label text="Click 'Add Server' to add your first VLESS server" styleClass="empty-state-hint"/>
+        <Label text="Add a server or import a share link to get started" styleClass="empty-state-hint"/>
     </VBox>
 </VBox>

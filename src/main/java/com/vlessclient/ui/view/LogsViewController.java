@@ -246,7 +246,7 @@ public class LogsViewController {
         chooser.setTitle(I18n.get("logs.save.title"));
         String stamp = LocalDateTime.now()
                 .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
-        chooser.setInitialFileName("vless-log-" + stamp + ".txt");
+        chooser.setInitialFileName("tunl-log-" + stamp + ".txt");
         chooser.getExtensionFilters().addAll(
                 new FileChooser.ExtensionFilter("Log files", "*.log", "*.txt"),
                 new FileChooser.ExtensionFilter("All files", "*.*"));
