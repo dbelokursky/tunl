@@ -211,6 +211,16 @@ public class SubscriptionsViewController {
             VBox info = new VBox(2);
             info.getChildren().addAll(nameLabel, urlLabel, statusLabel);
 
+            // A failed refresh is otherwise invisible: the row keeps showing an
+            // old timestamp and looks the same as a healthy subscription.
+            if (sub.getLastError() != null && !sub.getLastError().isBlank()) {
+                Label errorLabel = new Label(
+                        I18n.get("subscriptions.last.error", sub.getLastError()));
+                errorLabel.getStyleClass().add("subscription-error");
+                errorLabel.setWrapText(true);
+                info.getChildren().add(errorLabel);
+            }
+
             Region spacer = new Region();
             HBox.setHgrow(spacer, Priority.ALWAYS);
 

@@ -202,12 +202,18 @@ public class SubscriptionService {
             fetchedServers = parseContent(content);
         } catch (Exception e) {
             log.error("Failed to fetch subscription '{}': {}", sub.getName(), e.getMessage());
+            // Record it: a failed refresh used to be invisible in the UI, so a
+            // subscription with a dead URL or an expired token silently went
+            // stale while still looking healthy.
+            sub.setLastError(e.getMessage() != null ? e.getMessage() : e.toString());
+            saveSubscriptions();
             return;
         }
 
         applyNamePrefix(fetchedServers, sub.getName());
         diffAndApply(sub, fetchedServers);
 
+        sub.setLastError(null);
         sub.setLastRefreshedAt(System.currentTimeMillis());
         saveSubscriptions();
         log.info("Refreshed subscription '{}': {} servers",

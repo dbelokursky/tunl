@@ -31,6 +31,15 @@ public class Subscription {
     @JsonProperty("serverIds")
     private List<String> serverIds = new ArrayList<>();
 
+    /**
+     * Why the last refresh failed, or null when it succeeded. Persisted so the
+     * failure is still visible after a restart: a subscription that stops
+     * updating (dead URL, expired token, unsupported body) otherwise looks
+     * identical to a healthy one, just with an older timestamp.
+     */
+    @JsonProperty("lastError")
+    private String lastError;
+
     public Subscription() {
         this.id = UUID.randomUUID().toString();
     }
@@ -81,6 +90,15 @@ public class Subscription {
 
     public void setServerIds(List<String> serverIds) {
         this.serverIds = serverIds;
+    }
+
+    /** Why the last refresh failed, or null when it succeeded. */
+    public String getLastError() {
+        return lastError;
+    }
+
+    public void setLastError(String lastError) {
+        this.lastError = lastError;
     }
 
     @Override

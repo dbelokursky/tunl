@@ -318,9 +318,23 @@ public class RoutingViewController {
         }
     }
 
+    /**
+     * Deletes a rule after confirming. Deleting used to happen on a single
+     * click of the in-row button, with no confirmation and no undo — unlike
+     * servers and subscriptions, which both ask first.
+     */
     private void deleteRule(RoutingRule rule) {
-        routingService.removeRule(rule.getId());
-        loadRules();
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        confirm.setTitle(I18n.get("routing.rule.delete.title"));
+        confirm.setHeaderText(I18n.get("routing.rule.delete.header",
+                rule.getType() + " " + rule.getValue()));
+        confirm.setContentText(I18n.get("servers.delete.warning"));
+
+        java.util.Optional<ButtonType> result = confirm.showAndWait();
+        if (result.isPresent() && result.get() == ButtonType.OK) {
+            routingService.removeRule(rule.getId());
+            loadRules();
+        }
     }
 
     private void loadRules() {
