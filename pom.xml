@@ -195,6 +195,16 @@
                         <vless.singbox.skipBundled>true</vless.singbox.skipBundled>
                         <vless.singbox.installDir>${project.build.directory}/test-singbox-install</vless.singbox.installDir>
                         <!--
+                            Same idea one level up: every service resolving
+                            through PlatformPaths (ConfigStore, RoutingService,
+                            SubscriptionService, the log dir) must stay out of
+                            the developer's real profile. Without this the UI
+                            tests load the actual servers.json and settings.json
+                            and hit the real OS keychain, so they assert against
+                            a populated world locally and an empty one on CI.
+                        -->
+                        <vless.data.dir>${project.build.directory}/test-data-dir</vless.data.dir>
+                        <!--
                             Headless JavaFX for the whole suite. The UI tests
                             always set these per-class, but service tests that
                             call Platform.startup (LogReaderTest,

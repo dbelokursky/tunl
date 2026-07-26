@@ -71,11 +71,16 @@ class PlatformPathsTest {
 
     @Test
     void current_matchesDetectedPlatform() {
+        // The suite runs with the data dir redirected, so current() hands back
+        // the wrapper; the per-OS choice being asserted here is its delegate.
         PlatformPaths current = PlatformPaths.current();
+        PlatformPaths osChoice = current instanceof PlatformPaths.OverriddenPlatformPaths o
+                ? o.delegate()
+                : current;
         switch (Platform.current()) {
-            case WINDOWS -> assertThat(current).isInstanceOf(WindowsPlatformPaths.class);
-            case LINUX -> assertThat(current).isInstanceOf(LinuxPlatformPaths.class);
-            default -> assertThat(current).isInstanceOf(MacPlatformPaths.class);
+            case WINDOWS -> assertThat(osChoice).isInstanceOf(WindowsPlatformPaths.class);
+            case LINUX -> assertThat(osChoice).isInstanceOf(LinuxPlatformPaths.class);
+            default -> assertThat(osChoice).isInstanceOf(MacPlatformPaths.class);
         }
     }
 
