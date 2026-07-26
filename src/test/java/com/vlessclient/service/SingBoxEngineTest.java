@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.io.CleanupMode;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
@@ -26,6 +27,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 // lifecycle runs everywhere. Windows matters most here: its Process.destroy()
 // is always a hard TerminateProcess, which is the reason SystemProxyGuard
 // exists, and none of that was exercised while this class was Unix-only.
+//
+// Temp dirs use CleanupMode.NEVER because every one of them hosts a running
+// fake core. Windows refuses to delete a file while any process holds it, and
+// a .cmd's `timeout` child outlives the cmd.exe that destroy() kills — so
+// JUnit's cleanup failed the test *after* it had already passed. The OS
+// reclaims these directories anyway; letting JUnit try only converts a
+// platform quirk into a red build.
 class SingBoxEngineTest {
 
     private static final String DUMMY_CONFIG = "{\"log\":{\"level\":\"info\"}}";
@@ -151,7 +159,7 @@ class SingBoxEngineTest {
     }
 
     @Test
-    void startLaunchesProcessAndIsRunningIsTrue(@TempDir Path tmp) throws Exception {
+    void startLaunchesProcessAndIsRunningIsTrue(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
         Path fake = createFakeSingBox(tmp, "sing-box", 30);
         SingBoxEngine engine = new SingBoxEngine(fake);
 
@@ -164,7 +172,7 @@ class SingBoxEngineTest {
     }
 
     @Test
-    void stopTerminatesProcessAndFlipsRunningFalse(@TempDir Path tmp) throws Exception {
+    void stopTerminatesProcessAndFlipsRunningFalse(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
         Path fake = createFakeSingBox(tmp, "sing-box", 30);
         SingBoxEngine engine = new SingBoxEngine(fake);
 
@@ -178,7 +186,7 @@ class SingBoxEngineTest {
     }
 
     @Test
-    void startThrowsIllegalStateWhenAlreadyRunning(@TempDir Path tmp) throws Exception {
+    void startThrowsIllegalStateWhenAlreadyRunning(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
         Path fake = createFakeSingBox(tmp, "sing-box", 30);
         SingBoxEngine engine = new SingBoxEngine(fake);
 
@@ -193,7 +201,7 @@ class SingBoxEngineTest {
     }
 
     @Test
-    void connectionStateTransitionsToConnectedWhenStartedMessageSeen(@TempDir Path tmp) throws Exception {
+    void connectionStateTransitionsToConnectedWhenStartedMessageSeen(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
         Path fake = createFakeSingBox(tmp, "sing-box", 30);
         SingBoxEngine engine = new SingBoxEngine(fake);
 
@@ -208,7 +216,7 @@ class SingBoxEngineTest {
     }
 
     @Test
-    void connectionStateTransitionsToErrorWhenProcessExitsUnexpectedly(@TempDir Path tmp) throws Exception {
+    void connectionStateTransitionsToErrorWhenProcessExitsUnexpectedly(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
         Path fake = createCrashingSingBox(tmp, "sing-box");
         SingBoxEngine engine = new SingBoxEngine(fake);
 
@@ -219,7 +227,7 @@ class SingBoxEngineTest {
     }
 
     @Test
-    void errorMessageIsAlreadySetWhenStateListenersSeeError(@TempDir Path tmp) throws Exception {
+    void errorMessageIsAlreadySetWhenStateListenersSeeError(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
         // Publication-order regression: state listeners fire synchronously
         // inside connectionState.set(ERROR), so the error message must be
         // written BEFORE the state flips — a listener (status banner, or a
@@ -254,7 +262,7 @@ class SingBoxEngineTest {
     }
 
     @Test
-    void rapidStartStopCyclesCrashNoMonitorThread(@TempDir Path tmp) throws Exception {
+    void rapidStartStopCyclesCrashNoMonitorThread(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
         // NPE-race canary: a monitor thread scheduled late used to re-read
         // the process field after stop() nulled it and die on the NPE. The
         // capture-based monitor must survive any start/stop interleaving;
@@ -294,7 +302,7 @@ class SingBoxEngineTest {
             ]}""";
 
     @Test
-    void stopRunsSystemProxyGuardForMarkedConfig(@TempDir Path tmp) throws Exception {
+    void stopRunsSystemProxyGuardForMarkedConfig(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
         Path fake = createFakeSingBox(tmp, "sing-box", 30);
         SingBoxEngine engine = new SingBoxEngine(fake);
         List<String> guardCalls = new CopyOnWriteArrayList<>();
@@ -312,7 +320,7 @@ class SingBoxEngineTest {
     }
 
     @Test
-    void crashRunsSystemProxyGuardToo(@TempDir Path tmp) throws Exception {
+    void crashRunsSystemProxyGuardToo(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
         Path fake = createCrashingSingBox(tmp, "sing-box");
         SingBoxEngine engine = new SingBoxEngine(fake);
         List<String> guardCalls = new CopyOnWriteArrayList<>();
@@ -329,7 +337,7 @@ class SingBoxEngineTest {
     }
 
     @Test
-    void unmarkedConfigNeverInvokesTheGuard(@TempDir Path tmp) throws Exception {
+    void unmarkedConfigNeverInvokesTheGuard(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
         Path fake = createFakeSingBox(tmp, "sing-box", 30);
         SingBoxEngine engine = new SingBoxEngine(fake);
         List<String> guardCalls = new CopyOnWriteArrayList<>();
@@ -343,7 +351,7 @@ class SingBoxEngineTest {
     }
 
     @Test
-    void startupCleanupClearsAStaleProxyWhenNotRunning(@TempDir Path tmp) throws Exception {
+    void startupCleanupClearsAStaleProxyWhenNotRunning(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
         SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
         List<String> guardCalls = new CopyOnWriteArrayList<>();
         engine.setSystemProxyGuard((host, port) -> guardCalls.add(host + ":" + port));
@@ -354,7 +362,7 @@ class SingBoxEngineTest {
     }
 
     @Test
-    void startupCleanupIsSkippedWhileTheCoreRuns(@TempDir Path tmp) throws Exception {
+    void startupCleanupIsSkippedWhileTheCoreRuns(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
         SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
         List<String> guardCalls = new CopyOnWriteArrayList<>();
         engine.setSystemProxyGuard((host, port) -> guardCalls.add(host + ":" + port));
@@ -373,7 +381,7 @@ class SingBoxEngineTest {
     // so unlike the rest of the class this one stays Unix-only.
     @EnabledOnOs({OS.MAC, OS.LINUX})
     @Test
-    void tunModeUsesTunLauncherAndStopSignalsTheWrapper(@TempDir Path tmp) throws Exception {
+    void tunModeUsesTunLauncherAndStopSignalsTheWrapper(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
         // Fake privileged wrapper honoring the TunLauncher contract: streams a
         // started line and exits as soon as the stop-signal file appears.
         Path stopFile = tmp.resolve("stop.signal");
