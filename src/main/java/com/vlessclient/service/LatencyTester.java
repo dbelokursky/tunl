@@ -35,6 +35,14 @@ public class LatencyTester {
     private final ExecutorService executor;
     private final ClashApiDelayProbe delayProbe;
 
+    /**
+     * The most recent result per server id, so a view other than the one that
+     * ran the test can still show and rank by it. In memory only: a latency is
+     * true of a moment and a network, and persisting it would have the app
+     * present a stale number from a previous session as current fact.
+     */
+    private final Map<String, Result> lastResults = new java.util.concurrent.ConcurrentHashMap<>();
+
     /** Supplies the running core's Clash API details, or null when it is down. */
     private volatile java.util.function.Supplier<ApiEndpoint> endpointSupplier = () -> null;
 
@@ -86,10 +94,29 @@ public class LatencyTester {
         return CompletableFuture.supplyAsync(() -> measureBest(server), executor);
     }
 
+    /**
+     * The most recent measurement for a server, if one has been taken this
+     * session. Lets the server list rank by latency without running its own
+     * test over results the dashboard already has.
+     */
+    public java.util.Optional<Result> lastResult(String serverId) {
+        return serverId == null
+                ? java.util.Optional.empty()
+                : java.util.Optional.ofNullable(lastResults.get(serverId));
+    }
+
     private Result measureBest(ServerConfig server) {
         if (server == null) {
             return new Result(-1, false);
         }
+        Result result = probeOrConnect(server);
+        if (server.getId() != null) {
+            lastResults.put(server.getId(), result);
+        }
+        return result;
+    }
+
+    private Result probeOrConnect(ServerConfig server) {
         ApiEndpoint endpoint = endpointSupplier.get();
         if (endpoint != null) {
             String tag = com.vlessclient.service.outbound.OutboundTags.server(server);

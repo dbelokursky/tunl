@@ -249,3 +249,28 @@ probe, so a dead server is excluded rather than ranked last.
 core before the shape was adopted, because endpoints and outbounds are separate
 namespaces and this was not obvious. It works, so WireGuard participates in
 groups like any other protocol.
+
+**Activation is a click, not a selection change (phase 6).** The server list
+bound "make this active" to the selection model, which only worked because the
+list was never rebuilt underneath it. A `FilteredList` rebuilds it on every
+keystroke, and a rebuilt list moves the selection on its own — so searching
+would have silently switched the server the app connects through. Two existing
+faults surfaced with it: arrow-key navigation was writing the config and
+restarting a live tunnel once per keypress, and a multi-select was impossible
+because every row touched while building one would activate. Activation now
+comes from a plain primary click or Enter; modifier-clicks build a selection.
+
+**Grouping by subscription was dropped, not deferred.** The plan asked for
+group rows per originating subscription. `SubscriptionService.applyNamePrefix`
+already prefixes every imported server with `[SubName]`, so the grouping is
+present in the row and, more usefully, reachable through the same search box
+as everything else — typing the subscription name narrows to it. Real group
+headers would also contradict sorting: a list cannot be both grouped by source
+and ordered globally by latency, and latency is the ordering users came for.
+
+**Latency lives in `LatencyTester`, in memory only.** The list sorts by the
+last measurement, which meant it had to be readable outside the view that took
+it. Putting it on the tester rather than in a new service keeps it with the
+thing that produces it; keeping it out of `ServerConfig` keeps it out of
+`servers.json`, where a latency from a previous session on a different network
+would be presented as current fact.
