@@ -422,28 +422,86 @@ public class DashboardViewController {
                 log.debug("RoutingService not available; using default route");
             }
             String configJson = configGenerator.generate(activeServer, settings, routingConfig);
-            singBoxEngine.start(configJson, settings.getProxyMode());
+            ProxyMode mode = settings.getProxyMode();
+            // Config generation is cheap and needs the FX-owned state; the
+            // start itself is not — see startEngine.
+            connectButton.setDisable(true);
+            Thread.startVirtualThread(() -> startEngine(configJson, mode));
         } catch (IllegalArgumentException e) {
             log.error("Service unavailable during connect", e);
             showError(I18n.get("dashboard.error.service.title"),
                     I18n.get("dashboard.error.service.body", e.getMessage()));
+        }
+    }
+
+    /**
+     * Starts the core off the FX thread.
+     *
+     * <p>Connecting used to run inline on the FX thread, freezing the window
+     * for as long as the start took — on a TUN connect that is a SHA-256 of the
+     * ~40 MB binary plus, when the privileged setup has to be refreshed, a
+     * modal admin prompt with a 60-second timeout. The UI was unresponsive
+     * during the one action users watch most, and the OS auth dialog raced a
+     * frozen renderer.</p>
+     *
+     * <p>Waiting for a previous stop first is what keeps the reconnect paths
+     * working: both the server-switch restart and the health-check
+     * auto-reconnect stop and start back to back, and {@code start()} throws
+     * if the core is still running. The engine publishes all state through
+     * {@code connectionStateProperty}, which already marshals to FX, so the UI
+     * keeps updating itself from here.</p>
+     */
+    private void startEngine(String configJson, ProxyMode mode) {
+        try {
+            awaitEngineStopped();
+            singBoxEngine.start(configJson, mode);
         } catch (IOException e) {
             log.error("Failed to start sing-box", e);
-            statusLabel.setText(I18n.get("error.connection.failed", e.getMessage()));
-            showError(I18n.get("dashboard.error.start.title"), e.getMessage());
+            Platform.runLater(() -> {
+                statusLabel.setText(I18n.get("error.connection.failed", e.getMessage()));
+                showError(I18n.get("dashboard.error.start.title"), e.getMessage());
+            });
         } catch (IllegalStateException e) {
             log.warn("sing-box already running: {}", e.getMessage());
+        } finally {
+            Platform.runLater(this::refreshConnectButtonAvailability);
+        }
+    }
+
+    /**
+     * Blocks until the core is no longer running, or the wait times out.
+     * A stop can take seconds (SIGTERM grace, then a force-kill), so a
+     * reconnect that started immediately would hit "already running".
+     */
+    private void awaitEngineStopped() {
+        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(15).toNanos();
+        while (singBoxEngine.isRunning() && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
         }
     }
 
     private void disconnect() {
         log.info("Disconnecting");
 
-        if (singBoxEngine != null) {
-            singBoxEngine.stop();
-        } else {
+        if (singBoxEngine == null) {
             connectionState.set(ConnectionState.DISCONNECTED);
+            return;
         }
+        // stop() waits out a SIGTERM grace period and can force-kill after it,
+        // so it cannot run on the FX thread either.
+        connectButton.setDisable(true);
+        Thread.startVirtualThread(() -> {
+            try {
+                singBoxEngine.stop();
+            } finally {
+                Platform.runLater(this::refreshConnectButtonAvailability);
+            }
+        });
     }
 
     /**
@@ -474,10 +532,9 @@ public class DashboardViewController {
         log.info("Active server changed while connected ({} -> {}); restarting tunnel",
                 activeServer.getName(), nowActive.getName());
         disconnect();
-        javafx.animation.PauseTransition gap =
-                new javafx.animation.PauseTransition(javafx.util.Duration.millis(700));
-        gap.setOnFinished(e -> connect());
-        gap.play();
+        // No timed gap needed: the start waits for the stop to finish
+        // (awaitEngineStopped), which is exact rather than a guess.
+        connect();
     }
 
     // ===== Service availability / auto-reconnect =====
