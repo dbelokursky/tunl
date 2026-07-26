@@ -19,7 +19,9 @@ wraps [sing-box](https://github.com/SagerNet/sing-box) in a friendly GUI with
 live traffic stats, share-link import, subscriptions, routing rules and a
 tray/menu-bar icon.
 
-<!-- TODO(screenshots): docs/screenshots/dashboard.png — Phase 3 of plans/readme.md -->
+<p align="center">
+  <img src="docs/screenshots/dashboard.png" width="900" alt="Tunl dashboard: connected through Amsterdam, live traffic graph"/>
+</p>
 
 ---
 
@@ -161,9 +163,19 @@ What TUN asks for on each OS:
 
 ### Servers
 
-Right-click a server for the context menu: **Edit**, **Duplicate**,
-**Copy Share Link**, **Delete**. The **Test Latency** button on the Dashboard
-pings all servers at once.
+<p align="center">
+  <img src="docs/screenshots/servers.png" width="900" alt="Server list with search, sort and per-server latency"/>
+</p>
+
+Search filters on name, address, port and protocol at once. Sort by your own
+order, name, protocol, or fastest first — **Measure** fills in the latency for
+whatever the search currently shows. While the tunnel is up the measurement
+goes *through* each proxy rather than to its address, so a server that answers
+but does not work ranks where it belongs.
+
+Click a server to make it active; Cmd/Shift-click builds a selection, and
+deleting one asks once for the whole batch. Right-click for **Edit**,
+**Duplicate**, **Copy Share Link**, **Delete**.
 
 ### Subscriptions
 
@@ -171,6 +183,10 @@ pings all servers at once.
 periodically re-synced.
 
 ### Routing
+
+<p align="center">
+  <img src="docs/screenshots/routing.png" width="900" alt="Routing tab: bypass countries, bypass list and custom rules"/>
+</p>
 
 **Routing** tab — routing rules: geoip, geosite, domain, ruleset.
 
@@ -224,6 +240,10 @@ rollback on failure).
 | `⌘Q`   | Quit                                    |
 
 ### Settings
+
+<p align="center">
+  <img src="docs/screenshots/settings.png" width="900" alt="Settings: appearance, connection and health check"/>
+</p>
 
 | Field                    | Description                                           |
 |--------------------------|-------------------------------------------------------|
@@ -345,6 +365,9 @@ mvn clean package           # build the shaded jar (with the sing-box bundle)
 mvn test                    # all tests
 mvn test -Dtest=SingBoxInstallerTest   # a single test class
 mvn validate                # checkstyle
+
+# regenerate docs/screenshots/*.png after a UI change
+mvn test -Dtest=ScreenshotGenerator -Dtunl.screenshots=true -Djacoco.skip=true
 ```
 
 ### Regenerating the icon
