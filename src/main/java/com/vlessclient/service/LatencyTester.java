@@ -13,8 +13,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Measures TCP connect latency to servers using a bounded pool of daemon
+ * Measures how long each server takes to answer, on a bounded pool of daemon
  * threads.
+ *
+ * <p>Two measurements, in order of usefulness. While the tunnel is up the core
+ * is asked for the delay <em>through</em> each proxy it knows about, which is
+ * the number that actually predicts browsing speed. Otherwise — or for servers
+ * absent from the running config — it falls back to a TCP connect, which only
+ * measures the path to the address and will happily report 40 ms for a server
+ * that is reachable but unusable.</p>
+ *
+ * <p>{@link Result#throughProxy()} says which one produced a given number, so
+ * the UI can be honest about what it is showing.</p>
  */
 public class LatencyTester {
 
@@ -23,16 +33,73 @@ public class LatencyTester {
     private static final int MAX_CONCURRENT_TESTS = 10;
 
     private final ExecutorService executor;
+    private final ClashApiDelayProbe delayProbe;
+
+    /** Supplies the running core's Clash API details, or null when it is down. */
+    private volatile java.util.function.Supplier<ApiEndpoint> endpointSupplier = () -> null;
+
+    /** Where to reach the Clash API of the core that is currently running. */
+    public record ApiEndpoint(int port, String secret) { }
+
+    /**
+     * One server's measurement.
+     *
+     * @param millis      round-trip in milliseconds, or -1 when unreachable
+     * @param throughProxy true when measured through the proxy itself rather
+     *                     than by connecting to its address
+     */
+    public record Result(long millis, boolean throughProxy) {
+        public boolean reachable() {
+            return millis >= 0;
+        }
+    }
 
     /**
      * Creates a tester backed by a fixed pool of daemon threads.
      */
     public LatencyTester() {
+        this(new ClashApiDelayProbe());
+    }
+
+    /** Test seam: inject the probe. */
+    LatencyTester(ClashApiDelayProbe delayProbe) {
+        this.delayProbe = delayProbe;
         this.executor = Executors.newFixedThreadPool(MAX_CONCURRENT_TESTS, r -> {
             Thread t = new Thread(r, "latency-tester");
             t.setDaemon(true);
             return t;
         });
+    }
+
+    /**
+     * Tells the tester how to reach the running core. Supplying null (or a
+     * supplier that returns null) keeps every measurement on the TCP path.
+     */
+    public void setApiEndpointSupplier(java.util.function.Supplier<ApiEndpoint> supplier) {
+        this.endpointSupplier = supplier != null ? supplier : () -> null;
+    }
+
+    /**
+     * Measures one server, preferring the through-proxy probe.
+     */
+    public CompletableFuture<Result> measure(ServerConfig server) {
+        return CompletableFuture.supplyAsync(() -> measureBest(server), executor);
+    }
+
+    private Result measureBest(ServerConfig server) {
+        if (server == null) {
+            return new Result(-1, false);
+        }
+        ApiEndpoint endpoint = endpointSupplier.get();
+        if (endpoint != null) {
+            String tag = com.vlessclient.service.outbound.OutboundTags.server(server);
+            java.util.Optional<Long> throughProxy =
+                    delayProbe.measure(endpoint.port(), endpoint.secret(), tag);
+            if (throughProxy.isPresent()) {
+                return new Result(throughProxy.get(), true);
+            }
+        }
+        return new Result(measureLatency(server), false);
     }
 
     public CompletableFuture<Long> testSingle(ServerConfig server) {

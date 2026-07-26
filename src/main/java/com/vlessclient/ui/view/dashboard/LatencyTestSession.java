@@ -14,6 +14,7 @@ import javafx.application.Platform;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -37,6 +38,9 @@ public final class LatencyTestSession {
     private Timeline latencyTimeline;
     private volatile boolean latencyInFlight;
 
+    /** Invoked when the user picks a server from the results. */
+    private java.util.function.Consumer<ServerConfig> onServerChosen = server -> { };
+
     /**
      * Creates the session over the controller's button and result list.
      * {@code latencyTester} may be null when the service is unavailable; the
@@ -47,6 +51,17 @@ public final class LatencyTestSession {
         this.latencyTester = latencyTester;
         this.testLatencyButton = testLatencyButton;
         this.latencyResultList = latencyResultList;
+    }
+
+    /**
+     * Makes result rows actionable. Without this the measurement is read-only:
+     * the user learns which server is fastest and then has to go find it in
+     * another tab to actually use it.
+     *
+     * @param handler receives the chosen server, on the FX thread
+     */
+    public void setOnServerChosen(java.util.function.Consumer<ServerConfig> handler) {
+        this.onServerChosen = handler != null ? handler : server -> { };
     }
 
     /**
@@ -132,13 +147,19 @@ public final class LatencyTestSession {
         }
 
         latencyResultList.getChildren().clear();
-        for (ServerConfig server : servers) {
+        // Fastest first, unreachable last: the ranking is the answer the user
+        // pressed the button for, and an unsorted list makes them do it by eye.
+        List<ServerConfig> ranked = new java.util.ArrayList<>(servers);
+        ranked.sort(java.util.Comparator.comparingLong(server -> {
+            Long latency = results.get(server.getId());
+            return latency == null || latency < 0 ? Long.MAX_VALUE : latency;
+        }));
+        for (ServerConfig server : ranked) {
             Long latency = results.get(server.getId());
             if (latency == null) {
                 continue;
             }
-            String name = server.getName() != null ? server.getName() : server.getAddress();
-            latencyResultList.getChildren().add(buildLatencyRow(name, latency));
+            latencyResultList.getChildren().add(buildLatencyRow(server, latency));
         }
         if (latencyResultList.getChildren().isEmpty()) {
             showLatencyStatus(I18n.get("dashboard.no.results"));
@@ -147,16 +168,27 @@ public final class LatencyTestSession {
         setLatencyListVisible(true);
     }
 
-    /** One latency row: green dot + name + "NNN ms", or red dot + "timeout". */
-    private HBox buildLatencyRow(String name, long latency) {
+    /**
+     * One latency row: green dot + name + "NNN ms", or red dot + "timeout".
+     * Clicking a reachable row makes that server active — the result is worth
+     * acting on, not just reading.
+     */
+    private HBox buildLatencyRow(ServerConfig server, long latency) {
         boolean ok = latency >= 0;
         HBox row = new HBox(8);
         row.setAlignment(Pos.CENTER_LEFT);
+        if (ok) {
+            row.getStyleClass().add("latency-row-actionable");
+            row.setCursor(javafx.scene.Cursor.HAND);
+            row.setOnMouseClicked(event -> onServerChosen.accept(server));
+            Tooltip.install(row, new Tooltip(I18n.get("dashboard.latency.use")));
+        }
 
         Circle dot = new Circle(5);
         dot.getStyleClass().setAll(ok ? "status-circle-connected" : "status-circle-error");
 
-        Label nameLabel = new Label(name);
+        Label nameLabel = new Label(
+                server.getName() != null ? server.getName() : server.getAddress());
         nameLabel.getStyleClass().setAll("service-name");
 
         Region spacer = new Region();
