@@ -12,6 +12,7 @@ import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.RoutingRule;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.model.ServerSelection;
 import com.vlessclient.service.outbound.Hysteria2OutboundBuilder;
 import com.vlessclient.service.outbound.OutboundTags;
 import com.vlessclient.service.outbound.ShadowsocksOutboundBuilder;
@@ -43,6 +44,15 @@ import org.slf4j.LoggerFactory;
 public class SingBoxConfigGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(SingBoxConfigGenerator.class);
+
+    /**
+     * Probe used by the automatic group types. A 204-no-content endpoint is
+     * the convention here: it is tiny, unauthenticated, and widely reachable,
+     * so a failure means the server, not the target.
+     */
+    private static final String PROBE_URL = "https://www.gstatic.com/generate_204";
+    private static final String PROBE_INTERVAL = "3m";
+    private static final int PROBE_TOLERANCE_MS = 50;
 
     private final ObjectMapper mapper;
     private final com.vlessclient.platform.SystemProxySupport systemProxySupport;
@@ -85,6 +95,28 @@ public class SingBoxConfigGenerator {
      */
     public String generate(ServerConfig server, AppSettings settings,
                            RoutingConfig routingConfig) {
+        return generate(List.of(server), server, settings, routingConfig);
+    }
+
+    /**
+     * Generates the configuration for a set of candidate servers.
+     *
+     * <p>Which of them actually carries traffic depends on
+     * {@link AppSettings#getServerSelection()}: pinned to {@code active}, or
+     * chosen by the core among all candidates. Membership is derived here at
+     * generate time rather than stored, so a subscription refresh cannot leave
+     * a stale member behind.</p>
+     *
+     * @param candidates every server the group may use; ignored unless the
+     *                   selection mode is automatic
+     * @param active     the pinned server, and the fallback when a mode needs
+     *                   one specific server
+     * @param settings   app settings, including the selection mode
+     * @param routingConfig routing rules, or {@code null} for defaults
+     * @return the sing-box configuration serialized as a JSON string
+     */
+    public String generate(List<ServerConfig> candidates, ServerConfig active,
+                           AppSettings settings, RoutingConfig routingConfig) {
         ObjectNode root = mapper.createObjectNode();
 
         root.set("log", buildLog());
@@ -100,12 +132,17 @@ public class SingBoxConfigGenerator {
         // top-level endpoints entry. It carries its own server tag and the
         // proxy group references it, exactly like an outbound member — a
         // selector may point at an endpoint (verified against the real core).
-        if (server.getProtocol() == Protocol.WIREGUARD) {
-            ArrayNode endpoints = mapper.createArrayNode();
-            endpoints.add(wireguardBuilder.build(server, OutboundTags.server(server)));
+        List<ServerConfig> members = groupMembers(candidates, active, settings);
+        ArrayNode endpoints = mapper.createArrayNode();
+        for (ServerConfig member : members) {
+            if (member.getProtocol() == Protocol.WIREGUARD) {
+                endpoints.add(wireguardBuilder.build(member, OutboundTags.server(member)));
+            }
+        }
+        if (!endpoints.isEmpty()) {
             root.set("endpoints", endpoints);
         }
-        root.set("outbounds", buildOutbounds(server));
+        root.set("outbounds", buildOutbounds(members, settings.getServerSelection()));
 
         if (routingConfig != null) {
             ObjectNode route = buildRoute(routingConfig);
@@ -124,7 +161,7 @@ public class SingBoxConfigGenerator {
         // an explicit route.final the first outbound ("direct" for WireGuard)
         // would silently swallow all traffic. buildRoute already sets final,
         // so this only fills the no-RoutingConfig paths.
-        if (server.getProtocol() == Protocol.WIREGUARD) {
+        if (!endpoints.isEmpty()) {
             ObjectNode route = (ObjectNode) root.get("route");
             if (route == null) {
                 route = mapper.createObjectNode();
@@ -494,34 +531,57 @@ public class SingBoxConfigGenerator {
     }
 
     /**
-     * Emits the server's own outbound plus the group that fronts it.
+     * The servers the group may use, decided here rather than stored.
      *
-     * <p>The {@code proxy} tag belongs to a selector group rather than to the
-     * server directly. Nothing downstream notices — {@code route.final}, the
-     * DNS {@code detour} and every rule-set {@code download_detour} keep
-     * resolving {@code proxy} — but it is what lets a group hold several
-     * members later without touching route, DNS or rule-sets.</p>
+     * <p>In an automatic mode that is every configured server; pinned, it is
+     * just the active one. Deriving it per connect is what keeps a
+     * subscription refresh from leaving a stale member behind, since there is
+     * no membership list to go stale.</p>
      *
-     * <p>WireGuard contributes no outbound: it is a top-level {@code endpoints}
-     * entry. The group references its tag all the same — verified against the
-     * real binary, since a selector pointing at an endpoint is not obviously
-     * legal.</p>
+     * <p>An automatic mode with nothing to choose between falls back to the
+     * active server: emitting an empty group would be rejected by the core,
+     * and refusing to connect over a mode toggle would be worse than ignoring
+     * it.</p>
      */
-    private ArrayNode buildOutbounds(ServerConfig server) {
-        ArrayNode outbounds = mapper.createArrayNode();
-        String memberTag = OutboundTags.server(server);
+    private List<ServerConfig> groupMembers(List<ServerConfig> candidates, ServerConfig active,
+                                            AppSettings settings) {
+        if (!settings.getServerSelection().isAutomatic() || candidates == null) {
+            return List.of(active);
+        }
+        // De-duplicate by id: the same server must not appear twice in a
+        // group, and callers pass whatever list they hold.
+        java.util.Map<String, ServerConfig> byId = new java.util.LinkedHashMap<>();
+        for (ServerConfig candidate : candidates) {
+            if (candidate != null && candidate.getId() != null) {
+                byId.putIfAbsent(candidate.getId(), candidate);
+            }
+        }
+        byId.putIfAbsent(active.getId(), active);
+        return byId.isEmpty() ? List.of(active) : List.copyOf(byId.values());
+    }
 
-        if (server.getProtocol() != Protocol.WIREGUARD) {
-            outbounds.add(buildProxyOutbound(server, memberTag));
+    /**
+     * Emits every member's own outbound plus the group that fronts them.
+     *
+     * <p>The group carries the {@code proxy} tag in every mode, so route, DNS
+     * and rule-sets resolve the same name whether one server is pinned or the
+     * core is choosing.</p>
+     */
+    private ArrayNode buildOutbounds(List<ServerConfig> members, ServerSelection selection) {
+        ArrayNode outbounds = mapper.createArrayNode();
+        ArrayNode memberTags = mapper.createArrayNode();
+
+        for (ServerConfig member : members) {
+            String memberTag = OutboundTags.server(member);
+            memberTags.add(memberTag);
+            // WireGuard contributes an endpoint instead; the group still
+            // references its tag.
+            if (member.getProtocol() != Protocol.WIREGUARD) {
+                outbounds.add(buildProxyOutbound(member, memberTag));
+            }
         }
 
-        ObjectNode group = mapper.createObjectNode();
-        group.put("type", "selector");
-        group.put("tag", OutboundTags.PROXY);
-        ArrayNode members = mapper.createArrayNode();
-        members.add(memberTag);
-        group.set("outbounds", members);
-        outbounds.add(group);
+        outbounds.add(buildProxyGroup(selection, memberTags));
 
         ObjectNode direct = mapper.createObjectNode();
         direct.put("type", "direct");
@@ -529,6 +589,28 @@ public class SingBoxConfigGenerator {
         outbounds.add(direct);
 
         return outbounds;
+    }
+
+    /**
+     * The proxy group itself. The automatic types need a probe target and an
+     * interval; without them sing-box would never re-measure and the mode
+     * would silently behave like a plain selector.
+     */
+    private ObjectNode buildProxyGroup(ServerSelection selection, ArrayNode memberTags) {
+        ObjectNode group = mapper.createObjectNode();
+        group.put("type", selection.singBoxType());
+        group.put("tag", OutboundTags.PROXY);
+        group.set("outbounds", memberTags);
+
+        if (selection.isAutomatic()) {
+            group.put("url", PROBE_URL);
+            group.put("interval", PROBE_INTERVAL);
+            // Only switch away from the current pick when a candidate is
+            // meaningfully faster, so traffic does not hop between servers
+            // whose latencies are within noise of each other.
+            group.put("tolerance", PROBE_TOLERANCE_MS);
+        }
+        return group;
     }
 
     private ObjectNode buildProxyOutbound(ServerConfig server, String tag) {

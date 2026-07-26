@@ -224,3 +224,28 @@ destabilised by it.
   is accepted by sing-box; it cannot prove `url-test` picks a *usable* server.
   A manual pass with a deliberately dead member belongs in
   `docs/RELEASE-CHECKLIST.md`.
+
+
+---
+
+## Decisions taken during implementation
+
+**Membership is a mode, not a stored list (option A).** The two questions this
+plan flagged as blocking — what "the active server" means once groups exist,
+and what a subscription refresh does to a stored membership — both came from
+one choice: persisting the member list. Replacing it with a rule evaluated at
+connect time removes both. `ServerSelection` is therefore a setting
+(`single` / `auto_best`), not an entity, and membership is derived in
+`SingBoxConfigGenerator.groupMembers`.
+
+**There is no fallback mode.** The plan assumed sing-box offers `url-test` and
+`fallback` group types. It does not: the real core answers
+`unknown outbound type: fallback` — that is a Clash concept. Only `selector`
+and `urltest` exist, confirmed by probing the shipped binary. `urltest` already
+covers the fallback case, since it only picks among members that answered the
+probe, so a dead server is excluded rather than ranked last.
+
+**A selector may reference a WireGuard endpoint.** Checked against the real
+core before the shape was adopted, because endpoints and outbounds are separate
+namespaces and this was not obvious. It works, so WireGuard participates in
+groups like any other protocol.
