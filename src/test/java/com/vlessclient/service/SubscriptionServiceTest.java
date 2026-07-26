@@ -107,6 +107,35 @@ class SubscriptionServiceTest {
                 .containsExactlyInAnyOrder("server2.com", "server3.com");
     }
 
+    /**
+     * A failed refresh used to vanish into the log: the row kept its old
+     * timestamp and looked identical to a healthy subscription, so a dead URL
+     * or an expired token went unnoticed indefinitely.
+     */
+    @Test
+    void refreshSubscription_recordsWhyItFailedAndClearsItOnSuccess() {
+        String content = "vless://uuid1@server1.com:443?security=tls&type=tcp#Server1\n";
+        service.setFetchedContent(Base64.getEncoder()
+                .encodeToString(content.getBytes(StandardCharsets.UTF_8)));
+        service.addSubscription("TestSub", "https://example.com/sub");
+        Subscription sub = service.getSubscriptions().get(0);
+        assertThat(sub.getLastError()).isNull();
+
+        service.failFetchWith("HTTP 403");
+        service.refreshSubscription(sub.getId());
+
+        assertThat(sub.getLastError()).contains("403");
+        // Persisted, so the failure is still visible after a restart.
+        assertThat(new TestableSubscriptionService(configStore, shareLinkParser, tempDir)
+                .getSubscriptions().get(0).getLastError()).contains("403");
+
+        // A later success clears it — the row must not keep warning forever.
+        service.setFetchedContent(Base64.getEncoder()
+                .encodeToString(content.getBytes(StandardCharsets.UTF_8)));
+        service.refreshSubscription(sub.getId());
+        assertThat(sub.getLastError()).isNull();
+    }
+
     @Test
     void removeSubscription_removesAssociatedServers() {
         String content = "vless://uuid1@server1.com:443?security=tls&type=tcp#Server1\n"
@@ -176,6 +205,7 @@ class SubscriptionServiceTest {
     private static class TestableSubscriptionService extends SubscriptionService {
 
         private String fetchedContent = "";
+        private RuntimeException fetchFailure;
 
         TestableSubscriptionService(ConfigStore configStore, ShareLinkParser shareLinkParser,
                                      Path dataDir) {
@@ -185,10 +215,19 @@ class SubscriptionServiceTest {
 
         void setFetchedContent(String content) {
             this.fetchedContent = content;
+            this.fetchFailure = null;
+        }
+
+        /** Makes the next fetch fail, the way a dead URL or bad token would. */
+        void failFetchWith(String message) {
+            this.fetchFailure = new RuntimeException(message);
         }
 
         @Override
         String fetchContent(String url) {
+            if (fetchFailure != null) {
+                throw fetchFailure;
+            }
             return fetchedContent;
         }
     }

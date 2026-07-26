@@ -41,6 +41,34 @@ public class MainViewTest extends ApplicationTest {
         stage.show();
     }
 
+    /**
+     * The sidebar text must come from the bundle, not FXML literals. It used to
+     * be hardcoded English, so the primary Russian audience saw an English
+     * navigation while the sidebar.* translations sat unused — and a language
+     * change did not move it.
+     */
+    @Test
+    void sidebarLabelsComeFromTheMessageBundle() {
+        // Every nav label must be bound to the bundle rather than carrying an
+        // FXML literal — that is what left the navigation in English for the
+        // primary Russian audience while sidebar.* sat translated and unused.
+        // Asserting the binding (not a re-translated value) keeps this robust:
+        // I18n's locale is process-wide static state shared by the whole
+        // headless suite, so flipping it here would race the other classes.
+        for (String id : new String[] {"#btnDashboard", "#btnServers", "#btnSubscriptions",
+                                       "#btnRouting", "#btnLogs", "#btnSettings"}) {
+            Button button = lookup(id).queryButton();
+            assertThat(button.textProperty().isBound())
+                    .as("%s must take its text from the message bundle", id)
+                    .isTrue();
+            assertThat(button.getText()).isNotBlank();
+        }
+
+        Button dashboard = lookup("#btnDashboard").queryButton();
+        assertThat(dashboard.getText())
+                .isEqualTo(com.vlessclient.app.I18n.get("sidebar.dashboard"));
+    }
+
     @Test
     void sidebarButtonsExist() {
         assertThat(lookup("#btnDashboard").tryQuery()).isPresent();

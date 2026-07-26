@@ -964,3 +964,10 @@
 .update-item-detail {
     -fx-padding: 0 0 0 17;
 }
+
+/* Subscription row: why the last refresh failed. Uses the on-surface red
+   (-c-danger-fg), not the button-fill red. */
+.subscription-error {
+    -fx-font-size: 11px;
+    -fx-text-fill: -c-danger-fg;
+}

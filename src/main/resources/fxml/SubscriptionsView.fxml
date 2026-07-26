@@ -29,8 +29,7 @@
     <VBox fx:id="emptyState" styleClass="empty-state" spacing="8" alignment="CENTER"
           VBox.vgrow="ALWAYS" managed="true" visible="true">
         <Label text="&#x1F517;" styleClass="empty-state-icon"/>
-        <Label text="No subscriptions" styleClass="empty-state-title"/>
-        <Label text="Click 'Add Subscription' to import servers from a URL"
-               styleClass="empty-state-hint"/>
+        <Label fx:id="emptyStateTitle" styleClass="empty-state-title"/>
+        <Label fx:id="emptyStateHint" styleClass="empty-state-hint"/>
     </VBox>
 </VBox>

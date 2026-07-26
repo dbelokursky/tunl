@@ -1,5 +1,6 @@
 package com.vlessclient.ui.view;
 
+import com.vlessclient.app.I18n;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
@@ -48,6 +49,7 @@ public class MainViewController {
     @FXML
     public void initialize() {
         installSidebarIcons();
+        bindSidebarLabels();
         showDashboard();
 
         if (rootNode != null) {
@@ -85,6 +87,30 @@ public class MainViewController {
         }
         if (btnSettings != null) {
             btnSettings.setGraphic(Icons.settings(size));
+        }
+    }
+
+    /**
+     * Binds the sidebar labels to the message bundle.
+     *
+     * <p>The FXML carried English literals, so the navigation stayed in English
+     * for a Russian user even though {@code sidebar.*} has been translated all
+     * along — the most visible of the keys that were sitting unused. Binding
+     * (rather than a one-off {@code setText}) also makes the labels follow a
+     * language change without a restart, matching how Settings already works.</p>
+     */
+    private void bindSidebarLabels() {
+        bindText(btnDashboard, "sidebar.dashboard");
+        bindText(btnServers, "sidebar.servers");
+        bindText(btnSubscriptions, "sidebar.subscriptions");
+        bindText(btnRouting, "sidebar.routing");
+        bindText(btnLogs, "sidebar.logs");
+        bindText(btnSettings, "sidebar.settings");
+    }
+
+    private static void bindText(Button button, String key) {
+        if (button != null) {
+            button.textProperty().bind(I18n.binding(key));
         }
     }
 
