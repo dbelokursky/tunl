@@ -94,18 +94,25 @@ class SingBoxConfigGeneratorTest {
         String json = generator.generate(server, defaultSettings);
         JsonNode root = parse(json);
 
+        // Three now: the server's own outbound, the proxy group fronting it,
+        // and direct.
         JsonNode outbounds = root.get("outbounds");
         assertThat(outbounds).isNotNull();
-        assertThat(outbounds.size()).isEqualTo(2);
+        assertThat(outbounds.size()).isEqualTo(3);
 
         JsonNode proxy = outbounds.get(0);
         assertThat(proxy.get("type").asText()).isEqualTo("vless");
-        assertThat(proxy.get("tag").asText()).isEqualTo("proxy");
+        assertThat(proxy.get("tag").asText())
+                .isEqualTo(com.vlessclient.service.outbound.OutboundTags.server(server));
         assertThat(proxy.get("server").asText()).isEqualTo("1.2.3.4");
         assertThat(proxy.get("server_port").asInt()).isEqualTo(443);
         assertThat(proxy.get("uuid").asText()).isEqualTo("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
 
-        JsonNode direct = outbounds.get(1);
+        JsonNode group = outbounds.get(1);
+        assertThat(group.get("tag").asText()).isEqualTo("proxy");
+        assertThat(group.get("type").asText()).isEqualTo("selector");
+
+        JsonNode direct = outbounds.get(2);
         assertThat(direct.get("type").asText()).isEqualTo("direct");
         assertThat(direct.get("tag").asText()).isEqualTo("direct");
     }

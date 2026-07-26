@@ -24,15 +24,79 @@ class SingBoxConfigGeneratorMultiProtocolTest {
         defaultSettings = new AppSettings();
     }
 
+    /**
+     * The server's own outbound — the first entry, ahead of the proxy group
+     * and direct. It carries a per-server tag; the {@code proxy} tag belongs
+     * to the group that fronts it (see proxyGroupFrontsTheServerOutbound).
+     */
     private JsonNode proxyOutbound(ServerConfig server) throws Exception {
         String json = generator.generate(server, defaultSettings);
         return mapper.readTree(json).get("outbounds").get(0);
+    }
+
+    private static String memberTag(ServerConfig server) {
+        return com.vlessclient.service.outbound.OutboundTags.server(server);
     }
 
     /** WireGuard lives under top-level {@code endpoints}, not {@code outbounds}. */
     private JsonNode wireguardEndpoint(ServerConfig server) throws Exception {
         String json = generator.generate(server, defaultSettings);
         return mapper.readTree(json).get("endpoints").get(0);
+    }
+
+    /**
+     * The indirection proxy groups are built on: the {@code proxy} tag belongs
+     * to a group, not to the server, while everything downstream keeps
+     * resolving {@code proxy}. If this inverts, routing silently starts
+     * pointing at one specific server again and groups cannot exist.
+     */
+    @Test
+    void proxyGroupFrontsTheServerOutbound() throws Exception {
+        ServerConfig server = vlessServer();
+
+        JsonNode root = mapper.readTree(generator.generate(server, defaultSettings));
+        JsonNode outbounds = root.get("outbounds");
+
+        JsonNode group = null;
+        for (JsonNode node : outbounds) {
+            if ("proxy".equals(node.path("tag").asText())) {
+                group = node;
+            }
+        }
+        assertThat(group).as("a node tagged proxy must exist").isNotNull();
+        assertThat(group.get("type").asText()).isEqualTo("selector");
+        assertThat(group.get("outbounds").get(0).asText()).isEqualTo(memberTag(server));
+
+        // The server itself is a member, not the entry point.
+        assertThat(outbounds.get(0).get("tag").asText()).isEqualTo(memberTag(server));
+        assertThat(outbounds.get(0).get("type").asText()).isEqualTo("vless");
+    }
+
+    /**
+     * Tags are derived from the server id, never the name: names are
+     * user-editable and duplicated freely by subscriptions, and a tag
+     * collision would route traffic through the wrong server.
+     */
+    @Test
+    void memberTagsAreUniquePerServerEvenWhenNamesCollide() throws Exception {
+        ServerConfig first = vlessServer();
+        first.setName("Same name");
+        ServerConfig second = vlessServer();
+        second.setName("Same name");
+
+        assertThat(memberTag(first)).isNotEqualTo(memberTag(second));
+        assertThat(mapper.readTree(generator.generate(first, defaultSettings))
+                .get("outbounds").get(0).get("tag").asText())
+                .isEqualTo(memberTag(first));
+    }
+
+    private ServerConfig vlessServer() {
+        ServerConfig server = new ServerConfig();
+        server.setProtocol(Protocol.VLESS);
+        server.setAddress("vless.example.com");
+        server.setPort(443);
+        server.setUuid("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+        return server;
     }
 
     // -- VMess tests --
@@ -49,7 +113,7 @@ class SingBoxConfigGeneratorMultiProtocolTest {
         JsonNode proxy = proxyOutbound(server);
 
         assertThat(proxy.get("type").asText()).isEqualTo("vmess");
-        assertThat(proxy.get("tag").asText()).isEqualTo("proxy");
+        assertThat(proxy.get("tag").asText()).isEqualTo(memberTag(server));
         assertThat(proxy.get("server").asText()).isEqualTo("vmess.example.com");
         assertThat(proxy.get("server_port").asInt()).isEqualTo(443);
         assertThat(proxy.get("uuid").asText()).isEqualTo("b1c2d3e4-f5a6-7890-abcd-ef1234567890");
@@ -110,7 +174,7 @@ class SingBoxConfigGeneratorMultiProtocolTest {
         JsonNode proxy = proxyOutbound(server);
 
         assertThat(proxy.get("type").asText()).isEqualTo("trojan");
-        assertThat(proxy.get("tag").asText()).isEqualTo("proxy");
+        assertThat(proxy.get("tag").asText()).isEqualTo(memberTag(server));
         assertThat(proxy.get("server").asText()).isEqualTo("trojan.example.com");
         assertThat(proxy.get("server_port").asInt()).isEqualTo(443);
         assertThat(proxy.get("password").asText()).isEqualTo("my-trojan-password");
@@ -172,7 +236,7 @@ class SingBoxConfigGeneratorMultiProtocolTest {
         JsonNode proxy = proxyOutbound(server);
 
         assertThat(proxy.get("type").asText()).isEqualTo("shadowsocks");
-        assertThat(proxy.get("tag").asText()).isEqualTo("proxy");
+        assertThat(proxy.get("tag").asText()).isEqualTo(memberTag(server));
         assertThat(proxy.get("server").asText()).isEqualTo("ss.example.com");
         assertThat(proxy.get("server_port").asInt()).isEqualTo(8388);
         assertThat(proxy.get("method").asText()).isEqualTo("aes-256-gcm");
@@ -225,7 +289,7 @@ class SingBoxConfigGeneratorMultiProtocolTest {
         JsonNode proxy = proxyOutbound(server);
 
         assertThat(proxy.get("type").asText()).isEqualTo("hysteria2");
-        assertThat(proxy.get("tag").asText()).isEqualTo("proxy");
+        assertThat(proxy.get("tag").asText()).isEqualTo(memberTag(server));
         assertThat(proxy.get("server").asText()).isEqualTo("hy2.example.com");
         assertThat(proxy.get("server_port").asInt()).isEqualTo(443);
         assertThat(proxy.get("password").asText()).isEqualTo("hy2-auth-password");
@@ -293,7 +357,7 @@ class SingBoxConfigGeneratorMultiProtocolTest {
         JsonNode endpoint = wireguardEndpoint(server);
 
         assertThat(endpoint.get("type").asText()).isEqualTo("wireguard");
-        assertThat(endpoint.get("tag").asText()).isEqualTo("proxy");
+        assertThat(endpoint.get("tag").asText()).isEqualTo(memberTag(server));
         assertThat(endpoint.get("private_key").asText()).isEqualTo("wg-private-key-base64");
 
         JsonNode address = endpoint.get("address");
@@ -336,12 +400,19 @@ class SingBoxConfigGeneratorMultiProtocolTest {
 
         JsonNode root = mapper.readTree(generator.generate(server, defaultSettings));
 
-        // No wireguard outbound; "direct" is the only outbound left. Without
-        // an explicit final the first outbound would become the default and
-        // all traffic would bypass the tunnel.
+        // No wireguard outbound: it is an endpoint. What sits in outbounds is
+        // the proxy group (pointing at that endpoint) and direct. Without an
+        // explicit final the first outbound would become the default and all
+        // traffic would bypass the tunnel.
         JsonNode outbounds = root.get("outbounds");
-        assertThat(outbounds.size()).isEqualTo(1);
-        assertThat(outbounds.get(0).get("tag").asText()).isEqualTo("direct");
+        assertThat(outbounds.size()).isEqualTo(2);
+        assertThat(outbounds.get(0).get("tag").asText()).isEqualTo("proxy");
+        assertThat(outbounds.get(0).get("type").asText()).isEqualTo("selector");
+        // A selector referencing an endpoint is legal — verified against the
+        // real core before this shape was adopted.
+        assertThat(outbounds.get(0).get("outbounds").get(0).asText())
+                .isEqualTo(memberTag(server));
+        assertThat(outbounds.get(1).get("tag").asText()).isEqualTo("direct");
         assertThat(root.get("route").get("final").asText()).isEqualTo("proxy");
     }
 

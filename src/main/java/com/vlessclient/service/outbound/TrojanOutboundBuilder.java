@@ -15,10 +15,10 @@ public final class TrojanOutboundBuilder extends OutboundBuilder {
     }
 
     @Override
-    public ObjectNode build(ServerConfig server) {
+    public ObjectNode build(ServerConfig server, String tag) {
         ObjectNode outbound = mapper.createObjectNode();
         outbound.put("type", "trojan");
-        outbound.put("tag", "proxy");
+        outbound.put("tag", tag);
         outbound.put("server", server.getAddress());
         outbound.put("server_port", server.getPort());
         outbound.put("password", server.getUuid());
