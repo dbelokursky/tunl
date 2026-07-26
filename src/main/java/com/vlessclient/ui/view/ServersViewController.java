@@ -7,6 +7,7 @@ import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ShareLinkExporter;
 import com.vlessclient.service.ShareLinkParser;
 import com.vlessclient.service.ThemeManager;
+import com.vlessclient.service.WireguardConfigParser;
 import java.io.IOException;
 import java.util.Optional;
 import javafx.collections.ObservableList;
@@ -17,11 +18,12 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.ContextMenu;
+import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.MenuItem;
-import javafx.scene.control.TextInputDialog;
+import javafx.scene.control.TextArea;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.HBox;
@@ -112,26 +114,42 @@ public class ServersViewController {
         openServerForm(null);
     }
 
+    /**
+     * Imports a server from a share link or a WireGuard {@code .conf}.
+     *
+     * <p>One input for both: WireGuard has no share-link format, so its users
+     * hold an INI config instead. Asking them to pick a format first would be
+     * a choice the text itself already answers — a {@code .conf} always has an
+     * {@code [Interface]} section, and a share link never does.</p>
+     */
     @FXML
     private void onImportLinkClicked() {
-        TextInputDialog dialog = new TextInputDialog();
+        Dialog<String> dialog = new Dialog<>();
         dialog.setTitle(I18n.get("dialog.import.link"));
         dialog.setHeaderText(I18n.get("servers.import.header"));
-        dialog.setContentText(I18n.get("servers.import.label"));
-        dialog.getDialogPane().setPrefWidth(500);
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        dialog.getDialogPane().setPrefWidth(560);
 
-        Optional<String> result = dialog.showAndWait();
-        result.ifPresent(link -> {
-            if (link.isBlank()) {
+        // Multi-line: a .conf is a whole file, not a one-liner.
+        TextArea input = new TextArea();
+        input.setPromptText(I18n.get("servers.import.prompt"));
+        input.setPrefRowCount(8);
+        input.setWrapText(true);
+        dialog.getDialogPane().setContent(input);
+        dialog.setResultConverter(button -> button == ButtonType.OK ? input.getText() : null);
+
+        applyTheme(dialog);
+
+        dialog.showAndWait().ifPresent(text -> {
+            if (text == null || text.isBlank()) {
                 return;
             }
             try {
-                ShareLinkParser parser = ServiceLocator.get(ShareLinkParser.class);
-                ServerConfig server = parser.parse(link.trim());
+                ServerConfig server = parseImport(text.trim());
                 configStore.addServer(server);
-                log.info("Imported server from share link: {}", server.getName());
+                log.info("Imported server: {}", server.getName());
             } catch (Exception e) {
-                log.error("Failed to parse share link", e);
+                log.error("Failed to import server", e);
                 Alert alert = new Alert(Alert.AlertType.ERROR);
                 alert.setTitle(I18n.get("servers.import.error.title"));
                 alert.setHeaderText(I18n.get("servers.import.error.header"));
@@ -139,6 +157,23 @@ public class ServersViewController {
                 alert.showAndWait();
             }
         });
+    }
+
+    /** Picks the parser from the text's own shape rather than asking the user. */
+    private ServerConfig parseImport(String text) {
+        if (text.toLowerCase(java.util.Locale.ROOT).contains("[interface]")) {
+            return new WireguardConfigParser().parse(text);
+        }
+        return ServiceLocator.get(ShareLinkParser.class).parse(text);
+    }
+
+    private void applyTheme(Dialog<?> dialog) {
+        try {
+            dialog.getDialogPane().getStylesheets()
+                    .add(ServiceLocator.get(ThemeManager.class).currentStylesheet());
+        } catch (IllegalArgumentException e) {
+            log.debug("ThemeManager unavailable; import dialog uses default styling");
+        }
     }
 
     private void openServerForm(ServerConfig existingServer) {
