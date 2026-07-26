@@ -22,9 +22,10 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-// Drives the engine with fake #!/bin/sh binaries and POSIX file permissions,
-// so it only runs where a Unix shell and POSIX attributes exist.
-@EnabledOnOs({OS.MAC, OS.LINUX})
+// Fake cores are shell scripts on Unix and .cmd files on Windows, so the whole
+// lifecycle runs everywhere. Windows matters most here: its Process.destroy()
+// is always a hard TerminateProcess, which is the reason SystemProxyGuard
+// exists, and none of that was exercised while this class was Unix-only.
 class SingBoxEngineTest {
 
     private static final String DUMMY_CONFIG = "{\"log\":{\"level\":\"info\"}}";
@@ -49,14 +50,20 @@ class SingBoxEngineTest {
      * line and sleeps for the given number of seconds.
      */
     private Path createFakeSingBox(Path dir, String name, int sleepSeconds) throws Exception {
-        Path script = dir.resolve(name);
-        String body = ""
-                + "#!/bin/sh\n"
+        if (WINDOWS) {
+            // timeout is the stock Windows sleep; /t counts seconds and /nobreak
+            // stops a stray keypress from cutting it short. Redirecting from NUL
+            // keeps it from failing when stdin is not a console, which is how
+            // ProcessBuilder starts it.
+            return writeScript(dir, name,
+                    "@echo off\r\n"
+                    + "echo sing-box started\r\n"
+                    + "timeout /t " + sleepSeconds + " /nobreak > NUL\r\n");
+        }
+        return writeScript(dir, name,
+                "#!/bin/sh\n"
                 + "echo 'sing-box started'\n"
-                + "sleep " + sleepSeconds + "\n";
-        Files.writeString(script, body);
-        makeExecutable(script);
-        return script;
+                + "sleep " + sleepSeconds + "\n");
     }
 
     /**
@@ -64,13 +71,32 @@ class SingBoxEngineTest {
      * simulating a crashed sing-box.
      */
     private Path createCrashingSingBox(Path dir, String name) throws Exception {
-        Path script = dir.resolve(name);
-        String body = ""
-                + "#!/bin/sh\n"
+        if (WINDOWS) {
+            return writeScript(dir, name,
+                    "@echo off\r\n"
+                    + "echo sing-box crashing\r\n"
+                    + "exit /b 1\r\n");
+        }
+        return writeScript(dir, name,
+                "#!/bin/sh\n"
                 + "echo 'sing-box crashing'\n"
-                + "exit 1\n";
+                + "exit 1\n");
+    }
+
+    private static final boolean WINDOWS =
+            System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
+
+    /**
+     * Writes a fake core and makes it runnable. On Windows the extension is
+     * what makes a file executable (and ProcessBuilder routes .cmd through the
+     * shell), so the name gains .cmd and there are no POSIX bits to set.
+     */
+    private Path writeScript(Path dir, String name, String body) throws Exception {
+        Path script = dir.resolve(WINDOWS ? name + ".cmd" : name);
         Files.writeString(script, body);
-        makeExecutable(script);
+        if (!WINDOWS) {
+            makeExecutable(script);
+        }
         return script;
     }
 
@@ -343,6 +369,9 @@ class SingBoxEngineTest {
         }
     }
 
+    // Builds its own /bin/sh wrapper to stand in for the privileged launcher,
+    // so unlike the rest of the class this one stays Unix-only.
+    @EnabledOnOs({OS.MAC, OS.LINUX})
     @Test
     void tunModeUsesTunLauncherAndStopSignalsTheWrapper(@TempDir Path tmp) throws Exception {
         // Fake privileged wrapper honoring the TunLauncher contract: streams a
