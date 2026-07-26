@@ -67,12 +67,26 @@ public class SubscriptionService {
      */
     public SubscriptionService(ConfigStore configStore, ShareLinkParser shareLinkParser) {
         this(configStore, shareLinkParser,
-                migrateLegacyDataDir(PlatformPaths.current().dataDir(), legacyMacDataDir()),
+                resolveDataDir(),
                 HttpClient.newBuilder()
                         .connectTimeout(Duration.ofSeconds(15))
                         .followRedirects(HttpClient.Redirect.NORMAL)
                         .build(),
                 SecretSealers.forCurrentPlatform());
+    }
+
+    /**
+     * The data dir, migrating a pre-port file into it first — except when the
+     * dir is redirected for tests, where the "legacy" location is the
+     * developer's real profile and migrating would move their live config out
+     * of it.
+     */
+    private static Path resolveDataDir() {
+        Path platformDir = PlatformPaths.current().dataDir();
+        if (PlatformPaths.isDataDirOverridden()) {
+            return platformDir;
+        }
+        return migrateLegacyDataDir(platformDir, legacyMacDataDir());
     }
 
     /** The pre-port location: subscriptions.json used to be written mac-style on every OS. */
