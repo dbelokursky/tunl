@@ -43,6 +43,7 @@ public class SettingsViewController implements ViewShownAware {
     @FXML private Label httpPortLabel;
     @FXML private Label proxyModeLabel;
     @FXML private Label aboutLabel;
+    @FXML private Label geoAttributionLabel;
     @FXML private Label appVersionLabel;
     @FXML private Label singboxVersionLabel;
     @FXML private Label appVersionValue;
@@ -418,6 +419,9 @@ public class SettingsViewController implements ViewShownAware {
         healthCheckReconnectDelayLabel.textProperty()
                 .bind(I18n.binding("settings.health.check.reconnect.delay"));
         aboutLabel.textProperty().bind(I18n.binding("settings.about"));
+        if (geoAttributionLabel != null) {
+            geoAttributionLabel.textProperty().bind(I18n.binding("settings.geo.attribution"));
+        }
         appVersionLabel.textProperty().bind(I18n.binding("settings.app.version"));
         singboxVersionLabel.textProperty().bind(I18n.binding("settings.singbox.version"));
         updatesLabel.textProperty().bind(I18n.binding("settings.updates"));

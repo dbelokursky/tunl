@@ -9,6 +9,7 @@ import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.ServerSelection;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.service.CountryResolver;
 import com.vlessclient.service.LatencyTester;
 import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ServiceReachabilityChecker;
@@ -52,6 +53,7 @@ public class DashboardViewController {
 
     @FXML private Circle statusCircle;
     @FXML private javafx.scene.layout.StackPane statusHalo;
+    @FXML private javafx.scene.layout.StackPane statusFlag;
     @FXML private Label statusTitle;
     @FXML private Label statusLabel;
     @FXML private Label serverNameLabel;
@@ -673,6 +675,50 @@ public class DashboardViewController {
         }
     }
 
+    /**
+     * Shows the exit country beside the status while connected.
+     *
+     * <p>Hidden — and unmanaged, so it takes no space — whenever the country
+     * is unknown or the tunnel is down. An empty slot next to "Connected"
+     * would read as a missing flag rather than as missing information.</p>
+     */
+    private void showStatusFlag(ServerConfig server) {
+        if (statusFlag == null) {
+            return;
+        }
+        hideStatusFlag();
+        if (server == null) {
+            return;
+        }
+        CountryResolver resolver;
+        try {
+            resolver = ServiceLocator.get(CountryResolver.class);
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+        resolver.countryOf(server).ifPresent(this::paintStatusFlag);
+        resolver.resolveAsync(server, code -> Platform.runLater(() -> {
+            // Only paint if this is still the server we are connected to.
+            if (activeServer == server
+                    && singBoxEngine != null
+                    && singBoxEngine.connectionStateProperty().get() == ConnectionState.CONNECTED) {
+                paintStatusFlag(code);
+            }
+        }));
+    }
+
+    private void paintStatusFlag(String isoCode) {
+        statusFlag.getChildren().setAll(Flags.of(isoCode, 18));
+        statusFlag.setVisible(true);
+        statusFlag.setManaged(true);
+    }
+
+    private void hideStatusFlag() {
+        statusFlag.getChildren().clear();
+        statusFlag.setVisible(false);
+        statusFlag.setManaged(false);
+    }
+
     private void updateUi(ConnectionState state) {
         String haloClass;
         switch (state) {
@@ -687,6 +733,7 @@ public class DashboardViewController {
                 statusLabel.setText(activeServer != null
                         ? I18n.get("dashboard.status.routing.through", activeServer.getName())
                         : I18n.get("dashboard.status.routing"));
+                showStatusFlag(activeServer);
                 statusLabel.getStyleClass().setAll("status-subtitle");
                 connectButton.setText(I18n.get("button.disconnect"));
                 connectButton.setDisable(false);
@@ -694,6 +741,7 @@ public class DashboardViewController {
                 connectButton.getStyleClass().add("disconnect-button");
             }
             case CONNECTING -> {
+                hideStatusFlag();
                 statusCircle.setFill(Color.web("#ef6c00"));
                 statusCircle.getStyleClass().setAll("status-circle-connecting");
                 haloClass = "status-halo-connecting";
@@ -707,6 +755,7 @@ public class DashboardViewController {
                 connectButton.setDisable(false);
             }
             case ERROR -> {
+                hideStatusFlag();
                 statusCircle.setFill(Color.web("#c62828"));
                 statusCircle.getStyleClass().setAll("status-circle-error");
                 haloClass = "status-halo-error";

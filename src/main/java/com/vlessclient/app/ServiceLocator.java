@@ -4,6 +4,8 @@ import com.vlessclient.model.AppSettings;
 import com.vlessclient.platform.Autostart;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.CoreUpdateService;
+import com.vlessclient.service.CountryResolver;
+import com.vlessclient.service.GeoIpDatabase;
 import com.vlessclient.service.LatencyTester;
 import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ServiceReachabilityChecker;
@@ -72,6 +74,15 @@ public class ServiceLocator {
 
         ShareLinkParser shareLinkParser = new ShareLinkParser();
         register(ShareLinkParser.class, shareLinkParser);
+
+        // Country flags: the database downloads in the background on first
+        // run and every lookup is local, so a server list never leaves the
+        // machine.
+        GeoIpDatabase geoIp = new GeoIpDatabase();
+        CountryResolver countryResolver = new CountryResolver(geoIp);
+        countryResolver.warmUp();
+        register(GeoIpDatabase.class, geoIp);
+        register(CountryResolver.class, countryResolver);
 
         ShareLinkExporter shareLinkExporter = new ShareLinkExporter();
         register(ShareLinkExporter.class, shareLinkExporter);

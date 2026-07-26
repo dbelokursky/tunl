@@ -54,7 +54,10 @@
             </StackPane>
 
             <VBox spacing="1" HBox.hgrow="ALWAYS" minWidth="0">
-                <Label fx:id="statusTitle" text="Disconnected" styleClass="status-title"/>
+                <HBox alignment="CENTER_LEFT" spacing="8">
+                    <StackPane fx:id="statusFlag" minWidth="0" managed="false" visible="false"/>
+                    <Label fx:id="statusTitle" text="Disconnected" styleClass="status-title"/>
+                </HBox>
                 <Label fx:id="statusLabel" text="Add a server to get started"
                        styleClass="status-subtitle" wrapText="true" maxWidth="Infinity"/>
             </VBox>

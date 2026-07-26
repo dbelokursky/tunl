@@ -174,6 +174,12 @@
                        style="-fx-font-size: 13px;"/>
             </HBox>
 
+            <!-- Required by the country database's CC BY 4.0 licence: the
+                 attribution has to be visible in the product, not only in the
+                 repository. -->
+            <Label fx:id="geoAttributionLabel" styleClass="hint-label"
+                   wrapText="true" maxWidth="Infinity"/>
+
             <!-- Updates: the app and the sing-box core, each on its own row
                  with a status dot, current→latest detail, and an action.
                  One "Check for updates" checks both. -->
