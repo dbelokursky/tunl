@@ -980,3 +980,22 @@
     -fx-background-color: -c-surface-sunken;
     -fx-background-radius: 6;
 }
+
+/* Latency chip on a server row. Deliberately quieter than the protocol badge:
+   it is a measurement that may be minutes old, not an attribute of the server. */
+.latency-chip {
+    -fx-font-size: 10px;
+    -fx-font-weight: bold;
+    -fx-background-radius: 4;
+    -fx-padding: 3 8;
+}
+
+.latency-chip-ok {
+    -fx-background-color: #e8f5e9;
+    -fx-text-fill: #2e7d32;
+}
+
+.latency-chip-fail {
+    -fx-background-color: #fdecea;
+    -fx-text-fill: #c62828;
+}

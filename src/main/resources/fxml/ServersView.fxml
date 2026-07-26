@@ -2,8 +2,10 @@
 
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.ListView?>
+<?import javafx.scene.control.TextField?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.VBox?>
 <?import javafx.scene.layout.Priority?>
@@ -22,6 +24,15 @@
                 onAction="#onImportLinkClicked"/>
         <Button fx:id="addServerButton" text="+ Add Server" styleClass="primary-button"
                 onAction="#onAddServerClicked"/>
+    </HBox>
+
+    <!-- Search and sort. Hidden while there are no servers: it would only
+         offer to narrow an empty list. -->
+    <HBox fx:id="filterBar" alignment="CENTER_LEFT" spacing="10">
+        <TextField fx:id="searchField" styleClass="search-field" HBox.hgrow="ALWAYS"/>
+        <ComboBox fx:id="sortCombo" styleClass="sort-combo" prefWidth="190"/>
+        <Button fx:id="measureButton" styleClass="secondary-button"
+                onAction="#onMeasureClicked"/>
     </HBox>
 
     <!-- Server List -->
