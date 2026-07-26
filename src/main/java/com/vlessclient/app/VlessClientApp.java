@@ -3,6 +3,7 @@ package com.vlessclient.app;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.platform.Autostart;
+import com.vlessclient.platform.PrivilegeHelper;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.CoreUpdateService;
 import com.vlessclient.service.SingBoxConfigGenerator;
@@ -16,6 +17,7 @@ import java.awt.Desktop;
 import java.awt.Taskbar;
 import java.awt.Toolkit;
 import java.awt.desktop.QuitStrategy;
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.nio.file.Path;
@@ -26,6 +28,9 @@ import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
+import javafx.scene.control.Alert;
+import javafx.scene.control.ButtonBar;
+import javafx.scene.control.ButtonType;
 import javafx.scene.image.Image;
 import javafx.stage.Stage;
 import org.slf4j.Logger;
@@ -260,6 +265,72 @@ public class VlessClientApp extends Application {
         if (mainController != null) {
             mainController.triggerAutoConnect();
         }
+
+        offerToReplaceLegacySudoersRule(primaryStage);
+    }
+
+    /**
+     * Offers to replace a pre-hardening sudoers rule left by an older version.
+     *
+     * <p>That rule authorized the root-owned sing-box with <em>any</em>
+     * arguments, which lets anything running as the user write a file as root
+     * without a prompt. Newer builds install a rule pinned to one command line,
+     * but only when a TUN connection is made — so a user who never enables TUN
+     * would keep the wide rule indefinitely after updating. This closes it at
+     * startup instead.</p>
+     *
+     * <p>Asks rather than acting silently: replacing it needs an admin prompt,
+     * and an unexplained password request at launch is exactly the pattern
+     * users should be suspicious of. Declining is respected for this run; the
+     * offer returns next launch, since the rule is still there.</p>
+     */
+    private void offerToReplaceLegacySudoersRule(Stage owner) {
+        // Fully qualified: javafx.application.Platform is imported here.
+        if (!com.vlessclient.platform.Platform.current().isMac()) {
+            return;
+        }
+        // The sudo probe shells out; keep it off the FX thread so it cannot
+        // delay the window becoming interactive.
+        Thread.startVirtualThread(() -> {
+            if (!PrivilegeHelper.hasLegacyWideRule()) {
+                return;
+            }
+            log.warn("Pre-hardening sudoers rule detected; offering to replace it");
+            Platform.runLater(() -> promptToReplaceLegacyRule(owner));
+        });
+    }
+
+    private void promptToReplaceLegacyRule(Stage owner) {
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.initOwner(owner);
+        alert.setTitle(I18n.get("security.legacy.rule.title"));
+        alert.setHeaderText(I18n.get("security.legacy.rule.header"));
+        alert.setContentText(I18n.get("security.legacy.rule.body"));
+        alert.getButtonTypes().setAll(
+                new ButtonType(I18n.get("security.legacy.rule.fix"), ButtonBar.ButtonData.OK_DONE),
+                new ButtonType(I18n.get("button.later"), ButtonBar.ButtonData.CANCEL_CLOSE));
+
+        alert.showAndWait()
+                .filter(b -> b.getButtonData() == ButtonBar.ButtonData.OK_DONE)
+                .ifPresent(b -> replaceLegacyRule());
+    }
+
+    private void replaceLegacyRule() {
+        Path binary;
+        try {
+            binary = ServiceLocator.get(SingBoxInstaller.class).managedBinaryPath();
+        } catch (IllegalArgumentException e) {
+            log.warn("SingBoxInstaller unavailable; cannot replace the legacy rule");
+            return;
+        }
+        Thread.startVirtualThread(() -> {
+            try {
+                PrivilegeHelper.configure(binary);
+                log.info("Replaced the pre-hardening sudoers rule with the pinned one");
+            } catch (IOException e) {
+                log.warn("Could not replace the legacy sudoers rule: {}", e.getMessage());
+            }
+        });
     }
 
     @Override

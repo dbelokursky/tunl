@@ -139,6 +139,33 @@ class PrivilegeHelperTest {
         assertThat(PrivilegeHelper.hasPinnedRule(listing)).isFalse();
     }
 
+    /**
+     * The startup offer must fire only for the wide rule left by an older
+     * build — not for "no rule yet" (nothing to heal; the first TUN connect
+     * installs it) and not for the pinned rule (already safe). Prompting for a
+     * password at launch in either of those cases would be unexplained.
+     */
+    @Test
+    void legacyWideRuleIsDistinguishedFromNoRuleAndFromThePinnedRule() {
+        String wide = """
+                User dima may run the following commands on host:
+                    (ALL) ALL
+                    (root) NOPASSWD: /usr/local/libexec/vless-client/sing-box""";
+        String pinned = """
+                User dima may run the following commands on host:
+                    (root) NOPASSWD: /usr/local/libexec/vless-client/sing-box run -c \
+                /usr/local/libexec/vless-client/run/tun-config.json""";
+        String none = """
+                User dima may run the following commands on host:
+                    (ALL) ALL""";
+
+        assertThat(PrivilegeHelper.hasLegacyWideRule(wide)).isTrue();
+        assertThat(PrivilegeHelper.hasLegacyWideRule(pinned)).isFalse();
+        assertThat(PrivilegeHelper.hasLegacyWideRule(none)).isFalse();
+        assertThat(PrivilegeHelper.hasLegacyWideRule("")).isFalse();
+        assertThat(PrivilegeHelper.hasLegacyWideRule(null)).isFalse();
+    }
+
     @Test
     void elevatedBinaryIsTheRootOwnedLocation() {
         assertThat(PrivilegeHelper.elevatedBinary())
