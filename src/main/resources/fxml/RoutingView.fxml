@@ -56,9 +56,13 @@
         </HBox>
         <Label styleClass="hint-label" wrapText="true"
                text="One entry per line — these hosts go direct and bypass the VPN. Wildcards: *.example.com, .example.com, *google*; CIDR (192.168.0.0/16); bare IPs; URLs. Lines starting with # are comments."/>
+        <!-- One example, not five: a TextArea renders its prompt as a single
+             run, so the newlines this used to carry came out concatenated into
+             "*.github.comapi.openai.com192.168.0.0/16…" on every empty list.
+             The help text above already gives the full syntax. -->
         <TextArea fx:id="bypassListArea" styleClass="code-area" prefRowCount="8"
                   wrapText="false" VBox.vgrow="ALWAYS"
-                  promptText="*.github.com&#10;api.openai.com&#10;192.168.0.0/16&#10;# legacy in-house services&#10;.corp.local"/>
+                  promptText="*.github.com"/>
     </VBox>
 
     <!-- Custom rules: always active, composing with the sections above -->
