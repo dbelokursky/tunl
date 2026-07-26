@@ -158,6 +158,36 @@ public final class PrivilegeHelper {
         return false;
     }
 
+    /**
+     * Whether the pre-hardening rule — the one authorizing the binary with any
+     * arguments — is still installed.
+     *
+     * <p>Distinct from {@code !isConfigured()}, which is also true when no rule
+     * exists at all. Only this case is worth interrupting the user about at
+     * startup: a standing rule that grants write-a-file-as-root to anything
+     * running as them, which would otherwise sit there until they next use TUN.</p>
+     */
+    public static boolean hasLegacyWideRule() {
+        return hasLegacyWideRule(sudoListing());
+    }
+
+    /** Test seam for {@link #hasLegacyWideRule()}. */
+    static boolean hasLegacyWideRule(String listing) {
+        if (listing == null) {
+            return false;
+        }
+        for (String line : listing.lines().toList()) {
+            String trimmed = line.trim();
+            int marker = trimmed.indexOf("NOPASSWD:");
+            if (marker < 0 || !trimmed.contains(ELEVATED_BINARY.toString())) {
+                continue;
+            }
+            String authorized = trimmed.substring(marker + "NOPASSWD:".length()).trim();
+            return authorized.equals(ELEVATED_BINARY.toString());
+        }
+        return false;
+    }
+
     /** Raw {@code sudo -n -l} output, or empty when sudo declines to answer. */
     private static String sudoListing() {
         try {
