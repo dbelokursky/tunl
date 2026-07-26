@@ -301,7 +301,8 @@ public class TrayIconService {
                 } catch (IllegalArgumentException e) {
                     log.debug("RoutingService not available; using default route");
                 }
-                String configJson = configGenerator.generate(active, settings, routingConfig);
+                String configJson = configGenerator.generate(
+                        configStore.getServers(), active, settings, routingConfig);
                 singBoxEngine.start(configJson, settings.getProxyMode());
             } catch (IOException e) {
                 log.error("Failed to start sing-box from tray", e);

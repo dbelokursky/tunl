@@ -7,6 +7,7 @@ import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.model.ServerSelection;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.LatencyTester;
 import com.vlessclient.service.RoutingService;
@@ -67,6 +68,8 @@ public class DashboardViewController {
     @FXML private Button testLatencyButton;
     @FXML private VBox latencyResultList;
     @FXML private ComboBox<ProxyMode> proxyModeCombo;
+    @FXML private Label serverSelectionLabel;
+    @FXML private ComboBox<ServerSelection> serverSelectionCombo;
     @FXML private Label proxyModeWarning;
     @FXML private HBox singBoxMissingBanner;
     @FXML private Label brewCommandLabel;
@@ -148,6 +151,7 @@ public class DashboardViewController {
                 reachabilityChecker, () -> singBoxEngine, this::connect, this::disconnect);
 
         initProxyModeCombo();
+        initServerSelectionCombo();
         trafficDisplay.initSparklines();
 
         if (trafficMonitor != null) {
@@ -292,6 +296,73 @@ public class DashboardViewController {
         });
     }
 
+    /**
+     * Wires the "which server" selector: pin the active one, or let the core
+     * pick the fastest among all of them. Mirrors initProxyModeCombo so the
+     * two controls behave identically — same persistence, same failure mode
+     * when settings are unavailable.
+     *
+     * <p>Changing it while connected restarts the tunnel, for the same reason
+     * switching servers does: otherwise the UI would claim one thing and the
+     * live connection keep doing another.</p>
+     */
+    private void initServerSelectionCombo() {
+        if (serverSelectionCombo == null) {
+            return;
+        }
+        serverSelectionLabel.textProperty().bind(I18n.binding("dashboard.selection"));
+        serverSelectionCombo.getItems().addAll(ServerSelection.values());
+        serverSelectionCombo.setCellFactory(cb -> new ListCell<>() {
+            @Override
+            protected void updateItem(ServerSelection item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : formatSelection(item));
+            }
+        });
+        serverSelectionCombo.setButtonCell(new ListCell<>() {
+            @Override
+            protected void updateItem(ServerSelection item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : formatSelection(item));
+            }
+        });
+
+        try {
+            serverSelectionCombo.setValue(
+                    ServiceLocator.get(AppSettings.class).getServerSelection());
+        } catch (IllegalArgumentException e) {
+            serverSelectionCombo.setValue(ServerSelection.SINGLE);
+        }
+
+        serverSelectionCombo.valueProperty().addListener((obs, oldVal, newVal) -> {
+            if (newVal == null || newVal == oldVal) {
+                return;
+            }
+            try {
+                ConfigStore configStore = ServiceLocator.get(ConfigStore.class);
+                AppSettings settings = configStore.getSettings();
+                settings.setServerSelection(newVal);
+                configStore.saveSettings(settings);
+            } catch (IllegalArgumentException e) {
+                log.warn("Could not save server selection setting");
+                return;
+            }
+            if (singBoxEngine != null
+                    && singBoxEngine.connectionStateProperty().get() == ConnectionState.CONNECTED) {
+                log.info("Server selection changed while connected; restarting tunnel");
+                disconnect();
+                connect();
+            }
+        });
+    }
+
+    private String formatSelection(ServerSelection selection) {
+        return switch (selection) {
+            case SINGLE -> I18n.get("dashboard.selection.single");
+            case AUTO_BEST -> I18n.get("dashboard.selection.auto");
+        };
+    }
+
     private String formatProxyMode(ProxyMode mode) {
         return switch (mode) {
             case SYSTEM_PROXY -> I18n.get("settings.proxy.system");
@@ -421,7 +492,11 @@ public class DashboardViewController {
             } catch (IllegalArgumentException e) {
                 log.debug("RoutingService not available; using default route");
             }
-            String configJson = configGenerator.generate(activeServer, settings, routingConfig);
+            // Every configured server is a candidate; the generator uses them
+            // only when the selection mode is automatic.
+            List<ServerConfig> candidates = ServiceLocator.get(ConfigStore.class).getServers();
+            String configJson = configGenerator.generate(
+                    candidates, activeServer, settings, routingConfig);
             ProxyMode mode = settings.getProxyMode();
             // Config generation is cheap and needs the FX-owned state; the
             // start itself is not — see startEngine.

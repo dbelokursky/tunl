@@ -67,6 +67,8 @@
             <HBox alignment="CENTER_LEFT" spacing="12" fillHeight="false">
                 <Label text="Mode" styleClass="stats-title"/>
                 <ComboBox fx:id="proxyModeCombo" prefWidth="150" styleClass="mode-combo"/>
+                <Label fx:id="serverSelectionLabel" styleClass="stats-title"/>
+                <ComboBox fx:id="serverSelectionCombo" prefWidth="170" styleClass="mode-combo"/>
                 <Region HBox.hgrow="ALWAYS"/>
                 <Button fx:id="connectButton" text="Connect" styleClass="connect-button"
                         onAction="#onConnectClicked" minWidth="170" prefWidth="170" prefHeight="44"/>

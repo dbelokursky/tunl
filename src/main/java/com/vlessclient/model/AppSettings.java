@@ -60,6 +60,14 @@ public class AppSettings {
     private ProxyMode proxyMode = ProxyMode.SYSTEM_PROXY;
 
     /**
+     * Whether the active server carries the traffic, or the core picks among
+     * all of them. Defaults to SINGLE so an existing install behaves exactly
+     * as before until the user opts in.
+     */
+    @JsonProperty("server_selection")
+    private ServerSelection serverSelection = ServerSelection.SINGLE;
+
+    /**
      * In SYSTEM_PROXY mode, have sing-box register itself as the OS proxy on
      * connect (and restore the previous state on disconnect) instead of only
      * listening on the local ports.
@@ -204,6 +212,14 @@ public class AppSettings {
 
     public void setProxyMode(ProxyMode proxyMode) {
         this.proxyMode = proxyMode;
+    }
+
+    public ServerSelection getServerSelection() {
+        return serverSelection;
+    }
+
+    public void setServerSelection(ServerSelection serverSelection) {
+        this.serverSelection = serverSelection != null ? serverSelection : ServerSelection.SINGLE;
     }
 
     public boolean isSystemProxyAutoConfig() {
