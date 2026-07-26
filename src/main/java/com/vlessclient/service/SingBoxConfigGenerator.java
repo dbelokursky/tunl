@@ -13,6 +13,7 @@ import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.RoutingRule;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.outbound.Hysteria2OutboundBuilder;
+import com.vlessclient.service.outbound.OutboundTags;
 import com.vlessclient.service.outbound.ShadowsocksOutboundBuilder;
 import com.vlessclient.service.outbound.TrojanOutboundBuilder;
 import com.vlessclient.service.outbound.VlessOutboundBuilder;
@@ -96,11 +97,12 @@ public class SingBoxConfigGenerator {
 
         // WireGuard is not an outbound anymore: sing-box 1.13 removed the
         // legacy wireguard outbound (deprecated since 1.11) in favor of a
-        // top-level endpoints entry. The endpoint keeps the "proxy" tag so
-        // route.final and dns detour references resolve to it unchanged.
+        // top-level endpoints entry. It carries its own server tag and the
+        // proxy group references it, exactly like an outbound member — a
+        // selector may point at an endpoint (verified against the real core).
         if (server.getProtocol() == Protocol.WIREGUARD) {
             ArrayNode endpoints = mapper.createArrayNode();
-            endpoints.add(wireguardBuilder.build(server));
+            endpoints.add(wireguardBuilder.build(server, OutboundTags.server(server)));
             root.set("endpoints", endpoints);
         }
         root.set("outbounds", buildOutbounds(server));
@@ -129,7 +131,7 @@ public class SingBoxConfigGenerator {
                 root.set("route", route);
             }
             if (!route.has("final")) {
-                route.put("final", "proxy");
+                route.put("final", OutboundTags.PROXY);
             }
         }
 
@@ -491,27 +493,51 @@ public class SingBoxConfigGenerator {
         return inbounds;
     }
 
+    /**
+     * Emits the server's own outbound plus the group that fronts it.
+     *
+     * <p>The {@code proxy} tag belongs to a selector group rather than to the
+     * server directly. Nothing downstream notices — {@code route.final}, the
+     * DNS {@code detour} and every rule-set {@code download_detour} keep
+     * resolving {@code proxy} — but it is what lets a group hold several
+     * members later without touching route, DNS or rule-sets.</p>
+     *
+     * <p>WireGuard contributes no outbound: it is a top-level {@code endpoints}
+     * entry. The group references its tag all the same — verified against the
+     * real binary, since a selector pointing at an endpoint is not obviously
+     * legal.</p>
+     */
     private ArrayNode buildOutbounds(ServerConfig server) {
         ArrayNode outbounds = mapper.createArrayNode();
+        String memberTag = OutboundTags.server(server);
+
         if (server.getProtocol() != Protocol.WIREGUARD) {
-            outbounds.add(buildProxyOutbound(server));
+            outbounds.add(buildProxyOutbound(server, memberTag));
         }
+
+        ObjectNode group = mapper.createObjectNode();
+        group.put("type", "selector");
+        group.put("tag", OutboundTags.PROXY);
+        ArrayNode members = mapper.createArrayNode();
+        members.add(memberTag);
+        group.set("outbounds", members);
+        outbounds.add(group);
 
         ObjectNode direct = mapper.createObjectNode();
         direct.put("type", "direct");
-        direct.put("tag", "direct");
+        direct.put("tag", OutboundTags.DIRECT);
         outbounds.add(direct);
 
         return outbounds;
     }
 
-    private ObjectNode buildProxyOutbound(ServerConfig server) {
+    private ObjectNode buildProxyOutbound(ServerConfig server, String tag) {
         return switch (server.getProtocol()) {
-            case VLESS -> vlessBuilder.build(server);
-            case VMESS -> vmessBuilder.build(server);
-            case TROJAN -> trojanBuilder.build(server);
-            case SHADOWSOCKS -> shadowsocksBuilder.build(server);
-            case HYSTERIA2 -> hysteria2Builder.build(server);
+            case VLESS -> vlessBuilder.build(server, tag);
+            case VMESS -> vmessBuilder.build(server, tag);
+            case TROJAN -> trojanBuilder.build(server, tag);
+            case SHADOWSOCKS -> shadowsocksBuilder.build(server, tag);
+            case HYSTERIA2 -> hysteria2Builder.build(server, tag);
             case WIREGUARD -> throw new IllegalStateException(
                     "WireGuard is emitted as an endpoint, not an outbound");
         };

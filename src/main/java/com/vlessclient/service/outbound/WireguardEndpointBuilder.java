@@ -33,10 +33,10 @@ public final class WireguardEndpointBuilder {
      * @param server the server to build the endpoint from
      * @return the endpoint as a JSON object node
      */
-    public ObjectNode build(ServerConfig server) {
+    public ObjectNode build(ServerConfig server, String tag) {
         ObjectNode endpoint = mapper.createObjectNode();
         endpoint.put("type", "wireguard");
-        endpoint.put("tag", "proxy");
+        endpoint.put("tag", tag);
 
         if (server.getFlow() != null && !server.getFlow().isBlank()) {
             ArrayNode address = mapper.createArrayNode();

@@ -24,13 +24,19 @@ public abstract class OutboundBuilder {
     }
 
     /**
-     * Builds the sing-box proxy outbound object (tagged {@code proxy}) for the
-     * given server.
+     * Builds the sing-box outbound object for the given server under the given
+     * tag.
+     *
+     * <p>The tag is supplied rather than fixed: a server's outbound is now one
+     * member of a proxy group, so it carries its own
+     * {@link OutboundTags#server(String) server tag} while the group holds the
+     * {@code proxy} tag everything downstream resolves.</p>
      *
      * @param server the server to build the outbound from
+     * @param tag the sing-box tag to emit
      * @return the outbound as a JSON object node
      */
-    public abstract ObjectNode build(ServerConfig server);
+    public abstract ObjectNode build(ServerConfig server, String tag);
 
     /** Adds the {@code tls} block (server name, ALPN, uTLS, Reality) when TLS is enabled. */
     protected final void addTlsIfEnabled(ObjectNode outbound, TlsConfig tls) {

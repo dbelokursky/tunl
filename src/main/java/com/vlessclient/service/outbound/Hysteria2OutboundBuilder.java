@@ -17,10 +17,10 @@ public final class Hysteria2OutboundBuilder extends OutboundBuilder {
     }
 
     @Override
-    public ObjectNode build(ServerConfig server) {
+    public ObjectNode build(ServerConfig server, String tag) {
         ObjectNode outbound = mapper.createObjectNode();
         outbound.put("type", "hysteria2");
-        outbound.put("tag", "proxy");
+        outbound.put("tag", tag);
         outbound.put("server", server.getAddress());
         outbound.put("server_port", server.getPort());
         outbound.put("password", server.getUuid());
