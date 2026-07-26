@@ -140,7 +140,8 @@ public final class LatencyTestSession {
                 }));
     }
 
-    private void displayLatencyResults(Map<String, Long> results, List<ServerConfig> servers) {
+    private void displayLatencyResults(Map<String, LatencyTester.Result> results,
+                                       List<ServerConfig> servers) {
         if (results.isEmpty()) {
             showLatencyStatus(I18n.get("dashboard.no.results"));
             return;
@@ -151,15 +152,15 @@ public final class LatencyTestSession {
         // pressed the button for, and an unsorted list makes them do it by eye.
         List<ServerConfig> ranked = new java.util.ArrayList<>(servers);
         ranked.sort(java.util.Comparator.comparingLong(server -> {
-            Long latency = results.get(server.getId());
-            return latency == null || latency < 0 ? Long.MAX_VALUE : latency;
+            LatencyTester.Result result = results.get(server.getId());
+            return result == null || !result.reachable() ? Long.MAX_VALUE : result.millis();
         }));
         for (ServerConfig server : ranked) {
-            Long latency = results.get(server.getId());
-            if (latency == null) {
+            LatencyTester.Result result = results.get(server.getId());
+            if (result == null) {
                 continue;
             }
-            latencyResultList.getChildren().add(buildLatencyRow(server, latency));
+            latencyResultList.getChildren().add(buildLatencyRow(server, result));
         }
         if (latencyResultList.getChildren().isEmpty()) {
             showLatencyStatus(I18n.get("dashboard.no.results"));
@@ -172,16 +173,24 @@ public final class LatencyTestSession {
      * One latency row: green dot + name + "NNN ms", or red dot + "timeout".
      * Clicking a reachable row makes that server active — the result is worth
      * acting on, not just reading.
+     *
+     * <p>The tooltip says which measurement produced the number. The two are
+     * not comparable — a through-proxy number includes the handshake this
+     * server would actually perform, a TCP one only proves the address answers
+     * — and a row that does not say so invites ranking them against each
+     * other.</p>
      */
-    private HBox buildLatencyRow(ServerConfig server, long latency) {
-        boolean ok = latency >= 0;
+    private HBox buildLatencyRow(ServerConfig server, LatencyTester.Result result) {
+        boolean ok = result.reachable();
         HBox row = new HBox(8);
         row.setAlignment(Pos.CENTER_LEFT);
         if (ok) {
             row.getStyleClass().add("latency-row-actionable");
             row.setCursor(javafx.scene.Cursor.HAND);
             row.setOnMouseClicked(event -> onServerChosen.accept(server));
-            Tooltip.install(row, new Tooltip(I18n.get("dashboard.latency.use")));
+            String how = I18n.get(result.throughProxy()
+                    ? "dashboard.latency.via.proxy" : "dashboard.latency.via.tcp");
+            Tooltip.install(row, new Tooltip(how + "\n" + I18n.get("dashboard.latency.use")));
         }
 
         Circle dot = new Circle(5);
@@ -194,11 +203,11 @@ public final class LatencyTestSession {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        Label result =
-                new Label(ok ? latency + " ms" : I18n.get("dashboard.latency.timeout"));
-        result.getStyleClass().setAll(ok ? "service-ok" : "service-fail");
+        Label value = new Label(
+                ok ? result.millis() + " ms" : I18n.get("dashboard.latency.timeout"));
+        value.getStyleClass().setAll(ok ? "service-ok" : "service-fail");
 
-        row.getChildren().addAll(dot, nameLabel, spacer, result);
+        row.getChildren().addAll(dot, nameLabel, spacer, value);
         return row;
     }
 

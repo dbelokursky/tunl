@@ -96,6 +96,26 @@ class LatencyTesterProbeTest {
                 .isNull();
     }
 
+    /**
+     * The regression guard for how the probe first shipped: it was reachable
+     * only through {@link LatencyTester#measure}, while the app measures with
+     * {@link LatencyTester#testAll}, which still ran the TCP path. Every
+     * measurement the user could actually trigger was the old one, and no test
+     * noticed because they all called {@code measure} directly.
+     */
+    @Test
+    void theBulkPathAlsoGoesThroughTheProxy() throws Exception {
+        StubProbe probe = new StubProbe(Optional.of(212L));
+        LatencyTester tester = new LatencyTester(probe);
+        tester.setApiEndpointSupplier(() -> new LatencyTester.ApiEndpoint(9090, "token"));
+        ServerConfig server = server();
+
+        var results = tester.testAll(java.util.List.of(server)).get();
+
+        assertThat(results.get(server.getId()).millis()).isEqualTo(212);
+        assertThat(results.get(server.getId()).throughProxy()).isTrue();
+    }
+
     @Test
     void aNullServerIsUnreachableRatherThanAnError() throws Exception {
         LatencyTester tester = new LatencyTester(new StubProbe(Optional.of(10L)));

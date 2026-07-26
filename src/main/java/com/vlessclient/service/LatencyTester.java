@@ -102,32 +102,39 @@ public class LatencyTester {
         return new Result(measureLatency(server), false);
     }
 
-    public CompletableFuture<Long> testSingle(ServerConfig server) {
+    /**
+     * The TCP-only measurement, deliberately not public: it answers "is the
+     * address reachable", which is the weaker question. Callers that want a
+     * number to rank servers by should use {@link #measure} or {@link #testAll},
+     * both of which prefer the through-proxy probe. Kept as a seam so tests can
+     * pin the fallback path directly.
+     */
+    CompletableFuture<Long> measureTcp(ServerConfig server) {
         return CompletableFuture.supplyAsync(() -> measureLatency(server), executor);
     }
 
     /**
-     * Measures latency to every given server concurrently.
+     * Measures every given server concurrently, each one preferring the
+     * through-proxy probe and falling back to TCP.
      *
      * @param servers the servers to test; may be null or empty
-     * @return a future of a map from server id to latency in milliseconds, or
-     *         {@code -1} for servers that could not be reached
+     * @return a future of a map from server id to its result
      */
-    public CompletableFuture<Map<String, Long>> testAll(List<ServerConfig> servers) {
+    public CompletableFuture<Map<String, Result>> testAll(List<ServerConfig> servers) {
         if (servers == null || servers.isEmpty()) {
             return CompletableFuture.completedFuture(Map.of());
         }
 
-        List<CompletableFuture<Map.Entry<String, Long>>> futures = servers.stream()
+        List<CompletableFuture<Map.Entry<String, Result>>> futures = servers.stream()
                 .map(server -> CompletableFuture.supplyAsync(
-                        () -> Map.entry(server.getId(), measureLatency(server)), executor))
+                        () -> Map.entry(server.getId(), measureBest(server)), executor))
                 .toList();
 
         return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
                 .thenApply(v -> {
-                    Map<String, Long> results = new HashMap<>();
-                    for (CompletableFuture<Map.Entry<String, Long>> future : futures) {
-                        Map.Entry<String, Long> entry = future.join();
+                    Map<String, Result> results = new HashMap<>();
+                    for (CompletableFuture<Map.Entry<String, Result>> future : futures) {
+                        Map.Entry<String, Result> entry = future.join();
                         results.put(entry.getKey(), entry.getValue());
                     }
                     return results;
