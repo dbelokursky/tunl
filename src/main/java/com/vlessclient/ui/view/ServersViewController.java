@@ -46,6 +46,8 @@ public class ServersViewController {
     @FXML private Button addServerButton;
     @FXML private Button importLinkButton;
     @FXML private VBox emptyState;
+    @FXML private Label emptyStateTitle;
+    @FXML private Label emptyStateHint;
 
     private ConfigStore configStore;
 
@@ -55,6 +57,7 @@ public class ServersViewController {
      */
     @FXML
     public void initialize() {
+        bindEmptyState();
         configStore = ServiceLocator.get(ConfigStore.class);
         ObservableList<ServerConfig> servers = configStore.getServers();
 
@@ -73,6 +76,20 @@ public class ServersViewController {
                         setActiveServer(newVal);
                     }
                 });
+    }
+
+    /**
+     * Binds the empty-state text to the bundle. The FXML carried English
+     * literals while servers.empty.* sat translated and unused, so a Russian
+     * user met an English screen at exactly the moment they had nothing yet.
+     */
+    private void bindEmptyState() {
+        if (emptyStateTitle != null) {
+            emptyStateTitle.textProperty().bind(I18n.binding("servers.empty.title"));
+        }
+        if (emptyStateHint != null) {
+            emptyStateHint.textProperty().bind(I18n.binding("servers.empty.hint"));
+        }
     }
 
     private void updateEmptyState(ObservableList<ServerConfig> servers) {

@@ -41,6 +41,8 @@ public class SubscriptionsViewController {
 
     @FXML private ListView<Subscription> subscriptionListView;
     @FXML private VBox emptyState;
+    @FXML private Label emptyStateTitle;
+    @FXML private Label emptyStateHint;
     @FXML private Button addSubscriptionButton;
     @FXML private Button refreshAllButton;
 
@@ -52,6 +54,7 @@ public class SubscriptionsViewController {
      */
     @FXML
     public void initialize() {
+        bindEmptyState();
         subscriptionService = ServiceLocator.get(SubscriptionService.class);
 
         ObservableList<Subscription> subs = subscriptionService.getSubscriptions();
@@ -61,6 +64,19 @@ public class SubscriptionsViewController {
         subs.addListener((javafx.collections.ListChangeListener<Subscription>) change ->
                 updateEmptyState(subs));
         updateEmptyState(subs);
+    }
+
+    /**
+     * Binds the empty-state text to the bundle; the FXML carried English
+     * literals while subscriptions.empty.* sat translated and unused.
+     */
+    private void bindEmptyState() {
+        if (emptyStateTitle != null) {
+            emptyStateTitle.textProperty().bind(I18n.binding("subscriptions.empty.title"));
+        }
+        if (emptyStateHint != null) {
+            emptyStateHint.textProperty().bind(I18n.binding("subscriptions.empty.hint"));
+        }
     }
 
     private void updateEmptyState(ObservableList<Subscription> subs) {
