@@ -56,6 +56,19 @@ class CoreUpdateServiceTest {
         return major + "." + minor + "." + patch;
     }
 
+    /**
+     * SingBoxEngine publishes its state through Platform.runLater, so the
+     * toolkit has to be up for the rollback listener to ever fire.
+     */
+    @org.junit.jupiter.api.BeforeAll
+    static void initJfx() {
+        try {
+            javafx.application.Platform.startup(() -> { });
+        } catch (IllegalStateException ignored) {
+            // Already started by another test class in this JVM.
+        }
+    }
+
     @TempDir Path tempDir;
 
     private HttpServer server;
@@ -302,6 +315,69 @@ class CoreUpdateServiceTest {
         assertThatThrownBy(() -> service.rollback())
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("No previous");
+    }
+
+    /**
+     * The auto-rollback safety net had no coverage at all, though it is the
+     * thing standing between a bad core update and a client that cannot
+     * connect: if the first connect after an update errors out, the previous
+     * binary must come back on its own.
+     */
+    @Test
+    void attachToEngine_rollsBackWhenTheFirstConnectAfterAnUpdateFails() throws Exception {
+        writeManagedBinary(fakeBinaryScript(CURRENT_VERSION, 0));
+        // The promoted core passes validation (version + check, which promote
+        // requires) but dies the moment it is asked to run — exactly the
+        // failure mode this net exists for, and one `sing-box check` cannot
+        // predict.
+        servedTarball = buildTarball(
+                "#!/bin/sh\n"
+                + "if [ \"$1\" = version ]; then echo 'sing-box version " + NEW_VERSION
+                + "'; exit 0; fi\n"
+                + "if [ \"$1\" = check ]; then exit 0; fi\n"
+                + "exit 1\n");
+        service.promote(stageNewVersion());
+        assertThat(service.isTrial()).isTrue();
+
+        SingBoxEngine engine = new SingBoxEngine(installer.managedBinaryPath());
+        java.util.concurrent.CountDownLatch rolledBack =
+                new java.util.concurrent.CountDownLatch(1);
+        String[] restored = new String[1];
+        service.attachToEngine(engine, version -> {
+            restored[0] = version;
+            rolledBack.countDown();
+        });
+
+        engine.start("{\"log\":{\"level\":\"info\"}}", com.vlessclient.model.ProxyMode.SYSTEM_PROXY);
+
+        assertThat(rolledBack.await(15, TimeUnit.SECONDS))
+                .as("a failed first connect must trigger the rollback")
+                .isTrue();
+        assertThat(restored[0]).isEqualTo(CURRENT_VERSION);
+        assertThat(service.installedVersion()).isEqualTo(CURRENT_VERSION);
+        // The trial is over either way — a second ERROR must not roll back again.
+        assertThat(service.isTrial()).isFalse();
+    }
+
+    /**
+     * The mirror case: a core that connects successfully ends its trial, so a
+     * later crash (an unrelated network drop, say) is not mistaken for a bad
+     * update and does not revert the user's core behind their back.
+     */
+    @Test
+    void attachToEngine_doesNotRollBackAfterASuccessfulConnect() throws Exception {
+        writeManagedBinary(fakeBinaryScript(CURRENT_VERSION, 0));
+        service.promote(stageNewVersion());
+        SingBoxEngine engine = new SingBoxEngine(installer.managedBinaryPath());
+        java.util.concurrent.atomic.AtomicBoolean rolledBack =
+                new java.util.concurrent.atomic.AtomicBoolean();
+        service.attachToEngine(engine, version -> rolledBack.set(true));
+
+        service.markTrialSuccess();
+
+        assertThat(service.isTrial()).isFalse();
+        assertThat(rolledBack).isFalse();
+        assertThat(service.installedVersion()).isEqualTo(NEW_VERSION);
     }
 
     @Test
