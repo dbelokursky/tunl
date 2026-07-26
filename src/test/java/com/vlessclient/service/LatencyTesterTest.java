@@ -31,70 +31,70 @@ class LatencyTesterTest {
     }
 
     @Test
-    void testSingle_unreachableHost_returnsMinusOne() throws Exception {
+    void measureTcp_unreachableHost_returnsMinusOne() throws Exception {
         ServerConfig server = new ServerConfig();
         server.setAddress(LOOPBACK);
         server.setPort(closedLoopbackPort());
 
-        long result = tester.testSingle(server).get(10, TimeUnit.SECONDS);
+        long result = tester.measureTcp(server).get(10, TimeUnit.SECONDS);
 
         assertThat(result).isEqualTo(-1);
     }
 
     @Test
     void testAll_emptyList_returnsEmptyMap() throws Exception {
-        Map<String, Long> results = tester.testAll(List.of()).get(5, TimeUnit.SECONDS);
+        Map<String, LatencyTester.Result> results = tester.testAll(List.of()).get(5, TimeUnit.SECONDS);
 
         assertThat(results).isEmpty();
     }
 
     @Test
     void testAll_nullList_returnsEmptyMap() throws Exception {
-        Map<String, Long> results = tester.testAll(null).get(5, TimeUnit.SECONDS);
+        Map<String, LatencyTester.Result> results = tester.testAll(null).get(5, TimeUnit.SECONDS);
 
         assertThat(results).isEmpty();
     }
 
     @Test
-    void testSingle_nullAddress_returnsMinusOne() throws Exception {
+    void measureTcp_nullAddress_returnsMinusOne() throws Exception {
         ServerConfig server = new ServerConfig();
         server.setAddress(null);
         server.setPort(443);
 
-        long result = tester.testSingle(server).get(5, TimeUnit.SECONDS);
+        long result = tester.measureTcp(server).get(5, TimeUnit.SECONDS);
 
         assertThat(result).isEqualTo(-1);
     }
 
     @Test
-    void testSingle_blankAddress_returnsMinusOne() throws Exception {
+    void measureTcp_blankAddress_returnsMinusOne() throws Exception {
         ServerConfig server = new ServerConfig();
         server.setAddress("   ");
         server.setPort(443);
 
-        long result = tester.testSingle(server).get(5, TimeUnit.SECONDS);
+        long result = tester.measureTcp(server).get(5, TimeUnit.SECONDS);
 
         assertThat(result).isEqualTo(-1);
     }
 
     @Test
-    void testSingle_invalidPortZero_returnsMinusOne() throws Exception {
+    void measureTcp_invalidPortZero_returnsMinusOne() throws Exception {
         ServerConfig server = new ServerConfig();
         server.setAddress("example.com");
         server.setPort(0);
 
-        long result = tester.testSingle(server).get(5, TimeUnit.SECONDS);
+        long result = tester.measureTcp(server).get(5, TimeUnit.SECONDS);
 
         assertThat(result).isEqualTo(-1);
     }
 
     @Test
-    void testSingle_invalidPortTooLarge_returnsMinusOne() throws Exception {
+    void measureTcp_invalidPortTooLarge_returnsMinusOne() throws Exception {
         ServerConfig server = new ServerConfig();
         server.setAddress("example.com");
         server.setPort(70000);
 
-        long result = tester.testSingle(server).get(5, TimeUnit.SECONDS);
+        long result = tester.measureTcp(server).get(5, TimeUnit.SECONDS);
 
         assertThat(result).isEqualTo(-1);
     }
@@ -109,14 +109,14 @@ class LatencyTesterTest {
         server2.setAddress(LOOPBACK);
         server2.setPort(closedLoopbackPort());
 
-        Map<String, Long> results = tester.testAll(List.of(server1, server2))
+        Map<String, LatencyTester.Result> results = tester.testAll(List.of(server1, server2))
                 .get(15, TimeUnit.SECONDS);
 
         assertThat(results).hasSize(2);
         assertThat(results).containsKey(server1.getId());
         assertThat(results).containsKey(server2.getId());
-        assertThat(results.get(server1.getId())).isEqualTo(-1);
-        assertThat(results.get(server2.getId())).isEqualTo(-1);
+        assertThat(results.get(server1.getId()).reachable()).isFalse();
+        assertThat(results.get(server2.getId()).reachable()).isFalse();
     }
 
     // Reserves a loopback port then frees it: connecting to it is refused fast and

@@ -145,6 +145,32 @@ public class DashboardViewController {
                 trafficSparkline);
         latencySession = new LatencyTestSession(latencyTester, testLatencyButton,
                 latencyResultList);
+        // Picking a row makes that server active — and, if the tunnel is up,
+        // the existing server-switch handling restarts it.
+        latencySession.setOnServerChosen(server -> {
+            try {
+                ServiceLocator.get(ConfigStore.class).setActiveServer(server.getId());
+                log.info("Active server set from latency results: {}", server.getName());
+            } catch (IllegalArgumentException e) {
+                log.warn("ConfigStore unavailable; cannot apply the latency result");
+            }
+        });
+        if (latencyTester != null) {
+            // While connected, measure through the proxy instead of TCP-pinging
+            // its address; the supplier returns null when the core is down.
+            latencyTester.setApiEndpointSupplier(() -> {
+                if (singBoxEngine == null || !singBoxEngine.isRunning()) {
+                    return null;
+                }
+                try {
+                    AppSettings settings = ServiceLocator.get(AppSettings.class);
+                    return new LatencyTester.ApiEndpoint(
+                            settings.getClashApiPort(), settings.getClashApiSecret());
+                } catch (IllegalArgumentException e) {
+                    return null;
+                }
+            });
+        }
         // The engine is supplied lazily because onRetryInstallClicked can swap
         // in a new SingBoxEngine after an in-app install.
         healthChecks = new HealthCheckCoordinator(

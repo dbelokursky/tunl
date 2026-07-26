@@ -35,10 +35,12 @@ class LatencyTestSessionTest {
 
     /** Returns a caller-controlled future instead of probing real servers. */
     private static final class FakeTester extends LatencyTester {
-        private final CompletableFuture<Map<String, Long>> next = new CompletableFuture<>();
+        private final CompletableFuture<Map<String, LatencyTester.Result>> next =
+                new CompletableFuture<>();
 
         @Override
-        public CompletableFuture<Map<String, Long>> testAll(List<ServerConfig> servers) {
+        public CompletableFuture<Map<String, LatencyTester.Result>> testAll(
+                List<ServerConfig> servers) {
             return next;
         }
     }
@@ -151,7 +153,8 @@ class LatencyTestSessionTest {
         onFxAndWait(session::toggle);   // start; first tick's future stays pending
         onFxAndWait(session::toggle);   // stop while the tick is in flight
 
-        tester.next.complete(Map.of(config.getId(), 42L));
+        tester.next.complete(
+                Map.of(config.getId(), new LatencyTester.Result(42L, true)));
         flushFxEvents();
 
         // The late result must not repopulate the list after Stop.

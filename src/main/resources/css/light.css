@@ -974,3 +974,9 @@
     -fx-fill: -c-text-secondary;
     -fx-font-weight: bold;
 }
+
+/* A latency row you can act on: it sets the active server when clicked. */
+.latency-row-actionable:hover {
+    -fx-background-color: -c-surface-sunken;
+    -fx-background-radius: 6;
+}
