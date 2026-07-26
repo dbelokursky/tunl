@@ -6,6 +6,7 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ShareLinkExporter;
 import com.vlessclient.service.ShareLinkParser;
+import com.vlessclient.service.ThemeManager;
 import java.io.IOException;
 import java.util.Optional;
 import javafx.collections.ObservableList;
@@ -138,7 +139,14 @@ public class ServersViewController {
             dialog.setMinHeight(600);
 
             Scene scene = new Scene(formRoot, 520, 650);
-            scene.getStylesheets().add(getClass().getResource("/css/light.css").toExternalForm());
+            // Follow the app's theme instead of forcing light: a dark-mode user
+            // got a white flash on every add/edit.
+            try {
+                scene.getStylesheets().add(
+                        ServiceLocator.get(ThemeManager.class).currentStylesheet());
+            } catch (IllegalArgumentException e) {
+                log.debug("ThemeManager unavailable; server form uses default styling");
+            }
             dialog.setScene(scene);
 
             if (existingServer != null) {

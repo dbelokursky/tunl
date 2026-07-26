@@ -6,9 +6,12 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TlsConfig;
 import com.vlessclient.model.TransportConfig;
 import com.vlessclient.model.TransportType;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Consumer;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
@@ -362,46 +365,86 @@ public class ServerFormController {
         }
     }
 
+    /**
+     * Validates the form, marking the offending fields and telling the user
+     * what is wrong.
+     *
+     * <p>Failures used to go only to the log, so pressing Save on an
+     * incomplete form did nothing at all: the dialog stayed open with no
+     * message and no indication of which field to fix.</p>
+     */
     private boolean validate() {
-        StringBuilder errors = new StringBuilder();
+        List<String> errors = new ArrayList<>();
 
-        if (addressField.getText() == null || addressField.getText().trim().isEmpty()) {
-            errors.append("Address is required.\n");
-            addressField.getStyleClass().add("field-error");
-        } else {
-            addressField.getStyleClass().remove("field-error");
+        boolean addressMissing = isBlank(addressField.getText());
+        markField(addressField, addressMissing);
+        if (addressMissing) {
+            errors.add(I18n.get("error.field.required", I18n.get("form.address")));
         }
 
-        if (portField.getText() == null || portField.getText().trim().isEmpty()) {
-            errors.append("Port is required.\n");
-            portField.getStyleClass().add("field-error");
-        } else {
-            try {
-                int port = Integer.parseInt(portField.getText().trim());
-                if (port < 1 || port > 65535) {
-                    errors.append("Port must be between 1 and 65535.\n");
-                    portField.getStyleClass().add("field-error");
-                } else {
-                    portField.getStyleClass().remove("field-error");
-                }
-            } catch (NumberFormatException e) {
-                errors.append("Port must be a number.\n");
-                portField.getStyleClass().add("field-error");
+        errors.addAll(validatePort());
+
+        boolean uuidMissing = isBlank(uuidField.getText());
+        markField(uuidField, uuidMissing);
+        if (uuidMissing) {
+            // The label carries the protocol-specific name (UUID, Password, …).
+            errors.add(I18n.get("error.field.required",
+                    uuidLabel.getText().replace(" *", "")));
+        }
+
+        if (errors.isEmpty()) {
+            return true;
+        }
+        log.warn("Validation failed: {}", errors);
+        showValidationErrors(errors);
+        return false;
+    }
+
+    private List<String> validatePort() {
+        String text = portField.getText();
+        if (isBlank(text)) {
+            markField(portField, true);
+            return List.of(I18n.get("error.field.required", I18n.get("form.port")));
+        }
+        try {
+            int port = Integer.parseInt(text.trim());
+            boolean outOfRange = port < 1 || port > 65535;
+            markField(portField, outOfRange);
+            return outOfRange ? List.of(I18n.get("error.port.range")) : List.of();
+        } catch (NumberFormatException e) {
+            markField(portField, true);
+            return List.of(I18n.get("error.port.number"));
+        }
+    }
+
+    private void showValidationErrors(List<String> errors) {
+        Alert alert = new Alert(Alert.AlertType.WARNING);
+        if (saveButton.getScene() != null) {
+            alert.initOwner(saveButton.getScene().getWindow());
+        }
+        alert.setTitle(I18n.get("form.invalid.title"));
+        alert.setHeaderText(I18n.get("form.invalid.header"));
+        alert.setContentText(String.join("\n", errors));
+        alert.showAndWait();
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+
+    /**
+     * Adds or removes the error styling. Guarded against duplicates: the class
+     * was previously appended on every failed attempt, so the list grew each
+     * time the user pressed Save.
+     */
+    private static void markField(TextField field, boolean hasError) {
+        if (hasError) {
+            if (!field.getStyleClass().contains("field-error")) {
+                field.getStyleClass().add("field-error");
             }
-        }
-
-        if (uuidField.getText() == null || uuidField.getText().trim().isEmpty()) {
-            errors.append(uuidLabel.getText().replace(" *", "") + " is required.\n");
-            uuidField.getStyleClass().add("field-error");
         } else {
-            uuidField.getStyleClass().remove("field-error");
+            field.getStyleClass().remove("field-error");
         }
-
-        if (!errors.isEmpty()) {
-            log.warn("Validation failed: {}", errors);
-            return false;
-        }
-        return true;
     }
 
     private void updateTransportFields(String type) {

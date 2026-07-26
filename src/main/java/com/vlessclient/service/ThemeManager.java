@@ -91,6 +91,27 @@ public class ThemeManager {
         return currentTheme;
     }
 
+    /**
+     * The stylesheet in effect right now, for scenes this manager does not own
+     * — dialogs, mostly.
+     *
+     * <p>Deliberately not {@link #applyTheme}: that adopts the scene it is
+     * given as <em>the</em> tracked scene, so calling it for a short-lived
+     * dialog would leave the main window unwatched once the dialog closed, and
+     * "auto" mode would stop following the OS there. Dialogs take a snapshot of
+     * the current theme instead; they do not outlive a theme change in any way
+     * that matters.</p>
+     *
+     * @return an external-form stylesheet URL, ready for {@code getStylesheets}
+     */
+    public String currentStylesheet() {
+        String cssPath = resolveDark(isSystemDarkMode()) ? DARK_CSS : LIGHT_CSS;
+        return Objects.requireNonNull(
+                getClass().getResource(cssPath),
+                "Theme CSS not found: " + cssPath
+        ).toExternalForm();
+    }
+
     private boolean isAutoMode() {
         return "auto".equals(currentTheme);
     }
