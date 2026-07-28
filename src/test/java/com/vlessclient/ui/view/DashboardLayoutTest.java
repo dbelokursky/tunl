@@ -52,6 +52,13 @@ public class DashboardLayoutTest extends ApplicationTest {
      */
     private static final int NARROW_CONTENT_WIDTH = 760 - 200;
 
+    /**
+     * The tighter width DashboardFitTest pins, where nothing may be clipped.
+     * Pinning the labels raised the row's minimum width, so the two contracts
+     * -- labels stay whole, controls stay reachable -- are asserted together.
+     */
+    private static final int MIN_CONTENT_WIDTH = 500;
+
     private ScrollPane wrapper;
     private Stage stage;
 
@@ -141,21 +148,30 @@ public class DashboardLayoutTest extends ApplicationTest {
      */
     @Test
     void narrowWindowShrinksTheCombosNotTheirLabels() {
-        interact(() -> stage.setWidth(NARROW_CONTENT_WIDTH));
-        WaitForAsyncUtils.waitForFxEvents();
+        for (int width : new int[] {NARROW_CONTENT_WIDTH, MIN_CONTENT_WIDTH}) {
+            interact(() -> stage.setWidth(width));
+            WaitForAsyncUtils.waitForFxEvents();
 
-        Label serverLabel = lookup("#serverSelectionLabel").query();
-        assertThat(serverLabel.getWidth())
-                .withFailMessage("the server label was ellipsized to %.1fpx, below the"
-                        + " %.1fpx its text needs", serverLabel.getWidth(),
-                        serverLabel.prefWidth(-1))
-                .isGreaterThanOrEqualTo(serverLabel.prefWidth(-1) - 0.5);
+            Label serverLabel = lookup("#serverSelectionLabel").query();
+            assertThat(serverLabel.getWidth())
+                    .withFailMessage("at %dpx the server label was ellipsized to %.1fpx,"
+                            + " below the %.1fpx its text needs", width,
+                            serverLabel.getWidth(), serverLabel.prefWidth(-1))
+                    .isGreaterThanOrEqualTo(serverLabel.prefWidth(-1) - 0.5);
 
-        Region hero = lookup(".hero-card").query();
-        assertThat(toScene(lookup("#connectButton").query()).getMaxY())
-                .withFailMessage("connect button spills below the hero card at %dpx wide",
-                        NARROW_CONTENT_WIDTH)
-                .isLessThanOrEqualTo(toScene(hero).getMaxY() + 0.5);
+            Bounds connect = toScene(lookup("#connectButton").query());
+            assertThat(connect.getMaxX())
+                    .withFailMessage("at %dpx the connect button reaches %.1fpx and would"
+                            + " be clipped -- there is no horizontal scrollbar", width,
+                            connect.getMaxX())
+                    .isLessThanOrEqualTo(width + 0.5);
+
+            Region hero = lookup(".hero-card").query();
+            assertThat(connect.getMaxY())
+                    .withFailMessage("connect button spills below the hero card at %dpx wide",
+                            width)
+                    .isLessThanOrEqualTo(toScene(hero).getMaxY() + 0.5);
+        }
     }
 
     /**
