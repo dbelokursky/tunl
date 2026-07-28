@@ -335,8 +335,15 @@
     -fx-background-radius: 8;
     -fx-border-color: -c-border-strong;
     -fx-border-radius: 8;
-    -fx-padding: 8 20;
+    -fx-padding: 6 20;
     -fx-cursor: hand;
+    /* One control height across the app, so buttons sitting in the same row
+       line up regardless of whether they hold a word or a single glyph.
+       Pinned rather than left to padding: .secondary-button draws a border and
+       .icon-button does not, so equal padding would still give them different
+       heights. Padding is kept under the pin so it never fights it. */
+    -fx-min-height: 34;
+    -fx-pref-height: 34;
 }
 
 .secondary-button:hover {
@@ -365,12 +372,27 @@
 .icon-button {
     -fx-background-color: -c-surface-sunken;
     -fx-background-radius: 6;
-    -fx-padding: 5 8;
+    -fx-padding: 4 8;
     -fx-cursor: hand;
+    -fx-min-height: 34;
+    -fx-pref-height: 34;
+    -fx-min-width: 34;
+    /* Matches the .nav-icon-glyph fill below: some icon buttons carry a text
+       glyph instead of an SVG, and without this they fall back to the modena
+       default (black) rather than the theme. */
+    -fx-text-fill: -c-text-secondary;
 }
 
 .icon-button:hover {
     -fx-background-color: -c-border;
+    -fx-text-fill: -c-text;
+}
+
+/* Icon buttons that delete something: neutral at rest so a list of them stays
+   calm, red only under the pointer, where the click is about to happen. */
+.icon-button.destructive:hover {
+    -fx-background-color: -c-danger-tint;
+    -fx-text-fill: -c-danger-fg;
 }
 
 .icon-button .nav-icon-glyph {

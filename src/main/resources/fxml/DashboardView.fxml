@@ -68,10 +68,18 @@
              and button always stay on screen. The TUN warning wraps under. -->
         <VBox spacing="4">
             <HBox alignment="CENTER_LEFT" spacing="12" fillHeight="false">
-                <Label text="Mode" styleClass="stats-title"/>
-                <ComboBox fx:id="proxyModeCombo" prefWidth="150" styleClass="mode-combo"/>
-                <Label fx:id="serverSelectionLabel" styleClass="stats-title"/>
-                <ComboBox fx:id="serverSelectionCombo" prefWidth="170" styleClass="mode-combo"/>
+                <!-- The labels are pinned to their natural width: they name the
+                     control in two words, so ellipsizing them to "..." costs
+                     the whole meaning. The combos carry values instead, and
+                     truncating a value still leaves it recognisable, so they
+                     are the ones allowed to give up width first. The combo
+                     minimums are what lets the row still fit the 500px content
+                     width DashboardFitTest pins, now that the labels cannot
+                     shrink. -->
+                <Label text="Mode" styleClass="stats-title" minWidth="-Infinity"/>
+                <ComboBox fx:id="proxyModeCombo" prefWidth="150" minWidth="60" styleClass="mode-combo"/>
+                <Label fx:id="serverSelectionLabel" styleClass="stats-title" minWidth="-Infinity"/>
+                <ComboBox fx:id="serverSelectionCombo" prefWidth="170" minWidth="60" styleClass="mode-combo"/>
                 <Region HBox.hgrow="ALWAYS"/>
                 <Button fx:id="connectButton" text="Connect" styleClass="connect-button"
                         onAction="#onConnectClicked" minWidth="170" prefWidth="170" prefHeight="44"/>
@@ -164,7 +172,7 @@
             <Region HBox.hgrow="ALWAYS"/>
             <Label fx:id="healthSummaryLabel" text="—" styleClass="latency-result"/>
             <Button fx:id="addTargetButton" text="+" styleClass="secondary-button"
-                    minWidth="40" maxHeight="Infinity" onAction="#onAddTargetClicked"/>
+                    minWidth="40" onAction="#onAddTargetClicked"/>
             <Button fx:id="recheckButton" text="Re-check" styleClass="secondary-button"
                     prefWidth="120" onAction="#onRecheckClicked"/>
         </HBox>

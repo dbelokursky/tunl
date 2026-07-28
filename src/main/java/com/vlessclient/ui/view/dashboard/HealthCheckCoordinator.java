@@ -405,7 +405,7 @@ public final class HealthCheckCoordinator {
 
         if (url != null && !url.isBlank()) {
             Button remove = new Button("✕");
-            remove.getStyleClass().setAll("icon-button");
+            remove.getStyleClass().setAll("icon-button", "destructive");
             remove.setFocusTraversable(false);
             remove.setTooltip(new Tooltip(I18n.get("health.target.remove")));
             remove.setOnAction(e -> removeHealthTarget(url));
