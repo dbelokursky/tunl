@@ -204,8 +204,8 @@ public class McpServerService {
         // Config-mutation tools.
         addMutationTools(server);
 
-        // Audit every mutating call to logs/mcp-audit.log.
-        server.setAuditLog(new FileAuditLog(configStore.getDataDir()));
+        // Audit every mutating call to logs/mcp-audit.log (rolling; see logback.xml).
+        server.setAuditLog(new FileAuditLog());
 
         // Advertise server-initiated log streaming (GET /mcp SSE via the notifier).
         server.setLoggingCapability(true);

@@ -32,6 +32,29 @@
         </rollingPolicy>
     </appender>
 
+    <!-- MCP audit trail: one tab-separated line per mutating agent call. Kept
+         in its own rolling file (not vless-client.log) so it stays a clean,
+         greppable record. Bounded like the main log so it can't grow forever. -->
+    <appender name="MCP_AUDIT" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/mcp-audit.log</file>
+        <encoder>
+            <pattern>%msg%n</pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/mcp-audit.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <maxFileSize>5MB</maxFileSize>
+            <maxHistory>14</maxHistory>
+            <totalSizeCap>50MB</totalSizeCap>
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
+        </rollingPolicy>
+    </appender>
+
+    <!-- additivity=false: audit lines go only to mcp-audit.log, not the console
+         or the main app log. -->
+    <logger name="mcp.audit" level="INFO" additivity="false">
+        <appender-ref ref="MCP_AUDIT"/>
+    </logger>
+
     <!-- INFO by default (packaged app); dev runs via `mvn javafx:run` pass
          -Dvless.log.level=DEBUG through the jvm-args argfile. Users can
          raise verbosity for troubleshooting the same way without a rebuild. -->

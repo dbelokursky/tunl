@@ -1,23 +1,20 @@
 package com.vlessclient.service.mcp;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class McpAuditTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
-
-    @TempDir
-    Path tempDir;
 
     private ObjectNode toolCall(String name) {
         ObjectNode params = MAPPER.createObjectNode();
@@ -32,16 +29,27 @@ class McpAuditTest {
     }
 
     @Test
-    void fileAuditLog_appendsLine() throws Exception {
-        FileAuditLog audit = new FileAuditLog(tempDir);
-        audit.record("connect", "{\"mode\":\"tun\"}", false, "");
-        audit.record("delete_server", "{\"id\":\"x\"}", true, "not found");
+    void fileAuditLog_emitsThroughMcpAuditLogger() {
+        Logger auditLogger = (Logger) LoggerFactory.getLogger("mcp.audit");
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        auditLogger.addAppender(appender);
+        try {
+            FileAuditLog audit = new FileAuditLog();
+            audit.record("connect", "{\"mode\":\"tun\"}", false, "");
+            audit.record("delete_server", "{\"id\":\"x\"}", true, "not found");
 
-        Path file = tempDir.resolve("logs").resolve("mcp-audit.log");
-        List<String> lines = Files.readAllLines(file);
-        assertThat(lines).hasSize(2);
-        assertThat(lines.get(0)).contains("connect").contains("OK");
-        assertThat(lines.get(1)).contains("delete_server").contains("ERROR").contains("not found");
+            List<String> lines = new ArrayList<>();
+            appender.list.forEach(e -> lines.add(e.getFormattedMessage()));
+            assertThat(lines).hasSize(2);
+            assertThat(lines.get(0)).contains("connect").contains("OK");
+            assertThat(lines.get(1)).contains("delete_server").contains("ERROR")
+                    .contains("not found");
+            // timestamp, tool, OK/ERROR, args, message — tab-separated.
+            assertThat(lines.get(1).split("\t")).hasSize(5);
+        } finally {
+            auditLogger.detachAppender(appender);
+        }
     }
 
     @Test
