@@ -2,17 +2,23 @@ package com.vlessclient.service.mcp;
 
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
+import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.Subscription;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.RoutingService;
+import com.vlessclient.service.SingBoxConfigGenerator;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.SubscriptionService;
 import com.vlessclient.service.TrafficMonitor;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Production {@link AppControlService} backed by the real application services.
@@ -28,21 +34,29 @@ import java.util.List;
  */
 public class DefaultAppControlService implements AppControlService {
 
+    private static final long LATENCY_TIMEOUT_SECONDS = 15;
+
     private final ConfigStore configStore;
     private final TrafficMonitor trafficMonitor;
     private final SubscriptionService subscriptionService;
     private final RoutingService routingService;
+    private final SingBoxConfigGenerator configGenerator;
+    private final com.vlessclient.service.LatencyTester latencyTester;
     private volatile SingBoxEngine engine;
 
     public DefaultAppControlService(ConfigStore configStore,
                                     TrafficMonitor trafficMonitor,
                                     SubscriptionService subscriptionService,
                                     RoutingService routingService,
+                                    SingBoxConfigGenerator configGenerator,
+                                    com.vlessclient.service.LatencyTester latencyTester,
                                     SingBoxEngine engine) {
         this.configStore = configStore;
         this.trafficMonitor = trafficMonitor;
         this.subscriptionService = subscriptionService;
         this.routingService = routingService;
+        this.configGenerator = configGenerator;
+        this.latencyTester = latencyTester;
         this.engine = engine;
     }
 
@@ -165,5 +179,129 @@ public class DefaultAppControlService implements AppControlService {
                 s.getProxyDns(), s.getDirectDns(), s.getDnsStrategy(),
                 s.getTunInterfaceName(), s.isHealthCheckEnabled(),
                 s.isMcpEnabled(), s.getMcpPort(), s.isMcpAllowMutations());
+    }
+
+    @Override
+    public StatusInfo connect(String serverId, String mode, boolean confirm) throws McpToolException {
+        SingBoxEngine current = engine;
+        if (current == null) {
+            throw new McpToolException("sing-box binary is not available; cannot connect.");
+        }
+
+        // Resolve and gate the proxy mode before doing any work: TUN triggers a
+        // macOS admin password prompt and captures all traffic, so it needs an
+        // explicit confirm.
+        AppSettings settings = configStore.getSettings();
+        ProxyMode effectiveMode = mode != null && !mode.isBlank()
+                ? parseMode(mode) : settings.getProxyMode();
+        if (effectiveMode == ProxyMode.TUN && !confirm) {
+            throw new McpToolException("Connecting in TUN mode shows a macOS admin password "
+                    + "prompt and routes all traffic. Pass confirm:true to proceed.");
+        }
+
+        if (serverId != null && !serverId.isBlank()) {
+            selectServer(serverId);
+        }
+        ServerConfig active = FxExecutor.get(() -> configStore.getServers().stream()
+                .filter(ServerConfig::isActive).findFirst().orElse(null));
+        if (active == null) {
+            throw new McpToolException(
+                    "No active server. Pass serverId or select one with select_server.");
+        }
+
+        if (mode != null && !mode.isBlank() && effectiveMode != settings.getProxyMode()) {
+            settings.setProxyMode(effectiveMode);
+            configStore.saveSettings(settings);
+        }
+
+        RoutingConfig routing = safeRoutingConfig();
+        String configJson = configGenerator.generate(active, settings, routing);
+        try {
+            current.start(configJson, effectiveMode);
+        } catch (IOException e) {
+            throw new McpToolException("Failed to start sing-box: " + e.getMessage(), e);
+        } catch (IllegalStateException e) {
+            throw new McpToolException("sing-box is already running.");
+        }
+        return getStatus();
+    }
+
+    @Override
+    public StatusInfo disconnect() {
+        SingBoxEngine current = engine;
+        if (current != null) {
+            current.stop();
+        }
+        return getStatus();
+    }
+
+    @Override
+    public ServerSummary selectServer(String serverId) throws McpToolException {
+        boolean found = configStore.setActiveServer(serverId);
+        if (!found) {
+            throw new McpToolException("No server with id: " + serverId);
+        }
+        ServerConfig s = configStore.getServerById(serverId).orElseThrow();
+        return new ServerSummary(s.getId(), s.getName(),
+                s.getProtocol() != null ? s.getProtocol().getValue() : null,
+                s.getAddress(), s.getPort(), true);
+    }
+
+    @Override
+    public List<LatencyResult> measureLatency(String serverId) throws McpToolException {
+        List<ServerConfig> servers;
+        if (serverId != null && !serverId.isBlank()) {
+            ServerConfig one = configStore.getServerById(serverId)
+                    .orElseThrow(() -> new McpToolException("No server with id: " + serverId));
+            servers = List.of(one);
+        } else {
+            servers = new ArrayList<>(FxExecutor.get(() -> new ArrayList<>(configStore.getServers())));
+        }
+        if (servers.isEmpty()) {
+            throw new McpToolException("No servers configured to test.");
+        }
+        try {
+            Map<String, Long> results = latencyTester.testAll(servers)
+                    .get(LATENCY_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            List<LatencyResult> out = new ArrayList<>();
+            for (ServerConfig s : servers) {
+                Long ms = results.get(s.getId());
+                out.add(new LatencyResult(s.getId(), s.getName(), ms != null ? ms : -1));
+            }
+            return out;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new McpToolException("Latency test interrupted.");
+        } catch (Exception e) {
+            throw new McpToolException("Latency test failed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public String refreshSubscription(String subscriptionId) throws McpToolException {
+        Optional<Subscription> sub = subscriptionService.getSubscriptions().stream()
+                .filter(s -> s.getId().equals(subscriptionId)).findFirst();
+        if (sub.isEmpty()) {
+            throw new McpToolException("No subscription with id: " + subscriptionId);
+        }
+        subscriptionService.refreshSubscription(subscriptionId);
+        return "Refresh triggered for subscription '" + sub.get().getName() + "'.";
+    }
+
+    private ProxyMode parseMode(String mode) throws McpToolException {
+        return switch (mode.toLowerCase()) {
+            case "tun" -> ProxyMode.TUN;
+            case "system", "system_proxy" -> ProxyMode.SYSTEM_PROXY;
+            default -> throw new McpToolException(
+                    "Unknown mode '" + mode + "'. Use 'system_proxy' or 'tun'.");
+        };
+    }
+
+    private RoutingConfig safeRoutingConfig() {
+        try {
+            return routingService.getConfig();
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 }

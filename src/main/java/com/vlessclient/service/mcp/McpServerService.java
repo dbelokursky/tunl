@@ -4,8 +4,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vlessclient.app.AppVersion;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.service.mcp.tools.ConnectTool;
+import com.vlessclient.service.mcp.tools.DisconnectTool;
 import com.vlessclient.service.mcp.tools.GetLogsTool;
 import com.vlessclient.service.mcp.tools.GetStatusTool;
+import com.vlessclient.service.mcp.tools.MeasureLatencyTool;
+import com.vlessclient.service.mcp.tools.RefreshSubscriptionTool;
+import com.vlessclient.service.mcp.tools.SelectServerTool;
 import com.vlessclient.service.mcp.tools.SimpleReadTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -116,6 +121,16 @@ public class McpServerService {
                 control::getRouting));
         server.addTool(new SimpleReadTool("get_settings",
                 "Get application settings (no secrets).", control::getSettings));
+
+        // Action tools (mutating; hidden/blocked when mutations are off).
+        server.addTool(new ConnectTool(control));
+        server.addTool(new DisconnectTool(control));
+        server.addTool(new SelectServerTool(control));
+        server.addTool(new MeasureLatencyTool(control));
+        server.addTool(new RefreshSubscriptionTool(control));
+
+        // Audit every mutating call to logs/mcp-audit.log.
+        server.setAuditLog(new FileAuditLog(configStore.getDataDir()));
 
         // Browsable resources mirroring the read tools.
         server.addResource(new JsonResource("vless://status",

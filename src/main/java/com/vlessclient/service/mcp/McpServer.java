@@ -44,6 +44,7 @@ public class McpServer {
     private final BooleanSupplier allowMutations;
     private final Map<String, McpTool> tools = new LinkedHashMap<>();
     private final Map<String, McpResource> resources = new LinkedHashMap<>();
+    private McpAuditLog auditLog = McpAuditLog.NOOP;
 
     public McpServer(String serverName, String serverVersion, ObjectMapper mapper,
                      BooleanSupplier allowMutations) {
@@ -61,6 +62,11 @@ public class McpServer {
     /** Registers a resource. Registration order is preserved in {@code resources/list}. */
     public void addResource(McpResource resource) {
         resources.put(resource.uri(), resource);
+    }
+
+    /** Sets the audit sink that records mutating tool calls. */
+    public void setAuditLog(McpAuditLog auditLog) {
+        this.auditLog = auditLog != null ? auditLog : McpAuditLog.NOOP;
     }
 
     /**
@@ -241,8 +247,14 @@ public class McpServer {
                 ? a : mapper.createObjectNode();
         try {
             Object value = tool.call(arguments);
+            if (tool.mutating()) {
+                auditLog.record(toolName, arguments.toString(), false, "");
+            }
             return toolSuccess(value);
         } catch (McpToolException e) {
+            if (tool.mutating()) {
+                auditLog.record(toolName, arguments.toString(), true, e.getMessage());
+            }
             return toolError(e.getMessage());
         }
     }

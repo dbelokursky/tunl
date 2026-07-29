@@ -71,4 +71,59 @@ class FakeAppControlService implements AppControlService {
     public SettingsInfo getSettings() {
         return settings;
     }
+
+    // ----- actions: record calls so tests can assert behavior -----
+
+    String lastConnectServerId;
+    String lastConnectMode;
+    boolean lastConnectConfirm;
+    boolean disconnectCalled;
+    String lastSelectedServerId;
+    String lastLatencyServerId;
+    String lastRefreshedSubscriptionId;
+    McpToolException connectError;
+
+    @Override
+    public StatusInfo connect(String serverId, String mode, boolean confirm) throws McpToolException {
+        if (connectError != null) {
+            throw connectError;
+        }
+        lastConnectServerId = serverId;
+        lastConnectMode = mode;
+        lastConnectConfirm = confirm;
+        status = new StatusInfo("CONNECTED", true,
+                serverId != null ? serverId : "srv-1", "Tokyo",
+                mode != null ? mode : "system_proxy", 1080, 1081, 9090, "");
+        return status;
+    }
+
+    @Override
+    public StatusInfo disconnect() {
+        disconnectCalled = true;
+        status = new StatusInfo("DISCONNECTED", false, null, null,
+                "system_proxy", 1080, 1081, 9090, "");
+        return status;
+    }
+
+    @Override
+    public ServerSummary selectServer(String serverId) throws McpToolException {
+        lastSelectedServerId = serverId;
+        return servers.stream().filter(s -> s.id().equals(serverId)).findFirst()
+                .orElseThrow(() -> new McpToolException("No server with id: " + serverId));
+    }
+
+    @Override
+    public List<LatencyResult> measureLatency(String serverId) {
+        lastLatencyServerId = serverId;
+        return List.of(new LatencyResult("srv-1", "Tokyo", 42));
+    }
+
+    @Override
+    public String refreshSubscription(String subscriptionId) throws McpToolException {
+        if (subscriptions.stream().noneMatch(s -> s.id().equals(subscriptionId))) {
+            throw new McpToolException("No subscription with id: " + subscriptionId);
+        }
+        lastRefreshedSubscriptionId = subscriptionId;
+        return "Refresh triggered.";
+    }
 }

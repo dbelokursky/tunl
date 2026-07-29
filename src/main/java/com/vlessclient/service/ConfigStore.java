@@ -34,7 +34,8 @@ public class ConfigStore {
         this(Path.of(System.getProperty("user.home"), "Library", "Application Support", "VlessClient"));
     }
 
-    ConfigStore(Path dataDir) {
+    /** Creates a store backed by an explicit directory (used for DI and tests). */
+    public ConfigStore(Path dataDir) {
         this.dataDir = dataDir;
         this.objectMapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
         this.servers = FXCollections.observableArrayList();
@@ -96,6 +97,27 @@ public class ConfigStore {
         return servers.stream()
                 .filter(s -> s.getId().equals(id))
                 .findFirst();
+    }
+
+    /**
+     * Marks the server with {@code serverId} active (and all others inactive),
+     * persisting the change.
+     *
+     * @return {@code true} if a server with that id was found
+     */
+    public synchronized boolean setActiveServer(String serverId) {
+        boolean found = false;
+        for (ServerConfig s : servers) {
+            boolean active = s.getId().equals(serverId);
+            s.setActive(active);
+            if (active) {
+                found = true;
+            }
+        }
+        if (found) {
+            saveServers();
+        }
+        return found;
     }
 
     public AppSettings getSettings() {
