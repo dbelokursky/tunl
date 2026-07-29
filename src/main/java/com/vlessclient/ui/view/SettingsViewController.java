@@ -8,6 +8,7 @@ import com.vlessclient.model.ProxyMode;
 import com.vlessclient.platform.Autostart;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ThemeManager;
+import com.vlessclient.service.mcp.McpServerService;
 import com.vlessclient.ui.view.settings.UpdatesSection;
 import java.io.IOException;
 import java.util.Locale;
@@ -18,7 +19,10 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ProgressBar;
+import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.Circle;
 import javafx.util.StringConverter;
@@ -89,10 +93,19 @@ public class SettingsViewController implements ViewShownAware {
     @FXML private Label appUpdateDetail;
     @FXML private Button downloadAppButton;
 
+    @FXML private CheckBox mcpEnabledCheck;
+    @FXML private TextField mcpPortField;
+    @FXML private CheckBox mcpAllowMutationsCheck;
+    @FXML private Label mcpStatusLabel;
+    @FXML private TextArea mcpCommandArea;
+    @FXML private Button mcpCopyButton;
+    @FXML private Button mcpRegenButton;
+
     private ConfigStore configStore;
     private ThemeManager themeManager;
     private Autostart autostart;
     private UpdatesSection updatesSection;
+    private McpServerService mcpServerService;
     private boolean suppressLaunchAtLoginListener;
 
     /**
@@ -121,6 +134,12 @@ public class SettingsViewController implements ViewShownAware {
             log.warn("Autostart not available");
         }
 
+        try {
+            mcpServerService = ServiceLocator.get(McpServerService.class);
+        } catch (IllegalArgumentException e) {
+            log.warn("McpServerService not available");
+        }
+
         AppSettings settings = configStore.getSettings();
 
         initThemeCombo(settings);
@@ -130,6 +149,7 @@ public class SettingsViewController implements ViewShownAware {
         initProxyModeCombo(settings);
         initSystemProxyAutoConfig(settings);
         initAdvancedSettings(settings);
+        initMcpSettings(settings);
         initAboutSection();
         bindLabels();
     }
@@ -457,6 +477,83 @@ public class SettingsViewController implements ViewShownAware {
         if (configStore != null) {
             configStore.saveSettings(settings);
         }
+    }
+
+    /**
+     * Wires the Agent Control (MCP) section: the enable toggle, port and
+     * mutation checkbox persist and reconcile the running server via
+     * {@link McpServerService#apply()}; the copy/regenerate buttons act on the
+     * bearer token and the ready-to-run {@code claude mcp add} command.
+     *
+     * @param settings the settings instance to read and mutate
+     */
+    private void initMcpSettings(AppSettings settings) {
+        mcpEnabledCheck.setSelected(settings.isMcpEnabled());
+        mcpEnabledCheck.selectedProperty().addListener((obs, oldVal, newVal) -> {
+            settings.setMcpEnabled(newVal);
+            saveSettings(settings);
+            applyMcp();
+        });
+
+        mcpPortField.setText(String.valueOf(settings.getMcpPort()));
+        addNumericFilter(mcpPortField);
+        mcpPortField.textProperty().addListener((obs, oldVal, newVal) -> {
+            settings.setMcpPort(parsePort(newVal, 55555));
+            saveSettings(settings);
+            applyMcp();
+        });
+
+        mcpAllowMutationsCheck.setSelected(settings.isMcpAllowMutations());
+        mcpAllowMutationsCheck.selectedProperty().addListener((obs, oldVal, newVal) -> {
+            settings.setMcpAllowMutations(newVal);
+            saveSettings(settings);
+        });
+
+        if (mcpServerService == null) {
+            mcpEnabledCheck.setDisable(true);
+            mcpPortField.setDisable(true);
+            mcpAllowMutationsCheck.setDisable(true);
+            mcpCopyButton.setDisable(true);
+            mcpRegenButton.setDisable(true);
+        }
+        refreshMcpCommand();
+    }
+
+    private void applyMcp() {
+        if (mcpServerService != null) {
+            mcpServerService.apply();
+        }
+        refreshMcpCommand();
+    }
+
+    private void refreshMcpCommand() {
+        if (mcpServerService == null) {
+            mcpCommandArea.setText("");
+            mcpStatusLabel.setText("");
+            return;
+        }
+        mcpCommandArea.setText(mcpServerService.claudeAddCommand());
+        mcpStatusLabel.setText(mcpServerService.isRunning() ? "● running" : "○ stopped");
+    }
+
+    @FXML
+    private void onCopyMcpCommand() {
+        if (mcpServerService == null) {
+            return;
+        }
+        Clipboard clipboard = Clipboard.getSystemClipboard();
+        ClipboardContent content = new ClipboardContent();
+        content.putString(mcpServerService.claudeAddCommand());
+        clipboard.setContent(content);
+    }
+
+    @FXML
+    private void onRegenerateMcpToken() {
+        if (mcpServerService == null) {
+            return;
+        }
+        mcpServerService.regenerateToken();
+        refreshMcpCommand();
     }
 
     private int parsePort(String text, int defaultPort) {

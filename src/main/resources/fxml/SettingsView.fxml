@@ -7,6 +7,7 @@
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.ProgressBar?>
 <?import javafx.scene.control.Separator?>
+<?import javafx.scene.control.TextArea?>
 <?import javafx.scene.control.TextField?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.VBox?>
@@ -151,6 +152,45 @@
 
             <CheckBox fx:id="storeSecretsCheck" text="Store credentials in the system keychain"
                       styleClass="form-checkbox"/>
+        </VBox>
+
+        <!-- Agent Control (MCP) Section -->
+        <VBox spacing="12" styleClass="card">
+            <padding>
+                <Insets top="16" right="20" bottom="16" left="20"/>
+            </padding>
+
+            <Label text="Agent Control (MCP)" styleClass="form-section-title"/>
+
+            <Label text="Expose a local, loopback-only MCP server so AI agents can read status/logs and manage the client. Guarded by a bearer token."
+                   styleClass="status-subtitle" wrapText="true" maxWidth="520"/>
+
+            <CheckBox fx:id="mcpEnabledCheck" text="Enable MCP server" styleClass="form-checkbox"/>
+
+            <HBox spacing="12" alignment="CENTER_LEFT">
+                <Label text="Port" styleClass="form-label" prefWidth="120"/>
+                <TextField fx:id="mcpPortField" styleClass="form-field" prefWidth="120"
+                           promptText="55555"/>
+                <Label fx:id="mcpStatusLabel" text="" styleClass="stats-value"
+                       style="-fx-font-size: 12px;"/>
+            </HBox>
+
+            <CheckBox fx:id="mcpAllowMutationsCheck"
+                      text="Allow configuration changes (connect, edit servers, routing)"
+                      styleClass="form-checkbox"/>
+
+            <Separator styleClass="sidebar-separator"/>
+
+            <Label text="Add to Claude Code (copy &amp; run):" styleClass="form-label"/>
+            <TextArea fx:id="mcpCommandArea" editable="false" wrapText="true" prefRowCount="3"
+                      styleClass="form-field"/>
+
+            <HBox spacing="12" alignment="CENTER_LEFT">
+                <Button fx:id="mcpCopyButton" text="Copy command" styleClass="secondary-button"
+                        onAction="#onCopyMcpCommand"/>
+                <Button fx:id="mcpRegenButton" text="Regenerate token" styleClass="secondary-button"
+                        onAction="#onRegenerateMcpToken"/>
+            </HBox>
         </VBox>
 
         <!-- About Section -->

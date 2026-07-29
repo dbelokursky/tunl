@@ -54,10 +54,14 @@ public class ConfigStore {
     }
 
     /**
-     * Test seam: sealing disabled so test suites never write into the real
-     * OS keychain. Production always goes through the no-arg constructor.
+     * Creates a store backed by an explicit directory (used for DI and tests).
+     *
+     * <p>Test seam: sealing disabled so test suites never write into the real
+     * OS keychain. Production always goes through the no-arg constructor.</p>
+     *
+     * @param dataDir the directory backing this store
      */
-    ConfigStore(Path dataDir) {
+    public ConfigStore(Path dataDir) {
         this(dataDir, SecretSealers.disabled());
     }
 
@@ -209,6 +213,15 @@ public class ConfigStore {
 
     public AppSettings getSettings() {
         return settings;
+    }
+
+    /**
+     * Returns the directory backing this store.
+     *
+     * @return the data directory (holds servers.json, settings.json, ...)
+     */
+    public Path getDataDir() {
+        return dataDir;
     }
 
     /**

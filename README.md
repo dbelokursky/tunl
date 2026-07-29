@@ -279,6 +279,52 @@ with nothing to migrate by hand.
 
 ---
 
+## Agent control (MCP)
+
+Tunl can run a local **MCP server** (Model Context Protocol) so AI agents such
+as Claude Code can inspect state and drive the client: status, traffic, logs,
+server list, connect/disconnect, add servers from share links, routing rules,
+and more.
+
+### Security
+
+- Listens on **`127.0.0.1`** (loopback) only — never reachable from the network.
+- Every request needs an `Authorization: Bearer <token>` header; the token lives
+  in `mcp-token` (in the data dir) with `0600` permissions.
+- **Off by default** — enabled from Settings.
+- Mutating operations are gated by the "Allow configuration changes" toggle. The
+  most dangerous ones (connecting in TUN mode, which prompts for the macOS admin
+  password; deleting a server) additionally require an explicit `confirm: true`.
+- Every mutating call is appended to `logs/mcp-audit.log`.
+
+### Enable it
+
+**Settings → Agent Control (MCP):**
+1. Tick **Enable MCP server** (default port `55555`).
+2. Optionally toggle **Allow configuration changes**.
+3. Click **Copy command** and run it:
+
+```bash
+claude mcp add --transport http tunl http://127.0.0.1:55555/mcp \
+  --header "Authorization: Bearer <your-token>"
+```
+
+**Regenerate token** issues a new token and restarts the server.
+
+### Tools
+
+| Category | Tools |
+|----------|-------|
+| Read     | `get_status`, `get_traffic`, `list_servers`, `get_logs`, `list_subscriptions`, `get_routing`, `get_settings` |
+| Actions  | `connect`, `disconnect`, `select_server`, `measure_latency`, `refresh_subscription` |
+| Config   | `add_server`, `update_server`, `delete_server`, `set_proxy_mode`, `set_setting`, `add_routing_rule`, `remove_routing_rule` |
+
+Browsable resources: `vless://status`, `vless://traffic`, `vless://servers`,
+`vless://routing`, `vless://settings`, `vless://logs/recent`. Live log streaming
+is available over SSE (`GET /mcp`, `notifications/message`).
+
+---
+
 ## Troubleshooting
 
 **macOS: "app was blocked" / "Apple could not verify"**
