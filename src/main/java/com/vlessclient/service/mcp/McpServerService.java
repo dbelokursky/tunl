@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.app.AppVersion;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.mcp.tools.ConnectTool;
 import com.vlessclient.service.mcp.tools.DisconnectTool;
 import com.vlessclient.service.mcp.tools.GetLogsTool;
@@ -36,14 +37,37 @@ public class McpServerService {
     private final AppControlService control;
     private final McpTokenStore tokenStore;
     private final ObjectMapper mapper = new ObjectMapper();
+    private final McpNotifier notifier = new McpNotifier(mapper);
 
     private McpHttpServer httpServer;
     private int runningPort = -1;
+    private SingBoxEngine loggedEngine;
 
     public McpServerService(ConfigStore configStore, AppControlService control) {
         this.configStore = configStore;
         this.control = control;
         this.tokenStore = new McpTokenStore(configStore.getDataDir());
+    }
+
+    /**
+     * Bridges an engine's log output to connected SSE clients. Safe to call
+     * again after an engine hot-swap; a repeated call for the same engine is a
+     * no-op.
+     */
+    public synchronized void attachLogSource(SingBoxEngine engine) {
+        if (engine == null || engine == loggedEngine) {
+            return;
+        }
+        loggedEngine = engine;
+        engine.getLogLines().addListener((javafx.collections.ListChangeListener<String>) change -> {
+            while (change.next()) {
+                if (change.wasAdded()) {
+                    for (String line : change.getAddedSubList()) {
+                        notifier.broadcastLog(line);
+                    }
+                }
+            }
+        });
     }
 
     /**
@@ -67,7 +91,7 @@ public class McpServerService {
         try {
             String token = tokenStore.getOrCreate();
             McpServer server = buildServer();
-            httpServer = new McpHttpServer(desiredPort, token, server, mapper);
+            httpServer = new McpHttpServer(desiredPort, token, server, mapper, notifier);
             httpServer.start();
             runningPort = desiredPort;
         } catch (Exception e) {
@@ -105,6 +129,32 @@ public class McpServerService {
         }
     }
 
+    /**
+     * Generates a fresh bearer token, restarting the server (if running) so it
+     * takes effect immediately.
+     *
+     * @return the new token
+     */
+    public synchronized String regenerateToken() {
+        try {
+            String token = tokenStore.regenerate();
+            if (isRunning()) {
+                stop();
+                apply();
+            }
+            return token;
+        } catch (Exception e) {
+            log.error("Failed to regenerate MCP token", e);
+            return "";
+        }
+    }
+
+    /** @return a ready-to-run {@code claude mcp add} command for this server. */
+    public String claudeAddCommand() {
+        return "claude mcp add --transport http tunl " + endpointUrl()
+                + " --header \"Authorization: Bearer " + token() + "\"";
+    }
+
     /** Builds the fully-wired MCP server (tools + resources + audit). Visible for tests. */
     McpServer buildServer() {
         McpServer server = new McpServer(SERVER_NAME, AppVersion.VERSION, mapper,
@@ -138,6 +188,9 @@ public class McpServerService {
 
         // Audit every mutating call to logs/mcp-audit.log.
         server.setAuditLog(new FileAuditLog(configStore.getDataDir()));
+
+        // Advertise server-initiated log streaming (GET /mcp SSE via the notifier).
+        server.setLoggingCapability(true);
 
         // Browsable resources mirroring the read tools.
         server.addResource(new JsonResource("vless://status",

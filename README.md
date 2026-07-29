@@ -175,6 +175,54 @@ Connect.
 - `subscriptions.json` — подписки
 - `routing.json` — правила маршрутизации
 - `bin/sing-box` — кэш авто-загруженного бинаря (если был)
+- `mcp-token` — bearer-токен MCP-сервера (права `0600`)
+- `logs/mcp-audit.log` — журнал всех изменяющих вызовов через MCP
+
+---
+
+## Управление агентами (MCP)
+
+Приложение может поднимать локальный **MCP-сервер** (Model Context Protocol),
+через который ИИ-агенты (например Claude Code) читают состояние и управляют
+клиентом: статус, трафик, логи, список серверов, подключение/отключение,
+добавление серверов из share-ссылок, правила маршрутизации и т.д.
+
+### Безопасность
+
+- Сервер слушает **только `127.0.0.1`** (loopback) — снаружи недоступен.
+- Каждый запрос требует заголовок `Authorization: Bearer <token>`; токен лежит
+  в `mcp-token` с правами `0600`.
+- **Выключен по умолчанию** — включается тумблером в Settings.
+- Изменяющие операции гейтятся флагом «Allow configuration changes». Самые
+  опасные (подключение в TUN-режиме → запрос пароля macOS, удаление сервера)
+  дополнительно требуют явного `confirm: true`.
+- Каждый изменяющий вызов пишется в `logs/mcp-audit.log`.
+
+### Включение
+
+**Settings → Agent Control (MCP):**
+1. Отметь **Enable MCP server** (порт по умолчанию `55555`).
+2. При необходимости включи/выключи **Allow configuration changes**.
+3. Нажми **Copy command** — в буфер попадёт готовая строка, и выполни её:
+
+```bash
+claude mcp add --transport http tunl http://127.0.0.1:55555/mcp \
+  --header "Authorization: Bearer <твой-токен>"
+```
+
+Кнопка **Regenerate token** выпускает новый токен и перезапускает сервер.
+
+### Инструменты
+
+| Категория | Инструменты |
+|-----------|-------------|
+| Чтение    | `get_status`, `get_traffic`, `list_servers`, `get_logs`, `list_subscriptions`, `get_routing`, `get_settings` |
+| Действия  | `connect`, `disconnect`, `select_server`, `measure_latency`, `refresh_subscription` |
+| Конфиг    | `add_server`, `update_server`, `delete_server`, `set_proxy_mode`, `set_setting`, `add_routing_rule`, `remove_routing_rule`, `set_routing_preset` |
+
+Ресурсы (browsable): `vless://status`, `vless://traffic`, `vless://servers`,
+`vless://routing`, `vless://settings`, `vless://logs/recent`. Плюс live-стрим
+логов через SSE (`GET /mcp`, `notifications/message`).
 
 ---
 

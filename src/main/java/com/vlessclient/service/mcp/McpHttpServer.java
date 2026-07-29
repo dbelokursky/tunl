@@ -43,18 +43,27 @@ public class McpHttpServer {
     private static final long MAX_BODY_BYTES = 1_048_576; // 1 MiB
     private static final int STOP_DELAY_SECONDS = 1;
 
+    private static final long SSE_POLL_MS = 15_000;
+
     private final int port;
     private final String token;
     private final McpServer mcpServer;
     private final ObjectMapper mapper;
+    private final McpNotifier notifier;
 
     private HttpServer httpServer;
 
     public McpHttpServer(int port, String token, McpServer mcpServer, ObjectMapper mapper) {
+        this(port, token, mcpServer, mapper, null);
+    }
+
+    public McpHttpServer(int port, String token, McpServer mcpServer, ObjectMapper mapper,
+                         McpNotifier notifier) {
         this.port = port;
         this.token = token;
         this.mcpServer = mcpServer;
         this.mapper = mapper;
+        this.notifier = notifier;
     }
 
     /** Starts listening on loopback. Idempotent-safe: call {@link #stop()} first to restart. */
@@ -91,7 +100,12 @@ public class McpHttpServer {
 
     private void handle(HttpExchange exchange) throws IOException {
         try {
-            if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            String method = exchange.getRequestMethod();
+            if ("GET".equalsIgnoreCase(method)) {
+                handleSse(exchange);
+                return;
+            }
+            if (!"POST".equalsIgnoreCase(method)) {
                 sendPlain(exchange, 405, "Method Not Allowed");
                 return;
             }
@@ -128,6 +142,47 @@ public class McpHttpServer {
             }
         } finally {
             exchange.close();
+        }
+    }
+
+    private void handleSse(HttpExchange exchange) throws IOException {
+        if (notifier == null) {
+            sendPlain(exchange, 405, "Method Not Allowed");
+            return;
+        }
+        if (!isAuthorized(exchange)) {
+            sendPlain(exchange, 401, "Unauthorized");
+            return;
+        }
+        // Subscribe before headers go out so a frame pushed immediately after the
+        // client connects is not missed.
+        McpNotifier.Subscriber subscriber = notifier.subscribe();
+        exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+        exchange.getResponseHeaders().set("Cache-Control", "no-cache");
+        exchange.getResponseHeaders().set("Connection", "keep-alive");
+        exchange.sendResponseHeaders(200, 0); // 0 => chunked, stream stays open
+
+        OutputStream out = exchange.getResponseBody();
+        try {
+            // Flush a comment immediately so response headers reach the client
+            // right away rather than waiting for the first log line / keep-alive.
+            out.write(":connected\n\n".getBytes(StandardCharsets.UTF_8));
+            out.flush();
+            while (true) {
+                String frame = subscriber.poll(SSE_POLL_MS);
+                if (frame != null) {
+                    out.write(("data: " + frame + "\n\n").getBytes(StandardCharsets.UTF_8));
+                } else {
+                    out.write(":keep-alive\n\n".getBytes(StandardCharsets.UTF_8));
+                }
+                out.flush();
+            }
+        } catch (IOException e) {
+            // client disconnected — normal termination
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            notifier.unsubscribe(subscriber);
         }
     }
 

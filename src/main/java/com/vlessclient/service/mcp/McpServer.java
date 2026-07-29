@@ -45,6 +45,7 @@ public class McpServer {
     private final Map<String, McpTool> tools = new LinkedHashMap<>();
     private final Map<String, McpResource> resources = new LinkedHashMap<>();
     private McpAuditLog auditLog = McpAuditLog.NOOP;
+    private boolean loggingCapability;
 
     public McpServer(String serverName, String serverVersion, ObjectMapper mapper,
                      BooleanSupplier allowMutations) {
@@ -67,6 +68,11 @@ public class McpServer {
     /** Sets the audit sink that records mutating tool calls. */
     public void setAuditLog(McpAuditLog auditLog) {
         this.auditLog = auditLog != null ? auditLog : McpAuditLog.NOOP;
+    }
+
+    /** Advertises the {@code logging} capability (server pushes log notifications over SSE). */
+    public void setLoggingCapability(boolean enabled) {
+        this.loggingCapability = enabled;
     }
 
     /**
@@ -161,6 +167,9 @@ public class McpServer {
             resourceCaps.put("subscribe", false);
             resourceCaps.put("listChanged", false);
             capabilities.set("resources", resourceCaps);
+        }
+        if (loggingCapability) {
+            capabilities.set("logging", mapper.createObjectNode());
         }
         res.set("capabilities", capabilities);
 

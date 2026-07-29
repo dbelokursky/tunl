@@ -106,6 +106,9 @@ public class ServiceLocator {
         register(AppControlService.class, control);
         McpServerService mcpServerService = new McpServerService(configStore, control);
         register(McpServerService.class, mcpServerService);
+        if (engine != null) {
+            mcpServerService.attachLogSource(engine);
+        }
         mcpServerService.apply();
 
         log.info("ServiceLocator initialized");
@@ -227,6 +230,10 @@ public class ServiceLocator {
         Object control = services.get(AppControlService.class);
         if (control instanceof DefaultAppControlService defaultControl) {
             defaultControl.setEngine(engine);
+        }
+        Object mcp = services.get(McpServerService.class);
+        if (mcp instanceof McpServerService mcpServerService) {
+            mcpServerService.attachLogSource(engine);
         }
         log.info("SingBoxEngine registered with binary: {}", singBoxPath);
     }

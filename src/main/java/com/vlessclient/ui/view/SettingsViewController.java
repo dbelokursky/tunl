@@ -7,12 +7,17 @@ import com.vlessclient.model.ProxyMode;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.LoginItemService;
 import com.vlessclient.service.ThemeManager;
+import com.vlessclient.service.mcp.McpServerService;
 import javafx.fxml.FXML;
+import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
+import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
 import javafx.util.StringConverter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,9 +65,18 @@ public class SettingsViewController {
     @FXML private TextField tunInterfaceNameField;
     @FXML private TextField tunIpv4Field;
 
+    @FXML private CheckBox mcpEnabledCheck;
+    @FXML private TextField mcpPortField;
+    @FXML private CheckBox mcpAllowMutationsCheck;
+    @FXML private Label mcpStatusLabel;
+    @FXML private TextArea mcpCommandArea;
+    @FXML private Button mcpCopyButton;
+    @FXML private Button mcpRegenButton;
+
     private ConfigStore configStore;
     private ThemeManager themeManager;
     private LoginItemService loginItemService;
+    private McpServerService mcpServerService;
     private boolean suppressLaunchAtLoginListener;
 
     @FXML
@@ -88,11 +102,18 @@ public class SettingsViewController {
 
         AppSettings settings = configStore.getSettings();
 
+        try {
+            mcpServerService = ServiceLocator.get(McpServerService.class);
+        } catch (IllegalArgumentException e) {
+            log.warn("McpServerService not available");
+        }
+
         initThemeCombo(settings);
         initLanguageCombo(settings);
         initConnectionSettings(settings);
         initProxyModeCombo(settings);
         initAdvancedSettings(settings);
+        initMcpSettings(settings);
         initAboutSection();
         bindLabels();
     }
@@ -121,6 +142,81 @@ public class SettingsViewController {
             settings.setTunIpv4Address(newVal == null ? "" : newVal.trim());
             saveSettings(settings);
         });
+    }
+
+    /**
+     * Wires the Agent Control (MCP) section: enabling the server, its port and
+     * the mutation toggle all persist and reconcile the running server via
+     * {@link McpServerService#apply()}. The copy/regenerate buttons act on the
+     * bearer token and the ready-to-run {@code claude mcp add} command.
+     */
+    private void initMcpSettings(AppSettings settings) {
+        mcpEnabledCheck.setSelected(settings.isMcpEnabled());
+        mcpEnabledCheck.selectedProperty().addListener((obs, oldVal, newVal) -> {
+            settings.setMcpEnabled(newVal);
+            saveSettings(settings);
+            applyMcp();
+        });
+
+        mcpPortField.setText(String.valueOf(settings.getMcpPort()));
+        addNumericFilter(mcpPortField);
+        mcpPortField.textProperty().addListener((obs, oldVal, newVal) -> {
+            settings.setMcpPort(parsePort(newVal, 55555));
+            saveSettings(settings);
+            applyMcp();
+        });
+
+        mcpAllowMutationsCheck.setSelected(settings.isMcpAllowMutations());
+        mcpAllowMutationsCheck.selectedProperty().addListener((obs, oldVal, newVal) -> {
+            settings.setMcpAllowMutations(newVal);
+            saveSettings(settings);
+        });
+
+        if (mcpServerService == null) {
+            mcpEnabledCheck.setDisable(true);
+            mcpPortField.setDisable(true);
+            mcpAllowMutationsCheck.setDisable(true);
+            mcpCopyButton.setDisable(true);
+            mcpRegenButton.setDisable(true);
+        }
+        refreshMcpCommand();
+    }
+
+    private void applyMcp() {
+        if (mcpServerService != null) {
+            mcpServerService.apply();
+        }
+        refreshMcpCommand();
+    }
+
+    private void refreshMcpCommand() {
+        if (mcpServerService == null) {
+            mcpCommandArea.setText("");
+            mcpStatusLabel.setText("");
+            return;
+        }
+        mcpCommandArea.setText(mcpServerService.claudeAddCommand());
+        mcpStatusLabel.setText(mcpServerService.isRunning() ? "● running" : "○ stopped");
+    }
+
+    @FXML
+    private void onCopyMcpCommand() {
+        if (mcpServerService == null) {
+            return;
+        }
+        Clipboard clipboard = Clipboard.getSystemClipboard();
+        ClipboardContent content = new ClipboardContent();
+        content.putString(mcpServerService.claudeAddCommand());
+        clipboard.setContent(content);
+    }
+
+    @FXML
+    private void onRegenerateMcpToken() {
+        if (mcpServerService == null) {
+            return;
+        }
+        mcpServerService.regenerateToken();
+        refreshMcpCommand();
     }
 
     private void initThemeCombo(AppSettings settings) {

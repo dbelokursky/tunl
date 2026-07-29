@@ -118,6 +118,15 @@ class McpServerBuildTest {
     }
 
     @Test
+    void initialize_advertisesLoggingAndResources() {
+        JsonNode caps = call(service.buildServer(), "initialize", null)
+                .path("result").path("capabilities");
+        assertThat(caps.has("logging")).isTrue();
+        assertThat(caps.has("resources")).isTrue();
+        assertThat(caps.has("tools")).isTrue();
+    }
+
+    @Test
     void resourcesList_hasAllResources() {
         JsonNode resources = call(service.buildServer(), "resources/list", null)
                 .path("result").path("resources");
