@@ -43,6 +43,7 @@ public class McpServer {
     private final ObjectMapper mapper;
     private final BooleanSupplier allowMutations;
     private final Map<String, McpTool> tools = new LinkedHashMap<>();
+    private final Map<String, McpResource> resources = new LinkedHashMap<>();
 
     public McpServer(String serverName, String serverVersion, ObjectMapper mapper,
                      BooleanSupplier allowMutations) {
@@ -55,6 +56,11 @@ public class McpServer {
     /** Registers a tool. Registration order is preserved in {@code tools/list}. */
     public void addTool(McpTool tool) {
         tools.put(tool.name(), tool);
+    }
+
+    /** Registers a resource. Registration order is preserved in {@code resources/list}. */
+    public void addResource(McpResource resource) {
+        resources.put(resource.uri(), resource);
     }
 
     /**
@@ -108,7 +114,10 @@ public class McpServer {
                     return result(idNode, callTool(params));
                 }
                 case "resources/list" -> {
-                    return result(idNode, arrayResult("resources"));
+                    return result(idNode, resourcesList());
+                }
+                case "resources/read" -> {
+                    return result(idNode, readResource(params));
                 }
                 case "resources/templates/list" -> {
                     return result(idNode, arrayResult("resourceTemplates"));
@@ -141,6 +150,12 @@ public class McpServer {
 
         ObjectNode capabilities = mapper.createObjectNode();
         capabilities.set("tools", mapper.createObjectNode().put("listChanged", false));
+        if (!resources.isEmpty()) {
+            ObjectNode resourceCaps = mapper.createObjectNode();
+            resourceCaps.put("subscribe", false);
+            resourceCaps.put("listChanged", false);
+            capabilities.set("resources", resourceCaps);
+        }
         res.set("capabilities", capabilities);
 
         ObjectNode info = mapper.createObjectNode();
@@ -164,6 +179,47 @@ public class McpServer {
             t.set("inputSchema", tool.inputSchema());
             arr.add(t);
         }
+        return res;
+    }
+
+    private ObjectNode resourcesList() {
+        ObjectNode res = mapper.createObjectNode();
+        ArrayNode arr = res.putArray("resources");
+        for (McpResource resource : resources.values()) {
+            ObjectNode r = mapper.createObjectNode();
+            r.put("uri", resource.uri());
+            r.put("name", resource.name());
+            r.put("description", resource.description());
+            r.put("mimeType", resource.mimeType());
+            arr.add(r);
+        }
+        return res;
+    }
+
+    private ObjectNode readResource(ObjectNode params) {
+        JsonNode uriNode = params.get("uri");
+        if (uriNode == null || !uriNode.isTextual()) {
+            throw new IllegalArgumentException("resources/read requires a 'uri'");
+        }
+        String uri = uriNode.asText();
+        McpResource resource = resources.get(uri);
+        if (resource == null) {
+            throw new IllegalArgumentException("Unknown resource: " + uri);
+        }
+        JsonNode tree = mapper.valueToTree(resource.read());
+        String text;
+        try {
+            text = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(tree);
+        } catch (Exception e) {
+            text = String.valueOf(tree);
+        }
+        ObjectNode res = mapper.createObjectNode();
+        ArrayNode contents = res.putArray("contents");
+        ObjectNode entry = mapper.createObjectNode();
+        entry.put("uri", uri);
+        entry.put("mimeType", resource.mimeType());
+        entry.put("text", text);
+        contents.add(entry);
         return res;
     }
 

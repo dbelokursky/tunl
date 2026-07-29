@@ -14,8 +14,7 @@ class McpServerTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private final AppControlService control = () ->
-            new StatusInfo("CONNECTED", true, "srv-1", "Tokyo", "tun", 1080, 1081, 9090, "");
+    private final FakeAppControlService control = new FakeAppControlService();
 
     private McpServer serverWithMutations(boolean allowMutations) {
         McpServer server = new McpServer("vless-client", "0.1.0", MAPPER, () -> allowMutations);

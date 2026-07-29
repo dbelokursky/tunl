@@ -100,7 +100,8 @@ public class ServiceLocator {
         // that exposes it to agents. Started here so `mcp_enabled` takes effect
         // at launch; re-reconciled whenever settings are saved.
         SingBoxEngine engine = (SingBoxEngine) services.get(SingBoxEngine.class);
-        DefaultAppControlService control = new DefaultAppControlService(configStore, engine);
+        DefaultAppControlService control = new DefaultAppControlService(
+                configStore, trafficMonitor, subscriptionService, routingService, engine);
         register(AppControlService.class, control);
         McpServerService mcpServerService = new McpServerService(configStore, control);
         register(McpServerService.class, mcpServerService);

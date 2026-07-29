@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vlessclient.app.AppVersion;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.service.mcp.tools.GetLogsTool;
 import com.vlessclient.service.mcp.tools.GetStatusTool;
+import com.vlessclient.service.mcp.tools.SimpleReadTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -98,7 +100,39 @@ public class McpServerService {
     private McpServer buildServer() {
         McpServer server = new McpServer(SERVER_NAME, AppVersion.VERSION, mapper,
                 () -> configStore.getSettings().isMcpAllowMutations());
+
+        // Read / observability tools.
         server.addTool(new GetStatusTool(control));
+        server.addTool(new SimpleReadTool("get_traffic",
+                "Get live upload/download speeds and session totals.",
+                control::getTraffic));
+        server.addTool(new SimpleReadTool("list_servers",
+                "List all configured servers.", control::listServers));
+        server.addTool(new GetLogsTool(control));
+        server.addTool(new SimpleReadTool("list_subscriptions",
+                "List all configured subscriptions.", control::listSubscriptions));
+        server.addTool(new SimpleReadTool("get_routing",
+                "Get the current routing configuration (preset, rules, bypass list).",
+                control::getRouting));
+        server.addTool(new SimpleReadTool("get_settings",
+                "Get application settings (no secrets).", control::getSettings));
+
+        // Browsable resources mirroring the read tools.
+        server.addResource(new JsonResource("vless://status",
+                "Connection status", "Current connection state and active server.",
+                control::getStatus));
+        server.addResource(new JsonResource("vless://traffic",
+                "Traffic", "Live traffic speeds and session totals.", control::getTraffic));
+        server.addResource(new JsonResource("vless://servers",
+                "Servers", "All configured servers.", control::listServers));
+        server.addResource(new JsonResource("vless://routing",
+                "Routing", "Current routing configuration.", control::getRouting));
+        server.addResource(new JsonResource("vless://settings",
+                "Settings", "Application settings (no secrets).", control::getSettings));
+        server.addResource(new JsonResource("vless://logs/recent",
+                "Recent logs", "The most recent sing-box log lines.",
+                () -> control.getLogs(200, null)));
+
         return server;
     }
 }

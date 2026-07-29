@@ -19,8 +19,7 @@ class McpHttpServerTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String TOKEN = "test-secret-token";
 
-    private final AppControlService control = () ->
-            new StatusInfo("DISCONNECTED", false, null, null, "system_proxy", 1080, 1081, 9090, "");
+    private final FakeAppControlService control = new FakeAppControlService();
 
     private McpHttpServer server;
     private HttpClient client;
@@ -96,7 +95,7 @@ class McpHttpServerTest {
         assertThat(response.statusCode()).isEqualTo(200);
         JsonNode json = MAPPER.readTree(response.body());
         assertThat(json.path("result").path("structuredContent").path("state").asText())
-                .isEqualTo("DISCONNECTED");
+                .isEqualTo("CONNECTED");
         assertThat(json.path("result").path("structuredContent").path("socksPort").asInt())
                 .isEqualTo(1080);
     }
