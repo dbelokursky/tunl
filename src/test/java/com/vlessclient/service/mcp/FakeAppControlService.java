@@ -126,4 +126,90 @@ class FakeAppControlService implements AppControlService {
         lastRefreshedSubscriptionId = subscriptionId;
         return "Refresh triggered.";
     }
+
+    // ----- config mutation -----
+
+    String lastAddedShareLink;
+    String lastDeletedServerId;
+    String lastSetSettingKey;
+    RoutingInfo.RuleInfo lastAddedRule;
+
+    @Override
+    public ServerSummary addServer(String shareLink, String name) throws McpToolException {
+        if (shareLink == null || shareLink.isBlank()) {
+            throw new McpToolException("'shareLink' is required.");
+        }
+        lastAddedShareLink = shareLink;
+        ServerSummary added = new ServerSummary("srv-new",
+                name != null ? name : "Imported", "vless", "host", 443, false);
+        servers.add(added);
+        return added;
+    }
+
+    @Override
+    public ServerSummary updateServer(String id, String name, String shareLink)
+            throws McpToolException {
+        ServerSummary existing = servers.stream().filter(s -> s.id().equals(id)).findFirst()
+                .orElseThrow(() -> new McpToolException("No server with id: " + id));
+        return new ServerSummary(existing.id(),
+                name != null ? name : existing.name(), existing.protocol(),
+                existing.address(), existing.port(), existing.active());
+    }
+
+    @Override
+    public String deleteServer(String id, boolean confirm) throws McpToolException {
+        if (!confirm) {
+            throw new McpToolException("Deleting a server is irreversible; pass confirm:true.");
+        }
+        if (servers.stream().noneMatch(s -> s.id().equals(id))) {
+            throw new McpToolException("No server with id: " + id);
+        }
+        lastDeletedServerId = id;
+        servers.removeIf(s -> s.id().equals(id));
+        return "Deleted.";
+    }
+
+    @Override
+    public SettingsInfo setProxyMode(String mode) throws McpToolException {
+        if (!"tun".equals(mode) && !"system_proxy".equals(mode)) {
+            throw new McpToolException("Unknown mode.");
+        }
+        return settings;
+    }
+
+    @Override
+    public SettingsInfo setSetting(String key, com.fasterxml.jackson.databind.JsonNode value)
+            throws McpToolException {
+        if (key == null || value == null) {
+            throw new McpToolException("Both 'key' and 'value' are required.");
+        }
+        lastSetSettingKey = key;
+        return settings;
+    }
+
+    @Override
+    public RoutingInfo addRoutingRule(String type, String value, String action)
+            throws McpToolException {
+        if (value == null || value.isBlank()) {
+            throw new McpToolException("Rule 'value' is required.");
+        }
+        lastAddedRule = new RoutingInfo.RuleInfo("r-new", type, value, action);
+        return routing;
+    }
+
+    @Override
+    public RoutingInfo removeRoutingRule(String ruleId) throws McpToolException {
+        if (routing.rules().stream().noneMatch(r -> r.id().equals(ruleId))) {
+            throw new McpToolException("No routing rule with id: " + ruleId);
+        }
+        return routing;
+    }
+
+    @Override
+    public RoutingInfo setRoutingPreset(String preset) throws McpToolException {
+        if (preset == null || preset.isBlank()) {
+            throw new McpToolException("'preset' is required.");
+        }
+        return routing;
+    }
 }

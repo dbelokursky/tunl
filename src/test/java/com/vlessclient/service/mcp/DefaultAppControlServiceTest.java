@@ -3,6 +3,8 @@ package com.vlessclient.service.mcp;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.service.RoutingService;
+import com.vlessclient.service.ShareLinkParser;
 import com.vlessclient.service.SingBoxEngine;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,7 +33,7 @@ class DefaultAppControlServiceTest {
         store = new ConfigStore(tempDir);
         store.addServer(server("srv-1", "Tokyo"));
         SingBoxEngine engine = new SingBoxEngine(tempDir.resolve("sing-box"));
-        service = new DefaultAppControlService(store, null, null, null, null, null, engine);
+        service = new DefaultAppControlService(store, null, null, null, null, null, null, engine);
     }
 
     private ServerConfig server(String id, String name) {
@@ -86,5 +88,45 @@ class DefaultAppControlServiceTest {
     void measureLatency_unknownServer_isRejected() {
         assertThatThrownBy(() -> service.measureLatency("nope"))
                 .isInstanceOf(McpToolException.class);
+    }
+
+    @Test
+    void addServer_parsesShareLinkAndPersists() throws Exception {
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, null,
+                new RoutingService(), null, null, new ShareLinkParser(),
+                new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        ServerSummary added = svc.addServer(
+                "vless://test-uuid-1234@example.com:443#MyServer", "Renamed");
+
+        assertThat(added.name()).isEqualTo("Renamed");
+        assertThat(added.address()).isEqualTo("example.com");
+        assertThat(added.port()).isEqualTo(443);
+        assertThat(new ConfigStore(tempDir).getServerById(added.id())).isPresent();
+    }
+
+    @Test
+    void addServer_invalidLink_isRejected() {
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, null, null,
+                null, null, new ShareLinkParser(), new SingBoxEngine(tempDir.resolve("sing-box")));
+        assertThatThrownBy(() -> svc.addServer("not-a-link", null))
+                .isInstanceOf(McpToolException.class);
+    }
+
+    @Test
+    void deleteServer_withoutConfirm_isRejected() {
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, null, null,
+                null, null, new ShareLinkParser(), new SingBoxEngine(tempDir.resolve("sing-box")));
+        assertThatThrownBy(() -> svc.deleteServer("srv-1", false))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining("confirm");
+    }
+
+    @Test
+    void deleteServer_withConfirm_removes() throws Exception {
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, null, null,
+                null, null, new ShareLinkParser(), new SingBoxEngine(tempDir.resolve("sing-box")));
+        svc.deleteServer("srv-1", true);
+        assertThat(store.getServerById("srv-1")).isEmpty();
     }
 }

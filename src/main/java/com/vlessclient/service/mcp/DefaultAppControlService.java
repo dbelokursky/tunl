@@ -1,13 +1,16 @@
 package com.vlessclient.service.mcp;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
+import com.vlessclient.model.RoutingRule;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.Subscription;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.RoutingService;
+import com.vlessclient.service.ShareLinkParser;
 import com.vlessclient.service.SingBoxConfigGenerator;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.SubscriptionService;
@@ -42,6 +45,7 @@ public class DefaultAppControlService implements AppControlService {
     private final RoutingService routingService;
     private final SingBoxConfigGenerator configGenerator;
     private final com.vlessclient.service.LatencyTester latencyTester;
+    private final ShareLinkParser shareLinkParser;
     private volatile SingBoxEngine engine;
 
     public DefaultAppControlService(ConfigStore configStore,
@@ -50,6 +54,7 @@ public class DefaultAppControlService implements AppControlService {
                                     RoutingService routingService,
                                     SingBoxConfigGenerator configGenerator,
                                     com.vlessclient.service.LatencyTester latencyTester,
+                                    ShareLinkParser shareLinkParser,
                                     SingBoxEngine engine) {
         this.configStore = configStore;
         this.trafficMonitor = trafficMonitor;
@@ -57,6 +62,7 @@ public class DefaultAppControlService implements AppControlService {
         this.routingService = routingService;
         this.configGenerator = configGenerator;
         this.latencyTester = latencyTester;
+        this.shareLinkParser = shareLinkParser;
         this.engine = engine;
     }
 
@@ -286,6 +292,180 @@ public class DefaultAppControlService implements AppControlService {
         }
         subscriptionService.refreshSubscription(subscriptionId);
         return "Refresh triggered for subscription '" + sub.get().getName() + "'.";
+    }
+
+    @Override
+    public ServerSummary addServer(String shareLink, String name) throws McpToolException {
+        ServerConfig config = parseShareLink(shareLink);
+        if (name != null && !name.isBlank()) {
+            config.setName(name);
+        }
+        config.setActive(false);
+        configStore.addServer(config);
+        return summaryOf(config);
+    }
+
+    @Override
+    public ServerSummary updateServer(String id, String name, String shareLink)
+            throws McpToolException {
+        ServerConfig existing = configStore.getServerById(id)
+                .orElseThrow(() -> new McpToolException("No server with id: " + id));
+        ServerConfig updated;
+        if (shareLink != null && !shareLink.isBlank()) {
+            updated = parseShareLink(shareLink);
+            updated.setId(existing.getId());
+            updated.setActive(existing.isActive());
+            updated.setName(name != null && !name.isBlank() ? name : existing.getName());
+        } else {
+            updated = existing;
+            if (name != null && !name.isBlank()) {
+                updated.setName(name);
+            }
+        }
+        configStore.updateServer(updated);
+        return summaryOf(updated);
+    }
+
+    @Override
+    public String deleteServer(String id, boolean confirm) throws McpToolException {
+        if (!confirm) {
+            throw new McpToolException("Deleting a server is irreversible; pass confirm:true.");
+        }
+        ServerConfig existing = configStore.getServerById(id)
+                .orElseThrow(() -> new McpToolException("No server with id: " + id));
+        configStore.removeServer(id);
+        return "Deleted server '" + existing.getName() + "'.";
+    }
+
+    @Override
+    public SettingsInfo setProxyMode(String mode) throws McpToolException {
+        AppSettings settings = configStore.getSettings();
+        settings.setProxyMode(parseMode(mode));
+        configStore.saveSettings(settings);
+        return getSettings();
+    }
+
+    @Override
+    public SettingsInfo setSetting(String key, JsonNode value) throws McpToolException {
+        if (key == null || value == null) {
+            throw new McpToolException("Both 'key' and 'value' are required.");
+        }
+        AppSettings s = configStore.getSettings();
+        switch (key.toLowerCase()) {
+            case "theme" -> s.setTheme(asText(value, key));
+            case "language" -> s.setLanguage(asText(value, key));
+            case "auto_connect", "autoconnect" -> s.setAutoConnect(value.asBoolean());
+            case "socks_port", "socksport" -> s.setSocksPort(asPort(value, key));
+            case "http_port", "httpport" -> s.setHttpPort(asPort(value, key));
+            case "clash_api_port", "clashapiport" -> s.setClashApiPort(asPort(value, key));
+            case "proxy_dns", "proxydns" -> s.setProxyDns(asText(value, key));
+            case "direct_dns", "directdns" -> s.setDirectDns(asText(value, key));
+            case "dns_strategy", "dnsstrategy" -> s.setDnsStrategy(asText(value, key));
+            case "tun_interface_name", "tuninterfacename" -> s.setTunInterfaceName(asText(value, key));
+            case "health_check_enabled", "healthcheckenabled" ->
+                    s.setHealthCheckEnabled(value.asBoolean());
+            case "mcp_allow_mutations", "mcpallowmutations" ->
+                    s.setMcpAllowMutations(value.asBoolean());
+            default -> throw new McpToolException("Setting '" + key + "' is not settable via MCP. "
+                    + "Allowed: theme, language, auto_connect, socks_port, http_port, "
+                    + "clash_api_port, proxy_dns, direct_dns, dns_strategy, tun_interface_name, "
+                    + "health_check_enabled, mcp_allow_mutations. "
+                    + "(mcp_enabled/mcp_port require the Settings screen — they restart the server.)");
+        }
+        configStore.saveSettings(s);
+        return getSettings();
+    }
+
+    @Override
+    public RoutingInfo addRoutingRule(String type, String value, String action)
+            throws McpToolException {
+        if (value == null || value.isBlank()) {
+            throw new McpToolException("Rule 'value' is required.");
+        }
+        RoutingRule rule = new RoutingRule(parseRuleType(type), value, parseRuleAction(action));
+        routingService.addRule(rule);
+        return getRouting();
+    }
+
+    @Override
+    public RoutingInfo removeRoutingRule(String ruleId) throws McpToolException {
+        boolean present = routingService.getConfig().getRules().stream()
+                .anyMatch(r -> r.getId().equals(ruleId));
+        if (!present) {
+            throw new McpToolException("No routing rule with id: " + ruleId);
+        }
+        routingService.removeRule(ruleId);
+        return getRouting();
+    }
+
+    @Override
+    public RoutingInfo setRoutingPreset(String preset) throws McpToolException {
+        if (preset == null || preset.isBlank()) {
+            throw new McpToolException("'preset' is required.");
+        }
+        routingService.setPreset(preset);
+        return getRouting();
+    }
+
+    private ServerConfig parseShareLink(String shareLink) throws McpToolException {
+        if (shareLink == null || shareLink.isBlank()) {
+            throw new McpToolException("'shareLink' is required.");
+        }
+        try {
+            ServerConfig config = shareLinkParser.parse(shareLink.trim());
+            if (config == null) {
+                throw new McpToolException("Could not parse share link.");
+            }
+            return config;
+        } catch (McpToolException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new McpToolException("Invalid share link: " + e.getMessage(), e);
+        }
+    }
+
+    private ServerSummary summaryOf(ServerConfig s) {
+        return new ServerSummary(s.getId(), s.getName(),
+                s.getProtocol() != null ? s.getProtocol().getValue() : null,
+                s.getAddress(), s.getPort(), s.isActive());
+    }
+
+    private String asText(JsonNode value, String key) throws McpToolException {
+        if (!value.isTextual()) {
+            throw new McpToolException("Setting '" + key + "' expects a string.");
+        }
+        return value.asText();
+    }
+
+    private int asPort(JsonNode value, String key) throws McpToolException {
+        if (!value.isInt() || value.asInt() < 1 || value.asInt() > 65535) {
+            throw new McpToolException("Setting '" + key + "' expects a port (1-65535).");
+        }
+        return value.asInt();
+    }
+
+    private RoutingRule.RuleType parseRuleType(String type) throws McpToolException {
+        if (type == null) {
+            throw new McpToolException("Rule 'type' is required.");
+        }
+        for (RoutingRule.RuleType t : RoutingRule.RuleType.values()) {
+            if (t.getValue().equalsIgnoreCase(type) || t.name().equalsIgnoreCase(type)) {
+                return t;
+            }
+        }
+        throw new McpToolException("Unknown rule type: " + type);
+    }
+
+    private RoutingRule.RuleAction parseRuleAction(String action) throws McpToolException {
+        if (action == null) {
+            throw new McpToolException("Rule 'action' is required.");
+        }
+        for (RoutingRule.RuleAction a : RoutingRule.RuleAction.values()) {
+            if (a.getValue().equalsIgnoreCase(action) || a.name().equalsIgnoreCase(action)) {
+                return a;
+            }
+        }
+        throw new McpToolException("Unknown rule action: " + action + " (proxy|direct|block).");
     }
 
     private ProxyMode parseMode(String mode) throws McpToolException {

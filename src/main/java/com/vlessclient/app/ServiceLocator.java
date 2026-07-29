@@ -102,7 +102,7 @@ public class ServiceLocator {
         SingBoxEngine engine = (SingBoxEngine) services.get(SingBoxEngine.class);
         DefaultAppControlService control = new DefaultAppControlService(
                 configStore, trafficMonitor, subscriptionService, routingService,
-                configGenerator, latencyTester, engine);
+                configGenerator, latencyTester, shareLinkParser, engine);
         register(AppControlService.class, control);
         McpServerService mcpServerService = new McpServerService(configStore, control);
         register(McpServerService.class, mcpServerService);

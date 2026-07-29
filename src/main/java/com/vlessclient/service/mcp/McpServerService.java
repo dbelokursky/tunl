@@ -1,6 +1,8 @@
 package com.vlessclient.service.mcp;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.app.AppVersion;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.service.ConfigStore;
@@ -8,6 +10,7 @@ import com.vlessclient.service.mcp.tools.ConnectTool;
 import com.vlessclient.service.mcp.tools.DisconnectTool;
 import com.vlessclient.service.mcp.tools.GetLogsTool;
 import com.vlessclient.service.mcp.tools.GetStatusTool;
+import com.vlessclient.service.mcp.tools.LambdaTool;
 import com.vlessclient.service.mcp.tools.MeasureLatencyTool;
 import com.vlessclient.service.mcp.tools.RefreshSubscriptionTool;
 import com.vlessclient.service.mcp.tools.SelectServerTool;
@@ -102,7 +105,8 @@ public class McpServerService {
         }
     }
 
-    private McpServer buildServer() {
+    /** Builds the fully-wired MCP server (tools + resources + audit). Visible for tests. */
+    McpServer buildServer() {
         McpServer server = new McpServer(SERVER_NAME, AppVersion.VERSION, mapper,
                 () -> configStore.getSettings().isMcpAllowMutations());
 
@@ -129,6 +133,9 @@ public class McpServerService {
         server.addTool(new MeasureLatencyTool(control));
         server.addTool(new RefreshSubscriptionTool(control));
 
+        // Config-mutation tools.
+        addMutationTools(server);
+
         // Audit every mutating call to logs/mcp-audit.log.
         server.setAuditLog(new FileAuditLog(configStore.getDataDir()));
 
@@ -149,5 +156,106 @@ public class McpServerService {
                 () -> control.getLogs(200, null)));
 
         return server;
+    }
+
+    private void addMutationTools(McpServer server) {
+        server.addTool(new LambdaTool("add_server",
+                "Add a server from a share link (vless/vmess/trojan/ss/hysteria2). "
+                        + "Optional 'name' override. Requires 'shareLink'.",
+                true, schema(prop("shareLink", "string"), prop("name", "string"), req("shareLink")),
+                args -> control.addServer(str(args, "shareLink"), str(args, "name"))));
+
+        server.addTool(new LambdaTool("update_server",
+                "Update a server: rename ('name') and/or replace from a new 'shareLink'. "
+                        + "Requires 'id'.",
+                true, schema(prop("id", "string"), prop("name", "string"),
+                        prop("shareLink", "string"), req("id")),
+                args -> control.updateServer(str(args, "id"), str(args, "name"),
+                        str(args, "shareLink"))));
+
+        server.addTool(new LambdaTool("delete_server",
+                "Delete a server. Requires 'id' and 'confirm':true.",
+                true, schema(prop("id", "string"), prop("confirm", "boolean"), req("id")),
+                args -> control.deleteServer(str(args, "id"), bool(args, "confirm"))));
+
+        server.addTool(new LambdaTool("set_proxy_mode",
+                "Set the proxy mode: 'system_proxy' or 'tun'.",
+                true, schema(prop("mode", "string"), req("mode")),
+                args -> control.setProxyMode(str(args, "mode"))));
+
+        server.addTool(new LambdaTool("set_setting",
+                "Set one setting by 'key' and 'value' (e.g. theme, language, socks_port, "
+                        + "proxy_dns, health_check_enabled).",
+                true, schema(prop("key", "string"), prop("value", null), req("key", "value")),
+                args -> control.setSetting(str(args, "key"), args.get("value"))));
+
+        server.addTool(new LambdaTool("add_routing_rule",
+                "Append a routing rule. 'type' (domain, domain_suffix, geosite, geoip, "
+                        + "ip_cidr, ...), 'value', 'action' (proxy|direct|block).",
+                true, schema(prop("type", "string"), prop("value", "string"),
+                        prop("action", "string"), req("type", "value", "action")),
+                args -> control.addRoutingRule(str(args, "type"), str(args, "value"),
+                        str(args, "action"))));
+
+        server.addTool(new LambdaTool("remove_routing_rule",
+                "Remove a routing rule by 'ruleId'.",
+                true, schema(prop("ruleId", "string"), req("ruleId")),
+                args -> control.removeRoutingRule(str(args, "ruleId"))));
+
+        server.addTool(new LambdaTool("set_routing_preset",
+                "Set the routing preset by 'preset' name.",
+                true, schema(prop("preset", "string"), req("preset")),
+                args -> control.setRoutingPreset(str(args, "preset"))));
+    }
+
+    // ----- small schema/arg helpers -----
+
+    /** A single named property with an optional JSON-schema type (null = any). */
+    private record Prop(String name, String type) { }
+
+    private Prop prop(String name, String type) {
+        return new Prop(name, type);
+    }
+
+    /** Marker carrying the list of required property names. */
+    private record Required(String[] names) { }
+
+    private Required req(String... names) {
+        return new Required(names);
+    }
+
+    private ObjectNode schema(Object... parts) {
+        ObjectNode schema = mapper.createObjectNode();
+        schema.put("type", "object");
+        ObjectNode props = mapper.createObjectNode();
+        com.fasterxml.jackson.databind.node.ArrayNode required = mapper.createArrayNode();
+        for (Object part : parts) {
+            if (part instanceof Prop p) {
+                ObjectNode node = mapper.createObjectNode();
+                if (p.type() != null) {
+                    node.put("type", p.type());
+                }
+                props.set(p.name(), node);
+            } else if (part instanceof Required r) {
+                for (String name : r.names()) {
+                    required.add(name);
+                }
+            }
+        }
+        schema.set("properties", props);
+        if (!required.isEmpty()) {
+            schema.set("required", required);
+        }
+        return schema;
+    }
+
+    private static String str(ObjectNode args, String field) {
+        JsonNode node = args.get(field);
+        return node != null && node.isTextual() ? node.asText() : null;
+    }
+
+    private static boolean bool(ObjectNode args, String field) {
+        JsonNode node = args.get(field);
+        return node != null && node.asBoolean(false);
     }
 }
