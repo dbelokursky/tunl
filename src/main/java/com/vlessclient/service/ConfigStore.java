@@ -102,6 +102,11 @@ public class ConfigStore {
         return settings;
     }
 
+    /** @return the directory backing this store (holds servers.json, settings.json, ...). */
+    public Path getDataDir() {
+        return dataDir;
+    }
+
     public synchronized void saveSettings(AppSettings settings) {
         this.settings = settings;
         Path file = dataDir.resolve(SETTINGS_FILE);

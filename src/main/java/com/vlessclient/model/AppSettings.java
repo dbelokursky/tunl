@@ -60,6 +60,23 @@ public class AppSettings {
     @JsonProperty("health_check_targets")
     private List<HealthCheckTarget> healthCheckTargets = defaultHealthCheckTargets();
 
+    /** Whether the local MCP control server is enabled. Off by default. */
+    @JsonProperty("mcp_enabled")
+    private boolean mcpEnabled;
+
+    /** Loopback TCP port the MCP server listens on. High port to avoid clashes. */
+    @JsonProperty("mcp_port")
+    private int mcpPort = 55555;
+
+    /**
+     * Whether MCP tools that change state (add/edit servers, routing, connect)
+     * are permitted. When {@code false} the server exposes read-only tools only.
+     * The most dangerous actions (TUN connect, delete) always require an explicit
+     * {@code confirm} argument regardless of this flag.
+     */
+    @JsonProperty("mcp_allow_mutations")
+    private boolean mcpAllowMutations = true;
+
     public AppSettings() {
     }
 
@@ -205,5 +222,29 @@ public class AppSettings {
 
     public void setHealthCheckTargets(List<HealthCheckTarget> healthCheckTargets) {
         this.healthCheckTargets = healthCheckTargets;
+    }
+
+    public boolean isMcpEnabled() {
+        return mcpEnabled;
+    }
+
+    public void setMcpEnabled(boolean mcpEnabled) {
+        this.mcpEnabled = mcpEnabled;
+    }
+
+    public int getMcpPort() {
+        return mcpPort;
+    }
+
+    public void setMcpPort(int mcpPort) {
+        this.mcpPort = mcpPort;
+    }
+
+    public boolean isMcpAllowMutations() {
+        return mcpAllowMutations;
+    }
+
+    public void setMcpAllowMutations(boolean mcpAllowMutations) {
+        this.mcpAllowMutations = mcpAllowMutations;
     }
 }

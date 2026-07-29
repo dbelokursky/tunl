@@ -15,6 +15,9 @@ import com.vlessclient.service.SubscriptionService;
 import com.vlessclient.service.ThemeManager;
 import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.service.UpdateManager;
+import com.vlessclient.service.mcp.AppControlService;
+import com.vlessclient.service.mcp.DefaultAppControlService;
+import com.vlessclient.service.mcp.McpServerService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -93,6 +96,16 @@ public class ServiceLocator {
 
         register(LoginItemService.class, new LoginItemService());
 
+        // MCP control server: a facade over the services above, plus the server
+        // that exposes it to agents. Started here so `mcp_enabled` takes effect
+        // at launch; re-reconciled whenever settings are saved.
+        SingBoxEngine engine = (SingBoxEngine) services.get(SingBoxEngine.class);
+        DefaultAppControlService control = new DefaultAppControlService(configStore, engine);
+        register(AppControlService.class, control);
+        McpServerService mcpServerService = new McpServerService(configStore, control);
+        register(McpServerService.class, mcpServerService);
+        mcpServerService.apply();
+
         log.info("ServiceLocator initialized");
     }
 
@@ -132,6 +145,15 @@ public class ServiceLocator {
      */
     public static void shutdown() {
         log.info("ServiceLocator shutting down");
+
+        try {
+            Object mcp = services.get(McpServerService.class);
+            if (mcp instanceof McpServerService mcpServerService) {
+                mcpServerService.stop();
+            }
+        } catch (Exception e) {
+            log.error("Error stopping MCP server during shutdown", e);
+        }
 
         try {
             Object updater = services.get(UpdateManager.class);
@@ -197,7 +219,13 @@ public class ServiceLocator {
      */
     public static void registerSingBoxEngine(Path binaryPath) {
         singBoxPath = binaryPath.toString();
-        register(SingBoxEngine.class, new SingBoxEngine(binaryPath));
+        SingBoxEngine engine = new SingBoxEngine(binaryPath);
+        register(SingBoxEngine.class, engine);
+        // Point the MCP control facade at the freshly created engine.
+        Object control = services.get(AppControlService.class);
+        if (control instanceof DefaultAppControlService defaultControl) {
+            defaultControl.setEngine(engine);
+        }
         log.info("SingBoxEngine registered with binary: {}", singBoxPath);
     }
 }
