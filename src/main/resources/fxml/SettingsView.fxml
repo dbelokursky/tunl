@@ -5,7 +5,6 @@
 <?import javafx.scene.control.CheckBox?>
 <?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
-<?import javafx.scene.control.ProgressBar?>
 <?import javafx.scene.control.Separator?>
 <?import javafx.scene.control.TextArea?>
 <?import javafx.scene.control.TextField?>
@@ -220,18 +219,14 @@
             <Label fx:id="geoAttributionLabel" styleClass="hint-label"
                    wrapText="true" maxWidth="Infinity"/>
 
-            <!-- Updates: the app and the sing-box core, each on its own row
-                 with a status dot, current→latest detail, and an action.
-                 One "Check for updates" checks both. -->
+            <!-- Updates: the app only. The sing-box core ships pinned with the
+                 app and moves with it, so it has no row and no action here. -->
             <VBox styleClass="updates-section" spacing="10">
                 <HBox alignment="CENTER_LEFT" spacing="10">
                     <Label fx:id="updatesLabel" text="Updates" styleClass="section-header"/>
                     <Region HBox.hgrow="ALWAYS"/>
-                    <Button fx:id="checkCoreUpdateButton" text="Check for updates"/>
+                    <Button fx:id="checkUpdatesButton" text="Check for updates"/>
                 </HBox>
-
-                <ProgressBar fx:id="coreUpdateProgress" visible="false" managed="false"
-                             maxWidth="Infinity" prefHeight="14"/>
 
                 <!-- App sub-block: name + action on top, status below -->
                 <VBox fx:id="appUpdateRow" styleClass="update-item" spacing="3">
@@ -244,22 +239,6 @@
                                 managed="false"/>
                     </HBox>
                     <Label fx:id="appUpdateDetail" text="" styleClass="core-status"/>
-                </VBox>
-
-                <!-- sing-box core sub-block -->
-                <VBox fx:id="coreUpdateRow" styleClass="update-item" spacing="3">
-                    <HBox alignment="CENTER_LEFT" spacing="8">
-                        <Circle fx:id="coreUpdateDot" radius="5"
-                                styleClass="status-circle-disconnected"/>
-                        <Label fx:id="coreUpdateNameLabel" text="sing-box"
-                               styleClass="service-name"/>
-                        <Region HBox.hgrow="ALWAYS"/>
-                        <Button fx:id="installCoreUpdateButton" text="Update" visible="false"
-                                managed="false"/>
-                        <Button fx:id="rollbackCoreButton" text="Roll back" visible="false"
-                                managed="false"/>
-                    </HBox>
-                    <Label fx:id="coreUpdateStatusLabel" text="" styleClass="core-status"/>
                 </VBox>
             </VBox>
         </VBox>

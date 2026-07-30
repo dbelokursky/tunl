@@ -171,7 +171,113 @@ class SingBoxInstallerTest {
         assertThat(SingBoxInstaller.brewInstallCommand()).isEqualTo("brew install sing-box");
     }
 
+    // ===== cache reconciliation =====
+    // findExisting() prefers the cache over the classpath-bundled binary, so a
+    // cache from another pin has to be cleared or bumping the pin would never
+    // reach existing users.
+
+    @Test
+    void reconcileCacheWithPin_keepsCache_whenMarkerMatchesPin() throws Exception {
+        Path installDir = tempDir.resolve("bin");
+        Path cached = writeFakeCore(installDir, SingBoxInstaller.PINNED_VERSION);
+        Path marker = installDir.resolve("sing-box.version");
+        Files.writeString(marker, SingBoxInstaller.PINNED_VERSION);
+
+        new SingBoxInstaller(installDir).reconcileCacheWithPin();
+
+        assertThat(cached).exists();
+        assertThat(marker).exists();
+    }
+
+    @Test
+    void reconcileCacheWithPin_dropsCache_whenMarkerIsFromAnotherPin() throws Exception {
+        Path installDir = tempDir.resolve("bin");
+        Path cached = writeFakeCore(installDir, "1.12.0");
+        Path marker = installDir.resolve("sing-box.version");
+        Files.writeString(marker, "1.12.0");
+
+        new SingBoxInstaller(installDir).reconcileCacheWithPin();
+
+        assertThat(cached).doesNotExist();
+        assertThat(marker).doesNotExist();
+    }
+
+    @Test
+    void reconcileCacheWithPin_probesBinaryAndRecordsIt_whenMarkerIsMissing() throws Exception {
+        // The migration path: caches written before the marker existed.
+        Path installDir = tempDir.resolve("bin");
+        Path cached = writeFakeCore(installDir, SingBoxInstaller.PINNED_VERSION);
+
+        new SingBoxInstaller(installDir).reconcileCacheWithPin();
+
+        assertThat(cached).exists();
+        assertThat(installDir.resolve("sing-box.version"))
+                .exists()
+                .content()
+                .isEqualTo(SingBoxInstaller.PINNED_VERSION);
+    }
+
+    @Test
+    void reconcileCacheWithPin_dropsCache_whenProbedVersionDiffersFromPin() throws Exception {
+        Path installDir = tempDir.resolve("bin");
+        Path cached = writeFakeCore(installDir, "1.11.5");
+
+        new SingBoxInstaller(installDir).reconcileCacheWithPin();
+
+        assertThat(cached).doesNotExist();
+    }
+
+    @Test
+    void reconcileCacheWithPin_dropsCache_whenVersionIsUnreadable() throws Exception {
+        Path installDir = tempDir.resolve("bin");
+        Files.createDirectories(installDir);
+        Path cached = installDir.resolve("sing-box");
+        Files.writeString(cached, "#!/bin/sh\nexit 1\n");
+        assertThat(cached.toFile().setExecutable(true)).isTrue();
+
+        new SingBoxInstaller(installDir).reconcileCacheWithPin();
+
+        // Keeping a cache of unknown provenance would silently pin the user to
+        // the wrong core; losing it only costs a re-extraction.
+        assertThat(cached).doesNotExist();
+    }
+
+    @Test
+    void reconcileCacheWithPin_removesCoreUpdaterResidue() throws Exception {
+        Path installDir = tempDir.resolve("bin");
+        writeFakeCore(installDir, SingBoxInstaller.PINNED_VERSION);
+        Path rollbackCopy = installDir.resolve("sing-box.previous");
+        Path updaterState = installDir.resolve("core-update.json");
+        Files.writeString(rollbackCopy, "old binary");
+        Files.writeString(updaterState, "{}");
+
+        new SingBoxInstaller(installDir).reconcileCacheWithPin();
+
+        assertThat(rollbackCopy).doesNotExist();
+        assertThat(updaterState).doesNotExist();
+    }
+
+    @Test
+    void reconcileCacheWithPin_isNoOp_whenNoCacheExists() {
+        Path installDir = tempDir.resolve("bin");
+
+        new SingBoxInstaller(installDir).reconcileCacheWithPin();
+
+        assertThat(installDir.resolve("sing-box")).doesNotExist();
+    }
+
     // ===== helpers =====
+
+    /** A stand-in core that answers {@code version} like the real binary. */
+    private static Path writeFakeCore(Path installDir, String version) throws IOException {
+        Files.createDirectories(installDir);
+        Path binary = installDir.resolve("sing-box");
+        Files.writeString(binary, "#!/bin/sh\necho \"sing-box version " + version + "\"\n");
+        if (!binary.toFile().setExecutable(true)) {
+            throw new IOException("Could not make " + binary + " executable");
+        }
+        return binary;
+    }
 
     private static String currentArch() {
         String osArch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);

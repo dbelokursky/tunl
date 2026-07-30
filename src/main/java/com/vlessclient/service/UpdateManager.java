@@ -173,8 +173,7 @@ public class UpdateManager {
      *
      * <p>The app ships unsigned, so users are already trained to click past
      * Gatekeeper/SmartScreen — an installer that reaches their Downloads folder
-     * is likely to be run. Two checks make that safe to rely on, mirroring
-     * {@link CoreUpdateService}:</p>
+     * is likely to be run. Two checks make that safe to rely on:</p>
      *
      * <ul>
      *   <li>The URL must sit under the official releases prefix, so a tampered
