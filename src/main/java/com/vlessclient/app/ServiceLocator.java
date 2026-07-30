@@ -3,7 +3,6 @@ package com.vlessclient.app;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.platform.Autostart;
 import com.vlessclient.service.ConfigStore;
-import com.vlessclient.service.CoreUpdateService;
 import com.vlessclient.service.CountryResolver;
 import com.vlessclient.service.GeoIpDatabase;
 import com.vlessclient.service.LatencyTester;
@@ -48,11 +47,9 @@ public class ServiceLocator {
         SingBoxInstaller installer = new SingBoxInstaller();
         register(SingBoxInstaller.class, installer);
 
-        CoreUpdateService coreUpdateService = new CoreUpdateService(installer);
-        register(CoreUpdateService.class, coreUpdateService);
-        // Before binary resolution: drop an in-app-updated cache the new
-        // app pin has superseded, so the app-shipped core takes over.
-        coreUpdateService.reconcileWithPinnedVersion();
+        // Before binary resolution: drop a cache left by a different app pin,
+        // so the core this release ships takes over.
+        installer.reconcileCacheWithPin();
 
         Optional<Path> existing = installer.findExisting();
         if (existing.isPresent()) {

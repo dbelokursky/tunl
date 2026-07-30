@@ -218,9 +218,9 @@ quit via **Quit** in the tray menu or `⌘Q`.
 
 ### Updating the sing-box core
 
-**Settings → About → "Check for updates"** — core patches arrive without an
-app release (within the minor branch, validated with `sing-box check`, with
-rollback on failure).
+The core ships pinned with the app and moves only when the app is updated —
+there is no separate core update. On startup a cache left by an earlier pin is
+discarded, so the bundled binary always wins.
 
 ### Hotkeys
 

@@ -5,7 +5,6 @@ import com.vlessclient.model.ProxyMode;
 import com.vlessclient.platform.Autostart;
 import com.vlessclient.platform.PrivilegeHelper;
 import com.vlessclient.service.ConfigStore;
-import com.vlessclient.service.CoreUpdateService;
 import com.vlessclient.service.SingBoxConfigGenerator;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.SingBoxInstaller;
@@ -211,7 +210,6 @@ public class VlessClientApp extends Application {
     @Override
     public void start(Stage primaryStage) throws Exception {
         ensureSingBoxAvailable();
-        attachCoreTrialMonitor();
 
         FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/MainView.fxml"));
         Parent root = loader.load();
@@ -403,31 +401,6 @@ public class VlessClientApp extends Application {
             log.info("sing-box ready at {}", installed.get());
         } else {
             log.warn("User continued without sing-box; Connect will be unavailable");
-        }
-    }
-
-    /**
-     * Wires the core-update trial monitor to the engine: an in-app-updated
-     * sing-box that errors on its first connect is rolled back automatically,
-     * with a warning dialog telling the user which version was restored.
-     */
-    private void attachCoreTrialMonitor() {
-        try {
-            CoreUpdateService coreUpdateService = ServiceLocator.get(CoreUpdateService.class);
-            SingBoxEngine engine = ServiceLocator.get(SingBoxEngine.class);
-            coreUpdateService.attachToEngine(engine, restoredVersion ->
-                    Platform.runLater(() -> {
-                        javafx.scene.control.Alert alert =
-                                new javafx.scene.control.Alert(
-                                        javafx.scene.control.Alert.AlertType.WARNING);
-                        alert.setTitle(I18n.get("core.trial.rolledback.title"));
-                        alert.setHeaderText(null);
-                        alert.setContentText(I18n.get("core.trial.rolledback",
-                                restoredVersion != null ? restoredVersion : "?"));
-                        alert.show();
-                    }));
-        } catch (IllegalArgumentException e) {
-            log.debug("Core trial monitor not attached: {}", e.getMessage());
         }
     }
 

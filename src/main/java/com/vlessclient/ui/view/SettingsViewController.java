@@ -18,7 +18,6 @@ import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
-import javafx.scene.control.ProgressBar;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.input.Clipboard;
@@ -80,13 +79,7 @@ public class SettingsViewController implements ViewShownAware {
     @FXML private TextField tunIpv4Field;
 
     @FXML private Label updatesLabel;
-    @FXML private Label coreUpdateStatusLabel;
-    @FXML private ProgressBar coreUpdateProgress;
-    @FXML private Button checkCoreUpdateButton;
-    @FXML private Button installCoreUpdateButton;
-    @FXML private Button rollbackCoreButton;
-    @FXML private Circle coreUpdateDot;
-    @FXML private VBox coreUpdateRow;
+    @FXML private Button checkUpdatesButton;
 
     @FXML private VBox appUpdateRow;
     @FXML private Circle appUpdateDot;
@@ -385,25 +378,19 @@ public class SettingsViewController implements ViewShownAware {
     }
 
     /**
-     * Fills the About block and hands the whole Updates block (app row,
-     * sing-box core row, async sing-box version detection) over to
-     * {@link UpdatesSection}, which drives the controls listed here.
+     * Fills the About block and hands the whole Updates block (app row, async
+     * sing-box version detection) over to {@link UpdatesSection}, which drives
+     * the controls listed here.
      */
     private void initAboutSection() {
         appVersionValue.setText(AppVersion.VERSION);
         updatesSection = new UpdatesSection(new UpdatesSection.Controls(
                 singboxVersionValue,
-                coreUpdateStatusLabel,
-                coreUpdateProgress,
-                checkCoreUpdateButton,
-                installCoreUpdateButton,
-                rollbackCoreButton,
-                coreUpdateDot,
-                coreUpdateRow,
+                checkUpdatesButton,
                 appUpdateRow,
                 appUpdateDot,
                 appUpdateDetail,
-                downloadAppButton), configStore);
+                downloadAppButton));
         updatesSection.init();
     }
 
@@ -445,7 +432,7 @@ public class SettingsViewController implements ViewShownAware {
         appVersionLabel.textProperty().bind(I18n.binding("settings.app.version"));
         singboxVersionLabel.textProperty().bind(I18n.binding("settings.singbox.version"));
         updatesLabel.textProperty().bind(I18n.binding("settings.updates"));
-        checkCoreUpdateButton.textProperty().bind(I18n.binding("settings.core.check"));
+        checkUpdatesButton.textProperty().bind(I18n.binding("settings.updates.check"));
         downloadAppButton.textProperty().bind(I18n.binding("settings.update.download"));
         advancedLabel.textProperty().bind(I18n.binding("settings.advanced"));
         proxyDnsLabel.textProperty().bind(I18n.binding("settings.proxy.dns"));

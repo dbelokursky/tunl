@@ -51,6 +51,13 @@ public class SingBoxInstaller {
     public static final String PINNED_VERSION;
 
     /**
+     * Records which pinned version populated the cache, so
+     * {@link #reconcileCacheWithPin()} can spot a cache left behind by an
+     * older app release without spawning the binary on every launch.
+     */
+    private static final String VERSION_MARKER_NAME = "sing-box.version";
+
+    /**
      * SHA-256 checksums of the host OS's release archives, keyed by
      * architecture (arm64/amd64), from the same properties resource. Verified
      * after the runtime fallback download to protect against corruption or
@@ -207,6 +214,133 @@ public class SingBoxInstaller {
     }
 
     /**
+     * Drops a cached binary that a different app pin put there, so the core
+     * this release ships takes over. Call once at startup, before
+     * {@link #findExisting()}.
+     *
+     * <p>Necessary because {@code findExisting()} prefers the cache over the
+     * classpath-bundled binary: without this, a cache written by an earlier
+     * release would shadow the newer pinned core forever, and bumping the pin
+     * would have no effect for existing users.</p>
+     *
+     * <p>The cache's version comes from the {@value #VERSION_MARKER_NAME}
+     * marker. Caches written before the marker existed are probed once by
+     * running the binary, and the answer is recorded so later launches stay on
+     * the cheap path. A cache whose version cannot be determined is treated as
+     * stale — losing a cache costs one re-extraction, keeping a wrong one
+     * silently pins the user to the wrong core.</p>
+     */
+    public void reconcileCacheWithPin() {
+        removeCoreUpdaterResidue();
+        Path cached = managedBinaryPath();
+        Path marker = installDir.resolve(VERSION_MARKER_NAME);
+        if (!Files.isRegularFile(cached)) {
+            deleteQuietly(marker);
+            return;
+        }
+
+        String cachedVersion = readMarker(marker);
+        if (cachedVersion == null) {
+            cachedVersion = probeVersion(cached);
+            if (cachedVersion != null) {
+                writeMarker(marker, cachedVersion);
+            }
+        }
+        if (PINNED_VERSION.equals(cachedVersion)) {
+            return;
+        }
+
+        log.info("Cached sing-box {} does not match the app-pinned {}; removing the cache "
+                        + "so the bundled binary takes over",
+                cachedVersion != null ? cachedVersion : "of unknown version", PINNED_VERSION);
+        deleteQuietly(cached);
+        deleteQuietly(marker);
+    }
+
+    /**
+     * Removes leftovers of the in-app core updater that used to live in this
+     * directory: its rollback copy (a full binary, tens of megabytes) and its
+     * state file. Both are inert now, so this is one-time housekeeping for
+     * users upgrading from a release that had the updater.
+     */
+    private void removeCoreUpdaterResidue() {
+        deleteQuietly(installDir.resolve(binaryName + ".previous"));
+        deleteQuietly(installDir.resolve("core-update.json"));
+    }
+
+    private String readMarker(Path marker) {
+        if (!Files.isRegularFile(marker)) {
+            return null;
+        }
+        try {
+            String recorded = Files.readString(marker).trim();
+            return recorded.isEmpty() ? null : recorded;
+        } catch (IOException e) {
+            log.debug("Could not read {}: {}", marker, e.getMessage());
+            return null;
+        }
+    }
+
+    private void writeMarker(Path marker, String version) {
+        try {
+            Files.createDirectories(marker.getParent());
+            Files.writeString(marker, version);
+        } catch (IOException e) {
+            log.debug("Could not record the cached sing-box version: {}", e.getMessage());
+        }
+    }
+
+    private void deleteQuietly(Path path) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException e) {
+            log.debug("Could not delete {}: {}", path, e.getMessage());
+        }
+    }
+
+    /**
+     * Asks a cached binary for its version. Output goes to a file rather than a
+     * pipe: this runs on the startup path, and reading a pipe from a binary
+     * that never closes stdout would hang the app before the UI appears, where
+     * the timeout below cannot help.
+     *
+     * @return the version, or null if the binary did not answer as expected
+     */
+    private String probeVersion(Path binary) {
+        Path out = null;
+        try {
+            out = Files.createTempFile("singbox-version-", ".out");
+            ProcessBuilder pb = new ProcessBuilder(binary.toAbsolutePath().toString(), "version");
+            pb.redirectErrorStream(true);
+            pb.redirectOutput(out.toFile());
+            Process proc = pb.start();
+            if (!proc.waitFor(5, TimeUnit.SECONDS)) {
+                proc.destroyForcibly();
+                log.debug("Cached sing-box did not report its version in time");
+                return null;
+            }
+            if (proc.exitValue() != 0) {
+                return null;
+            }
+            String firstLine = Files.readString(out).lines().findFirst().orElse("");
+            String prefix = "sing-box version ";
+            return firstLine.startsWith(prefix)
+                    ? firstLine.substring(prefix.length()).trim()
+                    : null;
+        } catch (IOException e) {
+            log.debug("Could not probe the cached sing-box version: {}", e.getMessage());
+            return null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } finally {
+            if (out != null) {
+                deleteQuietly(out);
+            }
+        }
+    }
+
+    /**
      * Downloads the pinned sing-box release for the current CPU architecture,
      * extracts it into the cache directory, and sets the executable bit.
      *
@@ -236,6 +370,7 @@ public class SingBoxInstaller {
                 Files.copy(sourceBinary, targetBinary, StandardCopyOption.REPLACE_EXISTING);
                 makeExecutable(targetBinary);
                 verifyBinary(targetBinary);
+                writeMarker(installDir.resolve(VERSION_MARKER_NAME), PINNED_VERSION);
                 log.info("sing-box {} installed at {}", PINNED_VERSION, targetBinary);
                 return targetBinary.toAbsolutePath();
             } finally {
@@ -294,6 +429,7 @@ public class SingBoxInstaller {
             Path target = installDir.resolve(binaryName);
             Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
             makeExecutable(target);
+            writeMarker(installDir.resolve(VERSION_MARKER_NAME), PINNED_VERSION);
             log.info("Extracted bundled sing-box ({}) from classpath to {}", arch, target);
             return Optional.of(target.toAbsolutePath());
         }
@@ -441,9 +577,9 @@ public class SingBoxInstaller {
 
     /**
      * The cached binary this app manages (download target of {@link #install}
-     * and the classpath-extraction target). In-app core updates operate only
-     * on this path so the sudoers rule and a live SingBoxEngine, both bound
-     * to it, stay valid across updates.
+     * and the classpath-extraction target). The path is stable across app
+     * releases, so the sudoers rule and a live SingBoxEngine, both bound to
+     * it, survive a pin bump.
      */
     public Path managedBinaryPath() {
         return installDir.resolve(binaryName);
