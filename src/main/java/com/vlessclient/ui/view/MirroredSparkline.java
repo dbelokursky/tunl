@@ -19,10 +19,12 @@ import javafx.scene.shape.StrokeLineJoin;
 
 /**
  * A two-series mirrored sparkline for the Dashboard's real-time traffic
- * readout: download samples plot upward from a shared horizontal axis and
- * upload samples plot downward, the way router status pages and nload draw
- * a duplex link. Each half auto-scales to its own rolling maximum so a busy
- * downlink cannot flatten the (typically much smaller) uplink.
+ * readout: upload samples plot upward from a shared horizontal axis and
+ * download samples plot downward, so the direction a curve travels matches
+ * the word naming it. (nload and many router pages mirror a duplex link the
+ * other way round; the plain reading of "up" won here.) Each half auto-scales
+ * to its own rolling maximum so a busy downlink cannot flatten the (typically
+ * much smaller) uplink.
  *
  * <p>Rendering follows the retired single-series {@code Sparkline}: a rolling
  * buffer of up to {@link #maxSamples} sample pairs drawn on a {@link Canvas}
@@ -263,15 +265,15 @@ public class MirroredSparkline extends Region {
         int i = 0;
         for (double[] s : samples) {
             xs[i] = startX + stepX * i;
-            downYs[i] = axisY - (s[0] / maxDown) * halfH;
-            upYs[i] = axisY + (s[1] / maxUp) * halfH;
+            upYs[i] = axisY - (s[1] / maxUp) * halfH;
+            downYs[i] = axisY + (s[0] / maxDown) * halfH;
             i++;
         }
 
-        drawHalf(g, xs, downYs, count, axisY, axisY - halfH,
-                downLineColor.get(), downFillColor.get());
-        drawHalf(g, xs, upYs, count, axisY, axisY + halfH,
+        drawHalf(g, xs, upYs, count, axisY, axisY - halfH,
                 upLineColor.get(), upFillColor.get());
+        drawHalf(g, xs, downYs, count, axisY, axisY + halfH,
+                downLineColor.get(), downFillColor.get());
     }
 
     /**
