@@ -41,6 +41,23 @@ public interface TunLauncher {
     Launched launch(Path binary, Path configFile) throws IOException;
 
     /**
+     * Removes whatever {@link #launch} had to publish outside the caller's
+     * temp file for the privileged side to read — on macOS a copy of the
+     * config at the fixed path the sudoers rule pins, which carries the
+     * server's credentials.
+     *
+     * <p>Call once the launched process has exited, or after a launch that
+     * threw. Unlike the caller's temp config, the published path is
+     * <em>fixed</em> rather than unique per session, so the caller must be
+     * sure no newer session has taken over before calling this.</p>
+     *
+     * <p>Best effort: failures are logged by the implementation, never thrown.
+     * The default is a no-op, for launchers that read the config in place.</p>
+     */
+    default void cleanupSession() {
+    }
+
+    /**
      * Returns the launcher for the host platform.
      *
      * @return the launcher for the host platform

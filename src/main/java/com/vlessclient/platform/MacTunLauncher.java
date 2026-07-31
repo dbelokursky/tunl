@@ -50,6 +50,28 @@ public final class MacTunLauncher implements TunLauncher {
     }
 
     /**
+     * Deletes the published config. It lives at a fixed path so the sudoers
+     * rule can pin it, which means it is not self-cleaning the way a
+     * per-session temp file is: without this it would sit on disk with the
+     * server's credentials until the next connect overwrote it — surviving
+     * disconnect, app exit and reboot.
+     *
+     * <p>The run dir is user-owned, so no privileges are needed to remove it.</p>
+     */
+    @Override
+    public void cleanupSession() {
+        Path published = PrivilegeHelper.elevatedConfig();
+        try {
+            if (Files.deleteIfExists(published)) {
+                log.debug("Removed the published TUN config at {}", published);
+            }
+        } catch (IOException e) {
+            log.warn("Could not remove the published TUN config at {}: {}",
+                    published, e.getMessage());
+        }
+    }
+
+    /**
      * Starts sing-box via {@code sudo -n} — no password prompt. Requires the
      * sudoers NOPASSWD rule installed by {@link PrivilegeHelper#configure}.
      * The wrapper itself runs as the current user; only the sing-box child
