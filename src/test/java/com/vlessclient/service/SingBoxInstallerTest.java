@@ -266,6 +266,64 @@ class SingBoxInstallerTest {
         assertThat(installDir.resolve("sing-box")).doesNotExist();
     }
 
+    // ===== version detection =====
+
+    @Test
+    void detectVersion_answersFromMarker_withoutRunningTheManagedBinary() throws Exception {
+        Path installDir = tempDir.resolve("bin");
+        Files.createDirectories(installDir);
+        // A binary that fails if executed: the marker must be believed instead.
+        Path cached = installDir.resolve("sing-box");
+        Files.writeString(cached, "#!/bin/sh\nexit 1\n");
+        assertThat(cached.toFile().setExecutable(true)).isTrue();
+        Files.writeString(installDir.resolve("sing-box.version"), "1.13.14");
+
+        SingBoxInstaller installer = new SingBoxInstaller(installDir);
+
+        assertThat(installer.detectVersion(cached)).isEqualTo("1.13.14");
+    }
+
+    @Test
+    void detectVersion_runsTheBinary_whenItIsNotTheManagedOne() throws Exception {
+        // Homebrew / $PATH / .app bundle: no marker describes those, so ask.
+        Path elsewhere = tempDir.resolve("opt");
+        Path external = writeFakeCore(elsewhere, "1.12.3");
+        Files.createDirectories(tempDir.resolve("bin"));
+        Files.writeString(tempDir.resolve("bin").resolve("sing-box.version"), "1.13.14");
+
+        SingBoxInstaller installer = new SingBoxInstaller(tempDir.resolve("bin"));
+
+        assertThat(installer.detectVersion(external)).isEqualTo("1.12.3");
+    }
+
+    @Test
+    void detectVersion_runsTheBinary_whenTheMarkerIsMissing() throws Exception {
+        Path installDir = tempDir.resolve("bin");
+        Path cached = writeFakeCore(installDir, "1.13.14");
+
+        SingBoxInstaller installer = new SingBoxInstaller(installDir);
+
+        assertThat(installer.detectVersion(cached)).isEqualTo("1.13.14");
+    }
+
+    @Test
+    void detectVersion_returnsNull_whenTheBinaryDoesNotAnswer() throws Exception {
+        Path installDir = tempDir.resolve("bin");
+        Files.createDirectories(installDir);
+        Path cached = installDir.resolve("sing-box");
+        Files.writeString(cached, "#!/bin/sh\necho 'not a version line'\n");
+        assertThat(cached.toFile().setExecutable(true)).isTrue();
+
+        SingBoxInstaller installer = new SingBoxInstaller(installDir);
+
+        assertThat(installer.detectVersion(cached)).isNull();
+    }
+
+    @Test
+    void detectVersion_returnsNull_forNullPath() {
+        assertThat(new SingBoxInstaller(tempDir.resolve("bin")).detectVersion(null)).isNull();
+    }
+
     // ===== helpers =====
 
     /** A stand-in core that answers {@code version} like the real binary. */

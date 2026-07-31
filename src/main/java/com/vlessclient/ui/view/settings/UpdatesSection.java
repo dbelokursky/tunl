@@ -3,6 +3,7 @@ package com.vlessclient.ui.view.settings;
 import com.vlessclient.app.AppVersion;
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.service.SingBoxInstaller;
 import com.vlessclient.service.UpdateManager;
 import javafx.application.Platform;
 import javafx.scene.control.Button;
@@ -207,25 +208,28 @@ public final class UpdatesSection {
         t.start();
     }
 
+    /**
+     * The running core's version for the About row. Delegates to
+     * {@link SingBoxInstaller#detectVersion(java.nio.file.Path)}, which answers
+     * from the cache marker for the managed binary — so opening Settings
+     * usually spawns no process at all.
+     */
     private String detectSingBoxVersion() {
         String singBoxPath = ServiceLocator.getSingBoxPath();
         if (singBoxPath == null) {
             return I18n.get("settings.version.unknown");
         }
+        String version;
         try {
-            ProcessBuilder pb = new ProcessBuilder(singBoxPath, "version");
-            pb.redirectErrorStream(true);
-            Process process = pb.start();
-            String output;
-            try (var reader = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(process.getInputStream()))) {
-                output = reader.readLine();
-            }
-            process.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
-            return output != null ? output.trim() : I18n.get("settings.version.unknown");
-        } catch (Exception e) {
-            log.debug("Could not detect sing-box version", e);
+            version = ServiceLocator.get(SingBoxInstaller.class)
+                    .detectVersion(java.nio.file.Path.of(singBoxPath));
+        } catch (IllegalArgumentException e) {
+            log.debug("SingBoxInstaller not available");
             return I18n.get("settings.version.unknown");
         }
+        // Bare "1.13.14", matching the App Version row above it — the label
+        // already says "sing-box Version", so repeating it in the value read
+        // as stutter.
+        return version != null ? version : I18n.get("settings.version.unknown");
     }
 }
