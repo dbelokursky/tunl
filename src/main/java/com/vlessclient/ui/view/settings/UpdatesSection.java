@@ -124,11 +124,11 @@ public final class UpdatesSection {
         }
         if (updateManager.updateAvailableProperty().get()) {
             String latest = updateManager.latestVersionProperty().get();
-            setUpdateRow(AppVersion.VERSION + "  →  " + latest, "core-status-available");
+            setUpdateRow(AppVersion.VERSION + "  →  " + latest, "update-status-available");
             downloadAppButton.setVisible(true);
             downloadAppButton.setManaged(true);
         } else {
-            setUpdateRow(I18n.get("settings.updates.uptodate"), "core-status-ok");
+            setUpdateRow(I18n.get("settings.updates.uptodate"), "update-status-ok");
             downloadAppButton.setVisible(false);
             downloadAppButton.setManaged(false);
         }
@@ -138,7 +138,7 @@ public final class UpdatesSection {
         if (updateManager == null) {
             return;
         }
-        setUpdateRow(I18n.get("settings.updates.checking"), "core-status-muted");
+        setUpdateRow(I18n.get("settings.updates.checking"), "update-status-muted");
         Thread t = new Thread(() -> {
             updateManager.checkForUpdates();       // updates properties via runLater
             Platform.runLater(this::renderAppRow); // reflect the outcome either way
@@ -156,18 +156,18 @@ public final class UpdatesSection {
             return;
         }
         downloadAppButton.setDisable(true);
-        setUpdateRow(I18n.get("settings.update.downloading"), "core-status-muted");
+        setUpdateRow(I18n.get("settings.update.downloading"), "update-status-muted");
         Thread t = new Thread(() -> {
             java.nio.file.Path saved = updateManager.downloadUpdate(url);
             Platform.runLater(() -> {
                 downloadAppButton.setDisable(false);
                 if (saved != null) {
-                    setUpdateRow(I18n.get("settings.update.downloaded"), "core-status-ok");
+                    setUpdateRow(I18n.get("settings.update.downloaded"), "update-status-ok");
                     downloadAppButton.setVisible(false);
                     downloadAppButton.setManaged(false);
                 } else {
                     setUpdateRow(I18n.get("settings.update.download.failed"),
-                            "core-status-error");
+                            "update-status-error");
                 }
             });
         }, "app-update-download");
@@ -183,16 +183,16 @@ public final class UpdatesSection {
     private void setUpdateRow(String text, String modifier) {
         appUpdateDetail.setText(text == null ? "" : text);
         // update-item-detail indents the status under the item name; its
-        // padding wins over core-status because it's defined later in the CSS.
-        appUpdateDetail.getStyleClass().setAll("core-status", "update-item-detail", modifier);
+        // padding wins over update-status because it's defined later in the CSS.
+        appUpdateDetail.getStyleClass().setAll("update-status", "update-item-detail", modifier);
         appUpdateDot.getStyleClass().setAll(dotClassFor(modifier));
     }
 
     private static String dotClassFor(String modifier) {
         return switch (modifier) {
-            case "core-status-ok" -> "status-circle-connected";
-            case "core-status-available" -> "status-circle-connecting";
-            case "core-status-error" -> "status-circle-error";
+            case "update-status-ok" -> "status-circle-connected";
+            case "update-status-available" -> "status-circle-connecting";
+            case "update-status-error" -> "status-circle-error";
             default -> "status-circle-disconnected";
         };
     }

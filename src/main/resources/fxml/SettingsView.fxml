@@ -238,7 +238,7 @@
                         <Button fx:id="downloadAppButton" text="Download" visible="false"
                                 managed="false"/>
                     </HBox>
-                    <Label fx:id="appUpdateDetail" text="" styleClass="core-status"/>
+                    <Label fx:id="appUpdateDetail" text="" styleClass="update-status"/>
                 </VBox>
             </VBox>
         </VBox>
