@@ -95,12 +95,13 @@
     <!-- Real-time traffic section -->
     <Label text="Real-time traffic" styleClass="section-header"/>
 
-    <!-- Mirrored duplex card: download plots up from the shared dashed axis,
-         upload down, the way router status pages draw a link. Legends and
-         speed readouts float over the chart corners of their halves; the
-         chevron graphics are set from the controller (Icons.chevronDouble*).
-         Overlay children pin to USE_PREF_SIZE so the StackPane doesn't
-         stretch them over the canvas. -->
+    <!-- Mirrored duplex card: upload plots up from the shared dashed axis and
+         download plots down, so a curve travels the way its name says. Each
+         legend and speed readout floats over the corners of ITS OWN half — so
+         they swap together with the curves, or they would label the wrong one.
+         The chevron graphics are set from the controller
+         (Icons.chevronDouble*). Overlay children pin to USE_PREF_SIZE so the
+         StackPane doesn't stretch them over the canvas. -->
     <VBox styleClass="card, traffic-card" maxWidth="Infinity">
         <padding>
             <Insets top="12" right="18" bottom="12" left="20"/>
@@ -109,18 +110,18 @@
             <MirroredSparkline fx:id="trafficSparkline" prefHeight="150"/>
             <HBox StackPane.alignment="TOP_LEFT" alignment="CENTER_LEFT" spacing="8"
                   maxWidth="-Infinity" maxHeight="-Infinity" pickOnBounds="false">
-                <Label fx:id="downloadCardIcon" styleClass="stats-icon-download"/>
-                <Label text="Download" styleClass="stats-title"/>
-            </HBox>
-            <Label fx:id="downloadSpeedLabel" text="0 B/s" styleClass="speed-value"
-                   StackPane.alignment="TOP_RIGHT"
-                   maxWidth="-Infinity" maxHeight="-Infinity"/>
-            <HBox StackPane.alignment="BOTTOM_LEFT" alignment="CENTER_LEFT" spacing="8"
-                  maxWidth="-Infinity" maxHeight="-Infinity" pickOnBounds="false">
                 <Label fx:id="uploadCardIcon" styleClass="stats-icon-upload"/>
                 <Label text="Upload" styleClass="stats-title"/>
             </HBox>
             <Label fx:id="uploadSpeedLabel" text="0 B/s" styleClass="speed-value"
+                   StackPane.alignment="TOP_RIGHT"
+                   maxWidth="-Infinity" maxHeight="-Infinity"/>
+            <HBox StackPane.alignment="BOTTOM_LEFT" alignment="CENTER_LEFT" spacing="8"
+                  maxWidth="-Infinity" maxHeight="-Infinity" pickOnBounds="false">
+                <Label fx:id="downloadCardIcon" styleClass="stats-icon-download"/>
+                <Label text="Download" styleClass="stats-title"/>
+            </HBox>
+            <Label fx:id="downloadSpeedLabel" text="0 B/s" styleClass="speed-value"
                    StackPane.alignment="BOTTOM_RIGHT"
                    maxWidth="-Infinity" maxHeight="-Infinity"/>
         </StackPane>
