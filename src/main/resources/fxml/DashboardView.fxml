@@ -151,7 +151,7 @@
             <Region HBox.hgrow="ALWAYS" minWidth="8"/>
 
             <Button fx:id="testLatencyButton" text="Test Latency"
-                    styleClass="secondary-button" minWidth="-Infinity"
+                    styleClass="secondary-button" prefWidth="140" minWidth="-Infinity"
                     onAction="#onTestLatencyClicked"/>
         </HBox>
 
@@ -175,7 +175,7 @@
             <Button fx:id="addTargetButton" text="+" styleClass="secondary-button"
                     minWidth="40" onAction="#onAddTargetClicked"/>
             <Button fx:id="recheckButton" text="Re-check" styleClass="secondary-button"
-                    prefWidth="120" onAction="#onRecheckClicked"/>
+                    prefWidth="140" minWidth="-Infinity" onAction="#onRecheckClicked"/>
         </HBox>
 
         <VBox fx:id="serviceStatusList" spacing="6"/>
