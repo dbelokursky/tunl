@@ -946,17 +946,17 @@
 
 /* ===== Core-update status line (Settings > About) =====
    Colour-coded verdict on its own row. */
-.core-status {
+.update-status {
     -fx-font-size: 12.5px;
     -fx-font-weight: bold;
     -fx-text-fill: -c-text-secondary;
     -fx-padding: 2 0 0 0;
 }
 
-.core-status-ok        { -fx-text-fill: -c-accent-fg; }
-.core-status-available { -fx-text-fill: -c-warn; }
-.core-status-error     { -fx-text-fill: -c-danger-fg; }
-.core-status-muted     { -fx-text-fill: -c-text-secondary; -fx-font-weight: normal; }
+.update-status-ok        { -fx-text-fill: -c-accent-fg; }
+.update-status-available { -fx-text-fill: -c-warn; }
+.update-status-error     { -fx-text-fill: -c-danger-fg; }
+.update-status-muted     { -fx-text-fill: -c-text-secondary; -fx-font-weight: normal; }
 
 /* Per-server latency results, listed under the SESSION row. A hairline
    top border separates them from the metrics above. */
@@ -982,7 +982,7 @@
 }
 
 /* Status line indented under the item name (past the dot). Defined after
-   .core-status so its left padding wins. */
+   .update-status so its left padding wins. */
 .update-item-detail {
     -fx-padding: 0 0 0 17;
 }
