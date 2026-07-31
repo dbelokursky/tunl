@@ -57,6 +57,16 @@ public class SingBoxInstaller {
      */
     private static final String VERSION_MARKER_NAME = "sing-box.version";
 
+    /** Version probes on the startup path: short, so a wedged binary can't stall launch. */
+    private static final int VERSION_PROBE_TIMEOUT_SECONDS = 5;
+
+    /**
+     * Post-install verification: longer, because the first exec of a freshly
+     * extracted 50 MB binary can be slow (on-access antivirus scanning, cold
+     * page cache), and failing there would discard a good download.
+     */
+    private static final int VERSION_VERIFY_TIMEOUT_SECONDS = 10;
+
     /**
      * SHA-256 checksums of the host OS's release archives, keyed by
      * architecture (arm64/amd64), from the same properties resource. Verified
@@ -241,7 +251,7 @@ public class SingBoxInstaller {
 
         String cachedVersion = readMarker(marker);
         if (cachedVersion == null) {
-            cachedVersion = probeVersion(cached);
+            cachedVersion = probeVersion(cached, VERSION_PROBE_TIMEOUT_SECONDS);
             if (cachedVersion != null) {
                 writeMarker(marker, cachedVersion);
             }
@@ -299,14 +309,61 @@ public class SingBoxInstaller {
     }
 
     /**
-     * Asks a cached binary for its version. Output goes to a file rather than a
-     * pipe: this runs on the startup path, and reading a pipe from a binary
-     * that never closes stdout would hang the app before the UI appears, where
-     * the timeout below cannot help.
+     * The version of the sing-box binary at {@code binary}, as a bare
+     * {@code 1.13.14}.
      *
-     * @return the version, or null if the binary did not answer as expected
+     * <p>For the managed binary the answer comes from the
+     * {@value #VERSION_MARKER_NAME} marker, so the common case costs no
+     * process spawn. That is safe because {@link #reconcileCacheWithPin()}
+     * runs at startup before anything reads this and deletes any cache whose
+     * marker disagrees with the pin. Anything else — Homebrew, {@code $PATH},
+     * the .app bundle — is asked directly.</p>
+     *
+     * @return the version, or null when it cannot be determined
      */
-    private String probeVersion(Path binary) {
+    public String detectVersion(Path binary) {
+        if (binary == null) {
+            return null;
+        }
+        if (isManagedBinary(binary)) {
+            String recorded = readMarker(installDir.resolve(VERSION_MARKER_NAME));
+            if (recorded != null) {
+                return recorded;
+            }
+        }
+        return probeVersion(binary, VERSION_PROBE_TIMEOUT_SECONDS);
+    }
+
+    private boolean isManagedBinary(Path binary) {
+        return binary.toAbsolutePath().normalize()
+                .equals(managedBinaryPath().toAbsolutePath().normalize());
+    }
+
+    /** Runs the binary and parses its version, or null if it did not answer as expected. */
+    private String probeVersion(Path binary, int timeoutSeconds) {
+        VersionOutput out = runVersionCommand(binary, timeoutSeconds);
+        return out != null && out.exitCode() == 0 ? parseVersionLine(out.firstLine()) : null;
+    }
+
+    /** What {@code sing-box version} answered: its exit code and first output line. */
+    private record VersionOutput(int exitCode, String firstLine) {
+    }
+
+    /**
+     * Runs {@code <binary> version}. The single place this app shells out for a
+     * version, so the two traps live in one method instead of three.
+     *
+     * <p>Output goes to a file rather than a pipe. Reading the pipe before
+     * {@code waitFor} hangs forever on a binary that never closes stdout — and
+     * one call site is the startup path, where that would freeze the app before
+     * the UI appears. Reading it after {@code waitFor} deadlocks the other way
+     * round once the output outgrows the pipe buffer. A file sidesteps both and
+     * keeps the timeout guard meaningful.</p>
+     *
+     * @return the outcome, or null when the process could not be run, timed out,
+     *         or the thread was interrupted
+     */
+    private VersionOutput runVersionCommand(Path binary, int timeoutSeconds) {
         Path out = null;
         try {
             out = Files.createTempFile("singbox-version-", ".out");
@@ -314,21 +371,15 @@ public class SingBoxInstaller {
             pb.redirectErrorStream(true);
             pb.redirectOutput(out.toFile());
             Process proc = pb.start();
-            if (!proc.waitFor(5, TimeUnit.SECONDS)) {
+            if (!proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
                 proc.destroyForcibly();
-                log.debug("Cached sing-box did not report its version in time");
+                log.debug("sing-box at {} did not report its version in time", binary);
                 return null;
             }
-            if (proc.exitValue() != 0) {
-                return null;
-            }
-            String firstLine = Files.readString(out).lines().findFirst().orElse("");
-            String prefix = "sing-box version ";
-            return firstLine.startsWith(prefix)
-                    ? firstLine.substring(prefix.length()).trim()
-                    : null;
+            return new VersionOutput(proc.exitValue(),
+                    Files.readString(out).lines().findFirst().orElse(""));
         } catch (IOException e) {
-            log.debug("Could not probe the cached sing-box version: {}", e.getMessage());
+            log.debug("Could not read the sing-box version at {}: {}", binary, e.getMessage());
             return null;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -338,6 +389,12 @@ public class SingBoxInstaller {
                 deleteQuietly(out);
             }
         }
+    }
+
+    /** Parses {@code "sing-box version 1.13.14"} into {@code "1.13.14"}; null otherwise. */
+    private static String parseVersionLine(String firstLine) {
+        String prefix = "sing-box version ";
+        return firstLine.startsWith(prefix) ? firstLine.substring(prefix.length()).trim() : null;
     }
 
     /**
@@ -535,25 +592,15 @@ public class SingBoxInstaller {
     }
 
     private void verifyBinary(Path binary) throws IOException {
-        try {
-            ProcessBuilder pb = new ProcessBuilder(binary.toAbsolutePath().toString(), "version");
-            pb.redirectErrorStream(true);
-            Process proc = pb.start();
-            if (!proc.waitFor(10, TimeUnit.SECONDS)) {
-                proc.destroyForcibly();
-                throw new IOException("sing-box version check timed out");
-            }
-            if (proc.exitValue() != 0) {
-                String out = new String(proc.getInputStream().readAllBytes());
-                throw new IOException("sing-box version check failed: " + out);
-            }
-            log.info("sing-box verification OK: {}",
-                    new String(proc.getInputStream().readAllBytes())
-                            .lines().findFirst().orElse(""));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Interrupted while verifying sing-box", e);
+        VersionOutput out = runVersionCommand(binary, VERSION_VERIFY_TIMEOUT_SECONDS);
+        if (out == null) {
+            throw new IOException("sing-box version check did not complete for " + binary);
         }
+        if (out.exitCode() != 0) {
+            throw new IOException("sing-box version check failed (exit " + out.exitCode()
+                    + "): " + out.firstLine());
+        }
+        log.info("sing-box verification OK: {}", out.firstLine());
     }
 
     void deleteRecursive(Path dir) {
