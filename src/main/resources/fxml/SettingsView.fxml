@@ -225,7 +225,8 @@
                 <HBox alignment="CENTER_LEFT" spacing="10">
                     <Label fx:id="updatesLabel" text="Updates" styleClass="section-header"/>
                     <Region HBox.hgrow="ALWAYS"/>
-                    <Button fx:id="checkUpdatesButton" text="Check for updates"/>
+                    <Button fx:id="checkUpdatesButton" text="Check for updates"
+                            styleClass="secondary-button"/>
                 </HBox>
 
                 <!-- App sub-block: name + action on top, status below -->
@@ -236,7 +237,7 @@
                         <Label fx:id="appUpdateNameLabel" text="App" styleClass="service-name"/>
                         <Region HBox.hgrow="ALWAYS"/>
                         <Button fx:id="downloadAppButton" text="Download" visible="false"
-                                managed="false"/>
+                                managed="false" styleClass="secondary-button"/>
                     </HBox>
                     <Label fx:id="appUpdateDetail" text="" styleClass="update-status"/>
                 </VBox>
