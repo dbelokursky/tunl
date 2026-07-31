@@ -414,4 +414,122 @@ class SingBoxEngineTest {
         // (exit 0) — a force-kill fallback would surface as a signal exit.
         assertThat(wrapperProc.get().exitValue()).isZero();
     }
+
+    // ===== the launcher's published config carries credentials =====
+    // On macOS the sudoers rule pins a fixed config path, so launch() copies
+    // the generated config there. Nothing else can clean that up: it is not a
+    // per-session temp name, and it outlives the process that read it.
+
+    /** Records cleanupSession() calls; optionally fails the launch. */
+    private static final class RecordingLauncher
+            implements com.vlessclient.platform.TunLauncher {
+        private final java.util.concurrent.atomic.AtomicInteger cleanups =
+                new java.util.concurrent.atomic.AtomicInteger();
+        private final Path wrapper;
+        private final Path stopFile;
+
+        RecordingLauncher(Path wrapper, Path stopFile) {
+            this.wrapper = wrapper;
+            this.stopFile = stopFile;
+        }
+
+        @Override
+        public Launched launch(Path binary, Path configFile) throws java.io.IOException {
+            if (wrapper == null) {
+                throw new java.io.IOException("elevation refused");
+            }
+            Process p = new ProcessBuilder(wrapper.toString())
+                    .redirectErrorStream(true).start();
+            return new Launched(p, stopFile);
+        }
+
+        @Override
+        public void cleanupSession() {
+            cleanups.incrementAndGet();
+        }
+    }
+
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void tunSessionAsksTheLauncherToCleanUpOnceTheCoreExits(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        Path stopFile = tmp.resolve("stop.signal");
+        Path wrapper = tmp.resolve("wrapper.sh");
+        Files.writeString(wrapper, "#!/bin/sh\n"
+                + "echo 'sing-box started'\n"
+                + "while [ ! -f '" + stopFile + "' ]; do sleep 0.2; done\n");
+        makeExecutable(wrapper);
+
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+        RecordingLauncher launcher = new RecordingLauncher(wrapper, stopFile);
+        engine.setTunLauncher(launcher);
+
+        engine.start(DUMMY_CONFIG, ProxyMode.TUN);
+        engine.stop();
+        awaitConnectionState(engine, ConnectionState.DISCONNECTED, AWAIT_STATE_TIMEOUT_MS);
+
+        // Runs on the monitor thread once the wrapper is reaped.
+        long deadline = System.currentTimeMillis() + 5000;
+        while (launcher.cleanups.get() == 0 && System.currentTimeMillis() < deadline) {
+            Thread.sleep(25);
+        }
+        assertThat(launcher.cleanups.get()).isEqualTo(1);
+    }
+
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void nonTunSessionNeverAsksTheLauncherToCleanUp(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+        RecordingLauncher launcher = new RecordingLauncher(null, null);
+        engine.setTunLauncher(launcher);
+
+        engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+        engine.stop();
+        awaitConnectionState(engine, ConnectionState.DISCONNECTED, AWAIT_STATE_TIMEOUT_MS);
+        Thread.sleep(300);
+
+        // Nothing was published, so nothing must be removed — and the fixed
+        // published path may belong to a TUN session of another app instance.
+        assertThat(launcher.cleanups.get()).isZero();
+    }
+
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void failedLaunchRemovesTheConfigItHadAlreadyWritten(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+        RecordingLauncher launcher = new RecordingLauncher(null, null);
+        engine.setTunLauncher(launcher);
+
+        // A marker makes the assertion immune to temp files of other tests.
+        String marker = "cfg-marker-" + System.nanoTime();
+        String config = "{\"marker\":\"" + marker + "\",\"log\":{\"level\":\"info\"}}";
+
+        assertThatThrownBy(() -> engine.start(config, ProxyMode.TUN))
+                .isInstanceOf(java.io.IOException.class);
+
+        assertThat(leftoverConfigsContaining(marker))
+                .as("the generated config carries credentials and must not "
+                        + "survive a failed connect")
+                .isEmpty();
+        assertThat(launcher.cleanups.get()).isEqualTo(1);
+    }
+
+    /** Temp configs still on disk whose contents carry the given marker. */
+    private static List<Path> leftoverConfigsContaining(String marker) throws Exception {
+        Path tmpDir = Path.of(System.getProperty("java.io.tmpdir"));
+        try (var files = Files.list(tmpDir)) {
+            return files
+                    .filter(p -> p.getFileName().toString().startsWith("singbox-"))
+                    .filter(p -> {
+                        try {
+                            return Files.readString(p).contains(marker);
+                        } catch (Exception e) {
+                            return false;
+                        }
+                    })
+                    .toList();
+        }
+    }
 }

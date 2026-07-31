@@ -136,10 +136,23 @@ public class SingBoxEngine {
         Files.writeString(tempConfigFile, configJson);
         systemProxyTarget = extractSystemProxyTarget(configJson);
 
-        if (proxyMode == ProxyMode.TUN) {
-            startWithPrivileges();
-        } else {
-            startDirect();
+        // A launch that throws leaves no process, so the monitor below never
+        // runs and nothing else would remove the config we just wrote — and it
+        // carries the server's credentials. stop() cannot cover this either:
+        // it returns early when nothing is running.
+        try {
+            if (proxyMode == ProxyMode.TUN) {
+                startWithPrivileges();
+            } else {
+                startDirect();
+            }
+        } catch (IOException | RuntimeException e) {
+            cleanupConfigFile();
+            if (proxyMode == ProxyMode.TUN) {
+                // startWithPrivileges may have published its copy before failing.
+                tunLauncher.cleanupSession();
+            }
+            throw e;
         }
 
         // The "started" promotion only applies while THIS session is still
@@ -381,6 +394,7 @@ public class SingBoxEngine {
         Process proc = process;
         Path sessionConfigFile = tempConfigFile;
         SystemProxyTarget sessionProxyTarget = systemProxyTarget;
+        boolean sessionUsedTun = activeProxyMode == ProxyMode.TUN;
         if (proc == null) {
             return;
         }
@@ -418,9 +432,18 @@ public class SingBoxEngine {
                     // best-effort cleanup
                 }
                 Process current = process;
-                if (sessionProxyTarget != null && (current == null || current == proc)) {
+                boolean noSuccessor = current == null || current == proc;
+                if (sessionProxyTarget != null && noSuccessor) {
                     systemProxyGuard.clearIfPointsAt(
                             sessionProxyTarget.host(), sessionProxyTarget.port());
+                }
+                // The launcher's published config carries credentials and,
+                // unlike sessionConfigFile above, lives at a fixed path — so
+                // it needs the same successor guard as the OS proxy: a stale
+                // monitor must not delete the config a newer session is
+                // running on.
+                if (sessionUsedTun && noSuccessor) {
+                    tunLauncher.cleanupSession();
                 }
             }
         }, "singbox-process-monitor");
