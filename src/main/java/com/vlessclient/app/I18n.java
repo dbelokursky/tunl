@@ -30,8 +30,11 @@ public final class I18n {
      * Changes the active locale and reloads the resource bundle.
      */
     public static void setLocale(Locale newLocale) {
-        locale.set(newLocale);
+        // Bundle first, property second. Setting the property is what wakes
+        // every listener and binding, and anything that answers by calling
+        // get() would otherwise be served the language we are leaving.
         bundle = ResourceBundle.getBundle(BUNDLE_NAME, newLocale);
+        locale.set(newLocale);
         log.info("Locale set to {}", newLocale);
     }
 

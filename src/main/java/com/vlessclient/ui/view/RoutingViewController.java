@@ -69,6 +69,8 @@ public class RoutingViewController {
         rulesListView.setItems(rulesList);
         rulesListView.setCellFactory(list -> new RuleListCell());
 
+        ButtonLabels.bind(saveBypassButton, "routing.bypass.save", "routing.bypass.saved");
+
         loadRules();
         loadBypassList();
         if (bypassListArea != null) {
@@ -219,21 +221,7 @@ public class RoutingViewController {
         routingService.saveConfig(config);
         log.info("Bypass list saved: {} entries", parsed.size());
 
-        // Brief button feedback
-        String originalText = saveBypassButton.getText();
-        saveBypassButton.setText(I18n.get("routing.bypass.saved"));
-        saveBypassButton.setDisable(true);
-        Thread.startVirtualThread(() -> {
-            try {
-                Thread.sleep(1200);
-            } catch (InterruptedException ignored) {
-                Thread.currentThread().interrupt();
-            }
-            Platform.runLater(() -> {
-                saveBypassButton.setText(originalText);
-                saveBypassButton.setDisable(false);
-            });
-        });
+        ButtonLabels.flash(saveBypassButton, "routing.bypass.saved");
     }
 
     @FXML
