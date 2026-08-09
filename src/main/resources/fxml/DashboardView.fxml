@@ -31,7 +31,9 @@
             <Label text="Install it with Homebrew, then restart the app:" styleClass="banner-subtitle"/>
             <Label fx:id="brewCommandLabel" text="brew install sing-box" styleClass="banner-command"/>
         </VBox>
-        <Button fx:id="copyBrewButton" text="Copy" styleClass="secondary-button"
+        <!-- Label comes from ButtonLabels.bind: it swaps to "Copied!" on
+             click, and both spellings have to survive a language switch. -->
+        <Button fx:id="copyBrewButton" styleClass="secondary-button"
                 onAction="#onCopyBrewCommandClicked"/>
         <Button fx:id="retryInstallButton" text="Retry download" styleClass="secondary-button"
                 onAction="#onRetryInstallClicked"/>

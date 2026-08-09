@@ -109,6 +109,8 @@ public class DashboardViewController {
         totalUploadIcon.setGraphic(Icons.chevronDoubleUp(16));
         totalDownloadIcon.setGraphic(Icons.chevronDoubleDown(16));
 
+        ButtonLabels.bind(copyBrewButton, "dashboard.copy", "dashboard.copied");
+
         try {
             singBoxEngine = ServiceLocator.get(SingBoxEngine.class);
         } catch (IllegalArgumentException e) {
@@ -243,7 +245,7 @@ public class DashboardViewController {
         content.putString(SingBoxInstaller.brewInstallCommand());
         Clipboard.getSystemClipboard().setContent(content);
         if (copyBrewButton != null) {
-            copyBrewButton.setText(I18n.get("dashboard.copied"));
+            ButtonLabels.flash(copyBrewButton, "dashboard.copied");
         }
     }
 

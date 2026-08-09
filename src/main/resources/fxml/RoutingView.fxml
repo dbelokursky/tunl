@@ -51,7 +51,9 @@
             <Label text="Bypass list" styleClass="section-title"/>
             <Label fx:id="bypassCountLabel" text="0 entries" styleClass="count-badge"/>
             <Region HBox.hgrow="ALWAYS"/>
-            <Button fx:id="saveBypassButton" text="Save" styleClass="primary-button"
+            <!-- Label comes from ButtonLabels.bind; it swaps to "Saved" for a
+                 moment after a save. -->
+            <Button fx:id="saveBypassButton" styleClass="primary-button"
                     onAction="#onSaveBypassClicked"/>
         </HBox>
         <Label styleClass="hint-label" wrapText="true"

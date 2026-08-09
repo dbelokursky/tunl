@@ -260,7 +260,7 @@ public class ServersViewController {
     }
 
     private void setUpMeasureButton() {
-        measureButton.textProperty().bind(I18n.binding("servers.measure"));
+        ButtonLabels.bind(measureButton, "servers.measure", "servers.measuring");
         measureButton.setDisable(latencyTester == null);
     }
 
@@ -276,12 +276,11 @@ public class ServersViewController {
         if (latencyTester == null || targets.isEmpty()) {
             return;
         }
-        measureButton.textProperty().unbind();
-        measureButton.setText(I18n.get("servers.measuring"));
+        ButtonLabels.show(measureButton, "servers.measuring");
         measureButton.setDisable(true);
         latencyTester.testAll(targets).whenComplete((results, err) -> Platform.runLater(() -> {
             measureButton.setDisable(false);
-            measureButton.textProperty().bind(I18n.binding("servers.measure"));
+            ButtonLabels.reset(measureButton);
             if (err != null) {
                 log.warn("Latency measurement failed", err);
                 return;
