@@ -74,6 +74,8 @@ public class DashboardViewController {
     @FXML private ComboBox<ServerSelection> serverSelectionCombo;
     @FXML private Label proxyModeWarning;
     @FXML private HBox singBoxMissingBanner;
+    @FXML private Label singBoxMissingTitle;
+    @FXML private Label singBoxMissingHint;
     @FXML private Label brewCommandLabel;
     @FXML private Button copyBrewButton;
     @FXML private Button retryInstallButton;
@@ -109,7 +111,7 @@ public class DashboardViewController {
         totalUploadIcon.setGraphic(Icons.chevronDoubleUp(16));
         totalDownloadIcon.setGraphic(Icons.chevronDoubleDown(16));
 
-        ButtonLabels.bind(copyBrewButton, "dashboard.copy", "dashboard.copied");
+        bindInstallBannerLabels();
 
         try {
             singBoxEngine = ServiceLocator.get(SingBoxEngine.class);
@@ -228,6 +230,19 @@ public class DashboardViewController {
         }
         refreshSingBoxMissingBanner();
         refreshConnectButtonAvailability();
+    }
+
+    /**
+     * The banner's own wording, which used to sit in the FXML in English
+     * while the Copy button beside it answered in the user's language.
+     * {@code brewCommandLabel} is left out on purpose — it holds a shell
+     * command, and translating one would stop it working.
+     */
+    private void bindInstallBannerLabels() {
+        singBoxMissingTitle.textProperty().bind(I18n.binding("dashboard.singbox.missing.title"));
+        singBoxMissingHint.textProperty().bind(I18n.binding("dashboard.singbox.missing.hint"));
+        ButtonLabels.bind(copyBrewButton, "dashboard.copy", "dashboard.copied");
+        ButtonLabels.bind(retryInstallButton, "dashboard.singbox.retry");
     }
 
     private void refreshSingBoxMissingBanner() {
