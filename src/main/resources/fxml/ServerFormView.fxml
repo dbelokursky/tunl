@@ -24,23 +24,25 @@
                 <Insets top="20" right="24" bottom="20" left="24"/>
             </padding>
 
-            <Label text="Server Configuration" styleClass="form-title"/>
+            <!-- Every text= below is a design-time placeholder: the controller
+                 binds these to the bundle, so what ships is the translation. -->
+            <Label fx:id="formTitleLabel" text="Server Configuration" styleClass="form-title"/>
 
             <!-- Protocol -->
-            <Label text="Protocol" styleClass="form-label"/>
+            <Label fx:id="protocolLabel" text="Protocol" styleClass="form-label"/>
             <ComboBox fx:id="protocolCombo" maxWidth="Infinity" styleClass="form-field"
                       onAction="#onProtocolChanged"/>
 
             <!-- Basic Settings -->
-            <Label text="Name" styleClass="form-label"/>
+            <Label fx:id="nameLabel" text="Name" styleClass="form-label"/>
             <TextField fx:id="nameField" promptText="My Server" styleClass="form-field"/>
 
-            <Label text="Address *" styleClass="form-label"/>
+            <Label fx:id="addressLabel" text="Address *" styleClass="form-label"/>
             <TextField fx:id="addressField" promptText="example.com" styleClass="form-field"/>
 
             <HBox spacing="12">
                 <VBox spacing="4" HBox.hgrow="ALWAYS">
-                    <Label text="Port *" styleClass="form-label"/>
+                    <Label fx:id="portLabel" text="Port *" styleClass="form-label"/>
                     <TextField fx:id="portField" promptText="443" styleClass="form-field"/>
                 </VBox>
                 <VBox spacing="4" HBox.hgrow="ALWAYS">
@@ -67,22 +69,22 @@
 
             <!-- Transport -->
             <VBox fx:id="transportSection" spacing="4">
-                <Label text="Transport" styleClass="form-section-title"/>
+                <Label fx:id="transportSectionLabel" text="Transport" styleClass="form-section-title"/>
 
-                <Label text="Type" styleClass="form-label"/>
+                <Label fx:id="transportTypeLabel" text="Type" styleClass="form-label"/>
                 <ComboBox fx:id="transportTypeCombo" maxWidth="Infinity" styleClass="form-field"/>
 
                 <!-- WebSocket fields -->
                 <VBox fx:id="wsFields" spacing="4" managed="false" visible="false">
-                    <Label text="Path" styleClass="form-label"/>
+                    <Label fx:id="wsPathLabel" text="Path" styleClass="form-label"/>
                     <TextField fx:id="wsPathField" promptText="/ws" styleClass="form-field"/>
-                    <Label text="Host" styleClass="form-label"/>
+                    <Label fx:id="wsHostLabel" text="Host" styleClass="form-label"/>
                     <TextField fx:id="wsHostField" promptText="example.com" styleClass="form-field"/>
                 </VBox>
 
                 <!-- gRPC fields -->
                 <VBox fx:id="grpcFields" spacing="4" managed="false" visible="false">
-                    <Label text="Service Name" styleClass="form-label"/>
+                    <Label fx:id="grpcServiceNameLabel" text="Service Name" styleClass="form-label"/>
                     <TextField fx:id="grpcServiceNameField" promptText="grpc-service" styleClass="form-field"/>
                 </VBox>
             </VBox>
@@ -93,17 +95,19 @@
 
             <!-- TLS -->
             <VBox fx:id="tlsSection" spacing="4">
-                <Label text="TLS" styleClass="form-section-title"/>
+                <Label fx:id="tlsSectionLabel" text="TLS" styleClass="form-section-title"/>
                 <CheckBox fx:id="tlsEnabledCheck" text="Enable TLS" styleClass="form-checkbox"/>
 
                 <VBox fx:id="tlsFields" spacing="4" managed="false" visible="false">
-                    <Label text="SNI (Server Name)" styleClass="form-label"/>
+                    <Label fx:id="sniLabel" text="SNI (Server Name)" styleClass="form-label"/>
                     <TextField fx:id="sniField" promptText="example.com" styleClass="form-field"/>
 
+                    <!-- ALPN stays a literal: it is a protocol acronym, the same
+                         in every language, so a key would only add a lookup. -->
                     <Label text="ALPN" styleClass="form-label"/>
                     <TextField fx:id="alpnField" promptText="h2,http/1.1" styleClass="form-field"/>
 
-                    <Label text="Fingerprint" styleClass="form-label"/>
+                    <Label fx:id="fingerprintLabel" text="Fingerprint" styleClass="form-label"/>
                     <TextField fx:id="fingerprintField" promptText="chrome" styleClass="form-field"/>
 
                     <CheckBox fx:id="allowInsecureCheck" text="Allow Insecure" styleClass="form-checkbox"/>
@@ -117,10 +121,10 @@
                         <CheckBox fx:id="realityCheck" text="Reality" styleClass="form-checkbox"/>
 
                         <VBox fx:id="realityFields" spacing="4" managed="false" visible="false">
-                            <Label text="Public Key" styleClass="form-label"/>
+                            <Label fx:id="realityPublicKeyLabel" text="Public Key" styleClass="form-label"/>
                             <TextField fx:id="realityPublicKeyField" styleClass="form-field"/>
 
-                            <Label text="Short ID" styleClass="form-label"/>
+                            <Label fx:id="realityShortIdLabel" text="Short ID" styleClass="form-label"/>
                             <TextField fx:id="realityShortIdField" styleClass="form-field"/>
                         </VBox>
                     </VBox>
