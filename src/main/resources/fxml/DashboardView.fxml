@@ -113,7 +113,7 @@
             <HBox StackPane.alignment="TOP_LEFT" alignment="CENTER_LEFT" spacing="8"
                   maxWidth="-Infinity" maxHeight="-Infinity" pickOnBounds="false">
                 <Label fx:id="uploadCardIcon" styleClass="stats-icon-upload"/>
-                <Label text="Upload" styleClass="stats-title"/>
+                <Label fx:id="uploadCardTitle" text="Upload" styleClass="stats-title"/>
             </HBox>
             <Label fx:id="uploadSpeedLabel" text="0 B/s" styleClass="speed-value"
                    StackPane.alignment="TOP_RIGHT"
@@ -121,7 +121,7 @@
             <HBox StackPane.alignment="BOTTOM_LEFT" alignment="CENTER_LEFT" spacing="8"
                   maxWidth="-Infinity" maxHeight="-Infinity" pickOnBounds="false">
                 <Label fx:id="downloadCardIcon" styleClass="stats-icon-download"/>
-                <Label text="Download" styleClass="stats-title"/>
+                <Label fx:id="downloadCardTitle" text="Download" styleClass="stats-title"/>
             </HBox>
             <Label fx:id="downloadSpeedLabel" text="0 B/s" styleClass="speed-value"
                    StackPane.alignment="BOTTOM_RIGHT"

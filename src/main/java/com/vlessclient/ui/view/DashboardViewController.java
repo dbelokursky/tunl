@@ -74,6 +74,8 @@ public class DashboardViewController {
     @FXML private ComboBox<ServerSelection> serverSelectionCombo;
     @FXML private Label proxyModeWarning;
     @FXML private HBox singBoxMissingBanner;
+    @FXML private Label uploadCardTitle;
+    @FXML private Label downloadCardTitle;
     @FXML private Label singBoxMissingTitle;
     @FXML private Label singBoxMissingHint;
     @FXML private Label brewCommandLabel;
@@ -111,6 +113,10 @@ public class DashboardViewController {
         totalUploadIcon.setGraphic(Icons.chevronDoubleUp(16));
         totalDownloadIcon.setGraphic(Icons.chevronDoubleDown(16));
 
+        // Titles, not readouts: they belong here rather than in
+        // TrafficDisplayBinder, which only runs when a TrafficMonitor exists.
+        uploadCardTitle.textProperty().bind(I18n.binding("dashboard.upload.speed"));
+        downloadCardTitle.textProperty().bind(I18n.binding("dashboard.download.speed"));
         bindInstallBannerLabels();
 
         try {
