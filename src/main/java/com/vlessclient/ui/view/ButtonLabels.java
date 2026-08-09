@@ -4,15 +4,18 @@ import com.vlessclient.app.I18n;
 import java.util.ArrayList;
 import java.util.List;
 import javafx.animation.PauseTransition;
+import javafx.beans.binding.Bindings;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.Labeled;
 import javafx.scene.layout.Region;
 import javafx.util.Duration;
 
 /**
- * Keeps a button that swaps its label from resizing while it does so.
+ * Button labels that come from the bundle: the ones that swap mid-action
+ * without resizing the button, and the "add" labels that carry a marker.
  *
  * <p>Several buttons change text mid-action — "Copy" becomes "Copied!",
  * "Measure" becomes "Measuring…". Left alone the button resizes with its
@@ -37,6 +40,14 @@ final class ButtonLabels {
 
     /** How long a confirmation stays up before the idle label returns. */
     private static final Duration FLASH = Duration.millis(1200);
+
+    /**
+     * Fronts the label of a button that adds something. It lives here rather
+     * than in the bundle because the same keys name dialogs too — putting the
+     * marker in {@code button.add.subscription} would title that dialog
+     * "+ Add Subscription".
+     */
+    private static final String ADD_MARKER = "+ ";
 
     /**
      * Keys into the button's own property map, so per-button state rides with
@@ -76,6 +87,19 @@ final class ButtonLabels {
                 pinToWidest(button, keys);
             }
         });
+    }
+
+    /**
+     * Binds a label that never changes, so it follows a language switch.
+     * No width pinning: nothing swaps it, so nothing can make it jump.
+     */
+    static void bindStatic(Labeled node, String key) {
+        node.textProperty().bind(I18n.binding(key));
+    }
+
+    /** Same, fronted by the marker an add-action carries. */
+    static void bindAddAction(Labeled node, String key) {
+        node.textProperty().bind(Bindings.concat(ADD_MARKER, I18n.binding(key)));
     }
 
     /**

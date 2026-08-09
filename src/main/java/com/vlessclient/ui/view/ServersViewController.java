@@ -123,6 +123,8 @@ public class ServersViewController {
         setUpSearch();
         setUpSort();
         setUpMeasureButton();
+        ButtonLabels.bindStatic(importLinkButton, "button.import.link");
+        ButtonLabels.bindAddAction(addServerButton, "button.add.server");
 
         servers.addListener((javafx.collections.ListChangeListener<ServerConfig>) change -> {
             updateEmptyState(servers);

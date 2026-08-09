@@ -55,6 +55,8 @@ public class SubscriptionsViewController {
     @FXML
     public void initialize() {
         bindEmptyState();
+        ButtonLabels.bindStatic(refreshAllButton, "subscriptions.refresh.all");
+        ButtonLabels.bindAddAction(addSubscriptionButton, "button.add.subscription");
         subscriptionService = ServiceLocator.get(SubscriptionService.class);
 
         ObservableList<Subscription> subs = subscriptionService.getSubscriptions();

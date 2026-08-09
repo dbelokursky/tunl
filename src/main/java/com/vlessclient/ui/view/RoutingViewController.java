@@ -70,6 +70,7 @@ public class RoutingViewController {
         rulesListView.setCellFactory(list -> new RuleListCell());
 
         ButtonLabels.bind(saveBypassButton, "routing.bypass.save", "routing.bypass.saved");
+        ButtonLabels.bindAddAction(addRuleButton, "button.add.rule");
 
         loadRules();
         loadBypassList();
