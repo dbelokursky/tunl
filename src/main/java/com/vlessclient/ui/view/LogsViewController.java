@@ -71,6 +71,7 @@ public class LogsViewController {
      */
     @FXML
     public void initialize() {
+        ButtonLabels.bindStatic(autoScrollCheckBox, "logs.auto.scroll");
         // Items are the filter codes buildLevelPredicate() switches on; the
         // converter renders the localized names, so translating the UI can
         // never break the filtering logic.
