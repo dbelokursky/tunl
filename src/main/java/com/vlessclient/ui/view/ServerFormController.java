@@ -16,6 +16,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.Labeled;
 import javafx.scene.control.Separator;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
@@ -32,6 +33,29 @@ import org.slf4j.LoggerFactory;
 public class ServerFormController {
 
     private static final Logger log = LoggerFactory.getLogger(ServerFormController.class);
+
+    /** Appended to a required field's label. Lives here so the two places
+     *  that build one cannot drift apart. */
+    private static final String REQUIRED_MARKER = " *";
+
+    // Labels whose wording never changes with the protocol. They carry an
+    // fx:id purely so the bundle can reach them; the text= in the FXML is a
+    // design-time placeholder that binding overwrites at load.
+    @FXML private Label formTitleLabel;
+    @FXML private Label protocolLabel;
+    @FXML private Label nameLabel;
+    @FXML private Label addressLabel;
+    @FXML private Label portLabel;
+    @FXML private Label transportSectionLabel;
+    @FXML private Label transportTypeLabel;
+    @FXML private Label wsPathLabel;
+    @FXML private Label wsHostLabel;
+    @FXML private Label grpcServiceNameLabel;
+    @FXML private Label tlsSectionLabel;
+    @FXML private Label sniLabel;
+    @FXML private Label fingerprintLabel;
+    @FXML private Label realityPublicKeyLabel;
+    @FXML private Label realityShortIdLabel;
 
     @FXML private ComboBox<Protocol> protocolCombo;
     @FXML private TextField nameField;
@@ -92,6 +116,8 @@ public class ServerFormController {
      */
     @FXML
     public void initialize() {
+        bindStaticLabels();
+
         protocolCombo.setItems(FXCollections.observableArrayList(Protocol.values()));
         protocolCombo.setValue(Protocol.VLESS);
 
@@ -271,10 +297,10 @@ public class ServerFormController {
         setNodeVisible(tlsSection, true);
         setNodeVisible(realitySection, true);
 
-        uuidLabel.setText(required("form.uuid"));
+        bindRequired(uuidLabel, "form.uuid");
         uuidField.setPromptText("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx");
-        encryptionLabel.setText(I18n.get("form.encryption"));
-        flowLabel.setText(I18n.get("form.flow"));
+        bindLabel(encryptionLabel, "form.encryption");
+        bindLabel(flowLabel, "form.flow");
 
         // Reset encryption combo to VLESS defaults
         encryptionCombo.setItems(FXCollections.observableArrayList("none", "auto", "zero"));
@@ -301,7 +327,7 @@ public class ServerFormController {
             }
             case TROJAN -> {
                 // UUID label -> "Password", no Flow, no Reality
-                uuidLabel.setText(required("form.password"));
+                bindRequired(uuidLabel, "form.password");
                 uuidField.setPromptText(I18n.get("form.prompt.password"));
                 setNodeVisible(flowBox, false);
                 setNodeVisible(realitySection, false);
@@ -309,9 +335,9 @@ public class ServerFormController {
             }
             case SHADOWSOCKS -> {
                 // UUID -> "Password", Encryption -> "Method" with SS ciphers, no Transport, no TLS
-                uuidLabel.setText(required("form.password"));
+                bindRequired(uuidLabel, "form.password");
                 uuidField.setPromptText(I18n.get("form.prompt.password"));
-                encryptionLabel.setText(I18n.get("form.method"));
+                bindLabel(encryptionLabel, "form.method");
                 encryptionCombo.setItems(FXCollections.observableArrayList(
                         "aes-256-gcm",
                         "chacha20-ietf-poly1305",
@@ -327,10 +353,10 @@ public class ServerFormController {
             case HYSTERIA2 -> {
                 // UUID -> "Password", TLS always on (no checkbox), no Transport
                 // Flow field used for "Obfuscation Password"
-                uuidLabel.setText(required("form.password"));
+                bindRequired(uuidLabel, "form.password");
                 uuidField.setPromptText(I18n.get("form.prompt.password"));
                 setNodeVisible(encryptionBox, false);
-                flowLabel.setText(I18n.get("form.obfuscation.password"));
+                bindLabel(flowLabel, "form.obfuscation.password");
                 flowCombo.setItems(FXCollections.observableArrayList(""));
                 flowCombo.setEditable(true);
                 setNodeVisible(transportSeparator, false);
@@ -343,12 +369,12 @@ public class ServerFormController {
             case WIREGUARD -> {
                 // UUID -> "Private Key", Encryption -> "Peer Public Key", Flow -> "Local Address"
                 // No Transport, no TLS
-                uuidLabel.setText(required("form.private.key"));
+                bindRequired(uuidLabel, "form.private.key");
                 uuidField.setPromptText(I18n.get("form.prompt.private.key"));
-                encryptionLabel.setText(I18n.get("form.peer.public.key"));
+                bindLabel(encryptionLabel, "form.peer.public.key");
                 encryptionCombo.setItems(FXCollections.observableArrayList(""));
                 encryptionCombo.setEditable(true);
-                flowLabel.setText(I18n.get("form.local.address"));
+                bindLabel(flowLabel, "form.local.address");
                 flowCombo.setItems(FXCollections.observableArrayList(""));
                 flowCombo.setEditable(true);
                 setNodeVisible(transportSeparator, false);
@@ -471,9 +497,48 @@ public class ServerFormController {
         };
     }
 
-    /** Returns the localized text for the given key with the required-field marker appended. */
-    private static String required(String key) {
-        return I18n.get(key) + " *";
+    /**
+     * Points every label whose wording does not depend on the protocol at the
+     * bundle. The protocol-dependent three — uuid, encryption, flow — are
+     * bound the same way in {@link #updateFieldsForProtocol}, just to a key
+     * that changes with the selection.
+     *
+     * <p>Binding rather than setting is what lets the form follow a language
+     * switch while it is open. It also means nothing may call {@code setText}
+     * on these again: a bound property throws.</p>
+     */
+    private void bindStaticLabels() {
+        bindLabel(formTitleLabel, "form.title");
+        bindLabel(protocolLabel, "form.protocol");
+        bindLabel(nameLabel, "form.name");
+        bindRequired(addressLabel, "form.address");
+        bindRequired(portLabel, "form.port");
+        bindLabel(transportSectionLabel, "form.transport");
+        bindLabel(transportTypeLabel, "form.type");
+        bindLabel(wsPathLabel, "form.path");
+        bindLabel(wsHostLabel, "form.host");
+        bindLabel(grpcServiceNameLabel, "form.service.name");
+        bindLabel(tlsSectionLabel, "form.tls");
+        bindLabel(tlsEnabledCheck, "form.tls.enable");
+        bindLabel(sniLabel, "form.server.name");
+        bindLabel(fingerprintLabel, "form.fingerprint");
+        bindLabel(allowInsecureCheck, "form.allow.insecure");
+        bindLabel(realityCheck, "form.reality");
+        bindLabel(realityPublicKeyLabel, "form.public.key");
+        bindLabel(realityShortIdLabel, "form.short.id");
+        bindLabel(saveButton, "button.save");
+        bindLabel(cancelButton, "button.cancel.action");
+        nameField.promptTextProperty().bind(I18n.binding("form.prompt.name"));
+    }
+
+    /** Binds a label, button or checkbox to a bundle key. */
+    private static void bindLabel(Labeled node, String key) {
+        node.textProperty().bind(I18n.binding(key));
+    }
+
+    /** Same, plus the marker that flags the field as required. */
+    private static void bindRequired(Labeled node, String key) {
+        node.textProperty().bind(I18n.binding(key).concat(REQUIRED_MARKER));
     }
 
     private void setNodeVisible(javafx.scene.Node node, boolean visible) {
