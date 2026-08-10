@@ -16,8 +16,12 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 import javafx.collections.FXCollections;
@@ -48,6 +52,30 @@ public class ConfigStore {
     private final ObservableList<ServerConfig> servers;
     private final SecretSealer sealer;
     private AppSettings settings;
+
+    /**
+     * The last value sealed under each secret key, and the tag it produced.
+     *
+     * <p>Credentials are plaintext in memory, so {@code SecretSealer.isSealed}
+     * never short-circuits and {@link #serializableServers()} used to re-seal
+     * every server on every save. Each seal forks the platform secret tool
+     * ({@code security} on macOS), so one 60-server save meant 60 processes,
+     * and a subscription refresh — which saved once per server — meant 3600.</p>
+     *
+     * <p>Reusing the tag is safe because the keychain entry it names is still
+     * there and still holds this exact plaintext. The one case it misses is an
+     * entry deleted out from under a running app, which a save would otherwise
+     * have recreated; that already surfaces on load as "Could not unseal …",
+     * and the fix there is the same either way.</p>
+     *
+     * <p>Guarded by this object's monitor: only reached from the synchronized
+     * save path and the synchronized mutators.</p>
+     */
+    private final Map<String, SealedSecret> sealCache = new HashMap<>();
+
+    /** A sealed value and the plaintext that produced it. */
+    private record SealedSecret(String plaintext, String tag) {
+    }
 
     public ConfigStore() {
         this(PlatformPaths.current().dataDir(), SecretSealers.forCurrentPlatform());
@@ -162,6 +190,7 @@ public class ConfigStore {
     public synchronized void removeServer(String serverId) {
         boolean removed = servers.removeIf(s -> s.getId().equals(serverId));
         if (removed) {
+            evictSealCache(serverId);
             saveServers();
             // Off the caller's (usually FX) thread; a leftover entry is inert
             // if this races or fails.
@@ -172,6 +201,74 @@ public class ConfigStore {
         } else {
             log.warn("Server not found for removal: {}", serverId);
         }
+    }
+
+    /**
+     * Applies a whole set of additions, replacements and removals, then saves
+     * once.
+     *
+     * <p>The per-server methods each call {@code saveServers()}, and a save
+     * serializes — and seals — the entire list. Driving a subscription refresh
+     * through them cost one full save per changed server: quadratic writes,
+     * quadratic seals, and N change events on the observable list for what the
+     * user experiences as one operation.</p>
+     *
+     * <p>Semantics match the per-server methods exactly: an upsert whose id is
+     * already present replaces it in place, an upsert with a new id is
+     * appended and inherits {@link #addServer}'s rule that the first server to
+     * exist when nothing is active becomes active, and removals are applied
+     * after upserts.</p>
+     *
+     * @param upserts servers to add or replace, matched by id
+     * @param removalIds ids to remove; unknown ids are ignored
+     */
+    public synchronized void applyServerBatch(List<ServerConfig> upserts,
+                                              List<String> removalIds) {
+        boolean changed = false;
+
+        for (ServerConfig incoming : upserts) {
+            int existing = indexOfServer(incoming.getId());
+            if (existing >= 0) {
+                servers.set(existing, incoming);
+            } else {
+                if (servers.stream().noneMatch(ServerConfig::isActive)) {
+                    incoming.setActive(true);
+                }
+                servers.add(incoming);
+            }
+            changed = true;
+        }
+
+        Set<String> removed = new HashSet<>();
+        for (String id : removalIds) {
+            if (servers.removeIf(s -> s.getId().equals(id))) {
+                removed.add(id);
+                evictSealCache(id);
+                changed = true;
+            }
+        }
+
+        if (!changed) {
+            return;
+        }
+        saveServers();
+        if (!removed.isEmpty()) {
+            // Same treatment as removeServer: off the caller's thread, and a
+            // leftover entry is inert if it races or fails.
+            Thread.startVirtualThread(() -> removed.forEach(id -> {
+                sealer.delete(secretKey(id, "uuid"));
+                sealer.delete(secretKey(id, "flow"));
+            }));
+        }
+    }
+
+    private int indexOfServer(String id) {
+        for (int i = 0; i < servers.size(); i++) {
+            if (servers.get(i).getId().equals(id)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /**
@@ -247,7 +344,8 @@ public class ConfigStore {
         }
     }
 
-    private synchronized void saveServers() {
+    /** Package-private so tests can count how often a change hits the disk. */
+    synchronized void saveServers() {
         Path file = dataDir.resolve(SERVERS_FILE);
         try {
             ObjectNode envelope = objectMapper.createObjectNode();
@@ -307,12 +405,25 @@ public class ConfigStore {
         if (value == null || value.isBlank() || SecretSealer.isSealed(value)) {
             return null;
         }
-        String sealed = sealer.seal(secretKey(live.getId(), field), value);
+        String key = secretKey(live.getId(), field);
+        SealedSecret cached = sealCache.get(key);
+        if (cached != null && cached.plaintext().equals(value)) {
+            return cached.tag();
+        }
+        String sealed = sealer.seal(key, value);
         if (sealed == null) {
             log.warn("Could not seal {} for server '{}'; keeping plaintext",
                     field, live.getName());
+            return null;
         }
+        sealCache.put(key, new SealedSecret(value, sealed));
         return sealed;
+    }
+
+    /** Forgets a removed server's cached seals so its keys cannot be reused. */
+    private void evictSealCache(String serverId) {
+        sealCache.remove(secretKey(serverId, "uuid"));
+        sealCache.remove(secretKey(serverId, "flow"));
     }
 
     private static String secretKey(String serverId, String field) {

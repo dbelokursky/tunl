@@ -196,9 +196,10 @@ public class SubscriptionService {
             return;
         }
 
+        String content;
         List<ServerConfig> fetchedServers;
         try {
-            String content = fetchContent(sub.getUrl());
+            content = fetchContent(sub.getUrl());
             fetchedServers = parseContent(content);
         } catch (Exception e) {
             // Scrub before both sinks: the throw sites we control are already
@@ -210,6 +211,27 @@ public class SubscriptionService {
             // subscription with a dead URL or an expired token silently went
             // stale while still looking healthy.
             sub.setLastError(reason);
+            saveSubscriptions();
+            return;
+        }
+
+        // A body we could not make sense of is a failure, not an empty
+        // subscription. diffAndApply removes everything the fetch did not
+        // return, so without this a captive portal, an HTML "token expired"
+        // page, or a provider changing format deleted every server of this
+        // subscription — and then reported success, because lastError was
+        // cleared and lastRefreshedAt bumped a few lines below. It runs
+        // hourly in the background, so the user need not be watching.
+        //
+        // A genuinely empty body is left alone: a provider really can shut all
+        // its servers down, and that case has no ambiguity to protect against.
+        if (fetchedServers.isEmpty() && content != null && !content.isBlank()) {
+            log.warn("Subscription '{}' returned {} bytes with no recognizable "
+                    + "server links; keeping the {} server(s) already stored",
+                    sub.getName(), content.length(), sub.getServerIds().size());
+            sub.setLastError("The response contained no recognizable server links. "
+                    + "The subscription may have expired, or a captive portal "
+                    + "may have answered instead of the provider.");
             saveSubscriptions();
             return;
         }
@@ -402,6 +424,8 @@ public class SubscriptionService {
                         (a, b) -> a));
 
         List<String> newServerIds = new ArrayList<>();
+        List<ServerConfig> upserts = new ArrayList<>(fetchedByKey.size());
+        List<String> removals = new ArrayList<>();
 
         // Add new or update existing
         for (Map.Entry<String, ServerConfig> entry : fetchedByKey.entrySet()) {
@@ -413,21 +437,24 @@ public class SubscriptionService {
                 // Update: keep the existing ID, update fields
                 fetched.setId(existing.getId());
                 fetched.setActive(existing.isActive());
-                configStore.updateServer(fetched);
                 newServerIds.add(existing.getId());
             } else {
-                // New server
-                configStore.addServer(fetched);
                 newServerIds.add(fetched.getId());
             }
+            upserts.add(fetched);
         }
 
         // Remove servers that are no longer in the subscription
         for (Map.Entry<String, ServerConfig> entry : existingByKey.entrySet()) {
             if (!fetchedByKey.containsKey(entry.getKey())) {
-                configStore.removeServer(entry.getValue().getId());
+                removals.add(entry.getValue().getId());
             }
         }
+
+        // One save for the whole refresh. Going through addServer/updateServer/
+        // removeServer meant a full save — and a full re-seal of every stored
+        // credential — per changed server.
+        configStore.applyServerBatch(upserts, removals);
 
         sub.setServerIds(newServerIds);
     }
