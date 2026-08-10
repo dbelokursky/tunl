@@ -201,11 +201,15 @@ public class SubscriptionService {
             String content = fetchContent(sub.getUrl());
             fetchedServers = parseContent(content);
         } catch (Exception e) {
-            log.error("Failed to fetch subscription '{}': {}", sub.getName(), e.getMessage());
+            // Scrub before both sinks: the throw sites we control are already
+            // redacted, but a message from the JDK (URI parse failures quote
+            // the whole URI) or from a future call site is not ours to trust.
+            String reason = Redact.urlsIn(e.getMessage() != null ? e.getMessage() : e.toString());
+            log.error("Failed to fetch subscription '{}': {}", sub.getName(), reason);
             // Record it: a failed refresh used to be invisible in the UI, so a
             // subscription with a dead URL or an expired token silently went
             // stale while still looking healthy.
-            sub.setLastError(e.getMessage() != null ? e.getMessage() : e.toString());
+            sub.setLastError(reason);
             saveSubscriptions();
             return;
         }
@@ -288,7 +292,13 @@ public class SubscriptionService {
         HttpResponse<String> response =
                 httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() != 200) {
-            throw new IOException("HTTP " + response.statusCode() + " for URL: " + url);
+            // Redacted: this message is both logged and persisted into
+            // subscriptions.json as lastError, right next to the url field
+            // that serializableSubscriptions() deliberately seals. An expired
+            // token answering 401 is the ordinary case, so the plain URL here
+            // leaked the token into two files on the most common failure.
+            throw new IOException("HTTP " + response.statusCode()
+                    + " for URL: " + Redact.url(url));
         }
         return response.body();
     }
