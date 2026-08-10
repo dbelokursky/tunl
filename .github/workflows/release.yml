@@ -78,6 +78,15 @@ jobs:
         with:
           java-version: '25-ea'
           distribution: 'temurin'
+          cache: 'maven'
+      # Shares the cache the Build workflow populates on merge to main, so a
+      # tagged release does not re-download the sing-box tarballs. Keyed on
+      # singbox.properties: a core bump misses and re-fetches, and
+      # bundle-singbox.sh verifies the SHA-256 on cached bytes too.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/vless-client-build
+          key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
       - name: Build fat JAR
         run: mvn clean package -DskipTests
       - name: Smoke-test the bundled sing-box
@@ -144,6 +153,15 @@ jobs:
         with:
           java-version: '25-ea'
           distribution: 'temurin'
+          cache: 'maven'
+      # Shares the cache the Build workflow populates on merge to main, so a
+      # tagged release does not re-download the sing-box tarballs. Keyed on
+      # singbox.properties: a core bump misses and re-fetches, and
+      # bundle-singbox.sh verifies the SHA-256 on cached bytes too.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/vless-client-build
+          key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
       - name: Build fat JAR
         run: mvn -B clean package -DskipTests
       - name: Smoke-test the bundled sing-box
@@ -180,6 +198,15 @@ jobs:
         with:
           java-version: '25-ea'
           distribution: 'temurin'
+          cache: 'maven'
+      # Shares the cache the Build workflow populates on merge to main, so a
+      # tagged release does not re-download the sing-box tarballs. Keyed on
+      # singbox.properties: a core bump misses and re-fetches, and
+      # bundle-singbox.sh verifies the SHA-256 on cached bytes too.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/vless-client-build
+          key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
       - name: Build fat JAR
         run: mvn -B clean package -DskipTests
       - name: Smoke-test the bundled sing-box
@@ -208,6 +235,15 @@ jobs:
         with:
           java-version: '25-ea'
           distribution: 'temurin'
+          cache: 'maven'
+      # Shares the cache the Build workflow populates on merge to main, so a
+      # tagged release does not re-download the sing-box tarballs. Keyed on
+      # singbox.properties: a core bump misses and re-fetches, and
+      # bundle-singbox.sh verifies the SHA-256 on cached bytes too.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/vless-client-build
+          key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
       - name: Build fat JAR
         run: mvn -B clean package -DskipTests
       - name: Smoke-test the bundled sing-box
