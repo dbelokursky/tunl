@@ -24,6 +24,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import org.slf4j.Logger;
@@ -128,11 +129,14 @@ public class ConfigStore {
      * Connect then fails with "no server is selected" and the only cure is a
      * list gesture the UI never mentions.</p>
      */
-    public synchronized void addServer(ServerConfig server) {
-        if (servers.stream().noneMatch(ServerConfig::isActive)) {
-            server.setActive(true);
-        }
-        servers.add(server);
+    public void addServer(ServerConfig server) {
+        mutateList(() -> {
+            if (servers.stream().noneMatch(ServerConfig::isActive)) {
+                server.setActive(true);
+            }
+            servers.add(server);
+            return null;
+        });
         saveServers();
     }
 
@@ -148,17 +152,20 @@ public class ConfigStore {
      *
      * @param serverId id of the server to activate; unknown ids deactivate all
      */
-    public synchronized void setActiveServer(String serverId) {
-        boolean changed = false;
-        for (int i = 0; i < servers.size(); i++) {
-            ServerConfig s = servers.get(i);
-            boolean shouldBeActive = s.getId().equals(serverId);
-            if (s.isActive() != shouldBeActive) {
-                s.setActive(shouldBeActive);
-                servers.set(i, s);
-                changed = true;
+    public void setActiveServer(String serverId) {
+        boolean changed = mutateList(() -> {
+            boolean any = false;
+            for (int i = 0; i < servers.size(); i++) {
+                ServerConfig s = servers.get(i);
+                boolean shouldBeActive = s.getId().equals(serverId);
+                if (s.isActive() != shouldBeActive) {
+                    s.setActive(shouldBeActive);
+                    servers.set(i, s);
+                    any = true;
+                }
             }
-        }
+            return any;
+        });
         if (changed) {
             saveServers();
         }
@@ -170,15 +177,20 @@ public class ConfigStore {
      *
      * @param server the updated server, matched by id
      */
-    public synchronized void updateServer(ServerConfig server) {
-        for (int i = 0; i < servers.size(); i++) {
-            if (servers.get(i).getId().equals(server.getId())) {
-                servers.set(i, server);
-                saveServers();
-                return;
+    public void updateServer(ServerConfig server) {
+        boolean replaced = mutateList(() -> {
+            int at = indexOfServer(server.getId());
+            if (at < 0) {
+                return false;
             }
+            servers.set(at, server);
+            return true;
+        });
+        if (replaced) {
+            saveServers();
+        } else {
+            log.warn("Server not found for update: {}", server.getId());
         }
-        log.warn("Server not found for update: {}", server.getId());
     }
 
     /**
@@ -187,10 +199,12 @@ public class ConfigStore {
      *
      * @param serverId the id of the server to remove
      */
-    public synchronized void removeServer(String serverId) {
-        boolean removed = servers.removeIf(s -> s.getId().equals(serverId));
+    public void removeServer(String serverId) {
+        boolean removed = mutateList(() -> servers.removeIf(s -> s.getId().equals(serverId)));
         if (removed) {
-            evictSealCache(serverId);
+            synchronized (this) {
+                evictSealCache(serverId);
+            }
             saveServers();
             // Off the caller's (usually FX) thread; a leftover entry is inert
             // if this races or fails.
@@ -222,33 +236,30 @@ public class ConfigStore {
      * @param upserts servers to add or replace, matched by id
      * @param removalIds ids to remove; unknown ids are ignored
      */
-    public synchronized void applyServerBatch(List<ServerConfig> upserts,
-                                              List<String> removalIds) {
-        boolean changed = false;
-
-        for (ServerConfig incoming : upserts) {
-            int existing = indexOfServer(incoming.getId());
-            if (existing >= 0) {
-                servers.set(existing, incoming);
-            } else {
-                if (servers.stream().noneMatch(ServerConfig::isActive)) {
-                    incoming.setActive(true);
+    public void applyServerBatch(List<ServerConfig> upserts, List<String> removalIds) {
+        Set<String> removed = mutateList(() -> {
+            for (ServerConfig incoming : upserts) {
+                int existing = indexOfServer(incoming.getId());
+                if (existing >= 0) {
+                    servers.set(existing, incoming);
+                } else {
+                    if (servers.stream().noneMatch(ServerConfig::isActive)) {
+                        incoming.setActive(true);
+                    }
+                    servers.add(incoming);
                 }
-                servers.add(incoming);
             }
-            changed = true;
-        }
-
-        Set<String> removed = new HashSet<>();
-        for (String id : removalIds) {
-            if (servers.removeIf(s -> s.getId().equals(id))) {
-                removed.add(id);
-                evictSealCache(id);
-                changed = true;
+            Set<String> gone = new HashSet<>();
+            for (String id : removalIds) {
+                if (servers.removeIf(s -> s.getId().equals(id))) {
+                    gone.add(id);
+                    evictSealCache(id);
+                }
             }
-        }
+            return gone;
+        });
 
-        if (!changed) {
+        if (upserts.isEmpty() && removed.isEmpty()) {
             return;
         }
         saveServers();
@@ -260,6 +271,39 @@ public class ConfigStore {
                 sealer.delete(secretKey(id, "flow"));
             }));
         }
+    }
+
+    /**
+     * Applies a mutation to the server list on the JavaFX Application Thread.
+     *
+     * <p>{@link #getServers()} hands out the live {@code ObservableList} that
+     * {@code ServersViewController} wraps in a {@code FilteredList}/
+     * {@code SortedList}/{@code ListView}. Mutating it off the FX thread means
+     * mutating a live scene graph's backing collection: the change events fire
+     * on whatever thread mutated, and a listener then touches controls from
+     * there. Callers arrive from everywhere — virtual threads in
+     * {@code SubscriptionsViewController}, the hourly refresh scheduler, MCP
+     * HTTP workers, the AWT thread behind the tray menu.</p>
+     *
+     * <p><strong>The monitor is taken inside the action, never around it.</strong>
+     * Waiting for the FX thread while holding this object's monitor would
+     * deadlock the moment the FX thread called any synchronized method here:
+     * caller waits for FX, FX waits for the monitor. Everything that needs the
+     * monitor and does <em>not</em> need the FX thread — the disk write in
+     * {@code saveServers()} and the sealing it drives — therefore stays on the
+     * calling thread, which also keeps that work off the FX thread.</p>
+     *
+     * <p>The cost of the split is that a mutation and its save are two critical
+     * sections rather than one, so a concurrent change can land in between.
+     * {@code saveServers()} still serializes a consistent snapshot under the
+     * monitor; it may simply be a newer one than the caller produced.</p>
+     */
+    private <T> T mutateList(Supplier<T> mutation) {
+        return FxExecutor.get(() -> {
+            synchronized (this) {
+                return mutation.get();
+            }
+        });
     }
 
     private int indexOfServer(String id) {
@@ -277,23 +321,25 @@ public class ConfigStore {
      *
      * @param serverId the id of the server to duplicate
      */
-    public synchronized void duplicateServer(String serverId) {
+    public void duplicateServer(String serverId) {
         Optional<ServerConfig> original = getServerById(serverId);
         if (original.isEmpty()) {
             log.warn("Server not found for duplication: {}", serverId);
             return;
         }
+        ServerConfig copy;
         try {
             String json = objectMapper.writeValueAsString(original.get());
-            ServerConfig copy = objectMapper.readValue(json, ServerConfig.class);
-            copy.setId(UUID.randomUUID().toString());
-            copy.setName(copy.getName() + " (copy)");
-            copy.setActive(false);
-            servers.add(copy);
-            saveServers();
+            copy = objectMapper.readValue(json, ServerConfig.class);
         } catch (IOException e) {
             log.error("Failed to duplicate server: {}", serverId, e);
+            return;
         }
+        copy.setId(UUID.randomUUID().toString());
+        copy.setName(copy.getName() + " (copy)");
+        copy.setActive(false);
+        mutateList(() -> servers.add(copy));
+        saveServers();
     }
 
     /**
@@ -302,7 +348,10 @@ public class ConfigStore {
      * @param id the server id to look up
      * @return the matching server, or an empty optional if none exists
      */
-    public Optional<ServerConfig> getServerById(String id) {
+    public synchronized Optional<ServerConfig> getServerById(String id) {
+        // Synchronized because the callers are off the FX thread — MCP workers,
+        // the tray, the subscription refresh — and would otherwise stream over
+        // the list while the FX thread mutates it.
         return servers.stream()
                 .filter(s -> s.getId().equals(id))
                 .findFirst();

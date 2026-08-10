@@ -154,11 +154,18 @@ public class SubscriptionService {
      * @param name the display name for the subscription
      * @param url the URL to fetch subscription content from
      */
-    public synchronized void addSubscription(String name, String url) {
+    public void addSubscription(String name, String url) {
         Subscription sub = new Subscription();
         sub.setName(name);
         sub.setUrl(url);
-        subscriptions.add(sub);
+        // SubscriptionsViewController adds from a virtual thread, and the list
+        // is bound to a TableView. Same rule as ConfigStore: mutate on the FX
+        // thread, without holding this monitor while waiting for it.
+        FxExecutor.run(() -> {
+            synchronized (this) {
+                subscriptions.add(sub);
+            }
+        });
         saveSubscriptions();
         refreshSubscription(sub.getId());
     }
@@ -168,16 +175,19 @@ public class SubscriptionService {
      *
      * @param subscriptionId the id of the subscription to remove
      */
-    public synchronized void removeSubscription(String subscriptionId) {
+    public void removeSubscription(String subscriptionId) {
         Subscription sub = findById(subscriptionId);
         if (sub == null) {
             log.warn("Subscription not found for removal: {}", subscriptionId);
             return;
         }
-        for (String serverId : sub.getServerIds()) {
-            configStore.removeServer(serverId);
-        }
-        subscriptions.remove(sub);
+        // One batch rather than one save per server, matching diffAndApply.
+        configStore.applyServerBatch(List.of(), List.copyOf(sub.getServerIds()));
+        FxExecutor.run(() -> {
+            synchronized (this) {
+                subscriptions.remove(sub);
+            }
+        });
         saveSubscriptions();
         Thread.startVirtualThread(() -> sealer.delete(urlSecretKey(sub.getId())));
         log.info("Removed subscription '{}' and {} servers",
