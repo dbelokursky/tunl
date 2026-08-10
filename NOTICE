@@ -1,0 +1,23 @@
+tunl
+Copyright 2026 Dmitry Belokursky
+
+This product includes software developed as part of the tunl project
+(https://github.com/dbelokursky/tunl), licensed under the Apache License,
+Version 2.0. See the LICENSE file for the full text.
+
+--------------------------------------------------------------------------
+
+Bundled third-party component: sing-box
+
+The installers and dev builds distributed by this project bundle an
+unmodified sing-box binary (https://github.com/SagerNet/sing-box), which is
+licensed under the GNU General Public License v3.0:
+
+    https://github.com/SagerNet/sing-box/blob/main/LICENSE
+
+sing-box is invoked as a separate process over a documented interface; it is
+neither linked into nor derived from the Apache-2.0 licensed code in this
+repository, and the two are distributed together as an aggregation. The exact
+version bundled by any given build is pinned in
+src/main/resources/singbox.properties, and its corresponding source is
+available from the upstream repository above.

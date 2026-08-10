@@ -9,6 +9,7 @@
   <a href="https://github.com/dbelokursky/tunl/releases/latest"><img src="https://img.shields.io/github/v/release/dbelokursky/tunl" alt="Latest release"/></a>
   <a href="https://github.com/dbelokursky/tunl/releases"><img src="https://img.shields.io/github/downloads/dbelokursky/tunl/total" alt="Downloads"/></a>
   <a href="https://github.com/dbelokursky/tunl/releases/latest"><img src="https://img.shields.io/github/downloads/dbelokursky/tunl/latest/total?label=downloads@latest" alt="Latest release downloads"/></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/dbelokursky/tunl" alt="License"/></a>
 </p>
 
 <p align="center">🇬🇧 <b>English</b> · 🇷🇺 <a href="README.ru.md">Русский</a></p>
@@ -504,6 +505,11 @@ scripts/
 
 ## License
 
-TBD. sing-box is licensed under
+[Apache-2.0](LICENSE). Copyright and attribution live in [NOTICE](NOTICE).
+
+sing-box is licensed under
 [GPL-3.0](https://github.com/SagerNet/sing-box/blob/main/LICENSE); the
-installers and dev builds bundle its binary unmodified.
+installers and dev builds bundle its binary unmodified, as a separate process
+invoked over a documented interface. The bundled version is pinned in
+[`singbox.properties`](src/main/resources/singbox.properties) and its source is
+available upstream.

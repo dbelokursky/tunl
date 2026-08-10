@@ -9,6 +9,7 @@
   <a href="https://github.com/dbelokursky/tunl/releases/latest"><img src="https://img.shields.io/github/v/release/dbelokursky/tunl" alt="Latest release"/></a>
   <a href="https://github.com/dbelokursky/tunl/releases"><img src="https://img.shields.io/github/downloads/dbelokursky/tunl/total" alt="Downloads"/></a>
   <a href="https://github.com/dbelokursky/tunl/releases/latest"><img src="https://img.shields.io/github/downloads/dbelokursky/tunl/latest/total?label=downloads@latest" alt="Latest release downloads"/></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/dbelokursky/tunl" alt="License"/></a>
 </p>
 
 <p align="center">🇬🇧 <a href="README.md">English</a> · 🇷🇺 <b>Русский</b></p>
@@ -444,6 +445,11 @@ scripts/
 
 ## Лицензия
 
-TBD. sing-box лицензируется под
+[Apache-2.0](LICENSE). Копирайт и атрибуция — в [NOTICE](NOTICE).
+
+sing-box лицензируется под
 [GPL-3.0](https://github.com/SagerNet/sing-box/blob/main/LICENSE); установщики
-и dev-сборки бандлят его бинарь без изменений.
+и dev-сборки бандлят его бинарь без изменений, отдельным процессом,
+вызываемым по документированному интерфейсу. Забандленная версия закреплена в
+[`singbox.properties`](src/main/resources/singbox.properties), исходники
+доступны в апстриме.
