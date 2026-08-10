@@ -52,6 +52,84 @@ class McpAuditTest {
         }
     }
 
+    /** Builds a tools/call message carrying the given arguments node. */
+    private ObjectNode toolCall(String name, ObjectNode arguments) {
+        ObjectNode msg = toolCall(name);
+        ((ObjectNode) msg.get("params")).set("arguments", arguments);
+        return msg;
+    }
+
+    @Test
+    void server_redactsShareLinkFromAuditedArguments() {
+        String shareLink = "vless://b1e4c0de-1234-4321-abcd-9f3caa1b2c3d@gateway.example:443"
+                + "?security=reality#Amsterdam";
+
+        List<String> recordedArgs = new ArrayList<>();
+        McpAuditLog capture = (tool, args, error, message) -> recordedArgs.add(args);
+
+        McpServer server = new McpServer("vless-client", "0.1.0", MAPPER, () -> true);
+        server.setAuditLog(capture);
+        server.addTool(new com.vlessclient.service.mcp.tools.LambdaTool(
+                "add_server", "adds a server", true, MAPPER.createObjectNode(),
+                args -> "ok"));
+
+        ObjectNode arguments = MAPPER.createObjectNode();
+        arguments.put("shareLink", shareLink);
+        arguments.put("name", "Amsterdam");
+        server.handle(toolCall("add_server", arguments));
+
+        assertThat(recordedArgs).hasSize(1);
+        // The uuid is exactly what ConfigStore seals into the keychain; it must
+        // not survive into a plaintext rotating log.
+        assertThat(recordedArgs.get(0))
+                .doesNotContain("b1e4c0de-1234-4321-abcd-9f3caa1b2c3d")
+                .doesNotContain(shareLink)
+                .contains("<redacted>")
+                .contains("Amsterdam");   // non-secret arguments stay readable
+    }
+
+    @Test
+    void server_redactsUrlsHidingInUnlistedArguments() {
+        // A credential arriving under a key the denylist never heard of: the
+        // value-shape pass is what catches this one.
+        List<String> recordedArgs = new ArrayList<>();
+        McpAuditLog capture = (tool, args, error, message) -> recordedArgs.add(args);
+
+        McpServer server = new McpServer("vless-client", "0.1.0", MAPPER, () -> true);
+        server.setAuditLog(capture);
+        server.addTool(new com.vlessclient.service.mcp.tools.LambdaTool(
+                "set_setting", "sets a setting", true, MAPPER.createObjectNode(),
+                args -> "ok"));
+
+        ObjectNode arguments = MAPPER.createObjectNode();
+        arguments.put("key", "subscription_endpoint");
+        arguments.put("value", "https://provider.example/sub?token=9f3caa1b2c3d4e5f");
+        server.handle(toolCall("set_setting", arguments));
+
+        assertThat(recordedArgs.get(0))
+                .doesNotContain("9f3caa1b2c3d4e5f")
+                .contains("https://provider.example/…");
+    }
+
+    @Test
+    void auditLog_redactsUrlsQuotedBackInAnErrorMessage() {
+        Logger auditLogger = (Logger) LoggerFactory.getLogger("mcp.audit");
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        auditLogger.addAppender(appender);
+        try {
+            new FileAuditLog().record("add_server", "{}", true,
+                    "Missing UUID in vless://secret-uuid@gateway.example:443");
+
+            String line = appender.list.get(0).getFormattedMessage();
+            assertThat(line)
+                    .doesNotContain("secret-uuid")
+                    .contains("vless://gateway.example:443/…");
+        } finally {
+            auditLogger.detachAppender(appender);
+        }
+    }
+
     @Test
     void server_auditsOnlyMutatingTools() {
         List<String> recorded = new ArrayList<>();

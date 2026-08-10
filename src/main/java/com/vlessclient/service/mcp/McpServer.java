@@ -4,8 +4,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.vlessclient.service.Redact;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.BooleanSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,6 +40,14 @@ public class McpServer {
     private static final int METHOD_NOT_FOUND = -32601;
     private static final int INVALID_PARAMS = -32602;
     private static final int INTERNAL_ERROR = -32603;
+
+    /**
+     * Tool argument names whose value is a credential and is dropped whole
+     * from the audit log. {@code shareLink} is add_server/update_server's
+     * payload; {@code url} is here for the subscription tools this list will
+     * outlive.
+     */
+    private static final Set<String> SECRET_ARG_KEYS = Set.of("shareLink", "url");
 
     private final String serverName;
     private final String serverVersion;
@@ -265,15 +277,44 @@ public class McpServer {
         try {
             Object value = tool.call(arguments);
             if (tool.mutating()) {
-                auditLog.record(toolName, arguments.toString(), false, "");
+                auditLog.record(toolName, auditArgs(arguments), false, "");
             }
             return toolSuccess(value);
         } catch (McpToolException e) {
             if (tool.mutating()) {
-                auditLog.record(toolName, arguments.toString(), true, e.getMessage());
+                auditLog.record(toolName, auditArgs(arguments), true, e.getMessage());
             }
             return toolError(e.getMessage());
         }
+    }
+
+    /**
+     * The audit-log view of a tool's arguments. add_server and update_server
+     * take a whole share link, so the raw arguments carried the very
+     * credential ConfigStore seals into the keychain — {@code vless://<uuid>@…}
+     * — into a plaintext rotating log.
+     *
+     * <p>Redaction is by key <em>and</em> by value shape. The key list covers
+     * today's tools; the value pass catches a credential that arrives under a
+     * name nobody thought to add here, which is the failure mode a pure
+     * denylist has.</p>
+     */
+    private String auditArgs(ObjectNode arguments) {
+        ObjectNode copy = arguments.deepCopy();
+        // Snapshot the names: mutating while iterating fieldNames() reads as a
+        // bug even where LinkedHashMap tolerates a same-key replace.
+        List<String> fields = new ArrayList<>();
+        copy.fieldNames().forEachRemaining(fields::add);
+        for (String field : fields) {
+            JsonNode value = copy.get(field);
+            if (value == null || !value.isTextual()) {
+                continue;
+            }
+            copy.put(field, SECRET_ARG_KEYS.contains(field)
+                    ? Redact.REDACTED
+                    : Redact.urlsIn(value.asText()));
+        }
+        return copy.toString();
     }
 
     private ObjectNode toolSuccess(Object value) {

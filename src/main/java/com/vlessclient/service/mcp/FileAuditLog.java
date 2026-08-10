@@ -1,5 +1,6 @@
 package com.vlessclient.service.mcp;
 
+import com.vlessclient.service.Redact;
 import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,10 +25,17 @@ public class FileAuditLog implements McpAuditLog {
                 sanitize(message)));
     }
 
+    /**
+     * Keeps one call on one line, and takes a second pass at any URL that
+     * reached this far. McpServer already redacts the arguments structurally;
+     * this catches the {@code message} side, where a tool's exception text can
+     * quote back the share link it failed to parse.
+     */
     private String sanitize(String value) {
         if (value == null) {
             return "";
         }
-        return value.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ');
+        return Redact.urlsIn(value)
+                .replace('\t', ' ').replace('\n', ' ').replace('\r', ' ');
     }
 }
