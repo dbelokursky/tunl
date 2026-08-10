@@ -11,6 +11,17 @@
 
     <name>Tunl</name>
     <description>Cross-platform multi-protocol proxy client wrapping sing-box with a JavaFX GUI</description>
+    <url>https://github.com/dbelokursky/tunl</url>
+
+    <!-- The bundled sing-box binary stays under its own GPL-3.0 licence; it is
+         a separate process, not a dependency of this artifact. See NOTICE. -->
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
