@@ -302,6 +302,15 @@ public class ServerFormController {
         bindLabel(encryptionLabel, "form.encryption");
         bindLabel(flowLabel, "form.flow");
 
+        // WireGuard and Hysteria2 turn these two into free-text inputs below.
+        // Reset that here with everything else: left set, they stay editable
+        // for whatever protocol the user picks next — which both lets an
+        // arbitrary string into a fixed-choice field and leaves the row 4px
+        // taller than the rest of the form, since an editable ComboBox wraps a
+        // text field of its own.
+        encryptionCombo.setEditable(false);
+        flowCombo.setEditable(false);
+
         // Reset encryption combo to VLESS defaults
         encryptionCombo.setItems(FXCollections.observableArrayList("none", "auto", "zero"));
         if (encryptionCombo.getValue() == null

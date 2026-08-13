@@ -29,7 +29,7 @@
         </padding>
 
         <ComboBox fx:id="logLevelFilter" prefWidth="110" minWidth="-Infinity"
-                  styleClass="combo-box"/>
+                  styleClass="form-field"/>
 
         <TextField fx:id="searchField" promptText="Search logs..." minWidth="90"
                    HBox.hgrow="ALWAYS" styleClass="form-field"/>

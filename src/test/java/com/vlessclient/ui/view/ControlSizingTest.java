@@ -21,7 +21,8 @@ import org.testfx.framework.junit5.ApplicationTest;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Fails when any label in the app is too wide for the control showing it.
+ * The two rules the app sizes its controls by: no label is ever wider than
+ * the control showing it, and every ordinary control is the same height.
  *
  * <p>JavaFX does not report "this text got an ellipsis" — the label simply
  * renders shorter — so every labelled control is compared against a probe
@@ -29,14 +30,14 @@ import static org.assertj.core.api.Assertions.assertThat;
  * more width than the control was given, the user is reading a truncated
  * label.</p>
  *
- * <p>Both languages, because this is overwhelmingly a translation problem: a
- * width written into an FXML fits the English label it was measured against
- * and clips the Russian one. It cost the app its main action — connectButton
- * asked for 170px while "Подключить" needs 174 — the Routing save button, and
- * one item in the nav column. Both themes too, since each carries its own copy
- * of every size rule.</p>
+ * <p>Both languages, because clipping is overwhelmingly a translation
+ * problem: a width written into an FXML fits the English label it was
+ * measured against and clips the Russian one. It cost the app its main action
+ * — connectButton asked for 170px while "Подключить" needs 174 — the Routing
+ * save button, and one item in the nav column. Both themes too, since each
+ * carries its own copy of every size rule.</p>
  */
-public class LabelClippingTest extends ApplicationTest {
+public class ControlSizingTest extends ApplicationTest {
 
     /**
      * How far short a control may measure before this counts it as clipped.
@@ -53,6 +54,15 @@ public class LabelClippingTest extends ApplicationTest {
     /** The shell at its default size; the views at the width it leaves them. */
     private static final int WINDOW_WIDTH = 1100;
     private static final int CONTENT_WIDTH = 888;
+
+    /**
+     * The classes that carry the app's ordinary control height. Deliberate
+     * exceptions are simply not listed: .connect-button is the hero action at
+     * 44, .nav-button is a 50-high sidebar row, .mode-combo is the compact
+     * 30 the dashboard's hero row uses.
+     */
+    private static final List<String> SIZED = List.of(
+            "form-field", "primary-button", "secondary-button", "icon-button");
 
     private static final List<String> VIEWS = List.of("MainView", "DashboardView", "ServersView",
             "SubscriptionsView", "RoutingView", "LogsView", "SettingsView", "ServerFormView");
@@ -100,6 +110,59 @@ public class LabelClippingTest extends ApplicationTest {
         assertThat(clipped)
                 .withFailMessage("labels the layout is too narrow for — these render with an "
                         + "ellipsis:%n  %s", String.join("\n  ", clipped))
+                .isEmpty();
+    }
+
+
+    /**
+     * Every ordinary control is one height, whatever kind of control it is and
+     * whichever view it sits in. That is what {@code .secondary-button}'s
+     * "one control height across the app" comment promises, and only that
+     * class and {@code .icon-button} were keeping it: a primary button came
+     * out 32 beside a secondary's 34 in three views, and a {@code .form-field}
+     * ComboBox came out 42 beside a {@code .form-field} TextField's 34 in the
+     * same column.
+     *
+     * <p>The expected height is read from {@code .secondary-button} rather
+     * than written here, so this test cannot disagree with the stylesheet
+     * about what the number is — only about whether everything follows it.</p>
+     */
+    @Test
+    void everyOrdinaryControlIsOneHeight() {
+        List<String> odd = new ArrayList<>();
+        double[] expected = {0};
+        interact(() -> I18n.setLocale(Locale.ENGLISH));
+        for (String view : VIEWS) {
+            Scene scene = load(view);
+            interact(() -> {
+                for (String theme : List.of("light", "dark")) {
+                    dress(scene, theme);
+                    for (Node node : scene.getRoot().lookupAll("*")) {
+                        if (!(node instanceof Region region) || !isOnScreen(node)) {
+                            continue;
+                        }
+                        String sized = SIZED.stream()
+                                .filter(node.getStyleClass()::contains).findFirst().orElse(null);
+                        if (sized == null || region.getHeight() <= 0) {
+                            continue;
+                        }
+                        if ("secondary-button".equals(sized) && expected[0] == 0) {
+                            expected[0] = region.getHeight();
+                        }
+                        if (expected[0] > 0 && Math.abs(region.getHeight() - expected[0]) > 0.5) {
+                            odd.add("%s/%s %s [%s]: %.1f high, not %.1f".formatted(
+                                    view, theme, describe(node), sized,
+                                    region.getHeight(), expected[0]));
+                        }
+                    }
+                }
+            });
+        }
+
+        assertThat(odd)
+                .withFailMessage("controls that should share the app's one control height but "
+                        + "do not — these read as a ragged row wherever they sit beside "
+                        + "another:%n  %s", String.join("\n  ", odd))
                 .isEmpty();
     }
 
@@ -165,7 +228,7 @@ public class LabelClippingTest extends ApplicationTest {
     }
 
     private void dress(Scene scene, String theme) {
-        String css = LabelClippingTest.class.getResource("/css/" + theme + ".css")
+        String css = ControlSizingTest.class.getResource("/css/" + theme + ".css")
                 .toExternalForm();
         scene.getStylesheets().setAll(css);
         scene.getRoot().applyCss();
