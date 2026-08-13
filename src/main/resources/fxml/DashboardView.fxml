@@ -79,12 +79,19 @@
                      width DashboardFitTest pins, now that the labels cannot
                      shrink. -->
                 <Label text="Mode" styleClass="stats-title" minWidth="-Infinity"/>
-                <ComboBox fx:id="proxyModeCombo" prefWidth="150" minWidth="60" styleClass="mode-combo"/>
+                <!-- 190 is measured, not chosen: "Системный прокси" needs 178
+                     in the cell plus the arrow, and at 150 the mode was
+                     truncated at every window size rather than only at the
+                     narrow ones this row is designed to give up width at. Both
+                     combos take the same width — they are peers in one row. -->
+                <ComboBox fx:id="proxyModeCombo" prefWidth="190" minWidth="60" styleClass="mode-combo"/>
                 <Label fx:id="serverSelectionLabel" styleClass="stats-title" minWidth="-Infinity"/>
-                <ComboBox fx:id="serverSelectionCombo" prefWidth="170" minWidth="60" styleClass="mode-combo"/>
+                <ComboBox fx:id="serverSelectionCombo" prefWidth="190" minWidth="60" styleClass="mode-combo"/>
                 <Region HBox.hgrow="ALWAYS"/>
+                <!-- No width here: the controller pins it from the four labels
+                     this button can show, in whatever language is on. -->
                 <Button fx:id="connectButton" text="Connect" styleClass="connect-button"
-                        onAction="#onConnectClicked" minWidth="170" prefWidth="170" prefHeight="44"/>
+                        onAction="#onConnectClicked" prefHeight="44"/>
             </HBox>
             <Label fx:id="proxyModeWarning" text="" styleClass="hint-label"
                    wrapText="true" maxWidth="Infinity" visible="false" managed="false"/>

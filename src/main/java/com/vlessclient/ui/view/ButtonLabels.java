@@ -6,9 +6,6 @@ import java.util.List;
 import java.util.Map;
 import javafx.animation.PauseTransition;
 import javafx.beans.binding.Bindings;
-import javafx.beans.value.ChangeListener;
-import javafx.beans.value.ObservableValue;
-import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Labeled;
 import javafx.scene.layout.Region;
@@ -78,7 +75,23 @@ final class ButtonLabels {
         List<String> keys = new ArrayList<>();
         keys.add(idleKey);
         keys.addAll(List.of(alternateKeys));
+        pinWidth(button, keys);
+    }
 
+    /**
+     * Pins a button wide enough for every label it can show, without touching
+     * its text — for buttons a controller drives with {@code setText} as its
+     * own state changes, where binding the label here would fight it.
+     *
+     * <p>The width still has to come from the strings rather than from a
+     * number in the FXML: {@code connectButton} asked for 170 and "Подключить"
+     * needs 173.7, so the app's main action rendered as "Подключ…".</p>
+     */
+    static void pinWidth(Button button, String... keys) {
+        pinWidth(button, List.of(keys));
+    }
+
+    private static void pinWidth(Button button, List<String> keys) {
         // Measuring needs the font, which arrives with the stylesheet, so it
         // cannot run here: initialize() is called while the view is still
         // detached. Wait for a scene, then re-measure on every locale change.
@@ -241,19 +254,25 @@ final class ButtonLabels {
         return width;
     }
 
-    /** Runs the action once the button has a scene, immediately if it has one. */
+    /**
+     * Runs the action whenever the button is in a scene — now if it already
+     * is, and again every time it returns to one.
+     *
+     * <p>Every time, not just the first: MainView shows a view by replacing
+     * the content area's children, so all the views the user is not looking at
+     * have left the scene graph. A language switch made while a view is away
+     * skips its buttons — {@link #pinToWidest} needs a scene to measure in —
+     * and without a second chance on the way back, the button keeps the width
+     * of the language it was last measured in. That is how the Routing save
+     * button came to render "Сох…".</p>
+     */
     private static void whenInScene(Button button, Runnable action) {
         if (button.getScene() != null) {
             action.run();
-            return;
         }
-        button.sceneProperty().addListener(new ChangeListener<Scene>() {
-            @Override
-            public void changed(ObservableValue<? extends Scene> obs, Scene old, Scene scene) {
-                if (scene != null) {
-                    button.sceneProperty().removeListener(this);
-                    action.run();
-                }
+        button.sceneProperty().addListener((obs, old, scene) -> {
+            if (scene != null) {
+                action.run();
             }
         });
     }
