@@ -12,6 +12,7 @@ import com.vlessclient.service.mcp.McpServerService;
 import com.vlessclient.ui.view.settings.UpdatesSection;
 import java.io.IOException;
 import java.util.Locale;
+import java.util.Map;
 import javafx.fxml.FXML;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
@@ -432,8 +433,12 @@ public class SettingsViewController implements ViewShownAware {
         appVersionLabel.textProperty().bind(I18n.binding("settings.app.version"));
         singboxVersionLabel.textProperty().bind(I18n.binding("settings.singbox.version"));
         updatesLabel.textProperty().bind(I18n.binding("settings.updates"));
-        checkUpdatesButton.textProperty().bind(I18n.binding("settings.updates.check"));
-        downloadAppButton.textProperty().bind(I18n.binding("settings.update.download"));
+        // The Updates block's two buttons stand one row apart at the same
+        // edge of the card, so sizing each to its own label leaves the pair
+        // visibly mismatched. Bound as a group, they share a width.
+        ButtonLabels.bindSharingWidth(Map.of(
+                checkUpdatesButton, "settings.updates.check",
+                downloadAppButton, "settings.update.download"));
         advancedLabel.textProperty().bind(I18n.binding("settings.advanced"));
         proxyDnsLabel.textProperty().bind(I18n.binding("settings.proxy.dns"));
         directDnsLabel.textProperty().bind(I18n.binding("settings.direct.dns"));
