@@ -756,6 +756,17 @@
     -fx-background-color: -c-accent-tint;
 }
 
+/* ===== Separator =====
+   Stated in both themes rather than left to modena in one of them: the bare
+   colour override dark used to carry made a separator 2px high there against
+   3 in light, and the server form stacks three of them, so everything below
+   sat a few pixels apart between the themes. Same shape as
+   .sidebar-separator: one hairline along the top edge. */
+.separator .line {
+    -fx-border-color: -c-border transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
+}
+
 /* ===== Status Circle ===== */
 .status-circle-disconnected {
     -fx-fill: #9e9e9e;
@@ -900,6 +911,15 @@
 .log-msg-warn   { -fx-fill: #bf360c; }
 .log-msg-error  { -fx-fill: #b71c1c; }
 .log-plain      { -fx-fill: #424242; }
+
+/* Sized here as well as in dark, or the two themes render the same tooltip
+   at different text sizes and corner radii. */
+.tooltip {
+    -fx-background-color: -c-text;
+    -fx-text-fill: -c-surface;
+    -fx-font-size: 12px;
+    -fx-background-radius: 4;
+}
 
 /* ===== sing-box missing banner ===== */
 .singbox-missing-banner {
