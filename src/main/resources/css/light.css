@@ -967,6 +967,14 @@
     -fx-padding: 10 12;
 }
 
+/* Right side only, and the same 12 .update-item insets its contents by: it
+   puts "Check for updates" in the column the row's own button stands in, one
+   row below. The left side stays out of it — the header's label belongs to
+   the card's gutter with every other label in About, not to the sub-block. */
+.updates-header {
+    -fx-padding: 0 12 0 0;
+}
+
 /* Status line indented under the item name (past the dot). Defined after
    .update-status so its left padding wins. */
 .update-item-detail {

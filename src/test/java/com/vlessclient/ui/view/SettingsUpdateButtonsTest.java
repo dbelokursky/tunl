@@ -5,6 +5,7 @@ import com.vlessclient.app.ServiceLocator;
 import java.util.List;
 import java.util.Locale;
 import javafx.fxml.FXMLLoader;
+import javafx.geometry.Bounds;
 import javafx.scene.Group;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
@@ -30,6 +31,10 @@ import static org.assertj.core.api.Assertions.within;
  * language specific — 161 in English, 201 in Russian — and a number in this
  * file would only restate the one in the code, passing just as happily if
  * both were wrong.</p>
+ *
+ * <p>Width is half of it. The lower button sits inside a padded sub-block
+ * and the upper one does not, so equal widths still leave the two staggered
+ * unless the insets agree — hence the column check as well.</p>
  */
 public class SettingsUpdateButtonsTest extends ApplicationTest {
 
@@ -61,9 +66,38 @@ public class SettingsUpdateButtonsTest extends ApplicationTest {
 
     @Test
     void bothButtonsTakeTheWidthTheWidestLabelNeeds() {
-        Scene settings = loadSettings();
+        Scene settings = loadSettings("light");
 
         assertSharedWidth(settings, Locale.ENGLISH);
+    }
+
+    /**
+     * Equal widths only line the pair up if they start from the same edge.
+     * The lower button is inset by the padding {@code .update-item} puts
+     * around its contents, so {@code .updates-header} owes the upper one the
+     * same inset — and this fails if either number moves without the other.
+     *
+     * <p>Both themes, because both carry their own copy of the two rules and
+     * only one of them has to be forgotten for the pair to drift apart in a
+     * theme nobody screenshotted.</p>
+     */
+    @Test
+    void theTwoButtonsStandInOneColumn() {
+        for (String theme : List.of("light", "dark")) {
+            Scene settings = loadSettings(theme);
+
+            Bounds check = boundsOf(settings, button(settings, "#checkUpdatesButton"));
+            Bounds download = boundsOf(settings, button(settings, "#downloadAppButton"));
+
+            assertThat(download.getMaxX())
+                    .withFailMessage("in %s the buttons' right edges are %.1f apart — "
+                                    + "checkUpdatesButton ends at %.1f, downloadAppButton at "
+                                    + "%.1f. .updates-header's right padding has to match "
+                                    + ".update-item's",
+                            theme, Math.abs(check.getMaxX() - download.getMaxX()),
+                            check.getMaxX(), download.getMaxX())
+                    .isCloseTo(check.getMaxX(), within(SNAP));
+        }
     }
 
     /**
@@ -73,7 +107,7 @@ public class SettingsUpdateButtonsTest extends ApplicationTest {
      */
     @Test
     void theSharedWidthFollowsTheLanguage() {
-        Scene settings = loadSettings();
+        Scene settings = loadSettings("light");
 
         for (Locale locale : List.of(Locale.ENGLISH, Locale.of("ru"), Locale.ENGLISH)) {
             interact(() -> I18n.setLocale(locale));
@@ -109,6 +143,17 @@ public class SettingsUpdateButtonsTest extends ApplicationTest {
         String check = I18n.get("settings.updates.check");
         String download = I18n.get("settings.update.download");
         return check.length() >= download.length() ? check : download;
+    }
+
+    /** Where the button ends up on screen, once the row has been laid out. */
+    private Bounds boundsOf(Scene settings, Button button) {
+        final Bounds[] bounds = new Bounds[1];
+        interact(() -> {
+            settings.getRoot().applyCss();
+            settings.getRoot().layout();
+            bounds[0] = button.localToScene(button.getBoundsInLocal());
+        });
+        return bounds[0];
     }
 
     /** Laid-out width, which is what the row beside the button actually sees. */
@@ -149,7 +194,7 @@ public class SettingsUpdateButtonsTest extends ApplicationTest {
      * measure loose buttons in — the pinned ones cannot answer what they
      * would have been.
      */
-    private Scene loadSettings() {
+    private Scene loadSettings(String theme) {
         final Scene[] holder = new Scene[1];
         interact(() -> {
             try {
@@ -158,9 +203,15 @@ public class SettingsUpdateButtonsTest extends ApplicationTest {
                 Parent root = loader.load();
                 Scene scene = new Scene(root, 700, 720);
                 scene.getStylesheets().add(
-                        getClass().getResource("/css/light.css").toExternalForm());
+                        getClass().getResource("/css/" + theme + ".css").toExternalForm());
                 stage.setScene(scene);
                 stage.show();
+                // Before anything is looked up: the view hangs off a
+                // ScrollPane, whose skin builds the viewport that holds it
+                // during the first CSS pass. show() only forces that pass on a
+                // stage that was not already showing, and this runs twice.
+                root.applyCss();
+                root.layout();
 
                 probeRoot = new Group();
                 Scene probe = new Scene(probeRoot, 400, 100);

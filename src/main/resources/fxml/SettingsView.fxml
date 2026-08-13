@@ -222,7 +222,7 @@
             <!-- Updates: the app only. The sing-box core ships pinned with the
                  app and moves with it, so it has no row and no action here. -->
             <VBox styleClass="updates-section" spacing="10">
-                <HBox alignment="CENTER_LEFT" spacing="10">
+                <HBox alignment="CENTER_LEFT" spacing="10" styleClass="updates-header">
                     <Label fx:id="updatesLabel" text="Updates" styleClass="section-header"/>
                     <Region HBox.hgrow="ALWAYS"/>
                     <Button fx:id="checkUpdatesButton" text="Check for updates"
