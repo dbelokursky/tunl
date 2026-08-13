@@ -157,6 +157,13 @@ public class ThemeGeometryParityTest extends ApplicationTest {
                 stage.setScene(scene);
                 stage.show();
                 scene.setRoot(root);
+                // Sized explicitly, not left to the next pulse: setRoot does
+                // not resize the root, and laying out a root that is still at
+                // its own preferred width measures every child against a
+                // window it will never be shown in. Locally a pulse happened
+                // to land first; on a CI runner it did not, and the install
+                // banner reported labels 96px wide.
+                root.resize(scene.getWidth(), scene.getHeight());
                 root.applyCss();
                 root.layout();
                 holder[0] = scene;

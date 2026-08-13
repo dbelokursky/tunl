@@ -253,6 +253,22 @@ public class ControlSizingTest extends ApplicationTest {
                 stage.setScene(scene);
                 stage.show();
                 scene.setRoot(root);
+                // Sized explicitly, not left to the next pulse: setRoot does
+                // not resize the root, and laying out a root that is still at
+                // its own preferred width measures every child against a
+                // window it will never be shown in. Locally a pulse happened
+                // to land first; on a CI runner it did not, and the install
+                // banner reported labels 96px wide.
+                root.resize(scene.getWidth(), scene.getHeight());
+                // The install banner only shows on a machine with no sing-box,
+                // so whether it is covered would otherwise depend on the
+                // machine running the tests — it is up on CI and down here.
+                // Show it everywhere: it is a state the app really has.
+                Node banner = root.lookup("#singBoxMissingBanner");
+                if (banner != null) {
+                    banner.setVisible(true);
+                    banner.setManaged(true);
+                }
                 dress(scene, "light");
                 holder[0] = scene;
             } catch (Exception e) {

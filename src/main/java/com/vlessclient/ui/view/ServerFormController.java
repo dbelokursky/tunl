@@ -9,14 +9,17 @@ import com.vlessclient.model.TransportType;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
+import javafx.beans.binding.Bindings;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
+import javafx.geometry.Insets;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.Labeled;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Separator;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
@@ -104,6 +107,14 @@ public class ServerFormController {
 
     @FXML private Button saveButton;
     @FXML private Button cancelButton;
+    @FXML private ScrollPane formScroll;
+    @FXML private HBox formActions;
+
+    /** What the form's own content is inset by, from the FXML. */
+    private static final double ACTIONS_INSET = 24;
+
+    /** The actions bar's own breathing room, above and below. */
+    private static final double ACTIONS_VERTICAL = 12;
 
     private ServerConfig editingServer;
     private Consumer<ServerConfig> onSave;
@@ -117,6 +128,7 @@ public class ServerFormController {
     @FXML
     public void initialize() {
         bindStaticLabels();
+        followScrollViewport();
 
         protocolCombo.setItems(FXCollections.observableArrayList(Protocol.values()));
         protocolCombo.setValue(Protocol.VLESS);
@@ -398,6 +410,36 @@ public class ServerFormController {
         if (protocol != Protocol.HYSTERIA2) {
             tlsEnabledCheck.setDisable(false);
         }
+    }
+
+    /**
+     * Keeps Save and Cancel in the column the fields above them form.
+     *
+     * <p>The actions bar is a sibling of the scroll pane, not a row inside it,
+     * so it keeps the full width when a scrollbar appears and the fields lose
+     * it — which put its buttons 14px right of every field the moment the form
+     * grew tall enough to scroll, which is most of the time. Following the
+     * viewport's right edge costs one listener and is exact in both states.</p>
+     */
+    private void followScrollViewport() {
+        // What the fields lose on the right and this bar does not: the scroll
+        // pane's own right border plus the scrollbar when there is one. The
+        // viewport's bounds are relative to the viewport, not to the scroll
+        // pane, so its left inset has to come off separately — reading maxX as
+        // if it were a scroll-pane coordinate double-counts that inset and
+        // leaves the buttons 2px short.
+        //
+        // A binding rather than a listener: width and viewport bounds settle in
+        // separate passes, and reading one while the other is stale sets a
+        // padding that stays wrong until something else invalidates it.
+        formActions.paddingProperty().bind(Bindings.createObjectBinding(
+                () -> new Insets(ACTIONS_VERTICAL,
+                        ACTIONS_INSET + formScroll.getWidth()
+                                - formScroll.getInsets().getLeft()
+                                - formScroll.getViewportBounds().getWidth(),
+                        ACTIONS_VERTICAL, ACTIONS_INSET),
+                formScroll.widthProperty(), formScroll.viewportBoundsProperty(),
+                formScroll.insetsProperty()));
     }
 
     /**

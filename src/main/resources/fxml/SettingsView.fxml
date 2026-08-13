@@ -167,8 +167,11 @@
             <CheckBox fx:id="mcpEnabledCheck" text="Enable MCP server" styleClass="form-checkbox"/>
 
             <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label text="Port" styleClass="form-label" prefWidth="120"/>
-                <TextField fx:id="mcpPortField" styleClass="form-field" prefWidth="120"
+                <!-- 210 and 110: the label gutter and the numeric-field width
+                     every other label+field row in this view uses. At 120/120
+                     this row's field started 90px left of all of them. -->
+                <Label text="Port" styleClass="form-label" prefWidth="210"/>
+                <TextField fx:id="mcpPortField" styleClass="form-field" prefWidth="110"
                            promptText="55555"/>
                 <Label fx:id="mcpStatusLabel" text="" styleClass="stats-value"
                        style="-fx-font-size: 12px;"/>
@@ -193,7 +196,7 @@
         </VBox>
 
         <!-- About Section -->
-        <VBox spacing="8" styleClass="card">
+        <VBox spacing="12" styleClass="card">
             <padding>
                 <Insets top="16" right="20" bottom="16" left="20"/>
             </padding>
