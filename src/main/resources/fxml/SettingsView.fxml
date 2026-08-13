@@ -18,10 +18,10 @@
             xmlns:fx="http://javafx.com/fxml"
             fx:controller="com.vlessclient.ui.view.SettingsViewController"
             fitToWidth="true" styleClass="form-scroll">
+    <!-- No padding of its own: MainView's content area already insets every
+         page by 24, and the 16 this added on top made the Settings cards jump
+         inward against the Servers list and every other view. -->
     <VBox spacing="20" styleClass="form-content">
-        <padding>
-            <Insets top="8" right="16" bottom="24" left="16"/>
-        </padding>
 
         <!-- Title -->
         <Label fx:id="titleLabel" text="Settings" styleClass="view-title"/>

@@ -162,7 +162,10 @@
     -fx-text-fill: -c-text-muted;
     -fx-text-transform: uppercase;
     -fx-letter-spacing: 0.6;
-    -fx-padding: 2 0 0 2;
+    /* Top only. The 2 on the left used to push the header off the column it
+       heads — inside the health card it sat 2px right of the status dots
+       under it, and in Settings 2px right of every other label. */
+    -fx-padding: 2 0 0 0;
 }
 
 .traffic-card {
@@ -620,6 +623,12 @@
 .form-scroll {
     -fx-background-color: #ffffff;
     -fx-border-color: transparent;
+    /* Settings is the only page inside a scroll pane of its own, and modena
+       gives one a border and a padding: a transparent colour still reserves
+       1px a side, and the padding another. Both zeroed, or this page's content
+       sits further in than every other view's. */
+    -fx-border-width: 0;
+    -fx-padding: 0;
 }
 
 .form-scroll .viewport {
