@@ -28,10 +28,6 @@
 
         <!-- Appearance Section -->
         <VBox spacing="12" styleClass="card">
-            <padding>
-                <Insets top="16" right="20" bottom="16" left="20"/>
-            </padding>
-
             <Label fx:id="appearanceLabel" text="Appearance" styleClass="form-section-title"/>
 
             <HBox spacing="12" alignment="CENTER_LEFT">
@@ -47,10 +43,6 @@
 
         <!-- Connection Section -->
         <VBox spacing="12" styleClass="card">
-            <padding>
-                <Insets top="16" right="20" bottom="16" left="20"/>
-            </padding>
-
             <Label fx:id="connectionLabel" text="Connection" styleClass="form-section-title"/>
 
             <CheckBox fx:id="autoConnectCheck" text="Auto-connect on startup" styleClass="form-checkbox"/>
@@ -86,10 +78,6 @@
 
         <!-- Health Check Section -->
         <VBox spacing="12" styleClass="card">
-            <padding>
-                <Insets top="16" right="20" bottom="16" left="20"/>
-            </padding>
-
             <Label fx:id="healthCheckLabel" text="Health Check" styleClass="form-section-title"/>
 
             <CheckBox fx:id="healthCheckEnabledCheck" text="Enable health check"
@@ -117,10 +105,6 @@
 
         <!-- Advanced Section -->
         <VBox spacing="12" styleClass="card">
-            <padding>
-                <Insets top="16" right="20" bottom="16" left="20"/>
-            </padding>
-
             <Label fx:id="advancedLabel" text="Advanced" styleClass="form-section-title"/>
 
             <HBox spacing="12" alignment="CENTER_LEFT">
@@ -155,10 +139,6 @@
 
         <!-- Agent Control (MCP) Section -->
         <VBox spacing="12" styleClass="card">
-            <padding>
-                <Insets top="16" right="20" bottom="16" left="20"/>
-            </padding>
-
             <Label text="Agent Control (MCP)" styleClass="form-section-title"/>
 
             <Label text="Expose a local, loopback-only MCP server so AI agents can read status/logs and manage the client. Guarded by a bearer token."
@@ -167,8 +147,11 @@
             <CheckBox fx:id="mcpEnabledCheck" text="Enable MCP server" styleClass="form-checkbox"/>
 
             <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label text="Port" styleClass="form-label" prefWidth="120"/>
-                <TextField fx:id="mcpPortField" styleClass="form-field" prefWidth="120"
+                <!-- 210 and 110: the label gutter and the numeric-field width
+                     every other label+field row in this view uses. At 120/120
+                     this row's field started 90px left of all of them. -->
+                <Label text="Port" styleClass="form-label" prefWidth="210"/>
+                <TextField fx:id="mcpPortField" styleClass="form-field" prefWidth="110"
                            promptText="55555"/>
                 <Label fx:id="mcpStatusLabel" text="" styleClass="stats-value"
                        style="-fx-font-size: 12px;"/>
@@ -193,11 +176,7 @@
         </VBox>
 
         <!-- About Section -->
-        <VBox spacing="8" styleClass="card">
-            <padding>
-                <Insets top="16" right="20" bottom="16" left="20"/>
-            </padding>
-
+        <VBox spacing="12" styleClass="card">
             <Label fx:id="aboutLabel" text="About" styleClass="form-section-title"/>
 
             <HBox spacing="12" alignment="CENTER_LEFT">
@@ -222,7 +201,7 @@
             <!-- Updates: the app only. The sing-box core ships pinned with the
                  app and moves with it, so it has no row and no action here. -->
             <VBox styleClass="updates-section" spacing="10">
-                <HBox alignment="CENTER_LEFT" spacing="10">
+                <HBox alignment="CENTER_LEFT" spacing="10" styleClass="updates-header">
                     <Label fx:id="updatesLabel" text="Updates" styleClass="section-header"/>
                     <Region HBox.hgrow="ALWAYS"/>
                     <Button fx:id="checkUpdatesButton" text="Check for updates"

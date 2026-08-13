@@ -16,7 +16,10 @@
             styleClass="root-pane">
 
     <left>
-        <VBox fx:id="sidebar" styleClass="sidebar" prefWidth="200" spacing="2">
+        <!-- 212, not 200: a nav button gets the width less this VBox's 8+8 of
+             padding, and "Маршрутизация" needs 190 of it. At 200 the longest
+             item in the column was the only one rendering as "Маршрутиза…". -->
+        <VBox fx:id="sidebar" styleClass="sidebar" prefWidth="212" spacing="2">
             <padding>
                 <Insets top="16" right="8" bottom="16" left="8"/>
             </padding>
