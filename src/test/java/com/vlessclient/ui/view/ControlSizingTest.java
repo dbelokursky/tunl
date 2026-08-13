@@ -12,7 +12,6 @@ import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Labeled;
 import javafx.scene.layout.Region;
-import javafx.stage.Stage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -67,7 +66,8 @@ public class ControlSizingTest extends ApplicationTest {
     private static final List<String> VIEWS = List.of("MainView", "DashboardView", "ServersView",
             "SubscriptionsView", "RoutingView", "LogsView", "SettingsView", "ServerFormView");
 
-    private Stage stage;
+    private double width;
+    private double height;
 
     @BeforeAll
     static void setupHeadless() {
@@ -84,10 +84,6 @@ public class ControlSizingTest extends ApplicationTest {
         interact(() -> I18n.setLocale(Locale.ENGLISH));
     }
 
-    @Override
-    public void start(Stage primaryStage) {
-        this.stage = primaryStage;
-    }
 
     @Test
     void noLabelIsTruncatedInEitherLanguage() {
@@ -227,10 +223,21 @@ public class ControlSizingTest extends ApplicationTest {
                 : node.getClass().getSimpleName() + "." + String.join(".", node.getStyleClass());
     }
 
+    /**
+     * Applies a theme and lays the view out at the size under test.
+     *
+     * <p>The size is set here, immediately before every measurement, rather
+     * than once at load: a headless runner's screen can be smaller than the
+     * window being asked for, so the stage clamps the scene, and the next
+     * pulse lays the root out at that smaller size. On a runner with a 640px
+     * screen that turned a dashboard measured at 888 into one measured at
+     * about 480, where labels really are too narrow.</p>
+     */
     private void dress(Scene scene, String theme) {
         String css = ControlSizingTest.class.getResource("/css/" + theme + ".css")
                 .toExternalForm();
         scene.getStylesheets().setAll(css);
+        scene.getRoot().resize(width, height);
         scene.getRoot().applyCss();
         scene.getRoot().layout();
     }
@@ -247,19 +254,17 @@ public class ControlSizingTest extends ApplicationTest {
                 // pins measure themselves the moment their button joins a
                 // scene, and a scene with no stylesheet yet measures them in
                 // the wrong font and keeps that number.
-                Scene scene = new Scene(new Group(),
-                        view.equals("MainView") ? WINDOW_WIDTH : CONTENT_WIDTH, 740);
+                width = view.equals("MainView") ? WINDOW_WIDTH : CONTENT_WIDTH;
+                height = 740;
+                // Never shown. A scene only needs a root and its stylesheets
+                // to apply CSS and lay out, and putting one on a stage ties the
+                // test to the screen it runs on: a headless runner whose screen
+                // is smaller than the window clamps the scene, lays everything
+                // out narrower than asked, and can overflow monocle's
+                // framebuffer while painting it.
+                Scene scene = new Scene(new Group(), width, height);
                 dress(scene, "light");
-                stage.setScene(scene);
-                stage.show();
                 scene.setRoot(root);
-                // Sized explicitly, not left to the next pulse: setRoot does
-                // not resize the root, and laying out a root that is still at
-                // its own preferred width measures every child against a
-                // window it will never be shown in. Locally a pulse happened
-                // to land first; on a CI runner it did not, and the install
-                // banner reported labels 96px wide.
-                root.resize(scene.getWidth(), scene.getHeight());
                 // The install banner only shows on a machine with no sing-box,
                 // so whether it is covered would otherwise depend on the
                 // machine running the tests — it is up on CI and down here.

@@ -433,13 +433,25 @@ public class ServerFormController {
         // separate passes, and reading one while the other is stale sets a
         // padding that stays wrong until something else invalidates it.
         formActions.paddingProperty().bind(Bindings.createObjectBinding(
-                () -> new Insets(ACTIONS_VERTICAL,
-                        ACTIONS_INSET + formScroll.getWidth()
-                                - formScroll.getInsets().getLeft()
-                                - formScroll.getViewportBounds().getWidth(),
+                () -> new Insets(ACTIONS_VERTICAL, ACTIONS_INSET + scrollGutter(),
                         ACTIONS_VERTICAL, ACTIONS_INSET),
                 formScroll.widthProperty(), formScroll.viewportBoundsProperty(),
                 formScroll.insetsProperty()));
+    }
+
+    /**
+     * What the fields lose on the right and the actions bar does not: the
+     * scroll pane's own right border, plus the scrollbar when one is showing.
+     *
+     * <p>Zero until the scroll pane has been laid out. Subtracting a viewport
+     * that is still empty would count the pane's whole width as gutter, and a
+     * padding that large makes the bar demand more room than the dialog has,
+     * which widens the form rather than aligning anything.</p>
+     */
+    private double scrollGutter() {
+        double viewport = formScroll.getViewportBounds().getWidth();
+        return viewport <= 0 ? 0
+                : formScroll.getWidth() - formScroll.getInsets().getLeft() - viewport;
     }
 
     /**

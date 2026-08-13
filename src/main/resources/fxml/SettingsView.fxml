@@ -28,10 +28,6 @@
 
         <!-- Appearance Section -->
         <VBox spacing="12" styleClass="card">
-            <padding>
-                <Insets top="16" right="20" bottom="16" left="20"/>
-            </padding>
-
             <Label fx:id="appearanceLabel" text="Appearance" styleClass="form-section-title"/>
 
             <HBox spacing="12" alignment="CENTER_LEFT">
@@ -47,10 +43,6 @@
 
         <!-- Connection Section -->
         <VBox spacing="12" styleClass="card">
-            <padding>
-                <Insets top="16" right="20" bottom="16" left="20"/>
-            </padding>
-
             <Label fx:id="connectionLabel" text="Connection" styleClass="form-section-title"/>
 
             <CheckBox fx:id="autoConnectCheck" text="Auto-connect on startup" styleClass="form-checkbox"/>
@@ -86,10 +78,6 @@
 
         <!-- Health Check Section -->
         <VBox spacing="12" styleClass="card">
-            <padding>
-                <Insets top="16" right="20" bottom="16" left="20"/>
-            </padding>
-
             <Label fx:id="healthCheckLabel" text="Health Check" styleClass="form-section-title"/>
 
             <CheckBox fx:id="healthCheckEnabledCheck" text="Enable health check"
@@ -117,10 +105,6 @@
 
         <!-- Advanced Section -->
         <VBox spacing="12" styleClass="card">
-            <padding>
-                <Insets top="16" right="20" bottom="16" left="20"/>
-            </padding>
-
             <Label fx:id="advancedLabel" text="Advanced" styleClass="form-section-title"/>
 
             <HBox spacing="12" alignment="CENTER_LEFT">
@@ -155,10 +139,6 @@
 
         <!-- Agent Control (MCP) Section -->
         <VBox spacing="12" styleClass="card">
-            <padding>
-                <Insets top="16" right="20" bottom="16" left="20"/>
-            </padding>
-
             <Label text="Agent Control (MCP)" styleClass="form-section-title"/>
 
             <Label text="Expose a local, loopback-only MCP server so AI agents can read status/logs and manage the client. Guarded by a bearer token."
@@ -197,10 +177,6 @@
 
         <!-- About Section -->
         <VBox spacing="12" styleClass="card">
-            <padding>
-                <Insets top="16" right="20" bottom="16" left="20"/>
-            </padding>
-
             <Label fx:id="aboutLabel" text="About" styleClass="form-section-title"/>
 
             <HBox spacing="12" alignment="CENTER_LEFT">

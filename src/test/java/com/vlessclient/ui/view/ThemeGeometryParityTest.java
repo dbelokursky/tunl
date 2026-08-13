@@ -15,7 +15,6 @@ import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Labeled;
 import javafx.scene.layout.Region;
-import javafx.stage.Stage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -44,7 +43,8 @@ public class ThemeGeometryParityTest extends ApplicationTest {
     private static final List<String> VIEWS = List.of("MainView", "DashboardView", "ServersView",
             "SubscriptionsView", "RoutingView", "LogsView", "SettingsView", "ServerFormView");
 
-    private Stage stage;
+    private double width;
+    private double height;
 
     @BeforeAll
     static void setupHeadless() {
@@ -61,10 +61,6 @@ public class ThemeGeometryParityTest extends ApplicationTest {
         interact(() -> I18n.setLocale(Locale.ENGLISH));
     }
 
-    @Override
-    public void start(Stage primaryStage) {
-        this.stage = primaryStage;
-    }
 
     @Test
     void theThemesLayOutIdentically() {
@@ -109,6 +105,10 @@ public class ThemeGeometryParityTest extends ApplicationTest {
     private Map<String, Bounds> measure(Scene scene, String theme) {
         scene.getStylesheets().setAll(
                 getClass().getResource("/css/" + theme + ".css").toExternalForm());
+        // Sized here, immediately before measuring: a headless runner's screen
+        // can be smaller than the window asked for, so the stage clamps the
+        // scene and the next pulse lays the root out at that smaller size.
+        scene.getRoot().resize(width, height);
         scene.getRoot().applyCss();
         scene.getRoot().layout();
 
@@ -151,21 +151,15 @@ public class ThemeGeometryParityTest extends ApplicationTest {
             try {
                 Parent root = new FXMLLoader(getClass().getResource("/fxml/" + view + ".fxml"))
                         .load();
-                Scene scene = new Scene(new Group(), view.equals("MainView") ? 1100 : 888, 740);
+                width = view.equals("MainView") ? 1100 : 888;
+                height = 740;
+                // Never shown: a scene only needs a root and its stylesheets
+                // to apply CSS and lay out, and a stage ties the test to the
+                // screen it runs on.
+                Scene scene = new Scene(new Group(), width, height);
                 scene.getStylesheets().setAll(
                         getClass().getResource("/css/light.css").toExternalForm());
-                stage.setScene(scene);
-                stage.show();
                 scene.setRoot(root);
-                // Sized explicitly, not left to the next pulse: setRoot does
-                // not resize the root, and laying out a root that is still at
-                // its own preferred width measures every child against a
-                // window it will never be shown in. Locally a pulse happened
-                // to land first; on a CI runner it did not, and the install
-                // banner reported labels 96px wide.
-                root.resize(scene.getWidth(), scene.getHeight());
-                root.applyCss();
-                root.layout();
                 holder[0] = scene;
             } catch (Exception e) {
                 throw new IllegalStateException("could not load " + view, e);

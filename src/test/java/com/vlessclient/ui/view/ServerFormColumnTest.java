@@ -7,7 +7,6 @@ import javafx.scene.Group;
 import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
-import javafx.stage.Stage;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
@@ -32,7 +31,9 @@ public class ServerFormColumnTest extends ApplicationTest {
     /** Layout snapping, not a misaligned button. */
     private static final double SLACK = 1.0;
 
-    private Stage stage;
+    /** What the dialog opens at; see ServersViewController. */
+    private static final int DIALOG_WIDTH = 520;
+
 
     @BeforeAll
     static void setupHeadless() {
@@ -44,10 +45,6 @@ public class ServerFormColumnTest extends ApplicationTest {
         ServiceLocator.initialize();
     }
 
-    @Override
-    public void start(Stage primaryStage) {
-        this.stage = primaryStage;
-    }
 
     @Test
     void theActionsEndWhereTheFieldsEndWithARoomyDialog() {
@@ -61,8 +58,24 @@ public class ServerFormColumnTest extends ApplicationTest {
 
     private void assertSameRightEdge(int height) {
         Scene scene = load(height);
-        double fields = rightEdgeOf(scene, "#addressField");
-        double save = rightEdgeOf(scene, "#saveButton");
+        double[] edges = new double[2];
+        interact(() -> {
+            // Sized and laid out in the same action as the measurement: a
+            // headless runner's screen can be smaller than the dialog asked
+            // for, and the pulse that follows a clamped stage lays the root
+            // out at that smaller size. Twice, because the actions bar's
+            // padding follows the viewport bounds, so the pass that produces
+            // those bounds cannot also be the pass that uses them.
+            scene.getRoot().resize(DIALOG_WIDTH, height);
+            scene.getRoot().applyCss();
+            scene.getRoot().layout();
+            scene.getRoot().applyCss();
+            scene.getRoot().layout();
+            edges[0] = rightEdgeOf(scene, "#addressField");
+            edges[1] = rightEdgeOf(scene, "#saveButton");
+        });
+        double fields = edges[0];
+        double save = edges[1];
 
         assertThat(save)
                 .withFailMessage("at a dialog %dpx tall the buttons end %.1f from the fields — "
@@ -73,15 +86,11 @@ public class ServerFormColumnTest extends ApplicationTest {
                 .isCloseTo(fields, within(SLACK));
     }
 
-    private double rightEdgeOf(Scene scene, String selector) {
-        final double[] edge = new double[1];
-        interact(() -> {
-            Node node = scene.getRoot().lookup(selector);
-            assertThat(node).withFailMessage("%s is gone from ServerFormView", selector).isNotNull();
-            Bounds bounds = node.localToScene(node.getLayoutBounds());
-            edge[0] = bounds.getMaxX();
-        });
-        return edge[0];
+    /** Called on the FX thread, with the view already laid out. */
+    private static double rightEdgeOf(Scene scene, String selector) {
+        Node node = scene.getRoot().lookup(selector);
+        assertThat(node).withFailMessage("%s is gone from ServerFormView", selector).isNotNull();
+        return node.localToScene(node.getLayoutBounds()).getMaxX();
     }
 
     private Scene load(int height) {
@@ -90,21 +99,13 @@ public class ServerFormColumnTest extends ApplicationTest {
             try {
                 Parent root = new FXMLLoader(getClass().getResource("/fxml/ServerFormView.fxml"))
                         .load();
-                Scene scene = new Scene(new Group(), 520, height);
+                // Never shown: a scene only needs a root and its stylesheets
+                // to apply CSS and lay out, and a stage ties the test to the
+                // screen it runs on.
+                Scene scene = new Scene(new Group(), DIALOG_WIDTH, height);
                 scene.getStylesheets().setAll(
                         getClass().getResource("/css/light.css").toExternalForm());
-                stage.setScene(scene);
-                stage.show();
                 scene.setRoot(root);
-                // Sized explicitly rather than waiting for a pulse, and laid
-                // out twice: the actions bar's padding follows the viewport
-                // bounds, so the pass that produces those bounds cannot also be
-                // the pass that uses them.
-                root.resize(scene.getWidth(), scene.getHeight());
-                root.applyCss();
-                root.layout();
-                root.applyCss();
-                root.layout();
                 holder[0] = scene;
             } catch (Exception e) {
                 throw new IllegalStateException("could not load ServerFormView", e);

@@ -134,6 +134,12 @@
     -fx-border-color: -c-border;
     -fx-border-radius: 12;
     -fx-effect: dropshadow(gaussian, rgba(16, 24, 40, 0.05), 4, 0, 0, 1);
+    /* Stated here so every card in the app agrees. Written into each card's
+       FXML instead, they drifted into three recipes on the dashboard alone —
+       left 18 on one card and 20 on the next, against a right of 18 on both,
+       so the column their contents formed was ragged on the left while the
+       right lined up. */
+    -fx-padding: 16 18;
 }
 
 .hero-card {
