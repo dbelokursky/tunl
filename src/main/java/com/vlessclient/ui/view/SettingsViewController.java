@@ -391,7 +391,10 @@ public class SettingsViewController implements ViewShownAware {
                 appUpdateRow,
                 appUpdateDot,
                 appUpdateDetail,
-                downloadAppButton));
+                downloadAppButton,
+                // The button's label is bound, not set: the section says which
+                // of its labels to show, the controller knows how they bind.
+                key -> ButtonLabels.rebind(downloadAppButton, key)));
         updatesSection.init();
     }
 
@@ -436,9 +439,12 @@ public class SettingsViewController implements ViewShownAware {
         // The Updates block's two buttons stand one row apart at the same
         // edge of the card, so sizing each to its own label leaves the pair
         // visibly mismatched. Bound as a group, they share a width.
-        ButtonLabels.bindSharingWidth(Map.of(
-                checkUpdatesButton, "settings.updates.check",
-                downloadAppButton, "settings.update.download"));
+        // The lower button also carries the post-download label, so the shared
+        // width covers it and the pair does not resize when an update lands.
+        ButtonLabels.bindSharingWidth(
+                Map.of(checkUpdatesButton, "settings.updates.check",
+                        downloadAppButton, "settings.update.download"),
+                Map.of(downloadAppButton, java.util.List.of("settings.update.restart")));
         advancedLabel.textProperty().bind(I18n.binding("settings.advanced"));
         proxyDnsLabel.textProperty().bind(I18n.binding("settings.proxy.dns"));
         directDnsLabel.textProperty().bind(I18n.binding("settings.direct.dns"));

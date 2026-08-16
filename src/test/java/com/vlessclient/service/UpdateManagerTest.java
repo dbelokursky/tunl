@@ -105,4 +105,30 @@ class UpdateManagerTest {
         };
         assertThat(UpdateManager.installerExtension()).isEqualTo(expected);
     }
+
+    @Test
+    void versionFromReleaseUrl_readsTheTagOutOfTheAssetPath() {
+        // The version recorded with a staged installer has to describe the file
+        // that was actually fetched, so it is read back off that file's URL.
+        assertThat(UpdateManager.versionFromReleaseUrl(
+                "https://github.com/dbelokursky/tunl/releases/download/v1.6.0/tunl_1.6.0.dmg"))
+                .isEqualTo("1.6.0");
+    }
+
+    @Test
+    void versionFromReleaseUrl_isEmptyForAnythingOutsideTheReleasePrefix() {
+        assertThat(UpdateManager.versionFromReleaseUrl(
+                "https://evil.example.com/v9.9.9/tunl.dmg")).isEmpty();
+        assertThat(UpdateManager.versionFromReleaseUrl(null)).isEmpty();
+        assertThat(UpdateManager.versionFromReleaseUrl(
+                "https://github.com/dbelokursky/tunl/releases/download/")).isEmpty();
+    }
+
+    @Test
+    void downloadPolicy_downloadsUnlessSomethingIsAlreadyStaged() {
+        // Re-downloading on top of a verified installer that is already
+        // waiting is the one case not worth the bytes; everything else is.
+        assertThat(UpdateDownloadPolicy.shouldDownloadNow(true)).isFalse();
+        assertThat(UpdateDownloadPolicy.shouldDownloadNow(false)).isTrue();
+    }
 }

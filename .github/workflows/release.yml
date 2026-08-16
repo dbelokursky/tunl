@@ -256,6 +256,60 @@ jobs:
           body: ${{ needs.prepare-release.outputs.notes }}
           files: dist/*.deb
 
+  # Sign every installer with the project release key, so the in-app updater
+  # can tell a build we published from one that merely appeared on the release
+  # page. What gets signed is the asset's "sha256:<hex>" digest string: Ed25519
+  # cannot stream, and the updater already computes that digest while
+  # downloading (see ReleaseSignature).
+  #
+  # Required, unlike the macOS and Windows certificates above, which only
+  # affect how loudly the OS complains. The public half is compiled into the
+  # app, so a release that reaches the page unsigned is one the in-app updater
+  # will refuse for every user on a build that carries the key — a broken
+  # release that would otherwise go out green. Missing secret, failed job.
+  sign-release:
+    needs: [prepare-release, release-macos, release-windows, release-linux, release-linux-arm64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Secrets via job env — the `secrets` context can't be used in step `if:`.
+    env:
+      RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+    steps:
+      - name: Sign installer assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RELEASE_SIGNING_KEY" ]; then
+            echo "::error::RELEASE_SIGNING_KEY is not set. The app verifies" \
+              "release signatures against the key in ReleaseSignature.java," \
+              "so an unsigned release cannot be installed by the updater." \
+              "See docs/SIGNING.md."
+            exit 1
+          fi
+          KEY="$RUNNER_TEMP/release.key"
+          printf '%s' "$RELEASE_SIGNING_KEY" | base64 -d > "$KEY"
+          chmod 600 "$KEY"
+          trap 'rm -f "$KEY"' EXIT
+
+          gh release view "$GITHUB_REF_NAME" --json assets \
+            --jq '.assets[].name | select(test("\\.(dmg|msi|deb)$"))' \
+          | while read -r asset; do
+              gh release download "$GITHUB_REF_NAME" -p "$asset" \
+                -O "$RUNNER_TEMP/$asset" --clobber
+              hex=$(sha256sum "$RUNNER_TEMP/$asset" | awk '{print $1}')
+              # No trailing newline: the updater signs and verifies exactly
+              # the digest string it builds itself, with nothing around it.
+              printf 'sha256:%s' "$hex" > "$RUNNER_TEMP/message"
+              openssl pkeyutl -sign -rawin -inkey "$KEY" \
+                -in "$RUNNER_TEMP/message" -out "$RUNNER_TEMP/signature"
+              base64 -w0 "$RUNNER_TEMP/signature" > "$RUNNER_TEMP/$asset.sig"
+              gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/$asset.sig" --clobber
+              echo "signed $asset"
+            done
+
   # Fill the Homebrew cask and AUR PKGBUILD templates with this release's
   # version and asset checksums, and attach the ready-to-use files to the
   # release. A tap/AUR maintainer copies them into their package repo (see

@@ -30,6 +30,14 @@ public final class Launcher {
         System.setProperty("vless.log.dir",
                 com.vlessclient.platform.PlatformPaths.current().logsDir().toString());
 
+        // An update downloaded during an earlier run installs here, before
+        // anything else exists to tear down. A handoff means a helper is now
+        // waiting for this process to exit so it can replace the files it is
+        // running from: leave immediately and start nothing.
+        if (com.vlessclient.service.UpdateBootstrap.applyPendingUpdate()) {
+            return;
+        }
+
         // Must be set before any AWT / Swing / JavaFX class touches the
         // Toolkit; otherwise the menu bar and Dock keep the fully-qualified
         // main-class name that java-lang assigns by default.
