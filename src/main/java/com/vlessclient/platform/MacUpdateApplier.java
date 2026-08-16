@@ -1,9 +1,7 @@
 package com.vlessclient.platform;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermissions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,7 +19,6 @@ final class MacUpdateApplier implements UpdateApplier {
 
     private static final Logger log = LoggerFactory.getLogger(MacUpdateApplier.class);
 
-    private static final String SCRIPT_NAME = "apply-update.sh";
     private static final String LOG_NAME = "apply-update.log";
 
     /**
@@ -34,9 +31,8 @@ final class MacUpdateApplier implements UpdateApplier {
      * enough to download, rather than nothing.</p>
      */
     static final String RELAY_SCRIPT = """
-            #!/bin/bash
             # Applies a Tunl update once the app being replaced has exited.
-            # Written by MacUpdateApplier; regenerated on every update.
+            # Runs as the body of `bash -c`; never written to disk.
             set -u
 
             PID="$1"
@@ -136,22 +132,26 @@ final class MacUpdateApplier implements UpdateApplier {
 
         try {
             Path workDir = update.installer().getParent();
-            Path script = workDir.resolve(SCRIPT_NAME);
-            Files.writeString(script, RELAY_SCRIPT);
-            Files.setPosixFilePermissions(script, PosixFilePermissions.fromString("rwx------"));
 
-            // The relay outlives this process, so its output is the only
-            // account of what happened. Keep it next to the installer.
-            new ProcessBuilder("/bin/bash", script.toString(),
+            // Passed as the -c body rather than written to a file, so nothing
+            // lands on disk between here and the run that could be swapped
+            // for something else. Arguments still ride argv: bash -c binds
+            // the name after the body to $0 and the rest to $1..$3, so no
+            // path is ever interpolated into the script text.
+            new ProcessBuilder("/bin/bash", "-c", RELAY_SCRIPT,
+                    "tunl-update",
                     String.valueOf(ProcessHandle.current().pid()),
                     update.installer().toString(),
                     bundle.toString())
                     .redirectErrorStream(true)
+                    // The relay outlives this process, so its output is the
+                    // only account of what happened. Keep it beside the
+                    // installer.
                     .redirectOutput(ProcessBuilder.Redirect.appendTo(
                             workDir.resolve(LOG_NAME).toFile()))
                     .start();
 
-            log.info("Update {} handed off to {}", update.version(), script);
+            log.info("Update {} handed off to the installer relay", update.version());
             return Outcome.HANDED_OFF;
         } catch (IOException e) {
             log.error("Failed to start the update relay: {}", e.getMessage());

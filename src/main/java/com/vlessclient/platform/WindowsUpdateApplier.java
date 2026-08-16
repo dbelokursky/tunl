@@ -1,7 +1,6 @@
 package com.vlessclient.platform;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,7 +20,6 @@ final class WindowsUpdateApplier implements UpdateApplier {
 
     private static final Logger log = LoggerFactory.getLogger(WindowsUpdateApplier.class);
 
-    private static final String SCRIPT_NAME = "apply-update.ps1";
     private static final String LOG_NAME = "apply-update.log";
 
     @Override
@@ -34,18 +32,22 @@ final class WindowsUpdateApplier implements UpdateApplier {
 
         try {
             Path workDir = update.installer().getParent();
-            Path script = workDir.resolve(SCRIPT_NAME);
-            Files.writeString(script, relayScript(
-                    ProcessHandle.current().pid(), update.installer(), launcher));
+            String relay = relayScript(
+                    ProcessHandle.current().pid(), update.installer(), launcher);
 
+            // The script travels as an -EncodedCommand blob rather than a file,
+            // the same way WindowsTunLauncher carries its elevation scripts:
+            // nothing is written where it could be swapped between the write
+            // and the run. No file also means no -ExecutionPolicy Bypass,
+            // which governs script files and would be inert here anyway.
             new ProcessBuilder("powershell", "-NoProfile", "-NonInteractive",
-                    "-ExecutionPolicy", "Bypass", "-File", script.toString())
+                    "-EncodedCommand", WindowsTunLauncher.encode(relay))
                     .redirectErrorStream(true)
                     .redirectOutput(ProcessBuilder.Redirect.appendTo(
                             workDir.resolve(LOG_NAME).toFile()))
                     .start();
 
-            log.info("Update {} handed off to {}", update.version(), script);
+            log.info("Update {} handed off to the installer relay", update.version());
             return Outcome.HANDED_OFF;
         } catch (IOException e) {
             log.error("Failed to start the update relay: {}", e.getMessage());
@@ -60,9 +62,10 @@ final class WindowsUpdateApplier implements UpdateApplier {
 
     /**
      * Builds the relay script. Paths are baked in as PowerShell literals
-     * rather than passed as arguments: argument quoting between the JVM and
-     * {@code powershell.exe} mangles paths containing spaces, and every
-     * per-user install path contains the user's name.
+     * because {@code -EncodedCommand} carries no argv to pass them through —
+     * the same trade {@link WindowsTunLauncher} makes, and it rests on the
+     * same {@link WindowsTunLauncher#psLiteral} seam: every per-user install
+     * path contains the Windows username, and a username may contain a quote.
      *
      * @param pid       the process the script must outlive
      * @param installer the verified MSI
@@ -100,17 +103,8 @@ final class WindowsUpdateApplier implements UpdateApplier {
 
                 Write-Output "installed, relaunching"
                 Start-Process $exe
-                """.formatted(pid, psLiteral(installer.toString()), psLiteral(launcher.toString()));
-    }
-
-    /**
-     * Quotes a string as a PowerShell single-quoted literal, where the only
-     * character with meaning is the quote itself, doubled to escape it.
-     *
-     * @param value the raw value
-     * @return the value as a PowerShell literal, quotes included
-     */
-    static String psLiteral(String value) {
-        return "'" + value.replace("'", "''") + "'";
+                """.formatted(pid,
+                WindowsTunLauncher.psLiteral(installer.toString()),
+                WindowsTunLauncher.psLiteral(launcher.toString()));
     }
 }

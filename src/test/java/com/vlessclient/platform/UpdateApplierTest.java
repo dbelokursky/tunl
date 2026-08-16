@@ -6,7 +6,6 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -20,9 +19,6 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * are well-formed and correctly quoted.
  */
 class UpdateApplierTest {
-
-    @TempDir
-    Path tempDir;
 
     // -- macOS: finding the bundle to replace --
 
@@ -54,12 +50,12 @@ class UpdateApplierTest {
     @Test
     void macRelayScriptIsValidBash() throws Exception {
         assumeTrue(Files.isExecutable(Path.of("/bin/bash")), "no /bin/bash on this host");
-        Path script = tempDir.resolve("apply-update.sh");
-        Files.writeString(script, MacUpdateApplier.RELAY_SCRIPT);
 
         // A syntax error in the script only surfaces during a real update,
-        // when the app is already on its way out.
-        assertThat(run(List.of("/bin/bash", "-n", script.toString()))).isZero();
+        // when the app is already on its way out. Checked the way it runs:
+        // as a -c body, not a file.
+        assertThat(run(List.of("/bin/bash", "-n", "-c", MacUpdateApplier.RELAY_SCRIPT)))
+                .isZero();
     }
 
     @Test
@@ -73,12 +69,18 @@ class UpdateApplierTest {
     // -- Windows: quoting the paths baked into the relay --
 
     @Test
-    void powershellLiteralsQuoteAndEscape() {
-        assertThat(WindowsUpdateApplier.psLiteral("C:\\Program Files\\Tunl\\Tunl.exe"))
-                .isEqualTo("'C:\\Program Files\\Tunl\\Tunl.exe'");
-        // A single quote is the one character that ends the literal early.
-        assertThat(WindowsUpdateApplier.psLiteral("C:\\Users\\O'Brien\\Tunl.msi"))
-                .isEqualTo("'C:\\Users\\O''Brien\\Tunl.msi'");
+    void windowsRelayScriptCannotBeEscapedByAPathWithAQuoteInIt() {
+        // -EncodedCommand carries no argv, so both paths are text inside the
+        // script. A per-user install path contains the Windows username, and a
+        // username may legally contain a quote — the case that would otherwise
+        // turn a path into code. (psLiteral itself is WindowsTunLauncher's,
+        // and its own tests prove the escaping.)
+        String script = WindowsUpdateApplier.relayScript(1,
+                Path.of("C:\\Users\\O'Brien\\update\\tunl.msi"),
+                Path.of("C:\\Users\\O'Brien\\Tunl.exe"));
+
+        assertThat(script).contains("$msi = 'C:\\Users\\O''Brien\\update\\tunl.msi'");
+        assertThat(script).contains("$exe = 'C:\\Users\\O''Brien\\Tunl.exe'");
     }
 
     @Test
