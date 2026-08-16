@@ -97,22 +97,38 @@ process_asset windows amd64 zip
 process_asset linux amd64 tar.gz
 process_asset linux arm64 tar.gz
 
-# Sanity: the host-arch binary must actually run and report the version.
-host_arch=$(uname -m)
-case "${host_arch}" in
+# Sanity: the host's own binary must actually run and report the version.
+#
+# The OS is read from the host, not assumed. It used to be hardcoded to
+# darwin, which held only because every bump had been run from a Mac; the
+# first one on a Linux runner extracted a Mach-O binary and died with
+# "Exec format error" after all five checksums had already verified.
+case "$(uname -s)" in
+    Darwin) probe_os=darwin ;;
+    Linux)  probe_os=linux ;;
+    # Windows ships a .zip rather than a tar.gz, and no runner bumps from
+    # there. Say so instead of probing something that isn't the host.
+    *)      probe_os='' ;;
+esac
+case "$(uname -m)" in
     arm64|aarch64) probe_arch=arm64 ;;
     *)             probe_arch=amd64 ;;
 esac
-probe_dir="$(mktemp -d)"
-trap 'rm -rf "${probe_dir}"' EXIT
-tar -xzf "${CACHE_DIR}/sing-box-${VERSION}-darwin-${probe_arch}.tar.gz" \
-    -C "${probe_dir}" --strip-components=1
-reported="$("${probe_dir}/sing-box" version | head -n1)"
-if [[ "${reported}" != "sing-box version ${VERSION}" ]]; then
-    echo "[bump-singbox] binary reports '${reported}', expected 'sing-box version ${VERSION}'" >&2
-    exit 1
+
+if [[ -z "${probe_os}" ]]; then
+    echo "[bump-singbox] no tar.gz asset for $(uname -s); skipping the run check"
+else
+    probe_dir="$(mktemp -d)"
+    trap 'rm -rf "${probe_dir}"' EXIT
+    tar -xzf "${CACHE_DIR}/sing-box-${VERSION}-${probe_os}-${probe_arch}.tar.gz" \
+        -C "${probe_dir}" --strip-components=1
+    reported="$("${probe_dir}/sing-box" version | head -n1)"
+    if [[ "${reported}" != "sing-box version ${VERSION}" ]]; then
+        echo "[bump-singbox] binary reports '${reported}', expected 'sing-box version ${VERSION}'" >&2
+        exit 1
+    fi
+    echo "[bump-singbox] binary check OK: ${reported}"
 fi
-echo "[bump-singbox] binary check OK: ${reported}"
 
 tmp_props="$(mktemp)"
 {
