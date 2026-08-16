@@ -1,16 +1,22 @@
 package com.vlessclient.service.mcp;
 
+import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ProxyMode;
+import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.model.ServerSelection;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ShareLinkParser;
+import com.vlessclient.service.SingBoxConfigGenerator;
 import com.vlessclient.service.SingBoxEngine;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -66,6 +72,40 @@ class DefaultAppControlServiceTest {
         assertThatThrownBy(() -> service.connect(null, "bogus", false))
                 .isInstanceOf(McpToolException.class)
                 .hasMessageContaining("Unknown mode");
+    }
+
+    /**
+     * AUTO_BEST regression: an MCP-initiated connect must pass every candidate
+     * to the generator, not just the active server. The old single-server
+     * overload collapsed the group to one member, silently dropping automatic
+     * selection on this path while the dashboard and tray kept all candidates.
+     */
+    @Test
+    void connect_automaticSelection_passesAllCandidatesToTheGenerator() {
+        store.addServer(server("srv-2", "Osaka"));
+        store.setActiveServer("srv-1");
+        store.getSettings().setServerSelection(ServerSelection.AUTO_BEST);
+
+        List<List<ServerConfig>> captured = new ArrayList<>();
+        SingBoxConfigGenerator capturing = new SingBoxConfigGenerator() {
+            @Override
+            public String generate(List<ServerConfig> candidates, ServerConfig active,
+                                   AppSettings settings, RoutingConfig routing) {
+                captured.add(List.copyOf(candidates));
+                return "{}";
+            }
+        };
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, null,
+                new RoutingService(), capturing, null, new ShareLinkParser(),
+                new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        // The real start fails (no binary), but only after generate has run.
+        assertThatThrownBy(() -> svc.connect("srv-1", null, false))
+                .isInstanceOf(McpToolException.class);
+
+        assertThat(captured).hasSize(1);
+        assertThat(captured.get(0)).extracting(ServerConfig::getId)
+                .containsExactlyInAnyOrder("srv-1", "srv-2");
     }
 
     @Test

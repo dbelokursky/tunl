@@ -186,6 +186,30 @@ class SingBoxEngineTest {
     }
 
     @Test
+    void awaitStoppedReturnsImmediatelyWhenNotRunning() {
+        SingBoxEngine engine = new SingBoxEngine(Path.of("/nonexistent/sing-box"));
+        assertThat(engine.awaitStopped(java.time.Duration.ofSeconds(1))).isTrue();
+    }
+
+    @Test
+    void awaitStoppedTimesOutWhileRunningThenSucceedsAfterStop(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        Path fake = createFakeSingBox(tmp, "sing-box", 30);
+        SingBoxEngine engine = new SingBoxEngine(fake);
+
+        engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+        try {
+            assertThat(engine.isRunning()).isTrue();
+            // Still running: a short wait must time out (false), not lie.
+            assertThat(engine.awaitStopped(java.time.Duration.ofMillis(200))).isFalse();
+        } finally {
+            engine.stop();
+        }
+        // After stop, the wait returns true — this is what serializes reconnects.
+        assertThat(engine.awaitStopped(java.time.Duration.ofSeconds(5))).isTrue();
+    }
+
+    @Test
     void startThrowsIllegalStateWhenAlreadyRunning(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
         Path fake = createFakeSingBox(tmp, "sing-box", 30);
         SingBoxEngine engine = new SingBoxEngine(fake);

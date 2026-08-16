@@ -272,56 +272,60 @@ public class TrayIconService {
     }
 
     private void onToggleConnect() {
-        Platform.runLater(() -> {
-            if (singBoxEngine == null) {
-                log.warn("Tray connect clicked but SingBoxEngine is not available");
-                return;
-            }
-            ConnectionState state = singBoxEngine.connectionStateProperty().get();
-            if (state == ConnectionState.CONNECTED || state == ConnectionState.CONNECTING) {
-                try {
-                    singBoxEngine.stop();
-                } catch (Exception e) {
-                    log.error("Failed to stop sing-box from tray", e);
-                }
-                return;
-            }
+        SingBoxEngine engine = singBoxEngine;
+        if (engine == null) {
+            log.warn("Tray connect clicked but SingBoxEngine is not available");
+            return;
+        }
+        // Off the FX thread: stop() waits out a SIGTERM grace period and start()
+        // can hash a ~40 MB binary and raise a modal admin prompt — neither may
+        // run on the FX thread. The old Platform.runLater body did exactly that,
+        // freezing the window for up to a minute on a TUN connect.
+        Thread.startVirtualThread(() -> toggleConnection(engine));
+    }
 
-            ServerConfig active = findActiveServer();
-            if (active == null) {
+    private void toggleConnection(SingBoxEngine engine) {
+        try {
+            if (engine.isRunning()) {
+                engine.stop();
+                return;
+            }
+            // Read the FX-owned config on the FX thread; run the start off it.
+            ConnectSnapshot snap = FxExecutor.get(() -> {
+                ServerConfig active = configStore.getServers().stream()
+                        .filter(ServerConfig::isActive).findFirst().orElse(null);
+                return new ConnectSnapshot(
+                        List.copyOf(configStore.getServers()),
+                        active,
+                        ServiceLocator.get(AppSettings.class));
+            });
+            if (snap.active() == null) {
                 log.warn("Tray connect clicked but no active server selected");
                 showMainWindow();
                 return;
             }
+            com.vlessclient.model.RoutingConfig routingConfig = null;
             try {
-                AppSettings settings = ServiceLocator.get(AppSettings.class);
-                com.vlessclient.model.RoutingConfig routingConfig = null;
-                try {
-                    routingConfig = ServiceLocator.get(RoutingService.class).getConfig();
-                } catch (IllegalArgumentException e) {
-                    log.debug("RoutingService not available; using default route");
-                }
-                String configJson = configGenerator.generate(
-                        configStore.getServers(), active, settings, routingConfig);
-                singBoxEngine.start(configJson, settings.getProxyMode());
-            } catch (IOException e) {
-                log.error("Failed to start sing-box from tray", e);
-            } catch (IllegalStateException e) {
-                log.debug("sing-box already running: {}", e.getMessage());
-            } catch (Exception e) {
-                log.error("Unexpected error starting sing-box from tray", e);
+                routingConfig = ServiceLocator.get(RoutingService.class).getConfig();
+            } catch (IllegalArgumentException e) {
+                log.debug("RoutingService not available; using default route");
             }
-        });
+            String configJson = configGenerator.generate(
+                    snap.candidates(), snap.active(), snap.settings(), routingConfig);
+            engine.awaitStopped(java.time.Duration.ofSeconds(15));
+            engine.start(configJson, snap.settings().getProxyMode());
+        } catch (IOException e) {
+            log.error("Failed to start sing-box from tray", e);
+        } catch (IllegalStateException e) {
+            log.debug("sing-box already running: {}", e.getMessage());
+        } catch (Exception e) {
+            log.error("Unexpected error toggling connection from tray", e);
+        }
     }
 
-    private ServerConfig findActiveServer() {
-        if (configStore == null) {
-            return null;
-        }
-        return configStore.getServers().stream()
-                .filter(ServerConfig::isActive)
-                .findFirst()
-                .orElse(null);
+    /** FX-thread snapshot of everything a tray connect needs to build a config. */
+    private record ConnectSnapshot(List<ServerConfig> candidates, ServerConfig active,
+                                   AppSettings settings) {
     }
 
     private void showMainWindow() {

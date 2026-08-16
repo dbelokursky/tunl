@@ -9,6 +9,7 @@ import com.vlessclient.platform.TunLauncher;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyObjectProperty;
@@ -379,6 +380,31 @@ public class SingBoxEngine {
         // between a check and a use must not turn this into an NPE.
         Process p = process;
         return p != null && p.isAlive();
+    }
+
+    /**
+     * Blocks until the core is no longer running, or {@code timeout} elapses.
+     *
+     * <p>A stop can take seconds — a SIGTERM grace period, then a force-kill —
+     * so a reconnect (server switch, health-check auto-reconnect) that started
+     * immediately after {@link #stop()} would hit "already running". Callers on
+     * the connect path wait here first. Must not be called on the JavaFX thread:
+     * it sleeps.</p>
+     *
+     * @param timeout how long to wait
+     * @return true if the core is stopped by the deadline
+     */
+    public boolean awaitStopped(Duration timeout) {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (isRunning() && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return !isRunning();
+            }
+        }
+        return !isRunning();
     }
 
     /**

@@ -222,8 +222,14 @@ public class DefaultAppControlService implements AppControlService {
         if (serverId != null && !serverId.isBlank()) {
             selectServer(serverId);
         }
-        ServerConfig active = FxExecutor.get(() -> configStore.getServers().stream()
-                .filter(ServerConfig::isActive).findFirst().orElse(null));
+        // Snapshot the candidate list and the active server together on the FX
+        // thread. Passing every candidate (not just the active one) is what lets
+        // automatic selection pick among them — the single-server overload
+        // silently collapsed AUTO_BEST to a one-member group.
+        List<ServerConfig> candidates =
+                FxExecutor.get(() -> List.copyOf(configStore.getServers()));
+        ServerConfig active = candidates.stream()
+                .filter(ServerConfig::isActive).findFirst().orElse(null);
         if (active == null) {
             throw new McpToolException(
                     "No active server. Pass serverId or select one with select_server.");
@@ -235,7 +241,9 @@ public class DefaultAppControlService implements AppControlService {
         }
 
         RoutingConfig routing = safeRoutingConfig();
-        String configJson = configGenerator.generate(active, settings, routing);
+        String configJson = configGenerator.generate(candidates, active, settings, routing);
+        // Wait out any prior stop so a reconnect does not race "already running".
+        current.awaitStopped(java.time.Duration.ofSeconds(15));
         try {
             current.start(configJson, effectiveMode);
         } catch (IOException e) {
