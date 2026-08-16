@@ -93,7 +93,15 @@ jobs:
           git commit -am "chore(singbox): pin the core at $WANT"
           git push -u origin "$branch"
 
-          gh pr create --base main --head "$branch" \
+          # Two separate gates stand between this job and a checked PR, and
+          # only the second clears both:
+          #   - the repo setting "Allow GitHub Actions to create and approve
+          #     pull requests", without which the call below is refused;
+          #   - BUMP_TOKEN, because a PR opened with GITHUB_TOKEN is barred
+          #     from starting workflow runs even once it is allowed to exist.
+          # The branch is already pushed either way, so failing here costs
+          # nothing but a click.
+          if ! gh pr create --base main --head "$branch" \
             --title "chore(singbox): bump the pinned core to $WANT" \
             --body "Ядро sing-box: \`$HAVE\` → \`$WANT\`. Открыто автоматически, применять решает человек.
           $note
@@ -105,4 +113,13 @@ jobs:
 
           - **Зелёный \`-Psmoke\` на всех четырёх платформах** — это и есть главный аргумент: сюита гоняет настоящий бинарь по каждой форме генерируемого конфига. Красный smoke означает, что новое ядро разошлось с генератором.
           - **Минорный скачок** (\`x.Y.z\`) — повод открыть changelog sing-box: между минорными версиями там ломали схему конфига.
-          - Ядро уедет к пользователям следующим релизом приложения, и первый Connect в TUN после этого запросит админский пароль — sing-box изменился и больше не совпадает с root-копией из правила sudoers. Так задумано."
+          - Ядро уедет к пользователям следующим релизом приложения, и первый Connect в TUN после этого запросит админский пароль — sing-box изменился и больше не совпадает с root-копией из правила sudoers. Так задумано."; then
+            echo "::error::Could not open the pull request, but the bump itself \
+          succeeded and $branch is pushed. Open it in one click: \
+          $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/main...$branch — and to \
+          have this step do it, enable Settings > Actions > General > 'Allow \
+          GitHub Actions to create and approve pull requests'. Note that this \
+          alone lets the PR exist but still leaves its checks unstarted; add a \
+          BUMP_TOKEN secret (a PAT with repo scope) for the checks to run too."
+            exit 1
+          fi
