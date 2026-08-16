@@ -45,6 +45,10 @@ class UpdateApplierTest {
         assertThat(InstalledApp.isTranslocated(Path.of(
                 "/private/var/folders/ab/AppTranslocation/1234-5678/d/Tunl.app"))).isTrue();
         assertThat(InstalledApp.isTranslocated(Path.of("/Applications/Tunl.app"))).isFalse();
+        // A directory whose name merely starts the same way is not a mount.
+        assertThat(InstalledApp.isTranslocated(
+                Path.of("/Users/dev/AppTranslocationTests/Tunl.app"))).isFalse();
+        assertThat(InstalledApp.isTranslocated(null)).isFalse();
     }
 
     @Test

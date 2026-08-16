@@ -26,7 +26,7 @@ final class InstalledApp {
      * from it would replace a throwaway copy while leaving the app the user
      * actually double-clicks untouched.
      */
-    private static final String TRANSLOCATION_MARKER = "/AppTranslocation/";
+    private static final String TRANSLOCATION_DIR = "AppTranslocation";
 
     private InstalledApp() {
     }
@@ -54,6 +54,19 @@ final class InstalledApp {
      * @return true when the path is a translocated copy
      */
     static boolean isTranslocated(Path path) {
-        return path != null && path.toString().contains(TRANSLOCATION_MARKER);
+        if (path == null) {
+            return false;
+        }
+        // Compared element by element rather than as a substring of the whole
+        // path: the rendered form uses the host's separator, so a substring
+        // with slashes in it silently answers "no" anywhere but macOS. Element
+        // equality also beats a bare `contains`, which would match a directory
+        // merely named AppTranslocationTests.
+        for (Path element : path) {
+            if (element.toString().equals(TRANSLOCATION_DIR)) {
+                return true;
+            }
+        }
+        return false;
     }
 }
