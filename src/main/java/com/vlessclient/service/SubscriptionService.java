@@ -49,6 +49,15 @@ public class SubscriptionService {
      */
     static final int SUBSCRIPTIONS_CONFIG_VERSION = 1;
 
+    /**
+     * How long stopAutoRefresh() lets an in-flight refresh finish before it
+     * interrupts. Kept small on purpose: shutdown runs it well inside the
+     * Cmd+Q quit watchdog (2s) and the engine is already stopped by then, so a
+     * stuck refresh must never be what holds shutdown open — the old 60s could
+     * never complete under either quit path anyway.
+     */
+    private static final int SHUTDOWN_GRACE_SECONDS = 2;
+
     private final Path dataDir;
     private final ObjectMapper objectMapper;
     private final ObservableList<Subscription> subscriptions;
@@ -269,6 +278,15 @@ public class SubscriptionService {
      * Starts hourly background auto-refresh of all subscriptions. No-op if already running.
      */
     public void startAutoRefresh() {
+        startAutoRefresh(1, 1, TimeUnit.HOURS);
+    }
+
+    /**
+     * Schedules auto-refresh with an explicit initial delay and period.
+     * Package-private so a test can trigger an immediate cycle instead of
+     * waiting an hour.
+     */
+    void startAutoRefresh(long initialDelay, long period, TimeUnit unit) {
         synchronized (lifecycleLock) {
             if (scheduler != null && !scheduler.isShutdown()) {
                 return;
@@ -278,8 +296,26 @@ public class SubscriptionService {
                 t.setDaemon(true);
                 return t;
             });
-            scheduler.scheduleAtFixedRate(this::refreshAll, 1, 1, TimeUnit.HOURS);
+            scheduler.scheduleAtFixedRate(this::guardedRefreshAll, initialDelay, period, unit);
             log.info("Started subscription auto-refresh");
+        }
+    }
+
+    /**
+     * Runs a refresh cycle, swallowing and logging any failure.
+     *
+     * <p>{@link java.util.concurrent.ScheduledExecutorService#scheduleAtFixedRate
+     * scheduleAtFixedRate} cancels all future executions the moment one throws,
+     * so a single transient error — a CME from an off-thread list read, an
+     * FX-thread timeout inside applyServerBatch — would otherwise stop
+     * auto-refresh forever, with no log line and no UI signal, until the app
+     * restarts. Guarding here keeps the next hour firing.</p>
+     */
+    private void guardedRefreshAll() {
+        try {
+            refreshAll();
+        } catch (Exception e) {
+            log.error("Scheduled subscription refresh failed", e);
         }
     }
 
@@ -296,15 +332,15 @@ public class SubscriptionService {
             toShutdown = scheduler;
             scheduler = null;
         }
-        // shutdown() lets any in-flight refresh run to completion. We then wait
-        // for the scheduler thread to finish before returning so callers can
-        // rely on stopAutoRefresh() being synchronous with respect to any
-        // currently-executing refresh.
+        // shutdown() lets an in-flight refresh keep running; we then wait a
+        // bounded grace for it so stopAutoRefresh() is synchronous with respect
+        // to a quick cycle, but interrupt anything slower (shutdownNow) rather
+        // than block shutdown — see SHUTDOWN_GRACE_SECONDS.
         toShutdown.shutdown();
         try {
-            if (!toShutdown.awaitTermination(60, TimeUnit.SECONDS)) {
-                log.warn("Subscription auto-refresh did not terminate within timeout; "
-                        + "forcing shutdown");
+            if (!toShutdown.awaitTermination(SHUTDOWN_GRACE_SECONDS, TimeUnit.SECONDS)) {
+                log.warn("Subscription auto-refresh did not terminate within {}s; "
+                        + "forcing shutdown", SHUTDOWN_GRACE_SECONDS);
                 toShutdown.shutdownNow();
             }
         } catch (InterruptedException e) {

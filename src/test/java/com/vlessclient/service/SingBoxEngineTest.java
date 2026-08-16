@@ -415,6 +415,77 @@ class SingBoxEngineTest {
         assertThat(wrapperProc.get().exitValue()).isZero();
     }
 
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void concurrentStartsLaunchExactlyOneCore(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        // Several threads racing start() must not each launch a core: the
+        // lifecycle lock makes the check-and-launch atomic, so exactly one
+        // launch() happens and the losers see the winner's running process and
+        // throw. Without the lock they would all pass the isRunning() guard and
+        // orphan every core but the last. The launcher sleeps to widen the
+        // window a missing lock would leak through.
+        Path stopFile = tmp.resolve("stop.signal");
+        Path wrapper = tmp.resolve("wrapper.sh");
+        Files.writeString(wrapper, "#!/bin/sh\n"
+                + "echo 'sing-box started'\n"
+                + "while [ ! -f '" + stopFile + "' ]; do sleep 0.2; done\n");
+        makeExecutable(wrapper);
+
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+        java.util.concurrent.atomic.AtomicInteger launches =
+                new java.util.concurrent.atomic.AtomicInteger();
+        engine.setTunLauncher((binary, config) -> {
+            launches.incrementAndGet();
+            try {
+                Thread.sleep(150);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            Process p = new ProcessBuilder(wrapper.toString())
+                    .redirectErrorStream(true).start();
+            return new com.vlessclient.platform.TunLauncher.Launched(p, stopFile);
+        });
+
+        int racers = 6;
+        CountDownLatch ready = new CountDownLatch(racers);
+        CountDownLatch go = new CountDownLatch(1);
+        List<Throwable> thrown = new CopyOnWriteArrayList<>();
+        List<Thread> workers = new java.util.ArrayList<>();
+        for (int i = 0; i < racers; i++) {
+            Thread t = new Thread(() -> {
+                ready.countDown();
+                try {
+                    assertThat(go.await(5, TimeUnit.SECONDS)).isTrue();
+                    engine.start(DUMMY_CONFIG, ProxyMode.TUN);
+                } catch (Throwable e) {
+                    thrown.add(e);
+                }
+            }, "race-start-" + i);
+            workers.add(t);
+            t.start();
+        }
+        assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+        go.countDown();
+        for (Thread t : workers) {
+            t.join(15_000);
+        }
+
+        try {
+            assertThat(engine.isRunning()).isTrue();
+            assertThat(launches.get())
+                    .as("exactly one core launched despite %d racing starts", racers)
+                    .isEqualTo(1);
+            assertThat(thrown)
+                    .as("every loser failed with the already-running guard")
+                    .hasSize(racers - 1)
+                    .allSatisfy(e -> assertThat(e).isInstanceOf(IllegalStateException.class));
+        } finally {
+            engine.stop();
+        }
+        awaitConnectionState(engine, ConnectionState.DISCONNECTED, AWAIT_STATE_TIMEOUT_MS);
+    }
+
     // ===== the launcher's published config carries credentials =====
     // On macOS the sudoers rule pins a fixed config path, so launch() copies
     // the generated config there. Nothing else can clean that up: it is not a
