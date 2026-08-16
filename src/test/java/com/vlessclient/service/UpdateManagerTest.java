@@ -125,6 +125,38 @@ class UpdateManagerTest {
     }
 
     @Test
+    void aRefusedRequestIsNotSilence_itIsRateLimiting() {
+        // Unauthenticated callers get 60 requests an hour per IP address, and
+        // the app sends no token — so 403 is the failure users actually meet,
+        // and the one they can do something about by waiting.
+        assertThat(UpdateManager.resultForStatus(403))
+                .isEqualTo(UpdateManager.CheckResult.RATE_LIMITED);
+        assertThat(UpdateManager.resultForStatus(429))
+                .isEqualTo(UpdateManager.CheckResult.RATE_LIMITED);
+        assertThat(UpdateManager.resultForStatus(500))
+                .isEqualTo(UpdateManager.CheckResult.UNREACHABLE);
+        assertThat(UpdateManager.resultForStatus(404))
+                .isEqualTo(UpdateManager.CheckResult.UNREACHABLE);
+    }
+
+    @Test
+    void anUnreadableResponseIsNeverReportedAsBeingUpToDate() {
+        // The bug this pins: any failure used to leave the "update available"
+        // flag untouched, and an untouched flag renders as "up to date" with a
+        // green dot — good news, produced by having learned nothing.
+        assertThat(new UpdateManager().processReleaseResponse("{ not json at all"))
+                .isEqualTo(UpdateManager.CheckResult.UNREACHABLE);
+    }
+
+    @Test
+    void aReleaseNoNewerThanThisBuildIsUpToDate() {
+        // "dev" parses as 0, so 0.0.0 is the release that is not newer.
+        assertThat(new UpdateManager().processReleaseResponse(
+                "{\"tag_name\":\"v0.0.0\",\"assets\":[]}"))
+                .isEqualTo(UpdateManager.CheckResult.UP_TO_DATE);
+    }
+
+    @Test
     void downloadPolicy_downloadsUnlessSomethingIsAlreadyStaged() {
         // Re-downloading on top of a verified installer that is already
         // waiting is the one case not worth the bytes; everything else is.
