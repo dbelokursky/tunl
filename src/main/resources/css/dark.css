@@ -972,6 +972,30 @@
     -fx-background-radius: 4;
 }
 
+.update-banner {
+    -fx-background-color: #1b2b3a;
+    -fx-border-color: #4a7fb5;
+    -fx-border-width: 1;
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+}
+
+.update-banner .banner-icon {
+    -fx-font-size: 22px;
+    -fx-text-fill: #82b1ff;
+}
+
+.update-banner .banner-title {
+    -fx-font-size: 13px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #bbdefb;
+}
+
+.update-banner .banner-subtitle {
+    -fx-font-size: 11px;
+    -fx-text-fill: #b0bec5;
+}
+
 /* ===== Content scroll wrapper ===== */
 .content-scroll {
     -fx-background-color: transparent;
