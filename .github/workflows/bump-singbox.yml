@@ -20,21 +20,17 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # For the dispatch below, which is what gets the pull request's checks
+  # running without a personal access token.
+  actions: write
 
 jobs:
   bump:
     runs-on: ubuntu-latest
     steps:
-      # The PAT, when present, is what makes the resulting PR trigger CI:
-      # anything pushed or opened with GITHUB_TOKEN is deliberately barred
-      # from starting workflow runs, and a bump PR nobody checks is worse
-      # than no bump PR at all. Falls back to the default token, and says so
-      # in the PR body.
       - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.BUMP_TOKEN || github.token }}
 
-      - name: Resolve the version to pin
+      - name: Decide whether there is anything to do
         id: target
         env:
           GH_TOKEN: ${{ github.token }}
@@ -49,11 +45,22 @@ jobs:
           fi
           want="${want#v}"
           have="$(sed -n 's/^singbox\.version=//p' src/main/resources/singbox.properties)"
-          echo "have=$have" >> "$GITHUB_OUTPUT"
-          echo "want=$want" >> "$GITHUB_OUTPUT"
+          branch="chore/singbox-$want"
+
+          {
+            echo "have=$have"
+            echo "want=$want"
+            echo "branch=$branch"
+          } >> "$GITHUB_OUTPUT"
+
           if [ "$want" = "$have" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "pinned at $have, nothing to do"
+          elif [ "$(gh pr list --head "$branch" --state open --json number --jq 'length')" != "0" ]; then
+            # An earlier run already proposed this version and it is still
+            # being decided on. Proposing it again would only add noise.
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "a pull request for $branch is already open"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "pinned at $have, latest is $want"
@@ -64,62 +71,69 @@ jobs:
         # Downloads every bundled asset, hashes it locally, and cross-checks
         # each hash against the digest the Releases API publishes — two
         # different paths for the same bytes, so a tampered download fails
-        # the bump instead of getting pinned.
+        # the bump instead of getting pinned. Then runs the host's own binary
+        # to confirm it reports the version being pinned.
         run: scripts/bump-singbox.sh "${{ steps.target.outputs.want }}"
+
+      - name: Push the branch
+        if: steps.target.outputs.changed == 'true'
+        env:
+          BRANCH: ${{ steps.target.outputs.branch }}
+          WANT: ${{ steps.target.outputs.want }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -b "$BRANCH"
+          git commit -am "chore(singbox): pin the core at $WANT"
+          git push -u origin "$BRANCH"
+
+      # Before the pull request, deliberately: the checks are the point of the
+      # exercise, and they should run even if opening the PR is refused.
+      - name: Start the checks
+        if: steps.target.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.target.outputs.branch }}
+        # The push above cannot start a workflow run: GITHUB_TOKEN is barred
+        # from triggering workflows, which is what stops a workflow from
+        # setting itself off forever. workflow_dispatch is the documented
+        # exception — "workflow_dispatch and repository_dispatch events always
+        # create workflow runs" — so the run this pull request exists to
+        # collect is started explicitly rather than waited for.
+        #
+        # build.yml runs its four test-* jobs on any trigger and gates its
+        # packaging jobs on pushes to main, so this starts exactly the four
+        # required checks and nothing else.
+        run: gh workflow run build.yml --ref "$BRANCH"
 
       - name: Open the pull request
         if: steps.target.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ secrets.BUMP_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
           HAVE: ${{ steps.target.outputs.have }}
           WANT: ${{ steps.target.outputs.want }}
-          HAVE_PAT: ${{ secrets.BUMP_TOKEN != '' }}
+          BRANCH: ${{ steps.target.outputs.branch }}
         run: |
           set -euo pipefail
-          branch="chore/singbox-$WANT"
-          if [ "$(gh pr list --head "$branch" --state open --json number --jq 'length')" != "0" ]; then
-            echo "a pull request for $branch is already open"
-            exit 0
-          fi
-
-          note=''
-          if [ "$HAVE_PAT" != "true" ]; then
-            note=$'\n> **Проверки не запустятся сами.** PR открыт `GITHUB_TOKEN`, а он намеренно не триггерит workflow. Закрой и открой PR заново, либо заведи секрет `BUMP_TOKEN` (PAT с правами на repo).\n'
-          fi
-
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git checkout -b "$branch"
-          git commit -am "chore(singbox): pin the core at $WANT"
-          git push -u origin "$branch"
-
-          # Two separate gates stand between this job and a checked PR, and
-          # only the second clears both:
-          #   - the repo setting "Allow GitHub Actions to create and approve
-          #     pull requests", without which the call below is refused;
-          #   - BUMP_TOKEN, because a PR opened with GITHUB_TOKEN is barred
-          #     from starting workflow runs even once it is allowed to exist.
-          # The branch is already pushed either way, so failing here costs
-          # nothing but a click.
-          if ! gh pr create --base main --head "$branch" \
+          if ! gh pr create --base main --head "$BRANCH" \
             --title "chore(singbox): bump the pinned core to $WANT" \
             --body "Ядро sing-box: \`$HAVE\` → \`$WANT\`. Открыто автоматически, применять решает человек.
-          $note
+
           ## Что уже проверено
 
-          \`scripts/bump-singbox.sh\` скачал каждый ассет, посчитал SHA-256 локально и сверил с дайджестом из Releases API. Две разные дороги для одних и тех же байт — подделка или битая загрузка роняют bump, а не попадают в пин.
+          \`scripts/bump-singbox.sh\` скачал каждый ассет, посчитал SHA-256 локально и сверил с дайджестом из Releases API — две разные дороги для одних и тех же байт. Затем запустил бинарь своей платформы и убедился, что тот рапортует нужную версию.
 
           ## Что должен посмотреть человек
 
           - **Зелёный \`-Psmoke\` на всех четырёх платформах** — это и есть главный аргумент: сюита гоняет настоящий бинарь по каждой форме генерируемого конфига. Красный smoke означает, что новое ядро разошлось с генератором.
           - **Минорный скачок** (\`x.Y.z\`) — повод открыть changelog sing-box: между минорными версиями там ломали схему конфига.
           - Ядро уедет к пользователям следующим релизом приложения, и первый Connect в TUN после этого запросит админский пароль — sing-box изменился и больше не совпадает с root-копией из правила sudoers. Так задумано."; then
-            echo "::error::Could not open the pull request, but the bump itself \
-          succeeded and $branch is pushed. Open it in one click: \
-          $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/main...$branch — and to \
-          have this step do it, enable Settings > Actions > General > 'Allow \
-          GitHub Actions to create and approve pull requests'. Note that this \
-          alone lets the PR exist but still leaves its checks unstarted; add a \
-          BUMP_TOKEN secret (a PAT with repo scope) for the checks to run too."
+            echo "::error::The bump succeeded and $BRANCH is pushed with its \
+          checks already running, but the pull request could not be opened. \
+          Open it in one click: \
+          $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/main...$BRANCH — or \
+          enable Settings > Actions > General > 'Allow GitHub Actions to \
+          create and approve pull requests' to have this step do it."
             exit 1
           fi
