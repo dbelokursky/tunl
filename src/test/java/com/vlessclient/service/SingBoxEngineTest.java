@@ -191,6 +191,11 @@ class SingBoxEngineTest {
         assertThat(engine.awaitStopped(java.time.Duration.ofSeconds(1))).isTrue();
     }
 
+    // Mac/Linux only: this asserts the fake core is still alive after 200ms,
+    // but the Windows fake (`timeout` with redirected stdin) exits immediately,
+    // so "still running" cannot hold there. awaitStopped itself is OS-agnostic
+    // and is covered on every platform by the idle case above.
+    @EnabledOnOs({OS.MAC, OS.LINUX})
     @Test
     void awaitStoppedTimesOutWhileRunningThenSucceedsAfterStop(
             @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
