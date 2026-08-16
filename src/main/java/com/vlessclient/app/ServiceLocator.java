@@ -174,6 +174,22 @@ public class ServiceLocator {
             log.error("Error stopping MCP server during shutdown", e);
         }
 
+        // Stop the engine early — right after MCP so no in-flight agent connect
+        // survives it — and before the slow steps below. An in-flight
+        // subscription refresh can hold stopAutoRefresh for its grace window,
+        // and the Cmd+Q watchdog halts the JVM after 2s; halt() runs no
+        // shutdown hooks, so a core still running at that point is orphaned,
+        // keeping the SOCKS/HTTP ports and the OS proxy registration.
+        try {
+            Object engine = services.get(SingBoxEngine.class);
+            if (engine instanceof SingBoxEngine singBoxEngine && singBoxEngine.isRunning()) {
+                log.info("Stopping sing-box engine");
+                singBoxEngine.stop();
+            }
+        } catch (Exception e) {
+            log.error("Error stopping SingBoxEngine during shutdown", e);
+        }
+
         try {
             Object updater = services.get(UpdateManager.class);
             if (updater instanceof UpdateManager updateManager) {
@@ -226,16 +242,6 @@ public class ServiceLocator {
             }
         } catch (Exception e) {
             log.error("Error stopping ThemeManager during shutdown", e);
-        }
-
-        try {
-            Object engine = services.get(SingBoxEngine.class);
-            if (engine instanceof SingBoxEngine singBoxEngine && singBoxEngine.isRunning()) {
-                log.info("Stopping sing-box engine");
-                singBoxEngine.stop();
-            }
-        } catch (Exception e) {
-            log.error("Error stopping SingBoxEngine during shutdown", e);
         }
 
         services.clear();

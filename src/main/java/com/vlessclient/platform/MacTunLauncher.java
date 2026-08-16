@@ -81,31 +81,13 @@ public final class MacTunLauncher implements TunLauncher {
      */
     private Process startViaSudoNoPassword(Path binary, Path configFile,
                                            Path stopSignalFile) throws IOException {
-        // The NOPASSWD rule authorizes the root-owned copy, not the
-        // user-writable binary — invoke that path under sudo -n.
-        String singBoxCmd = shellQuote(
-                PrivilegeHelper.elevatedBinary().toAbsolutePath().toString());
-        // The rule pins the config path as well, so the generated config has to
-        // be published at that exact location; any other path is refused by
-        // sudo. Written 0600 in the user-owned run dir — it carries the
-        // server's credentials.
+        // The rule pins the config path, so the generated config has to be
+        // published at that exact location; any other path is refused by sudo.
+        // Written 0600 in the user-owned run dir — it carries the server's
+        // credentials.
         Path published = publishConfig(configFile);
-        String configPath = shellQuote(published.toString());
-        String stopPath = shellQuote(stopSignalFile.toAbsolutePath().toString());
-
-        // sudo forwards TERM/INT to its child (sing-box), so killing the
-        // user-owned sudo propagates to root-owned sing-box cleanly. Trap
-        // TERM/INT (not just EXIT): the engine stops us with SIGTERM, and a
-        // signal-killed shell skips an EXIT-only trap, orphaning the core.
-        String shellCommand = String.format(
-                "sudo -n %s run -c %s & SBPID=$!; "
-                        + "trap 'kill $SBPID 2>/dev/null; exit 0' EXIT INT TERM; "
-                        + "while kill -0 $SBPID 2>/dev/null "
-                        + "&& [ ! -f %s ]; do sleep 0.3; done; "
-                        + "kill $SBPID 2>/dev/null; "
-                        + "wait $SBPID 2>/dev/null; "
-                        + "rm -f %s",
-                singBoxCmd, configPath, stopPath, stopPath);
+        String shellCommand = sudoWrapperCommand(
+                PrivilegeHelper.elevatedBinary(), published, stopSignalFile);
 
         ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", shellCommand);
         pb.directory(binary.getParent().toFile());
@@ -116,21 +98,29 @@ public final class MacTunLauncher implements TunLauncher {
     }
 
     /**
-     * Legacy fallback: launch sing-box inside an osascript admin-privileges
-     * context. Prompts for a password on every Connect. Used only when
-     * NOPASSWD configuration is unavailable (e.g. the user cancelled the
-     * one-time install dialog).
+     * The wrapper for the sudo-NOPASSWD path. The NOPASSWD rule authorizes the
+     * root-owned copy, not the user-writable binary, so the core is invoked
+     * under {@code sudo -n}; sudo forwards TERM/INT to it, so killing the
+     * user-owned sudo propagates to root-owned sing-box cleanly.
+     *
+     * <p>Watches three things and tears the core down when any fires: the core
+     * itself, the stop-signal file, and the app's pid. The parent-pid watch is
+     * the safety net the osascript and Linux wrappers already had and this path
+     * lacked — on a hard app death (SIGKILL, crash: no shutdown hook, no stop
+     * file) the re-parented wrapper would otherwise loop forever, leaving a
+     * root-owned core holding the TUN up. Trap TERM/INT as well as EXIT: the
+     * engine stops us with SIGTERM, and a signal-killed shell skips an
+     * EXIT-only trap.</p>
      */
-    private Process startViaOsascriptPrompt(Path binary, Path configFile,
-                                            Path stopSignalFile) throws IOException {
+    static String sudoWrapperCommand(Path elevatedBinary, Path publishedConfig,
+                                     Path stopSignalFile) {
         long parentPid = ProcessHandle.current().pid();
-
-        String singBoxCmd = shellQuote(binary.toAbsolutePath().toString());
-        String configPath = shellQuote(configFile.toAbsolutePath().toString());
+        String singBoxCmd = shellQuote(elevatedBinary.toAbsolutePath().toString());
+        String configPath = shellQuote(publishedConfig.toString());
         String stopPath = shellQuote(stopSignalFile.toAbsolutePath().toString());
 
-        String shellCommand = String.format(
-                "%s run -c %s & SBPID=$!; "
+        return String.format(
+                "sudo -n %s run -c %s & SBPID=$!; "
                         + "trap 'kill $SBPID 2>/dev/null; exit 0' EXIT INT TERM; "
                         + "while kill -0 $SBPID 2>/dev/null "
                         + "&& kill -0 %d 2>/dev/null "
@@ -139,6 +129,17 @@ public final class MacTunLauncher implements TunLauncher {
                         + "wait $SBPID 2>/dev/null; "
                         + "rm -f %s",
                 singBoxCmd, configPath, parentPid, stopPath, stopPath);
+    }
+
+    /**
+     * Legacy fallback: launch sing-box inside an osascript admin-privileges
+     * context. Prompts for a password on every Connect. Used only when
+     * NOPASSWD configuration is unavailable (e.g. the user cancelled the
+     * one-time install dialog).
+     */
+    private Process startViaOsascriptPrompt(Path binary, Path configFile,
+                                            Path stopSignalFile) throws IOException {
+        String shellCommand = osascriptWrapperCommand(binary, configFile, stopSignalFile);
 
         ProcessBuilder pb = new ProcessBuilder(
                 "osascript",
@@ -151,6 +152,30 @@ public final class MacTunLauncher implements TunLauncher {
         Process process = pb.start();
         log.info("Started sing-box via osascript (password prompt expected)");
         return process;
+    }
+
+    /**
+     * The wrapper for the osascript fallback (the core runs as root because the
+     * whole script is elevated). Same three-way watch as
+     * {@link #sudoWrapperCommand}: core, stop file, and the app's pid.
+     */
+    static String osascriptWrapperCommand(Path binary, Path configFile,
+                                          Path stopSignalFile) {
+        long parentPid = ProcessHandle.current().pid();
+        String singBoxCmd = shellQuote(binary.toAbsolutePath().toString());
+        String configPath = shellQuote(configFile.toAbsolutePath().toString());
+        String stopPath = shellQuote(stopSignalFile.toAbsolutePath().toString());
+
+        return String.format(
+                "%s run -c %s & SBPID=$!; "
+                        + "trap 'kill $SBPID 2>/dev/null; exit 0' EXIT INT TERM; "
+                        + "while kill -0 $SBPID 2>/dev/null "
+                        + "&& kill -0 %d 2>/dev/null "
+                        + "&& [ ! -f %s ]; do sleep 0.3; done; "
+                        + "kill $SBPID 2>/dev/null; "
+                        + "wait $SBPID 2>/dev/null; "
+                        + "rm -f %s",
+                singBoxCmd, configPath, parentPid, stopPath, stopPath);
     }
 
     /**

@@ -49,6 +49,15 @@ public class SubscriptionService {
      */
     static final int SUBSCRIPTIONS_CONFIG_VERSION = 1;
 
+    /**
+     * How long stopAutoRefresh() lets an in-flight refresh finish before it
+     * interrupts. Kept small on purpose: shutdown runs it well inside the
+     * Cmd+Q quit watchdog (2s) and the engine is already stopped by then, so a
+     * stuck refresh must never be what holds shutdown open — the old 60s could
+     * never complete under either quit path anyway.
+     */
+    private static final int SHUTDOWN_GRACE_SECONDS = 2;
+
     private final Path dataDir;
     private final ObjectMapper objectMapper;
     private final ObservableList<Subscription> subscriptions;
@@ -57,6 +66,14 @@ public class SubscriptionService {
     private final HttpClient httpClient;
     private final SecretSealer sealer;
     private final Object lifecycleLock = new Object();
+    /**
+     * Serializes refreshSubscription's apply stage against removeSubscription
+     * (and against another refresh of the same subscription). It is NOT held
+     * across the network fetch — only the in-memory diff/apply — so a slow
+     * fetch never blocks a delete. The FX thread never takes it, so blocking on
+     * the FX executor while holding it cannot deadlock.
+     */
+    private final Object refreshApplyLock = new Object();
     private ScheduledExecutorService scheduler;
 
     /**
@@ -176,6 +193,17 @@ public class SubscriptionService {
      * @param subscriptionId the id of the subscription to remove
      */
     public void removeSubscription(String subscriptionId) {
+        // Same lock refreshSubscription's apply stage takes: a refresh that
+        // fetched just before this delete must not re-insert the servers we are
+        // about to remove. Reading serverIds inside the lock also means that if
+        // a refresh applied first, we delete the ids it just wrote, not a stale
+        // set — no orphans either way.
+        synchronized (refreshApplyLock) {
+            removeSubscriptionLocked(subscriptionId);
+        }
+    }
+
+    private void removeSubscriptionLocked(String subscriptionId) {
         Subscription sub = findById(subscriptionId);
         if (sub == null) {
             log.warn("Subscription not found for removal: {}", subscriptionId);
@@ -246,14 +274,29 @@ public class SubscriptionService {
             return;
         }
 
-        applyNamePrefix(fetchedServers, sub.getName());
-        diffAndApply(sub, fetchedServers);
+        // Re-validate before applying: the fetch above can take up to 30s, and
+        // the user may have deleted this subscription meanwhile. Without the
+        // re-check diffAndApply would resolve none of the (now-gone) ids, treat
+        // every fetched server as new, and re-insert the whole list as
+        // untracked orphans that no future refresh or delete can reach.
+        // removeSubscription takes the same lock, so this check and the apply
+        // are atomic against a concurrent delete; it also serializes two
+        // refreshes of one subscription so they cannot mint duplicate servers.
+        synchronized (refreshApplyLock) {
+            if (!isRegistered(subscriptionId)) {
+                log.info("Subscription '{}' was removed during refresh; "
+                        + "discarding the fetched result", sub.getName());
+                return;
+            }
+            applyNamePrefix(fetchedServers, sub.getName());
+            diffAndApply(sub, fetchedServers);
 
-        sub.setLastError(null);
-        sub.setLastRefreshedAt(System.currentTimeMillis());
-        saveSubscriptions();
-        log.info("Refreshed subscription '{}': {} servers",
-                sub.getName(), sub.getServerIds().size());
+            sub.setLastError(null);
+            sub.setLastRefreshedAt(System.currentTimeMillis());
+            saveSubscriptions();
+            log.info("Refreshed subscription '{}': {} servers",
+                    sub.getName(), sub.getServerIds().size());
+        }
     }
 
     /**
@@ -269,6 +312,15 @@ public class SubscriptionService {
      * Starts hourly background auto-refresh of all subscriptions. No-op if already running.
      */
     public void startAutoRefresh() {
+        startAutoRefresh(1, 1, TimeUnit.HOURS);
+    }
+
+    /**
+     * Schedules auto-refresh with an explicit initial delay and period.
+     * Package-private so a test can trigger an immediate cycle instead of
+     * waiting an hour.
+     */
+    void startAutoRefresh(long initialDelay, long period, TimeUnit unit) {
         synchronized (lifecycleLock) {
             if (scheduler != null && !scheduler.isShutdown()) {
                 return;
@@ -278,8 +330,26 @@ public class SubscriptionService {
                 t.setDaemon(true);
                 return t;
             });
-            scheduler.scheduleAtFixedRate(this::refreshAll, 1, 1, TimeUnit.HOURS);
+            scheduler.scheduleAtFixedRate(this::guardedRefreshAll, initialDelay, period, unit);
             log.info("Started subscription auto-refresh");
+        }
+    }
+
+    /**
+     * Runs a refresh cycle, swallowing and logging any failure.
+     *
+     * <p>{@link java.util.concurrent.ScheduledExecutorService#scheduleAtFixedRate
+     * scheduleAtFixedRate} cancels all future executions the moment one throws,
+     * so a single transient error — a CME from an off-thread list read, an
+     * FX-thread timeout inside applyServerBatch — would otherwise stop
+     * auto-refresh forever, with no log line and no UI signal, until the app
+     * restarts. Guarding here keeps the next hour firing.</p>
+     */
+    private void guardedRefreshAll() {
+        try {
+            refreshAll();
+        } catch (Exception e) {
+            log.error("Scheduled subscription refresh failed", e);
         }
     }
 
@@ -296,15 +366,15 @@ public class SubscriptionService {
             toShutdown = scheduler;
             scheduler = null;
         }
-        // shutdown() lets any in-flight refresh run to completion. We then wait
-        // for the scheduler thread to finish before returning so callers can
-        // rely on stopAutoRefresh() being synchronous with respect to any
-        // currently-executing refresh.
+        // shutdown() lets an in-flight refresh keep running; we then wait a
+        // bounded grace for it so stopAutoRefresh() is synchronous with respect
+        // to a quick cycle, but interrupt anything slower (shutdownNow) rather
+        // than block shutdown — see SHUTDOWN_GRACE_SECONDS.
         toShutdown.shutdown();
         try {
-            if (!toShutdown.awaitTermination(60, TimeUnit.SECONDS)) {
-                log.warn("Subscription auto-refresh did not terminate within timeout; "
-                        + "forcing shutdown");
+            if (!toShutdown.awaitTermination(SHUTDOWN_GRACE_SECONDS, TimeUnit.SECONDS)) {
+                log.warn("Subscription auto-refresh did not terminate within {}s; "
+                        + "forcing shutdown", SHUTDOWN_GRACE_SECONDS);
                 toShutdown.shutdownNow();
             }
         } catch (InterruptedException e) {
@@ -478,6 +548,23 @@ public class SubscriptionService {
                 .filter(s -> s.getId().equals(id))
                 .findFirst()
                 .orElse(null);
+    }
+
+    /**
+     * Whether a subscription with this id is still registered. Uses an explicit
+     * synchronized scan rather than the streaming findById so it cannot throw a
+     * ConcurrentModificationException against an FX-thread list mutation while
+     * refreshSubscription re-checks existence at apply time.
+     */
+    private boolean isRegistered(String id) {
+        synchronized (this) {
+            for (Subscription s : subscriptions) {
+                if (s.getId().equals(id)) {
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 
     synchronized void saveSubscriptions() {

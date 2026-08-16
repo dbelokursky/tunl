@@ -58,9 +58,8 @@ class PrivilegeHelperTest {
     @Test
     void configureCommandInstallsARootOwnedCopyBeforeWritingTheRule() {
         Path userBinary = Path.of("/Users/alice/Library/Application Support/VlessClient/bin/sing-box");
-        Path stagedRule = tempDir.resolve("rule.tmp");
 
-        String cmd = PrivilegeHelper.configureShellCommand(userBinary, stagedRule, "alice");
+        String cmd = PrivilegeHelper.configureShellCommand(userBinary, "alice");
 
         // Creates the root-owned dir and installs the binary root:wheel 0755
         // at the elevated path — so the user can no longer swap what runs as root.
@@ -74,11 +73,52 @@ class PrivilegeHelperTest {
         // credentials in it, inside the root-owned parent.
         assertThat(cmd).contains(
                 "install -d -m 0700 -o 'alice' -g staff '/usr/local/libexec/vless-client/run'");
-        // Then the rule, validated with visudo, removed on failure.
-        assertThat(cmd).contains("install -m 0440 -o root -g wheel");
-        assertThat(cmd).contains("'/etc/sudoers.d/vless-client'");
-        assertThat(cmd).contains("visudo -c -f '/etc/sudoers.d/vless-client'");
-        assertThat(cmd).contains("rm -f '/etc/sudoers.d/vless-client'; exit 1");
+        // The rule is written into a root-owned mktemp, validated, then
+        // installed — never installed from a caller-supplied path.
+        assertThat(cmd).contains("STAGE=\"$(mktemp)\"");
+        assertThat(cmd).contains("visudo -c -f \"$STAGE\"");
+        assertThat(cmd).contains(
+                "install -m 0440 -o root -g wheel \"$STAGE\" '/etc/sudoers.d/vless-client'");
+        assertThat(cmd).contains("rm -f '/etc/sudoers.d/vless-client' \"$STAGE\"");
+        assertThat(cmd).contains("exit 1");
+    }
+
+    /**
+     * The TOCTOU fix: root generates the rule itself, so its content is fixed
+     * before validation. The staged rule is validated (visudo -c) and only then
+     * installed — an attacker has no user-writable file to swap in between.
+     */
+    @Test
+    void configureCommandValidatesTheStagedRuleBeforeInstallingIt() {
+        String cmd = PrivilegeHelper.configureShellCommand(
+                Path.of("/Users/alice/bin/sing-box"), "alice");
+
+        // The exact rule is echoed into the temp; no user path is trusted.
+        assertThat(cmd).contains("echo 'alice ALL=(root) NOPASSWD: "
+                + "/usr/local/libexec/vless-client/sing-box run -c "
+                + "/usr/local/libexec/vless-client/run/tun-config.json' > \"$STAGE\"");
+        // Validation strictly precedes the install into sudoers.d.
+        assertThat(cmd.indexOf("visudo -c -f \"$STAGE\""))
+                .as("the staged rule is validated before it is installed")
+                .isLessThan(cmd.indexOf("install -m 0440 -o root -g wheel \"$STAGE\""));
+    }
+
+    /**
+     * The shell-level {@code echo} of the single-quoted rule must reproduce
+     * {@link PrivilegeHelper#sudoersRule} byte for byte — a quoting slip would
+     * write a different (possibly wider) rule. Runs the echo through /bin/sh.
+     */
+    @Test
+    void echoedRuleReproducesSudoersRuleThroughTheShell() throws Exception {
+        String literal = "'alice ALL=(root) NOPASSWD: "
+                + "/usr/local/libexec/vless-client/sing-box run -c "
+                + "/usr/local/libexec/vless-client/run/tun-config.json'";
+        Process p = new ProcessBuilder("/bin/sh", "-c", "echo " + literal)
+                .redirectErrorStream(true).start();
+        String out = new String(p.getInputStream().readAllBytes());
+        p.waitFor();
+
+        assertThat(out).isEqualTo(PrivilegeHelper.sudoersRule("alice"));
     }
 
     /**

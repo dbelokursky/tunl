@@ -9,6 +9,7 @@ import com.vlessclient.platform.TunLauncher;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyObjectProperty;
@@ -40,9 +41,25 @@ public class SingBoxEngine {
     private final ReadOnlyObjectWrapper<ConnectionState> connectionState;
     private final ReadOnlyStringWrapper errorMessage;
 
-    // Written by start()/stop() and read from the monitor/watchdog daemon
-    // threads; volatile so those threads see the current session's process
-    // (or its absence) instead of a stale reference.
+    /**
+     * Serializes the process lifecycle. start(), stop() and forceStop() run
+     * their whole body under this monitor so the check-and-launch in start()
+     * is atomic. Three threads call start()/stop() — the dashboard's virtual
+     * thread, the tray's FX thread and the MCP worker — and an unguarded
+     * isRunning() check-then-act let two of them both observe "not running",
+     * both launch a core, and orphan the first: it would keep the SOCKS/HTTP
+     * ports and, in SYSTEM_PROXY mode, the OS proxy registration, invisible to
+     * stop() and the shutdown hook (both only ever act on the tracked process).
+     * Holding the lock also publishes the non-volatile session fields below
+     * across the caller threads.
+     */
+    private final Object lifecycle = new Object();
+
+    // Written by start()/stop()/forceStop() while holding `lifecycle` and read
+    // from the monitor/watchdog daemon threads. `process` is volatile so those
+    // threads (and the lock-free isRunning()) see the current session's process
+    // or its absence; the rest are captured into locals under the lock before
+    // any monitor thread is spawned, so they need no separate publication.
     private volatile Process process;
     private Path tempConfigFile;
     private Path stopSignalFile;
@@ -108,6 +125,26 @@ public class SingBoxEngine {
      * @throws IllegalStateException if sing-box is already running
      */
     public void start(String configJson, ProxyMode proxyMode) throws IOException {
+        // The whole check-and-launch runs under `lifecycle`: without it two of
+        // the three caller threads could both pass the isRunning() guard and
+        // launch a second core, orphaning the first.
+        synchronized (lifecycle) {
+            startLocked(configJson, proxyMode);
+        }
+    }
+
+    /**
+     * Starts sing-box with the given configuration JSON using SYSTEM_PROXY mode.
+     *
+     * @param configJson the sing-box configuration in JSON format
+     * @throws IOException          if the config file cannot be written or the process cannot start
+     * @throws IllegalStateException if sing-box is already running
+     */
+    public void start(String configJson) throws IOException {
+        start(configJson, ProxyMode.SYSTEM_PROXY);
+    }
+
+    private void startLocked(String configJson, ProxyMode proxyMode) throws IOException {
         if (isRunning()) {
             throw new IllegalStateException("sing-box is already running");
         }
@@ -185,17 +222,6 @@ public class SingBoxEngine {
         startProcessMonitor();
     }
 
-    /**
-     * Starts sing-box with the given configuration JSON using SYSTEM_PROXY mode.
-     *
-     * @param configJson the sing-box configuration in JSON format
-     * @throws IOException          if the config file cannot be written or the process cannot start
-     * @throws IllegalStateException if sing-box is already running
-     */
-    public void start(String configJson) throws IOException {
-        start(configJson, ProxyMode.SYSTEM_PROXY);
-    }
-
     private static final long TUN_CONNECTED_DELAY_MS = 1800;
 
     private void startTunConnectedWatchdog() {
@@ -258,6 +284,12 @@ public class SingBoxEngine {
      * temporary configuration file.</p>
      */
     public void stop() {
+        synchronized (lifecycle) {
+            stopLocked();
+        }
+    }
+
+    private void stopLocked() {
         stopRequested = true;
         if (!isRunning()) {
             // A crashed core leaves the dead process in the field; retire it
@@ -348,6 +380,31 @@ public class SingBoxEngine {
         // between a check and a use must not turn this into an NPE.
         Process p = process;
         return p != null && p.isAlive();
+    }
+
+    /**
+     * Blocks until the core is no longer running, or {@code timeout} elapses.
+     *
+     * <p>A stop can take seconds — a SIGTERM grace period, then a force-kill —
+     * so a reconnect (server switch, health-check auto-reconnect) that started
+     * immediately after {@link #stop()} would hit "already running". Callers on
+     * the connect path wait here first. Must not be called on the JavaFX thread:
+     * it sleeps.</p>
+     *
+     * @param timeout how long to wait
+     * @return true if the core is stopped by the deadline
+     */
+    public boolean awaitStopped(Duration timeout) {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (isRunning() && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return !isRunning();
+            }
+        }
+        return !isRunning();
     }
 
     /**
@@ -519,6 +576,16 @@ public class SingBoxEngine {
      * Used by the JVM shutdown hook.
      */
     private void forceStop() {
+        // Runs from the JVM shutdown hook. Taking `lifecycle` keeps it from
+        // racing a start()/stop() in flight; the wait is bounded (stop() blocks
+        // at most STOP_TIMEOUT_SECONDS+2), and the external quit killers halt
+        // the JVM if a start() is parked on an elevation prompt.
+        synchronized (lifecycle) {
+            forceStopLocked();
+        }
+    }
+
+    private void forceStopLocked() {
         stopRequested = true;
         // TUN mode: signal the wrapper via the stop file so it kills the
         // root-owned sing-box gracefully. Parent-PID watch in the wrapper

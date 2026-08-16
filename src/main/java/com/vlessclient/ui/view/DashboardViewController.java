@@ -606,15 +606,7 @@ public class DashboardViewController {
      * reconnect that started immediately would hit "already running".
      */
     private void awaitEngineStopped() {
-        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(15).toNanos();
-        while (singBoxEngine.isRunning() && System.nanoTime() < deadline) {
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
-            }
-        }
+        singBoxEngine.awaitStopped(java.time.Duration.ofSeconds(15));
     }
 
     private void disconnect() {
