@@ -5,6 +5,7 @@ import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.platform.UpdateApplier;
 import com.vlessclient.service.SingBoxInstaller;
+import com.vlessclient.service.SingBoxReleases;
 import com.vlessclient.service.UpdateManager;
 import com.vlessclient.ui.view.RestartToUpdate;
 import javafx.application.Platform;
@@ -19,7 +20,8 @@ import org.slf4j.LoggerFactory;
  * The "Updates" block of the Settings view: the app-update row and async
  * detection of the sing-box version shown under About. The sing-box core
  * itself is not updatable from here — it ships pinned with the app and moves
- * only when the app is updated.
+ * only when the app is updated. The row does say when a newer core exists,
+ * which is a nudge to open a bump pull request, not an offer to install one.
  * Extracted from {@link com.vlessclient.ui.view.SettingsViewController},
  * which stays the FXML endpoint and hands its injected controls over via
  * {@link Controls}.
@@ -53,6 +55,9 @@ public final class UpdatesSection {
     private final Button downloadAppButton;
     /** Shows one of the button's bound labels; see {@link Controls}. */
     private final java.util.function.Consumer<String> appButtonLabel;
+
+    /** Asked once per run, from the background thread below. */
+    private final SingBoxReleases singBoxReleases = new SingBoxReleases();
 
     private UpdateManager updateManager;
     /** When the last open-triggered app check started; 0 = never. */
@@ -263,11 +268,33 @@ public final class UpdatesSection {
 
     private void refreshSingBoxVersionAsync() {
         Thread t = new Thread(() -> {
-            String version = detectSingBoxVersion();
-            Platform.runLater(() -> singboxVersionValue.setText(version));
+            String label = withAvailableCore(detectSingBoxVersion());
+            Platform.runLater(() -> singboxVersionValue.setText(label));
         }, "singbox-version-refresh");
         t.setDaemon(true);
         t.start();
+    }
+
+    /**
+     * Appends the newer core version when one has been released.
+     *
+     * <p>Reporting only — nothing here installs a core. The pin moves through
+     * a reviewed pull request, where the real-binary smoke suite gets to
+     * decide whether the new version still matches the config generator; this
+     * line is what tells a maintainer to go and open one.</p>
+     *
+     * <p>Skipped when the core's own version is unknown: there is nothing to
+     * compare against, and it saves a request in exactly the case where the
+     * answer could not be used anyway.</p>
+     */
+    private String withAvailableCore(String version) {
+        if (version == null || version.isBlank()
+                || version.equals(I18n.get("settings.version.unknown"))) {
+            return version;
+        }
+        return singBoxReleases.newerThan(version)
+                .map(latest -> I18n.get("settings.singbox.update.available", version, latest))
+                .orElse(version);
     }
 
     /**
