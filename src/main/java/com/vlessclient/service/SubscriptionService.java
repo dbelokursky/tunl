@@ -66,6 +66,14 @@ public class SubscriptionService {
     private final HttpClient httpClient;
     private final SecretSealer sealer;
     private final Object lifecycleLock = new Object();
+    /**
+     * Serializes refreshSubscription's apply stage against removeSubscription
+     * (and against another refresh of the same subscription). It is NOT held
+     * across the network fetch — only the in-memory diff/apply — so a slow
+     * fetch never blocks a delete. The FX thread never takes it, so blocking on
+     * the FX executor while holding it cannot deadlock.
+     */
+    private final Object refreshApplyLock = new Object();
     private ScheduledExecutorService scheduler;
 
     /**
@@ -185,6 +193,17 @@ public class SubscriptionService {
      * @param subscriptionId the id of the subscription to remove
      */
     public void removeSubscription(String subscriptionId) {
+        // Same lock refreshSubscription's apply stage takes: a refresh that
+        // fetched just before this delete must not re-insert the servers we are
+        // about to remove. Reading serverIds inside the lock also means that if
+        // a refresh applied first, we delete the ids it just wrote, not a stale
+        // set — no orphans either way.
+        synchronized (refreshApplyLock) {
+            removeSubscriptionLocked(subscriptionId);
+        }
+    }
+
+    private void removeSubscriptionLocked(String subscriptionId) {
         Subscription sub = findById(subscriptionId);
         if (sub == null) {
             log.warn("Subscription not found for removal: {}", subscriptionId);
@@ -255,14 +274,29 @@ public class SubscriptionService {
             return;
         }
 
-        applyNamePrefix(fetchedServers, sub.getName());
-        diffAndApply(sub, fetchedServers);
+        // Re-validate before applying: the fetch above can take up to 30s, and
+        // the user may have deleted this subscription meanwhile. Without the
+        // re-check diffAndApply would resolve none of the (now-gone) ids, treat
+        // every fetched server as new, and re-insert the whole list as
+        // untracked orphans that no future refresh or delete can reach.
+        // removeSubscription takes the same lock, so this check and the apply
+        // are atomic against a concurrent delete; it also serializes two
+        // refreshes of one subscription so they cannot mint duplicate servers.
+        synchronized (refreshApplyLock) {
+            if (!isRegistered(subscriptionId)) {
+                log.info("Subscription '{}' was removed during refresh; "
+                        + "discarding the fetched result", sub.getName());
+                return;
+            }
+            applyNamePrefix(fetchedServers, sub.getName());
+            diffAndApply(sub, fetchedServers);
 
-        sub.setLastError(null);
-        sub.setLastRefreshedAt(System.currentTimeMillis());
-        saveSubscriptions();
-        log.info("Refreshed subscription '{}': {} servers",
-                sub.getName(), sub.getServerIds().size());
+            sub.setLastError(null);
+            sub.setLastRefreshedAt(System.currentTimeMillis());
+            saveSubscriptions();
+            log.info("Refreshed subscription '{}': {} servers",
+                    sub.getName(), sub.getServerIds().size());
+        }
     }
 
     /**
@@ -514,6 +548,23 @@ public class SubscriptionService {
                 .filter(s -> s.getId().equals(id))
                 .findFirst()
                 .orElse(null);
+    }
+
+    /**
+     * Whether a subscription with this id is still registered. Uses an explicit
+     * synchronized scan rather than the streaming findById so it cannot throw a
+     * ConcurrentModificationException against an FX-thread list mutation while
+     * refreshSubscription re-checks existence at apply time.
+     */
+    private boolean isRegistered(String id) {
+        synchronized (this) {
+            for (Subscription s : subscriptions) {
+                if (s.getId().equals(id)) {
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 
     synchronized void saveSubscriptions() {
