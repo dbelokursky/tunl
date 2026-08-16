@@ -27,8 +27,20 @@ permissions:
 jobs:
   bump:
     runs-on: ubuntu-latest
+    # Via job env, not the secrets context: `secrets` is not available in a
+    # step's `if:`, which is the same trap release.yml notes for its signing
+    # and certificate steps.
+    env:
+      BUMP_TOKEN: ${{ secrets.BUMP_TOKEN }}
     steps:
+      # BUMP_TOKEN, when it exists, is what makes the whole chore hands-free:
+      # a pull request opened by a PAT gets an ordinary pull_request run,
+      # while one opened by GITHUB_TOKEN gets a run parked in
+      # "action_required" until a human approves it. Everything below works
+      # either way; only that last click differs.
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.BUMP_TOKEN || github.token }}
 
       - name: Decide whether there is anything to do
         id: target
@@ -88,38 +100,49 @@ jobs:
           git commit -am "chore(singbox): pin the core at $WANT"
           git push -u origin "$BRANCH"
 
-      # Before the pull request, deliberately: the checks are the point of the
-      # exercise, and they should run even if opening the PR is refused.
-      - name: Start the checks
-        if: steps.target.outputs.changed == 'true'
+      # Only without a PAT, and only to answer the question early. With
+      # BUMP_TOKEN the pull request gets a real pull_request run and this
+      # would be a duplicate of it.
+      #
+      # GITHUB_TOKEN is barred from triggering workflows — that is what stops
+      # a workflow setting itself off forever — but workflow_dispatch is the
+      # documented exception ("workflow_dispatch and repository_dispatch
+      # events always create workflow runs"). build.yml runs its four test-*
+      # jobs on any trigger and gates its packaging jobs on pushes to main, so
+      # this starts exactly the four checks that matter.
+      #
+      # Worth being exact about what this does and does not buy: the run is
+      # green or red on the branch within minutes, with nobody touching
+      # anything, which is the whole question — does the new core still match
+      # the generator. It does NOT satisfy the pull request's required checks:
+      # those are only ever satisfied by the pull_request run, which is parked
+      # until approved. Verified by experiment, not assumed.
+      - name: Start the checks early
+        if: steps.target.outputs.changed == 'true' && env.BUMP_TOKEN == ''
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ steps.target.outputs.branch }}
-        # The push above cannot start a workflow run: GITHUB_TOKEN is barred
-        # from triggering workflows, which is what stops a workflow from
-        # setting itself off forever. workflow_dispatch is the documented
-        # exception — "workflow_dispatch and repository_dispatch events always
-        # create workflow runs" — so the run this pull request exists to
-        # collect is started explicitly rather than waited for.
-        #
-        # build.yml runs its four test-* jobs on any trigger and gates its
-        # packaging jobs on pushes to main, so this starts exactly the four
-        # required checks and nothing else.
         run: gh workflow run build.yml --ref "$BRANCH"
 
       - name: Open the pull request
         if: steps.target.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.BUMP_TOKEN || github.token }}
           HAVE: ${{ steps.target.outputs.have }}
           WANT: ${{ steps.target.outputs.want }}
           BRANCH: ${{ steps.target.outputs.branch }}
+          HAVE_PAT: ${{ secrets.BUMP_TOKEN != '' }}
         run: |
           set -euo pipefail
+          note=''
+          if [ "$HAVE_PAT" != "true" ]; then
+            note=$'\n> Проверки этого PR ждут одобрения — так GitHub поступает с прогонами на PR, открытых `GITHUB_TOKEN`. Нажми **Approve and run**. Ответ при этом уже известен: те же четыре проверки прогнаны на ветке отдельным запуском, в списке Actions.\n'
+          fi
+
           if ! gh pr create --base main --head "$BRANCH" \
             --title "chore(singbox): bump the pinned core to $WANT" \
             --body "Ядро sing-box: \`$HAVE\` → \`$WANT\`. Открыто автоматически, применять решает человек.
-
+          $note
           ## Что уже проверено
 
           \`scripts/bump-singbox.sh\` скачал каждый ассет, посчитал SHA-256 локально и сверил с дайджестом из Releases API — две разные дороги для одних и тех же байт. Затем запустил бинарь своей платформы и убедился, что тот рапортует нужную версию.
