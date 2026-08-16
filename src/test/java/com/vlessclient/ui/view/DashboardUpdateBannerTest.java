@@ -1,6 +1,7 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.service.UpdateManager;
 import com.vlessclient.ui.view.DashboardViewController.UpdateBannerState;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
@@ -37,6 +38,13 @@ public class DashboardUpdateBannerTest extends ApplicationTest {
 
     @Override
     public void start(Stage stage) throws Exception {
+        // Swap in an updater that was never started, so nothing here depends
+        // on what is published on GitHub. The one ServiceLocator builds checks
+        // for releases the moment it is created, and a test build calls itself
+        // version "dev" — which compares older than every release — so the
+        // banner's state would otherwise be decided by a network call.
+        ServiceLocator.register(UpdateManager.class, new UpdateManager());
+
         FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/DashboardView.fxml"));
         Parent root = loader.load();
         stage.setScene(new Scene(root, 640, 480));
