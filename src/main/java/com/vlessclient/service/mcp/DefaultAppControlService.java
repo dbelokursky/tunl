@@ -9,10 +9,10 @@ import com.vlessclient.model.RoutingRule;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.Subscription;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.FxExecutor;
 import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ShareLinkParser;
-import com.vlessclient.service.SingBoxConfigGenerator;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.SubscriptionService;
 import com.vlessclient.service.TrafficMonitor;
@@ -43,7 +43,7 @@ public class DefaultAppControlService implements AppControlService {
     private final TrafficMonitor trafficMonitor;
     private final SubscriptionService subscriptionService;
     private final RoutingService routingService;
-    private final SingBoxConfigGenerator configGenerator;
+    private final ConnectionService connectionService;
     private final com.vlessclient.service.LatencyTester latencyTester;
     private final ShareLinkParser shareLinkParser;
     private volatile SingBoxEngine engine;
@@ -55,7 +55,7 @@ public class DefaultAppControlService implements AppControlService {
      * @param trafficMonitor the live traffic monitor
      * @param subscriptionService the subscription service
      * @param routingService the routing service
-     * @param configGenerator the sing-box config generator
+     * @param connectionService the owner of the connect/disconnect flow
      * @param latencyTester the latency tester
      * @param shareLinkParser the share-link parser
      * @param engine the sing-box engine, or {@code null} if not yet available
@@ -64,7 +64,7 @@ public class DefaultAppControlService implements AppControlService {
                                     TrafficMonitor trafficMonitor,
                                     SubscriptionService subscriptionService,
                                     RoutingService routingService,
-                                    SingBoxConfigGenerator configGenerator,
+                                    ConnectionService connectionService,
                                     com.vlessclient.service.LatencyTester latencyTester,
                                     ShareLinkParser shareLinkParser,
                                     SingBoxEngine engine) {
@@ -72,7 +72,7 @@ public class DefaultAppControlService implements AppControlService {
         this.trafficMonitor = trafficMonitor;
         this.subscriptionService = subscriptionService;
         this.routingService = routingService;
-        this.configGenerator = configGenerator;
+        this.connectionService = connectionService;
         this.latencyTester = latencyTester;
         this.shareLinkParser = shareLinkParser;
         this.engine = engine;
@@ -222,44 +222,40 @@ public class DefaultAppControlService implements AppControlService {
         if (serverId != null && !serverId.isBlank()) {
             selectServer(serverId);
         }
-        // Snapshot the candidate list and the active server together on the FX
-        // thread. Passing every candidate (not just the active one) is what lets
-        // automatic selection pick among them — the single-server overload
-        // silently collapsed AUTO_BEST to a one-member group.
-        List<ServerConfig> candidates =
-                FxExecutor.get(() -> List.copyOf(configStore.getServers()));
-        ServerConfig active = candidates.stream()
-                .filter(ServerConfig::isActive).findFirst().orElse(null);
-        if (active == null) {
-            throw new McpToolException(
-                    "No active server. Pass serverId or select one with select_server.");
-        }
 
         if (mode != null && !mode.isBlank() && effectiveMode != settings.getProxyMode()) {
             settings.setProxyMode(effectiveMode);
             configStore.saveSettings(settings);
         }
 
-        RoutingConfig routing = safeRoutingConfig();
-        String configJson = configGenerator.generate(candidates, active, settings, routing);
-        // Wait out any prior stop so a reconnect does not race "already running".
-        current.awaitStopped(java.time.Duration.ofSeconds(15));
+        // The connect flow itself belongs to ConnectionService — including
+        // passing every candidate to the generator, which is what keeps
+        // automatic selection working on this path.
+        ConnectionService.ConnectAttempt attempt;
         try {
-            current.start(configJson, effectiveMode);
+            attempt = connectionService.connect(effectiveMode);
         } catch (IOException e) {
             throw new McpToolException("Failed to start sing-box: " + e.getMessage(), e);
-        } catch (IllegalStateException e) {
-            throw new McpToolException("sing-box is already running.");
+        }
+        if (!attempt.started()) {
+            // Anything but a start is an error for a tool call — including a
+            // future outcome this facade has not been taught to report, which
+            // must not read as a silent "connected".
+            String reason = switch (attempt.outcome()) {
+                case NO_ENGINE -> "sing-box binary is not available; cannot connect.";
+                case NO_ACTIVE_SERVER ->
+                        "No active server. Pass serverId or select one with select_server.";
+                case ALREADY_RUNNING -> "sing-box is already running.";
+                default -> "Unexpected connect outcome: " + attempt.outcome();
+            };
+            throw new McpToolException(reason);
         }
         return getStatus();
     }
 
     @Override
     public StatusInfo disconnect() {
-        SingBoxEngine current = engine;
-        if (current != null) {
-            current.stop();
-        }
+        connectionService.disconnect();
         return getStatus();
     }
 
@@ -492,11 +488,4 @@ public class DefaultAppControlService implements AppControlService {
         };
     }
 
-    private RoutingConfig safeRoutingConfig() {
-        try {
-            return routingService.getConfig();
-        } catch (RuntimeException e) {
-            return null;
-        }
-    }
 }

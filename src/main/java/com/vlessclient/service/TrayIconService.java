@@ -1,8 +1,6 @@
 package com.vlessclient.service;
 
 import com.vlessclient.app.I18n;
-import com.vlessclient.app.ServiceLocator;
-import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ServerConfig;
 import java.awt.AWTException;
@@ -44,7 +42,7 @@ public class TrayIconService {
 
     private final SingBoxEngine singBoxEngine;
     private final ConfigStore configStore;
-    private final SingBoxConfigGenerator configGenerator;
+    private final ConnectionService connectionService;
     private final Stage stage;
 
     private TrayIcon trayIcon;
@@ -58,18 +56,18 @@ public class TrayIconService {
     /**
      * Creates a tray icon service bound to the given engine, stores and stage.
      *
-     * @param singBoxEngine    engine whose connection state drives the icon
-     * @param configStore      store providing the selectable server list
-     * @param configGenerator  generator used to build a config on tray connect
-     * @param stage            main window shown/hidden from the tray
+     * @param singBoxEngine     engine whose connection state drives the icon
+     * @param configStore       store providing the selectable server list
+     * @param connectionService owner of the connect/disconnect flow
+     * @param stage             main window shown/hidden from the tray
      */
     public TrayIconService(SingBoxEngine singBoxEngine,
                            ConfigStore configStore,
-                           SingBoxConfigGenerator configGenerator,
+                           ConnectionService connectionService,
                            Stage stage) {
         this.singBoxEngine = singBoxEngine;
         this.configStore = configStore;
-        this.configGenerator = configGenerator;
+        this.connectionService = connectionService;
         this.stage = stage;
     }
 
@@ -272,60 +270,36 @@ public class TrayIconService {
     }
 
     private void onToggleConnect() {
-        SingBoxEngine engine = singBoxEngine;
-        if (engine == null) {
-            log.warn("Tray connect clicked but SingBoxEngine is not available");
-            return;
-        }
-        // Off the FX thread: stop() waits out a SIGTERM grace period and start()
-        // can hash a ~40 MB binary and raise a modal admin prompt — neither may
-        // run on the FX thread. The old Platform.runLater body did exactly that,
-        // freezing the window for up to a minute on a TUN connect.
-        Thread.startVirtualThread(() -> toggleConnection(engine));
+        // Off the FX thread: a stop waits out a SIGTERM grace period and a start
+        // can hash a ~40 MB binary and raise a modal admin prompt. Running that
+        // inline (as this menu item once did) froze the window for up to a
+        // minute on a TUN connect; ConnectionService now refuses to run on the
+        // FX thread at all, so the mistake cannot come back quietly.
+        Thread.startVirtualThread(this::toggleConnection);
     }
 
-    private void toggleConnection(SingBoxEngine engine) {
+    private void toggleConnection() {
         try {
-            if (engine.isRunning()) {
-                engine.stop();
+            if (connectionService.isRunning()) {
+                connectionService.disconnect();
                 return;
             }
-            // Read the FX-owned config on the FX thread; run the start off it.
-            ConnectSnapshot snap = FxExecutor.get(() -> {
-                ServerConfig active = configStore.getServers().stream()
-                        .filter(ServerConfig::isActive).findFirst().orElse(null);
-                return new ConnectSnapshot(
-                        List.copyOf(configStore.getServers()),
-                        active,
-                        ServiceLocator.get(AppSettings.class));
-            });
-            if (snap.active() == null) {
-                log.warn("Tray connect clicked but no active server selected");
-                showMainWindow();
-                return;
+            ConnectionService.ConnectAttempt attempt = connectionService.connect();
+            switch (attempt.outcome()) {
+                case NO_ACTIVE_SERVER -> {
+                    log.warn("Tray connect clicked but no active server selected");
+                    showMainWindow();
+                }
+                case NO_ENGINE ->
+                    log.warn("Tray connect clicked but SingBoxEngine is not available");
+                case ALREADY_RUNNING -> log.debug("sing-box already running");
+                default -> log.info("Connected from tray to {}", attempt.server().getName());
             }
-            com.vlessclient.model.RoutingConfig routingConfig = null;
-            try {
-                routingConfig = ServiceLocator.get(RoutingService.class).getConfig();
-            } catch (IllegalArgumentException e) {
-                log.debug("RoutingService not available; using default route");
-            }
-            String configJson = configGenerator.generate(
-                    snap.candidates(), snap.active(), snap.settings(), routingConfig);
-            engine.awaitStopped(java.time.Duration.ofSeconds(15));
-            engine.start(configJson, snap.settings().getProxyMode());
         } catch (IOException e) {
             log.error("Failed to start sing-box from tray", e);
-        } catch (IllegalStateException e) {
-            log.debug("sing-box already running: {}", e.getMessage());
         } catch (Exception e) {
             log.error("Unexpected error toggling connection from tray", e);
         }
-    }
-
-    /** FX-thread snapshot of everything a tray connect needs to build a config. */
-    private record ConnectSnapshot(List<ServerConfig> candidates, ServerConfig active,
-                                   AppSettings settings) {
     }
 
     private void showMainWindow() {

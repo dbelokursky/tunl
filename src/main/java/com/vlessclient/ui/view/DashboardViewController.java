@@ -5,15 +5,13 @@ import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
-import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.ServerSelection;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.CountryResolver;
 import com.vlessclient.service.LatencyTester;
-import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ServiceReachabilityChecker;
-import com.vlessclient.service.SingBoxConfigGenerator;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.SingBoxInstaller;
 import com.vlessclient.service.TrafficMonitor;
@@ -515,117 +513,102 @@ public class DashboardViewController {
         Platform.runLater(this::connect);
     }
 
+    /**
+     * Starts the tunnel. The flow itself belongs to {@link ConnectionService};
+     * what stays here is the UI half — remembering which server the dashboard
+     * claims, disabling the button, and turning the outcome into a message.
+     *
+     * <p>The work runs off the FX thread because a start hashes the ~40 MB
+     * binary and, for TUN, can raise a modal admin prompt with a 60-second
+     * timeout: inline it froze the window during the one action users watch
+     * most. The engine publishes its state through {@code
+     * connectionStateProperty}, which already marshals to FX, so the rest of
+     * the UI keeps updating itself.</p>
+     */
     private void connect() {
-        activeServer = findActiveServer();
-
-        if (activeServer == null) {
-            log.warn("No active server selected");
-            statusLabel.setText(I18n.get("dashboard.no.server"));
-            showError(I18n.get("dashboard.error.no.active.title"),
-                    I18n.get("dashboard.error.no.active.body"));
-            return;
-        }
-
-        if (singBoxEngine == null) {
-            showError(I18n.get("error.singbox.not.found"),
-                    I18n.get("dashboard.error.singbox.body"));
-            return;
-        }
-
-        log.info("Connecting to server: {}", activeServer.getName());
-
-        try {
-            SingBoxConfigGenerator configGenerator =
-                    ServiceLocator.get(SingBoxConfigGenerator.class);
-            AppSettings settings = ServiceLocator.get(AppSettings.class);
-            if (configGenerator == null || settings == null) {
-                showError(I18n.get("dashboard.error.config.title"),
-                        I18n.get("dashboard.error.config.body"));
-                return;
-            }
-            RoutingConfig routingConfig = null;
-            try {
-                routingConfig = ServiceLocator.get(RoutingService.class).getConfig();
-            } catch (IllegalArgumentException e) {
-                log.debug("RoutingService not available; using default route");
-            }
-            // Every configured server is a candidate; the generator uses them
-            // only when the selection mode is automatic.
-            List<ServerConfig> candidates = ServiceLocator.get(ConfigStore.class).getServers();
-            String configJson = configGenerator.generate(
-                    candidates, activeServer, settings, routingConfig);
-            ProxyMode mode = settings.getProxyMode();
-            // Config generation is cheap and needs the FX-owned state; the
-            // start itself is not — see startEngine.
-            connectButton.setDisable(true);
-            Thread.startVirtualThread(() -> startEngine(configJson, mode));
-        } catch (IllegalArgumentException e) {
-            log.error("Service unavailable during connect", e);
+        ConnectionService service = connectionService();
+        if (service == null) {
             showError(I18n.get("dashboard.error.service.title"),
-                    I18n.get("dashboard.error.service.body", e.getMessage()));
+                    I18n.get("dashboard.error.service.body", "ConnectionService"));
+            return;
         }
+        // Tracked for the UI (flag, server name, server-switch detection); the
+        // service resolves the active server again as the real source of truth.
+        activeServer = findActiveServer();
+        connectButton.setDisable(true);
+        Thread.startVirtualThread(() -> runConnect(service, false));
     }
 
     /**
-     * Starts the core off the FX thread.
-     *
-     * <p>Connecting used to run inline on the FX thread, freezing the window
-     * for as long as the start took — on a TUN connect that is a SHA-256 of the
-     * ~40 MB binary plus, when the privileged setup has to be refreshed, a
-     * modal admin prompt with a 60-second timeout. The UI was unresponsive
-     * during the one action users watch most, and the OS auth dialog raced a
-     * frozen renderer.</p>
-     *
-     * <p>Waiting for a previous stop first is what keeps the reconnect paths
-     * working: both the server-switch restart and the health-check
-     * auto-reconnect stop and start back to back, and {@code start()} throws
-     * if the core is still running. The engine publishes all state through
-     * {@code connectionStateProperty}, which already marshals to FX, so the UI
-     * keeps updating itself from here.</p>
+     * Restarts the tunnel, waiting for the old core to exit first. Used when the
+     * active server changes while connected.
      */
-    private void startEngine(String configJson, ProxyMode mode) {
+    private void reconnect() {
+        ConnectionService service = connectionService();
+        if (service == null) {
+            return;
+        }
+        activeServer = findActiveServer();
+        connectButton.setDisable(true);
+        Thread.startVirtualThread(() -> runConnect(service, true));
+    }
+
+    /** Runs a connect (or reconnect) off the FX thread and reports the result. */
+    private void runConnect(ConnectionService service, boolean restart) {
         try {
-            awaitEngineStopped();
-            singBoxEngine.start(configJson, mode);
+            ConnectionService.ConnectAttempt attempt =
+                    restart ? service.reconnect(null) : service.connect(null);
+            switch (attempt.outcome()) {
+                case NO_ACTIVE_SERVER -> Platform.runLater(() -> {
+                    log.warn("No active server selected");
+                    statusLabel.setText(I18n.get("dashboard.no.server"));
+                    showError(I18n.get("dashboard.error.no.active.title"),
+                            I18n.get("dashboard.error.no.active.body"));
+                });
+                case NO_ENGINE -> Platform.runLater(() ->
+                        showError(I18n.get("error.singbox.not.found"),
+                                I18n.get("dashboard.error.singbox.body")));
+                case ALREADY_RUNNING -> log.warn("sing-box already running");
+                // STARTED: the engine's state listener drives the UI from here.
+                default -> Platform.runLater(() -> setActiveServer(attempt.server()));
+            }
         } catch (IOException e) {
             log.error("Failed to start sing-box", e);
             Platform.runLater(() -> {
                 statusLabel.setText(I18n.get("error.connection.failed", e.getMessage()));
                 showError(I18n.get("dashboard.error.start.title"), e.getMessage());
             });
-        } catch (IllegalStateException e) {
-            log.warn("sing-box already running: {}", e.getMessage());
         } finally {
             Platform.runLater(this::refreshConnectButtonAvailability);
         }
     }
 
-    /**
-     * Blocks until the core is no longer running, or the wait times out.
-     * A stop can take seconds (SIGTERM grace, then a force-kill), so a
-     * reconnect that started immediately would hit "already running".
-     */
-    private void awaitEngineStopped() {
-        singBoxEngine.awaitStopped(java.time.Duration.ofSeconds(15));
-    }
-
     private void disconnect() {
-        log.info("Disconnecting");
-
-        if (singBoxEngine == null) {
+        ConnectionService service = connectionService();
+        if (service == null || singBoxEngine == null) {
             connectionState.set(ConnectionState.DISCONNECTED);
             return;
         }
-        // stop() waits out a SIGTERM grace period and can force-kill after it,
+        // A stop waits out a SIGTERM grace period and can force-kill after it,
         // so it cannot run on the FX thread either.
         connectButton.setDisable(true);
         Thread.startVirtualThread(() -> {
             try {
-                singBoxEngine.stop();
+                service.disconnect();
             } finally {
                 Platform.runLater(this::refreshConnectButtonAvailability);
             }
         });
+    }
+
+    /** The connect-flow owner, or null when it is not registered. */
+    private ConnectionService connectionService() {
+        try {
+            return ServiceLocator.get(ConnectionService.class);
+        } catch (IllegalArgumentException e) {
+            log.error("ConnectionService not available; connect is disabled", e);
+            return null;
+        }
     }
 
     /**
@@ -655,10 +638,11 @@ public class DashboardViewController {
         }
         log.info("Active server changed while connected ({} -> {}); restarting tunnel",
                 activeServer.getName(), nowActive.getName());
-        disconnect();
-        // No timed gap needed: the start waits for the stop to finish
-        // (awaitEngineStopped), which is exact rather than a guess.
-        connect();
+        // One restart on one thread: the service stops the old core and waits
+        // for it to exit before starting the new one, which is exact rather
+        // than a timed guess — and rules out the two racing threads a separate
+        // disconnect() plus connect() used to spawn.
+        reconnect();
     }
 
     // ===== Service availability / auto-reconnect =====
