@@ -3,6 +3,7 @@ package com.vlessclient.app;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.platform.Autostart;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.CountryResolver;
 import com.vlessclient.service.GeoIpDatabase;
 import com.vlessclient.service.LatencyTester;
@@ -110,13 +111,20 @@ public class ServiceLocator {
 
         register(Autostart.class, Autostart.current());
 
+        // The one owner of the connect flow: the dashboard, the tray and the MCP
+        // facade all drive the tunnel through it, so the three no longer carry
+        // their own copies of resolve-generate-await-start.
+        SingBoxEngine engine = (SingBoxEngine) services.get(SingBoxEngine.class);
+        ConnectionService connectionService = new ConnectionService(
+                configStore, configGenerator, routingService, engine);
+        register(ConnectionService.class, connectionService);
+
         // MCP control server: a facade over the services above, plus the server
         // that exposes it to agents. Started here so `mcp_enabled` takes effect
         // at launch; re-reconciled whenever settings are saved.
-        SingBoxEngine engine = (SingBoxEngine) services.get(SingBoxEngine.class);
         DefaultAppControlService control = new DefaultAppControlService(
                 configStore, trafficMonitor, subscriptionService, routingService,
-                configGenerator, latencyTester, shareLinkParser, engine);
+                connectionService, latencyTester, shareLinkParser, engine);
         register(AppControlService.class, control);
         McpServerService mcpServerService = new McpServerService(configStore, control);
         register(McpServerService.class, mcpServerService);
@@ -255,7 +263,13 @@ public class ServiceLocator {
         singBoxPath = binaryPath.toString();
         SingBoxEngine engine = new SingBoxEngine(binaryPath);
         register(SingBoxEngine.class, engine);
-        // Point the MCP control facade and log bridge at the fresh engine.
+        // Point the connect flow, the MCP control facade and the log bridge at
+        // the fresh engine. Missing the first would leave every caller of
+        // ConnectionService driving the engine that never had a binary.
+        Object connection = services.get(ConnectionService.class);
+        if (connection instanceof ConnectionService connectionService) {
+            connectionService.setEngine(engine);
+        }
         Object control = services.get(AppControlService.class);
         if (control instanceof DefaultAppControlService defaultControl) {
             defaultControl.setEngine(engine);
