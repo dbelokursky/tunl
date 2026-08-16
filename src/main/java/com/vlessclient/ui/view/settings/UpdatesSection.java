@@ -3,10 +3,15 @@ package com.vlessclient.ui.view.settings;
 import com.vlessclient.app.AppVersion;
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.platform.UpdateApplier;
+import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.SingBoxInstaller;
+import com.vlessclient.service.UpdateBootstrap;
 import com.vlessclient.service.UpdateManager;
 import javafx.application.Platform;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.Circle;
@@ -39,7 +44,8 @@ public final class UpdatesSection {
             VBox appUpdateRow,
             Circle appUpdateDot,
             Label appUpdateDetail,
-            Button downloadAppButton) {
+            Button downloadAppButton,
+            java.util.function.Consumer<String> appButtonLabel) {
     }
 
     private final Label singboxVersionValue;
@@ -48,6 +54,8 @@ public final class UpdatesSection {
     private final Circle appUpdateDot;
     private final Label appUpdateDetail;
     private final Button downloadAppButton;
+    /** Shows one of the button's bound labels; see {@link Controls}. */
+    private final java.util.function.Consumer<String> appButtonLabel;
 
     private UpdateManager updateManager;
     /** When the last open-triggered app check started; 0 = never. */
@@ -64,6 +72,7 @@ public final class UpdatesSection {
         this.appUpdateDot = controls.appUpdateDot();
         this.appUpdateDetail = controls.appUpdateDetail();
         this.downloadAppButton = controls.downloadAppButton();
+        this.appButtonLabel = controls.appButtonLabel();
     }
 
     /**
@@ -110,7 +119,8 @@ public final class UpdatesSection {
             appUpdateRow.setManaged(false);
             return;
         }
-        downloadAppButton.setOnAction(e -> onDownloadAppClicked());
+        // The button's label and action depend on which of the three states
+        // the row is in, so renderAppRow() owns both.
         // The background periodic check updates these on the FX thread, so the
         // row reflects a newer release even without pressing the button.
         updateManager.updateAvailableProperty().addListener((o, ov, nv) -> renderAppRow());
@@ -122,16 +132,79 @@ public final class UpdatesSection {
         if (updateManager == null) {
             return;
         }
-        if (updateManager.updateAvailableProperty().get()) {
-            String latest = updateManager.latestVersionProperty().get();
-            setUpdateRow(AppVersion.VERSION + "  →  " + latest, "update-status-available");
-            downloadAppButton.setVisible(true);
-            downloadAppButton.setManaged(true);
-        } else {
+        if (!updateManager.updateAvailableProperty().get()) {
             setUpdateRow(I18n.get("settings.updates.uptodate"), "update-status-ok");
-            downloadAppButton.setVisible(false);
-            downloadAppButton.setManaged(false);
+            hideAppButton();
+            return;
         }
+        if (!UpdateApplier.current().selfUpdates()) {
+            // Linux: the package belongs to whatever installed it, so the row
+            // reports the new version and offers nothing to press.
+            setUpdateRow(I18n.get("settings.update.packagemanager"), "update-status-available");
+            hideAppButton();
+            return;
+        }
+        if (updateManager.hasStagedUpdate()) {
+            // Already downloaded and verified, in this run or an earlier one:
+            // all that is left is the restart that lets it be installed.
+            setUpdateRow(I18n.get("settings.update.staged"), "update-status-ok");
+            showAppButton("settings.update.restart", this::onRestartClicked);
+            return;
+        }
+        String latest = updateManager.latestVersionProperty().get();
+        setUpdateRow(AppVersion.VERSION + "  →  " + latest, "update-status-available");
+        showAppButton("settings.update.download", this::onDownloadAppClicked);
+    }
+
+    private void showAppButton(String labelKey, Runnable action) {
+        appButtonLabel.accept(labelKey);
+        downloadAppButton.setOnAction(e -> action.run());
+        downloadAppButton.setVisible(true);
+        downloadAppButton.setManaged(true);
+    }
+
+    private void hideAppButton() {
+        downloadAppButton.setVisible(false);
+        downloadAppButton.setManaged(false);
+    }
+
+    /**
+     * Installs the staged update now instead of waiting for the next launch:
+     * hands the installer to the platform applier and quits, so the files this
+     * process is running from can be replaced while nothing holds them open.
+     */
+    private void onRestartClicked() {
+        if (tunnelIsUp() && !confirmRestart()) {
+            return;
+        }
+        if (UpdateBootstrap.applyPendingUpdate()) {
+            // The normal quit path — tray teardown, sing-box stop — which is
+            // exactly the exit the applier's helper is waiting for.
+            Platform.exit();
+            return;
+        }
+        setUpdateRow(I18n.get("settings.update.restart.failed"), "update-status-error");
+    }
+
+    private boolean tunnelIsUp() {
+        try {
+            return ServiceLocator.get(ConnectionService.class).isRunning();
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Asks before restarting while connected. Quitting drops the tunnel, and
+     * a VPN client that disconnects the user without warning to install
+     * something is worse than one that updates a day later.
+     */
+    private boolean confirmRestart() {
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        confirm.setTitle(I18n.get("settings.update.restart"));
+        confirm.setHeaderText(I18n.get("settings.update.restart.confirm.header"));
+        confirm.setContentText(I18n.get("settings.update.restart.confirm.body"));
+        return confirm.showAndWait().filter(button -> button == ButtonType.OK).isPresent();
     }
 
     private void runAppCheck() {
@@ -162,7 +235,7 @@ public final class UpdatesSection {
             Platform.runLater(() -> {
                 downloadAppButton.setDisable(false);
                 if (saved != null) {
-                    setUpdateRow(I18n.get("settings.update.downloaded"), "update-status-ok");
+                    setUpdateRow(I18n.get("settings.update.staged"), "update-status-ok");
                     downloadAppButton.setVisible(false);
                     downloadAppButton.setManaged(false);
                 } else {

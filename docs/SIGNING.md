@@ -97,3 +97,79 @@ Windows:
 ```powershell
 signtool verify /pa dist\tunl_*.msi
 ```
+
+## Release signing key (for the in-app updater)
+
+Separate from the two certificates above, and solving a different problem. OS
+code signing tells the *user's operating system* that the app is not malware.
+The release key tells the *running app* that an installer it downloaded by
+itself came from us — the check in
+`src/main/java/com/vlessclient/service/ReleaseSignature.java`, which the
+updater runs before staging anything.
+
+It matters because the SHA-256 the updater compares against arrives in the same
+GitHub API response as the download URL: anyone able to alter one alters the
+other. A signature made with a key that never appears in the release output
+cannot be produced that way.
+
+**What it does not cover:** with the private key stored in GitHub Actions
+secrets, an attacker who takes over the repository can run the signing workflow
+too. It stops a swapped release asset and a tampered API response, not a
+compromised account. Signing offline with a key that never touches CI closes
+that as well, and requires no code change — only the workflow step goes away.
+
+**Status: active.** The key pair exists, `RELEASE_SIGNING_KEY` is set, and
+`ReleaseSignature.PUBLIC_KEY` carries the public half — so every release from
+now on **must** be signed. The `sign-release` job fails the release rather than
+skipping when the secret is missing, because an unsigned release is one no
+current build can update to.
+
+### One-time setup
+
+Kept for a rotation or a new maintainer; already done for the current key.
+
+Generate the key pair (keep the private key off this repo and out of shell
+history — `~/.ssh`-adjacent, encrypted, backed up somewhere you can reach after
+losing the machine):
+
+```bash
+openssl genpkey -algorithm ED25519 -out tunl-release.key
+```
+
+Add the private key as a repository secret named `RELEASE_SIGNING_KEY`, base64
+encoded (the `sign-release` job in `release.yml` decodes it):
+
+```bash
+base64 -i tunl-release.key | tr -d '\n' | gh secret set RELEASE_SIGNING_KEY
+```
+
+Then take the public half and paste it into the `PUBLIC_KEY` constant in
+`ReleaseSignature.java`:
+
+```bash
+openssl pkey -in tunl-release.key -pubout -outform DER | base64 | tr -d '\n'
+```
+
+**Both halves must land in the same release.** An empty constant is what keeps
+verification off; filling it in makes a valid signature mandatory for every
+future update, so the build that first carries a key must also be the first
+release the workflow signs with it. Users on older builds update to that
+release through the unverified path once — there is no way around that, and it
+is the last time.
+
+### Losing the key
+
+Rotating it is a release like any other: generate a new pair, replace the
+secret and the constant. Users only ever verify against the key compiled into
+*their* build, so a rotation reaches them the same way any other change does —
+through one update signed by the old key.
+
+### Verifying a signature by hand
+
+```bash
+openssl pkey -in tunl-release.key -pubout -out tunl-release.pub.pem
+printf 'sha256:%s' "$(shasum -a 256 tunl_1.6.0.dmg | awk '{print $1}')" > message
+base64 -d < tunl_1.6.0.dmg.sig > signature.bin
+openssl pkeyutl -verify -rawin -pubin -inkey tunl-release.pub.pem \
+  -in message -sigfile signature.bin
+```

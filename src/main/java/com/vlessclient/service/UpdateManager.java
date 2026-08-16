@@ -49,9 +49,31 @@ public class UpdateManager {
      */
     private volatile String expectedDigest = "";
 
+    /**
+     * The release the last check found, held outside the JavaFX properties so
+     * the background download can read it on its own thread. The properties
+     * below drive the UI and are only ever touched on the FX thread.
+     *
+     * @param version the release version
+     * @param url     the installer asset URL
+     * @param digest  the {@code sha256:<hex>} published for that asset
+     */
+    record Candidate(String version, String url, String digest) {
+    }
+
+    private volatile Candidate candidate;
+
+    /**
+     * Whether an installer is waiting in staging, as of the last check. Kept
+     * as a field because the Settings row asks on the FX thread, and the
+     * answer otherwise costs a file read there.
+     */
+    private volatile boolean staged;
+
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final ScheduledExecutorService scheduler;
+    private final UpdateStaging staging;
 
     private final ReadOnlyBooleanWrapper updateAvailable = new ReadOnlyBooleanWrapper(false);
     private final ReadOnlyStringWrapper latestVersion = new ReadOnlyStringWrapper("");
@@ -69,7 +91,12 @@ public class UpdateManager {
     }
 
     UpdateManager(HttpClient httpClient) {
+        this(httpClient, new UpdateStaging());
+    }
+
+    UpdateManager(HttpClient httpClient, UpdateStaging staging) {
         this.httpClient = httpClient;
+        this.staging = staging;
         this.objectMapper = new ObjectMapper();
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "update-checker");
@@ -85,10 +112,36 @@ public class UpdateManager {
         scheduler.scheduleAtFixedRate(() -> {
             try {
                 checkForUpdates();
+                autoDownloadIfAllowed();
             } catch (Exception e) {
                 log.warn("Scheduled update check failed", e);
             }
         }, 0, CHECK_INTERVAL_HOURS, TimeUnit.HOURS);
+    }
+
+    /**
+     * Downloads the release found by the last check, if the policy allows it
+     * right now. Runs on the checker thread, so a slow download delays only
+     * the next check — which is a day away.
+     */
+    void autoDownloadIfAllowed() {
+        Candidate pending = candidate;
+        if (pending == null) {
+            return;
+        }
+        if (!com.vlessclient.platform.UpdateApplier.current().selfUpdates()) {
+            // Nothing here could install it — spending the bytes would only
+            // leave an installer the user has to find and run themselves.
+            log.info("Update {} available; this installation updates through "
+                    + "its package manager", pending.version());
+            return;
+        }
+        staged = staging.pending().isPresent();
+        if (!UpdateDownloadPolicy.shouldDownloadNow(staged)) {
+            log.info("Update {} available; deferring the download", pending.version());
+            return;
+        }
+        downloadUpdate(pending.url(), pending.digest());
     }
 
     /**
@@ -145,6 +198,7 @@ public class UpdateManager {
             if (isNewerVersion(version, AppVersion.VERSION)) {
                 log.info("Update available: {} -> {}", AppVersion.VERSION, version);
                 expectedDigest = asset.digest();
+                candidate = new Candidate(version, installerUrl, asset.digest());
                 Platform.runLater(() -> {
                     latestVersion.set(version);
                     downloadUrl.set(installerUrl);
@@ -159,8 +213,9 @@ public class UpdateManager {
     }
 
     /**
-     * Downloads the installer (DMG/MSI/DEB) for the pending update to the
-     * user's Downloads directory, verifying it before keeping it.
+     * Downloads the installer (DMG/MSI/DEB) for the pending update into the
+     * staging directory, verifying it and recording it as the update to apply
+     * at the next start.
      *
      * @return the saved file path, or {@code null} if the download failed
      */
@@ -171,9 +226,9 @@ public class UpdateManager {
     /**
      * Downloads and verifies the installer.
      *
-     * <p>The app ships unsigned, so users are already trained to click past
-     * Gatekeeper/SmartScreen — an installer that reaches their Downloads folder
-     * is likely to be run. Two checks make that safe to rely on:</p>
+     * <p>The file is not merely offered to the user any more: it is what the
+     * next start will hand to the OS installer without asking again. Two
+     * checks make that safe to rely on:</p>
      *
      * <ul>
      *   <li>The URL must sit under the official releases prefix, so a tampered
@@ -221,8 +276,7 @@ public class UpdateManager {
             }
 
             String fileName = extractFileName(url);
-            Path downloadsDir = com.vlessclient.platform.PlatformPaths.current().downloadsDir();
-            Path target = downloadsDir.resolve(fileName);
+            Path target = staging.dir().resolve(fileName);
 
             String actualDigest;
             try (InputStream in = response.body();
@@ -241,7 +295,26 @@ public class UpdateManager {
                 return null;
             }
 
-            log.info("Update downloaded and verified: {}", target);
+            if (ReleaseSignature.enforced() && !signatureIsValid(url, actualDigest)) {
+                // Same rule as a digest mismatch: an installer that fails a
+                // check must not be left where it could still be run.
+                Files.deleteIfExists(target);
+                return null;
+            }
+
+            try {
+                staging.stage(new com.vlessclient.platform.PendingUpdate(
+                        versionFromReleaseUrl(url), target, expectedDigest));
+            } catch (IOException | IllegalArgumentException e) {
+                // An installer nothing records is an installer nothing will
+                // ever apply; don't leave it on disk pretending otherwise.
+                Files.deleteIfExists(target);
+                log.error("Failed to stage the downloaded update: {}", e.getMessage());
+                return null;
+            }
+
+            staged = true;
+            log.info("Update downloaded, verified and staged: {}", target);
             return target;
         } catch (IOException | InterruptedException
                  | java.security.NoSuchAlgorithmException e) {
@@ -251,6 +324,59 @@ public class UpdateManager {
             }
             return null;
         }
+    }
+
+    /**
+     * Fetches the detached signature published next to an asset and checks it
+     * against the digest of the bytes just downloaded.
+     *
+     * <p>The signature lives at the asset's own URL plus {@code .sig}, so it
+     * is covered by the same release-prefix pin as the installer and cannot be
+     * pointed elsewhere by a tampered API response. A missing signature is a
+     * failure, not a reason to skip the check.</p>
+     *
+     * @param url    the installer asset URL
+     * @param digest the {@code sha256:<hex>} of the downloaded bytes
+     * @return true when a valid signature was found
+     */
+    private boolean signatureIsValid(String url, String digest) {
+        String signatureUrl = url + ReleaseSignature.SIGNATURE_SUFFIX;
+        try {
+            HttpResponse<String> response = httpClient.send(
+                    HttpRequest.newBuilder()
+                            .uri(URI.create(signatureUrl))
+                            .timeout(HTTP_TIMEOUT)
+                            .GET()
+                            .build(),
+                    HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() != 200) {
+                log.error("Update rejected: no signature at {} (status {})",
+                        signatureUrl, response.statusCode());
+                return false;
+            }
+            if (!ReleaseSignature.verifyDigest(digest, response.body())) {
+                log.error("Update rejected: signature does not match {}", url);
+                return false;
+            }
+            return true;
+        } catch (IOException | InterruptedException e) {
+            log.error("Update rejected: cannot fetch signature: {}", e.getMessage());
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Whether a verified installer is already waiting to be applied at the
+     * next start — the state the background download leaves behind.
+     *
+     * @return true when an update is staged
+     */
+    public boolean hasStagedUpdate() {
+        return staged;
     }
 
     // -- Properties --
@@ -381,6 +507,25 @@ public class UpdateManager {
     static String currentArchToken() {
         String osArch = System.getProperty("os.arch", "").toLowerCase(java.util.Locale.ROOT);
         return osArch.contains("aarch64") || osArch.contains("arm64") ? "arm64" : "amd64";
+    }
+
+    /**
+     * Reads the release version out of an asset URL, whose path always carries
+     * the tag right after the download prefix
+     * ({@code .../releases/download/v1.6.0/tunl_1.6.0_arm64.dmg}). Taken from
+     * the URL rather than from the check that produced it, so the version
+     * recorded for a file always describes the file actually fetched.
+     *
+     * @param url an asset URL under {@link #RELEASE_DOWNLOAD_PREFIX}
+     * @return the version without its {@code v} prefix, or empty if absent
+     */
+    static String versionFromReleaseUrl(String url) {
+        if (url == null || !url.startsWith(RELEASE_DOWNLOAD_PREFIX)) {
+            return "";
+        }
+        String rest = url.substring(RELEASE_DOWNLOAD_PREFIX.length());
+        int slash = rest.indexOf('/');
+        return slash <= 0 ? "" : stripVersionPrefix(rest.substring(0, slash));
     }
 
     private static String extractFileName(String url) {

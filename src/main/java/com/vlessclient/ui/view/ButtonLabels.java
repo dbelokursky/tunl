@@ -55,6 +55,14 @@ final class ButtonLabels {
     private static final Object IDLE_KEY = new Object();
     private static final Object PENDING_FLASH = new Object();
 
+    /**
+     * The key a button is bound to right now, which is not always the one it
+     * started with — see {@link #rebind}. Re-measuring has to put back the
+     * label that was on screen, not the default, or a language switch would
+     * also silently change what the button says it does.
+     */
+    private static final Object CURRENT_KEY = new Object();
+
     private ButtonLabels() {
     }
 
@@ -120,18 +128,55 @@ final class ButtonLabels {
      * again when that changes.</p>
      */
     static void bindSharingWidth(Map<Button, String> group) {
-        group.forEach((button, key) -> button.textProperty().bind(I18n.binding(key)));
+        bindSharingWidth(group, Map.of());
+    }
+
+    /**
+     * Same, counting labels a button swaps in later.
+     *
+     * <p>Without them the group is pinned to the labels it starts with, and a
+     * button that later shows a longer one either clips it or — since the pin
+     * is a minimum too — drags the whole group wider the moment it changes.
+     * The Updates block's second button is "Download" until an update has been
+     * staged and "Restart now" afterwards.</p>
+     *
+     * @param group      each button and the key it shows by default
+     * @param alternates extra keys a button may be swapped to, by button
+     */
+    static void bindSharingWidth(Map<Button, String> group, Map<Button, List<String>> alternates) {
+        group.forEach((button, key) -> {
+            button.getProperties().put(IDLE_KEY, key);
+            button.getProperties().put(CURRENT_KEY, key);
+            button.textProperty().bind(I18n.binding(key));
+        });
 
         // Same timing as bind(): the width depends on the font, which only
         // arrives with the stylesheet, so it cannot be measured until the
         // buttons are in a scene.
         Button any = group.keySet().iterator().next();
-        whenInScene(any, () -> pinToSharedWidest(group));
+        whenInScene(any, () -> pinToSharedWidest(group, alternates));
         I18n.localeProperty().addListener((obs, old, current) -> {
             if (any.getScene() != null) {
-                pinToSharedWidest(group);
+                pinToSharedWidest(group, alternates);
             }
         });
+    }
+
+    /**
+     * Swaps a button to another of its labels, keeping it bound so the new one
+     * follows a language switch too.
+     *
+     * <p>Unlike {@link #show}, which drops the binding because it labels work
+     * that is about to finish. This is for states that outlive the click —
+     * they can still be on screen when the user changes language.</p>
+     *
+     * @param button the button to relabel
+     * @param key    the bundle key to bind it to
+     */
+    static void rebind(Button button, String key) {
+        button.getProperties().put(CURRENT_KEY, key);
+        button.textProperty().unbind();
+        button.textProperty().bind(I18n.binding(key));
     }
 
     /**
@@ -221,10 +266,21 @@ final class ButtonLabels {
      * {@link #pinToWidest}: a preferred width alone still lets a cramped row
      * squeeze a button below it and clip the text.
      */
-    private static void pinToSharedWidest(Map<Button, String> group) {
+    private static void pinToSharedWidest(
+            Map<Button, String> group, Map<Button, List<String>> alternates) {
         double widest = 0;
         for (Map.Entry<Button, String> entry : group.entrySet()) {
-            widest = Math.max(widest, naturalWidth(entry.getKey(), entry.getValue()));
+            Button button = entry.getKey();
+            widest = Math.max(widest, naturalWidth(button, entry.getValue()));
+            for (String alternate : alternates.getOrDefault(button, List.of())) {
+                widest = Math.max(widest, naturalWidth(button, alternate));
+            }
+            // naturalWidth leaves the button bound to whatever it measured
+            // last; put back the label that was actually on screen.
+            Object current = button.getProperties().get(CURRENT_KEY);
+            button.textProperty().unbind();
+            button.textProperty().bind(
+                    I18n.binding(current instanceof String key ? key : entry.getValue()));
         }
         for (Button button : group.keySet()) {
             button.setMinWidth(widest);
