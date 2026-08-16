@@ -7,6 +7,7 @@ import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.ServerSelection;
+import com.vlessclient.platform.UpdateApplier;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.CountryResolver;
@@ -15,6 +16,7 @@ import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.SingBoxInstaller;
 import com.vlessclient.service.TrafficMonitor;
+import com.vlessclient.service.UpdateManager;
 import com.vlessclient.ui.view.dashboard.AddHealthTargetDialog;
 import com.vlessclient.ui.view.dashboard.HealthCheckCoordinator;
 import com.vlessclient.ui.view.dashboard.LatencyTestSession;
@@ -86,6 +88,10 @@ public class DashboardViewController {
     @FXML private HBox reconnectBanner;
     @FXML private Label reconnectBannerLabel;
     @FXML private Button cancelReconnectButton;
+    @FXML private HBox updateBanner;
+    @FXML private Label updateBannerTitle;
+    @FXML private Label updateBannerHint;
+    @FXML private Button updateBannerButton;
 
     private final ObjectProperty<ConnectionState> connectionState =
             new SimpleObjectProperty<>(ConnectionState.DISCONNECTED);
@@ -98,6 +104,7 @@ public class DashboardViewController {
     private TrafficDisplayBinder trafficDisplay;
     private LatencyTestSession latencySession;
     private HealthCheckCoordinator healthChecks;
+    private UpdateManager updateManager;
 
     /**
      * Wires up services, the connection-state listener, traffic/latency
@@ -122,6 +129,7 @@ public class DashboardViewController {
         uploadCardTitle.textProperty().bind(I18n.binding("dashboard.upload.speed"));
         downloadCardTitle.textProperty().bind(I18n.binding("dashboard.download.speed"));
         bindInstallBannerLabels();
+        initUpdateBanner();
 
         try {
             singBoxEngine = ServiceLocator.get(SingBoxEngine.class);
@@ -253,6 +261,107 @@ public class DashboardViewController {
         singBoxMissingHint.textProperty().bind(I18n.binding("dashboard.singbox.missing.hint"));
         ButtonLabels.bind(copyBrewButton, "dashboard.copy", "dashboard.copied");
         ButtonLabels.bind(retryInstallButton, "dashboard.singbox.retry");
+    }
+
+    /** What the dashboard should say about an update, if anything. */
+    enum UpdateBannerState {
+
+        /** Nothing newer exists, or there is no updater to ask. */
+        HIDDEN,
+
+        /** A newer release exists but this install updates through apt/AUR. */
+        PACKAGE_MANAGER,
+
+        /** Newer release seen; the background download has it in hand. */
+        DOWNLOADING,
+
+        /** Verified and staged — one restart away. */
+        READY
+    }
+
+    /**
+     * Chooses the banner's state. Kept as a pure function of the three facts
+     * it depends on, so the combinations can be checked without a scene.
+     *
+     * @param updateAvailable whether a newer release was found
+     * @param staged          whether its installer is already verified on disk
+     * @param selfUpdates     whether this platform installs updates in-app
+     * @return the state to render
+     */
+    static UpdateBannerState bannerState(
+            boolean updateAvailable, boolean staged, boolean selfUpdates) {
+        if (!updateAvailable) {
+            return UpdateBannerState.HIDDEN;
+        }
+        if (!selfUpdates) {
+            return UpdateBannerState.PACKAGE_MANAGER;
+        }
+        return staged ? UpdateBannerState.READY : UpdateBannerState.DOWNLOADING;
+    }
+
+    /**
+     * Wires the update banner to the updater's own properties, so a release
+     * found by the background check surfaces here without the user going
+     * looking for it in Settings.
+     */
+    private void initUpdateBanner() {
+        try {
+            updateManager = ServiceLocator.get(UpdateManager.class);
+        } catch (IllegalArgumentException e) {
+            updateManager = null;
+            refreshUpdateBanner();
+            return;
+        }
+        ButtonLabels.bind(updateBannerButton, "settings.update.restart");
+        updateManager.updateAvailableProperty()
+                .addListener((o, was, is) -> refreshUpdateBanner());
+        updateManager.latestVersionProperty()
+                .addListener((o, was, is) -> refreshUpdateBanner());
+        // The title carries a version number, so it cannot be a plain binding;
+        // re-render instead when the language changes under it.
+        I18n.localeProperty().addListener((o, was, is) -> refreshUpdateBanner());
+        refreshUpdateBanner();
+    }
+
+    private void refreshUpdateBanner() {
+        if (updateBanner == null) {
+            return;
+        }
+        UpdateBannerState state = updateManager == null
+                ? UpdateBannerState.HIDDEN
+                : bannerState(updateManager.updateAvailableProperty().get(),
+                        updateManager.hasStagedUpdate(),
+                        UpdateApplier.current().selfUpdates());
+
+        updateBanner.setVisible(state != UpdateBannerState.HIDDEN);
+        updateBanner.setManaged(state != UpdateBannerState.HIDDEN);
+        if (state == UpdateBannerState.HIDDEN) {
+            return;
+        }
+
+        String version = updateManager.latestVersionProperty().get();
+        updateBannerTitle.setText(state == UpdateBannerState.READY
+                ? I18n.get("dashboard.update.ready", version)
+                : I18n.get("dashboard.update.available", version));
+        String hintKey = switch (state) {
+            case READY -> "dashboard.update.hint.staged";
+            case PACKAGE_MANAGER -> "dashboard.update.hint.packagemanager";
+            default -> "dashboard.update.hint.downloading";
+        };
+        updateBannerHint.setText(I18n.get(hintKey));
+
+        // Only the staged state has anything to press: the download runs on
+        // its own, and a package-managed install is not ours to touch.
+        boolean actionable = state == UpdateBannerState.READY;
+        updateBannerButton.setVisible(actionable);
+        updateBannerButton.setManaged(actionable);
+    }
+
+    @FXML
+    private void onUpdateBannerClicked() {
+        if (RestartToUpdate.start() == RestartToUpdate.Outcome.FAILED) {
+            updateBannerHint.setText(I18n.get("settings.update.restart.failed"));
+        }
     }
 
     private void refreshSingBoxMissingBanner() {

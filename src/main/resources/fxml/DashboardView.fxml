@@ -39,6 +39,27 @@
                 onAction="#onRetryInstallClicked"/>
     </HBox>
 
+    <!-- Update banner (hidden unless a newer release exists). Same shape as
+         the one above, in an informational rather than a warning palette: a
+         waiting update is news, not a problem. minWidth=0 + wrapText so the
+         text yields at a narrow window instead of pushing the button out. -->
+    <HBox fx:id="updateBanner" styleClass="update-banner"
+          spacing="12" alignment="CENTER_LEFT"
+          visible="false" managed="false">
+        <padding>
+            <Insets top="12" right="16" bottom="12" left="16"/>
+        </padding>
+        <Label text="&#x2191;" styleClass="banner-icon"/>
+        <VBox spacing="2" HBox.hgrow="ALWAYS" minWidth="0">
+            <Label fx:id="updateBannerTitle" styleClass="banner-title"
+                   wrapText="true" maxWidth="Infinity"/>
+            <Label fx:id="updateBannerHint" styleClass="banner-subtitle"
+                   wrapText="true" maxWidth="Infinity"/>
+        </VBox>
+        <Button fx:id="updateBannerButton" styleClass="secondary-button"
+                onAction="#onUpdateBannerClicked"/>
+    </HBox>
+
     <!-- Status hero: two rows so nothing is clipped at a narrow window.
          Row 1 is the status (full width, subtitle free to wrap/ellipsize);
          row 2 carries the Mode selector + Connect button on their own line,
