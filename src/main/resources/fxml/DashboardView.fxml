@@ -44,10 +44,6 @@
          row 2 carries the Mode selector + Connect button on their own line,
          so the fixed-width controls never fight the status text for space. -->
     <VBox styleClass="card, hero-card, status-bar" spacing="14">
-        <padding>
-            <Insets top="14" right="18" bottom="14" left="18"/>
-        </padding>
-
         <!-- Row 1: status -->
         <HBox alignment="CENTER_LEFT" spacing="16">
             <StackPane fx:id="statusHalo" styleClass="status-halo, status-halo-sm"
@@ -79,12 +75,19 @@
                      width DashboardFitTest pins, now that the labels cannot
                      shrink. -->
                 <Label text="Mode" styleClass="stats-title" minWidth="-Infinity"/>
-                <ComboBox fx:id="proxyModeCombo" prefWidth="150" minWidth="60" styleClass="mode-combo"/>
+                <!-- 190 is measured, not chosen: "Системный прокси" needs 178
+                     in the cell plus the arrow, and at 150 the mode was
+                     truncated at every window size rather than only at the
+                     narrow ones this row is designed to give up width at. Both
+                     combos take the same width — they are peers in one row. -->
+                <ComboBox fx:id="proxyModeCombo" prefWidth="190" minWidth="60" styleClass="mode-combo"/>
                 <Label fx:id="serverSelectionLabel" styleClass="stats-title" minWidth="-Infinity"/>
-                <ComboBox fx:id="serverSelectionCombo" prefWidth="170" minWidth="60" styleClass="mode-combo"/>
+                <ComboBox fx:id="serverSelectionCombo" prefWidth="190" minWidth="60" styleClass="mode-combo"/>
                 <Region HBox.hgrow="ALWAYS"/>
+                <!-- No width here: the controller pins it from the four labels
+                     this button can show, in whatever language is on. -->
                 <Button fx:id="connectButton" text="Connect" styleClass="connect-button"
-                        onAction="#onConnectClicked" minWidth="170" prefWidth="170" prefHeight="44"/>
+                        onAction="#onConnectClicked" prefHeight="44"/>
             </HBox>
             <Label fx:id="proxyModeWarning" text="" styleClass="hint-label"
                    wrapText="true" maxWidth="Infinity" visible="false" managed="false"/>
@@ -105,9 +108,6 @@
          (Icons.chevronDouble*). Overlay children pin to USE_PREF_SIZE so the
          StackPane doesn't stretch them over the canvas. -->
     <VBox styleClass="card, traffic-card" maxWidth="Infinity">
-        <padding>
-            <Insets top="12" right="18" bottom="12" left="20"/>
-        </padding>
         <StackPane>
             <MirroredSparkline fx:id="trafficSparkline" prefHeight="150"/>
             <HBox StackPane.alignment="TOP_LEFT" alignment="CENTER_LEFT" spacing="8"
@@ -133,10 +133,6 @@
          sit on the top row; latency results are listed one-per-server below,
          so a multi-server result never overflows the strip into ellipsis. -->
     <VBox styleClass="card, totals-strip" spacing="10">
-        <padding>
-            <Insets top="12" right="18" bottom="12" left="20"/>
-        </padding>
-
         <HBox alignment="CENTER_LEFT" spacing="14">
             <Label text="Session" styleClass="stats-title"/>
 
@@ -166,10 +162,6 @@
     <!-- Service availability: reachability of key services through the tunnel -->
     <VBox fx:id="healthCard" styleClass="card" spacing="10"
           visible="false" managed="false">
-        <padding>
-            <Insets top="14" right="18" bottom="14" left="20"/>
-        </padding>
-
         <HBox alignment="CENTER_LEFT" spacing="10" fillHeight="true">
             <Label text="Service availability" styleClass="section-header"/>
             <Region HBox.hgrow="ALWAYS"/>

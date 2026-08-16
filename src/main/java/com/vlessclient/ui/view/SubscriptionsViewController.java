@@ -234,7 +234,9 @@ public class SubscriptionsViewController {
             deleteBtn.getStyleClass().add("secondary-button");
             deleteBtn.setOnAction(e -> deleteSubscription(sub));
 
-            HBox buttons = new HBox(8, refreshBtn, deleteBtn);
+            // 12, like the row around them and like the server rows: 8 was
+            // the only gap in a list row that was not.
+            HBox buttons = new HBox(12, refreshBtn, deleteBtn);
             buttons.setAlignment(Pos.CENTER_RIGHT);
 
             row.getChildren().addAll(info, spacer, buttons);

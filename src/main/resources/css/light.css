@@ -134,6 +134,12 @@
     -fx-border-color: -c-border;
     -fx-border-radius: 12;
     -fx-effect: dropshadow(gaussian, rgba(16, 24, 40, 0.05), 4, 0, 0, 1);
+    /* Stated here so every card in the app agrees. Written into each card's
+       FXML instead, they drifted into three recipes on the dashboard alone —
+       left 18 on one card and 20 on the next, against a right of 18 on both,
+       so the column their contents formed was ragged on the left while the
+       right lined up. */
+    -fx-padding: 16 18;
 }
 
 .hero-card {
@@ -156,7 +162,10 @@
     -fx-text-fill: -c-text-muted;
     -fx-text-transform: uppercase;
     -fx-letter-spacing: 0.6;
-    -fx-padding: 2 0 0 2;
+    /* Top only. The 2 on the left used to push the header off the column it
+       heads — inside the health card it sat 2px right of the status dots
+       under it, and in Settings 2px right of every other label. */
+    -fx-padding: 2 0 0 0;
 }
 
 .traffic-card {
@@ -240,9 +249,9 @@
 }
 
 /* ===== Connect/Disconnect Button =====
-   Flat solid fill (no gradient), one subtle shadow. Width is pinned in the
-   FXML (prefWidth) so Connect and Disconnect render at the same size and the
-   layout doesn't jump when the label toggles. */
+   Flat solid fill (no gradient), one subtle shadow. The width is pinned by
+   the controller, measured from the four labels this button can show, so it
+   holds still as the label toggles and fits them in any language. */
 .connect-button {
     -fx-background-color: -c-accent;
     -fx-text-fill: -c-on-accent;
@@ -318,6 +327,11 @@
     -fx-background-radius: 8;
     -fx-padding: 8 20;
     -fx-cursor: hand;
+    /* The same pin .secondary-button takes, for the same reason: the two sit
+       side by side in three views — Save beside Cancel, Add beside Import —
+       and padding alone left the primary 2px shorter than the secondary. */
+    -fx-min-height: 34;
+    -fx-pref-height: 34;
 }
 
 .primary-button:hover {
@@ -609,6 +623,12 @@
 .form-scroll {
     -fx-background-color: #ffffff;
     -fx-border-color: transparent;
+    /* Settings is the only page inside a scroll pane of its own, and modena
+       gives one a border and a padding: a transparent colour still reserves
+       1px a side, and the padding another. Both zeroed, or this page's content
+       sits further in than every other view's. */
+    -fx-border-width: 0;
+    -fx-padding: 0;
 }
 
 .form-scroll .viewport {
@@ -645,6 +665,24 @@
     -fx-background-radius: 6;
     -fx-padding: 8 12;
     -fx-font-size: 13px;
+    /* One height for every field in a form. A ComboBox wearing this class
+       came out 42 against a TextField's 34, because the combo pads its own
+       list-cell inside this padding — so the same form showed two field
+       heights in one column. */
+    -fx-min-height: 34;
+    -fx-pref-height: 34;
+}
+
+/* A ComboBox wearing .form-field pads its own list-cell inside .form-field's
+   padding, so the 8 that gives a text field its 34 made a combo 42 — two
+   field heights in one column. The height above is the one that counts; these
+   two hand the vertical room back to the cell so the value is not cropped. */
+.combo-box.form-field {
+    -fx-padding: 0 6 0 0;
+}
+
+.combo-box.form-field > .list-cell {
+    -fx-padding: 0 0 0 12;
 }
 
 .form-field:focused {
@@ -731,6 +769,17 @@
 
 .combo-box-popup .list-cell:filled:hover {
     -fx-background-color: -c-accent-tint;
+}
+
+/* ===== Separator =====
+   Stated in both themes rather than left to modena in one of them: the bare
+   colour override dark used to carry made a separator 2px high there against
+   3 in light, and the server form stacks three of them, so everything below
+   sat a few pixels apart between the themes. Same shape as
+   .sidebar-separator: one hairline along the top edge. */
+.separator .line {
+    -fx-border-color: -c-border transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
 }
 
 /* ===== Status Circle ===== */
@@ -878,6 +927,15 @@
 .log-msg-error  { -fx-fill: #b71c1c; }
 .log-plain      { -fx-fill: #424242; }
 
+/* Sized here as well as in dark, or the two themes render the same tooltip
+   at different text sizes and corner radii. */
+.tooltip {
+    -fx-background-color: -c-text;
+    -fx-text-fill: -c-surface;
+    -fx-font-size: 12px;
+    -fx-background-radius: 4;
+}
+
 /* ===== sing-box missing banner ===== */
 .singbox-missing-banner {
     -fx-background-color: #fff3e0;
@@ -965,6 +1023,14 @@
     -fx-background-color: -c-surface-sunken;
     -fx-background-radius: 8;
     -fx-padding: 10 12;
+}
+
+/* Right side only, and the same 12 .update-item insets its contents by: it
+   puts "Check for updates" in the column the row's own button stands in, one
+   row below. The left side stays out of it — the header's label belongs to
+   the card's gutter with every other label in About, not to the sub-block. */
+.updates-header {
+    -fx-padding: 0 12 0 0;
 }
 
 /* Status line indented under the item name (past the dot). Defined after

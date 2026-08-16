@@ -113,6 +113,12 @@ public class DashboardViewController {
         totalUploadIcon.setGraphic(Icons.chevronDoubleUp(16));
         totalDownloadIcon.setGraphic(Icons.chevronDoubleDown(16));
 
+        // The connect button's label is driven by the connection state below,
+        // so its width is pinned from the four labels that state can produce
+        // rather than bound here.
+        ButtonLabels.pinWidth(connectButton, "button.connect", "button.disconnect",
+                "button.cancel", "button.retry");
+
         // Titles, not readouts: they belong here rather than in
         // TrafficDisplayBinder, which only runs when a TrafficMonitor exists.
         uploadCardTitle.textProperty().bind(I18n.binding("dashboard.upload.speed"));

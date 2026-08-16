@@ -29,8 +29,8 @@
     <!-- Search and sort. Hidden while there are no servers: it would only
          offer to narrow an empty list. -->
     <HBox fx:id="filterBar" alignment="CENTER_LEFT" spacing="10">
-        <TextField fx:id="searchField" styleClass="search-field" HBox.hgrow="ALWAYS"/>
-        <ComboBox fx:id="sortCombo" styleClass="sort-combo" prefWidth="190"/>
+        <TextField fx:id="searchField" styleClass="form-field" HBox.hgrow="ALWAYS"/>
+        <ComboBox fx:id="sortCombo" styleClass="form-field" prefWidth="190"/>
         <Button fx:id="measureButton" styleClass="secondary-button"
                 onAction="#onMeasureClicked"/>
     </HBox>

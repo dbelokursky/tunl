@@ -18,7 +18,8 @@
       fx:controller="com.vlessclient.ui.view.ServerFormController"
       spacing="0" styleClass="form-root">
 
-    <ScrollPane fitToWidth="true" VBox.vgrow="ALWAYS" styleClass="form-scroll">
+    <ScrollPane fx:id="formScroll" fitToWidth="true" VBox.vgrow="ALWAYS"
+                styleClass="form-scroll">
         <VBox spacing="14" styleClass="form-content">
             <padding>
                 <Insets top="20" right="24" bottom="20" left="24"/>
@@ -52,12 +53,16 @@
                 </VBox>
             </HBox>
 
+            <!-- prefWidth 0 on both halves, so hgrow splits the row evenly the
+                 way the Port/UUID row above does. Left to their content they
+                 came out 398 and 438, which reads as a mistake directly under
+                 a row that is 418/418. -->
             <HBox fx:id="encryptionFlowBox" spacing="12">
-                <VBox fx:id="encryptionBox" spacing="4" HBox.hgrow="ALWAYS">
+                <VBox fx:id="encryptionBox" spacing="4" prefWidth="0" HBox.hgrow="ALWAYS">
                     <Label fx:id="encryptionLabel" text="Encryption" styleClass="form-label"/>
                     <ComboBox fx:id="encryptionCombo" maxWidth="Infinity" styleClass="form-field"/>
                 </VBox>
-                <VBox fx:id="flowBox" spacing="4" HBox.hgrow="ALWAYS">
+                <VBox fx:id="flowBox" spacing="4" prefWidth="0" HBox.hgrow="ALWAYS">
                     <Label fx:id="flowLabel" text="Flow" styleClass="form-label"/>
                     <ComboBox fx:id="flowCombo" maxWidth="Infinity" styleClass="form-field"/>
                 </VBox>
@@ -135,10 +140,10 @@
 
     <!-- Action Buttons -->
     <Separator/>
-    <HBox spacing="12" alignment="CENTER_RIGHT" styleClass="form-actions">
-        <padding>
-            <Insets top="12" right="24" bottom="12" left="24"/>
-        </padding>
+    <!-- The right padding is set by the controller: this bar is a sibling of
+         the scroll pane, so it does not lose the width a scrollbar takes and
+         its buttons would sit right of the fields whenever the form scrolls. -->
+    <HBox fx:id="formActions" spacing="12" alignment="CENTER_RIGHT" styleClass="form-actions">
         <Button fx:id="cancelButton" text="Cancel" styleClass="secondary-button"
                 onAction="#onCancelClicked"/>
         <Button fx:id="saveButton" text="Save" styleClass="primary-button"

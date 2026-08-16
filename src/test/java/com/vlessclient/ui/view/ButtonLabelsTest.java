@@ -102,6 +102,28 @@ public class ButtonLabelsTest extends ApplicationTest {
         assertThat(widthOf(button)).isEqualTo(russian);
     }
 
+    /**
+     * The language can change while the view holding the button is off screen:
+     * MainView swaps the whole content area, so every view but the visible one
+     * has left the scene graph. The pin has to catch up when the view comes
+     * back, or the button keeps the width of the language it was last measured
+     * in — which is how the Routing save button came to render "Сох…".
+     */
+    @Test
+    void widthCatchesUpOnALanguageSwitchMadeWhileTheViewWasAway() {
+        Button button = boundButton();
+        double english = widthOf(button);
+
+        interact(() -> root.getChildren().clear());
+        interact(() -> I18n.setLocale(Locale.of("ru")));
+        interact(() -> root.getChildren().setAll(button));
+
+        assertThat(widthOf(button))
+                .withFailMessage("still %.1f wide after coming back to a Russian UI — the pin "
+                        + "was left at the English width and the label is clipped", english)
+                .isGreaterThan(english);
+    }
+
     private Button boundButton() {
         Button button = new Button();
         button.getStyleClass().add("secondary-button");
