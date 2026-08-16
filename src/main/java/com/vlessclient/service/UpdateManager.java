@@ -152,9 +152,35 @@ public class UpdateManager {
     }
 
     /**
-     * Checks the GitHub Releases API for a newer version.
+     * How a check turned out.
+     *
+     * <p>The distinction that matters is between the last two and the first
+     * two: "nothing newer exists" and "no answer" are not the same fact, and
+     * a check that cannot reach GitHub must never be reported as being up to
+     * date. Silence looks identical to good news, and the networks this client
+     * exists for are exactly the ones where the answer goes missing.</p>
      */
-    public void checkForUpdates() {
+    public enum CheckResult {
+
+        /** A newer release exists; the properties below describe it. */
+        UPDATE_AVAILABLE,
+
+        /** GitHub answered, and this build is current. */
+        UP_TO_DATE,
+
+        /** GitHub refused: 60 unauthenticated requests per hour, per address. */
+        RATE_LIMITED,
+
+        /** No usable answer — offline, blocked, or an unreadable response. */
+        UNREACHABLE
+    }
+
+    /**
+     * Checks the GitHub Releases API for a newer version.
+     *
+     * @return what the check established, including its own failure
+     */
+    public CheckResult checkForUpdates() {
         log.info("Checking for updates...");
         try {
             HttpRequest request = HttpRequest.newBuilder()
@@ -169,23 +195,44 @@ public class UpdateManager {
 
             if (response.statusCode() != 200) {
                 log.warn("GitHub API returned status {}", response.statusCode());
-                return;
+                return resultForStatus(response.statusCode());
             }
 
-            processReleaseResponse(response.body());
+            return processReleaseResponse(response.body());
         } catch (IOException | InterruptedException e) {
             log.warn("Update check failed: {}", e.getMessage());
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
+            return CheckResult.UNREACHABLE;
         }
     }
 
     /**
-     * Parses the GitHub release JSON and updates properties if a newer version exists.
-     * Package-private for testing.
+     * Classifies a non-200 status.
+     *
+     * <p>403 is the one worth naming: unauthenticated callers get 60 requests
+     * an hour per IP address, shared with everything else on that address, and
+     * the app sends no token. Told plainly, it is something the user can wait
+     * out; folded into a generic failure, it looks like a broken app.</p>
+     *
+     * @param statusCode the HTTP status the API answered with
+     * @return the matching result
      */
-    void processReleaseResponse(String json) {
+    static CheckResult resultForStatus(int statusCode) {
+        return statusCode == 403 || statusCode == 429
+                ? CheckResult.RATE_LIMITED
+                : CheckResult.UNREACHABLE;
+    }
+
+    /**
+     * Parses the GitHub release JSON and updates properties if a newer version
+     * exists. Package-private for testing.
+     *
+     * @param json the Releases API response body
+     * @return what the response established
+     */
+    CheckResult processReleaseResponse(String json) {
         try {
             JsonNode root = objectMapper.readTree(json);
             String tagName = root.path("tag_name").asText("");
@@ -204,11 +251,16 @@ public class UpdateManager {
                     downloadUrl.set(installerUrl);
                     updateAvailable.set(true);
                 });
-            } else {
-                log.info("Already on latest version ({})", AppVersion.VERSION);
+                return CheckResult.UPDATE_AVAILABLE;
             }
+            log.info("Already on latest version ({})", AppVersion.VERSION);
+            return CheckResult.UP_TO_DATE;
         } catch (Exception e) {
+            // A response we cannot read is an answer we did not get. Reporting
+            // it as up to date would be the very thing this class stopped
+            // doing everywhere else.
             log.warn("Failed to parse release response: {}", e.getMessage());
+            return CheckResult.UNREACHABLE;
         }
     }
 

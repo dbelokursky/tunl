@@ -178,11 +178,35 @@ public final class UpdatesSection {
         }
         setUpdateRow(I18n.get("settings.updates.checking"), "update-status-muted");
         Thread t = new Thread(() -> {
-            updateManager.checkForUpdates();       // updates properties via runLater
-            Platform.runLater(this::renderAppRow); // reflect the outcome either way
+            UpdateManager.CheckResult result = updateManager.checkForUpdates();
+            Platform.runLater(() -> renderCheckResult(result));
         }, "app-update-check");
         t.setDaemon(true);
         t.start();
+    }
+
+    /**
+     * Renders what a check actually established.
+     *
+     * <p>Previously every outcome fell through to {@link #renderAppRow()},
+     * which reads one flag — so a check that never reached GitHub was shown as
+     * "up to date", with a green dot. That is the failure mode worth being
+     * careful about: it is indistinguishable from good news, and it appears
+     * exactly in the networks this client is used in.</p>
+     */
+    private void renderCheckResult(UpdateManager.CheckResult result) {
+        boolean failed = result == UpdateManager.CheckResult.RATE_LIMITED
+                || result == UpdateManager.CheckResult.UNREACHABLE;
+        // A failed check does not un-know what an earlier one found: with an
+        // update already waiting, that stays the more useful thing to say.
+        if (!failed || updateManager.updateAvailableProperty().get()) {
+            renderAppRow();
+            return;
+        }
+        setUpdateRow(I18n.get(result == UpdateManager.CheckResult.RATE_LIMITED
+                ? "settings.update.check.ratelimited"
+                : "settings.update.check.failed"), "update-status-error");
+        hideAppButton();
     }
 
     private void onDownloadAppClicked() {
