@@ -77,16 +77,6 @@ public class DashboardViewTest extends ApplicationTest {
     }
 
     @Test
-    void latencyResultListExistsAndStartsHidden() {
-        assertThat(lookup("#testLatencyButton").tryQuery()).isPresent();
-        Node list = lookup("#latencyResultList").query();
-        assertThat(list).isNotNull();
-        // No test has run yet, so the per-server result list is collapsed.
-        assertThat(list.isVisible()).isFalse();
-        assertThat(list.isManaged()).isFalse();
-    }
-
-    @Test
     void healthCardAndBannerHiddenWhileDisconnected() {
         // Disconnected on load: the availability card and the reconnect banner
         // start hidden until the tunnel comes up.

@@ -172,14 +172,6 @@
     -fx-min-height: 100;
 }
 
-.totals-strip {
-    -fx-min-height: 52;
-}
-
-.totals-strip .separator .line {
-    -fx-border-color: #3a3a3e;
-    -fx-border-width: 0 1 0 0;
-}
 
 .mode-combo {
     -fx-pref-height: 30;
@@ -685,6 +677,16 @@
     -fx-padding: 0 0 0 12;
 }
 
+/* A multi-line field cannot wear the single-line height. .form-field pins
+   34px so every field in a form matches, which is right for a TextField and
+   crops a TextArea to a sliver of its first line — the MCP command came out
+   as a horizontal slice through the middle of its glyphs. -1 is
+   USE_COMPUTED_SIZE: let prefRowCount decide instead. */
+.text-area.form-field {
+    -fx-min-height: -1;
+    -fx-pref-height: -1;
+}
+
 .form-field:focused {
     -fx-border-color: #66bb6a;
     -fx-background-color: #2d2d2d;
@@ -996,6 +998,14 @@
     -fx-text-fill: #b0bec5;
 }
 
+/* Session total under its speed readout in the traffic card. Muted and small:
+   it is the cumulative figure, and the live speed above it is what the eye
+   should land on first. */
+.session-total {
+    -fx-font-size: 12px;
+    -fx-text-fill: -c-text-muted;
+}
+
 /* ===== Content scroll wrapper ===== */
 .content-scroll {
     -fx-background-color: transparent;
@@ -1027,13 +1037,6 @@
 .update-status-error     { -fx-text-fill: -c-danger-fg; }
 .update-status-muted     { -fx-text-fill: -c-text-secondary; -fx-font-weight: normal; }
 
-/* Per-server latency results, listed under the SESSION row. A hairline
-   top border separates them from the metrics above. */
-.latency-list {
-    -fx-border-color: -c-border transparent transparent transparent;
-    -fx-border-width: 1 0 0 0;
-    -fx-padding: 8 0 0 0;
-}
 
 /* Updates block in Settings > About: app + sing-box rows under a divider. */
 .updates-section {
@@ -1088,11 +1091,6 @@
     -fx-font-weight: bold;
 }
 
-/* A latency row you can act on: it sets the active server when clicked. */
-.latency-row-actionable:hover {
-    -fx-background-color: -c-surface-sunken;
-    -fx-background-radius: 6;
-}
 
 /* Latency chip on a server row. Deliberately quieter than the protocol badge:
    it is a measurement that may be minutes old, not an attribute of the server. */

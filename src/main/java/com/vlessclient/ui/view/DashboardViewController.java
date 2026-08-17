@@ -19,7 +19,6 @@ import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.service.UpdateManager;
 import com.vlessclient.ui.view.dashboard.AddHealthTargetDialog;
 import com.vlessclient.ui.view.dashboard.HealthCheckCoordinator;
-import com.vlessclient.ui.view.dashboard.LatencyTestSession;
 import com.vlessclient.ui.view.dashboard.TrafficDisplayBinder;
 import java.io.IOException;
 import java.util.List;
@@ -65,10 +64,6 @@ public class DashboardViewController {
     @FXML private Label totalDownloadLabel;
     @FXML private Label uploadCardIcon;
     @FXML private Label downloadCardIcon;
-    @FXML private Label totalUploadIcon;
-    @FXML private Label totalDownloadIcon;
-    @FXML private Button testLatencyButton;
-    @FXML private VBox latencyResultList;
     @FXML private ComboBox<ProxyMode> proxyModeCombo;
     @FXML private Label serverSelectionLabel;
     @FXML private ComboBox<ServerSelection> serverSelectionCombo;
@@ -102,7 +97,6 @@ public class DashboardViewController {
     // Extracted Dashboard collaborators; the controller stays the FXML
     // endpoint and hands each one the few controls it drives.
     private TrafficDisplayBinder trafficDisplay;
-    private LatencyTestSession latencySession;
     private HealthCheckCoordinator healthChecks;
     private UpdateManager updateManager;
 
@@ -115,8 +109,6 @@ public class DashboardViewController {
     public void initialize() {
         uploadCardIcon.setGraphic(Icons.chevronDoubleUp(16));
         downloadCardIcon.setGraphic(Icons.chevronDoubleDown(16));
-        totalUploadIcon.setGraphic(Icons.chevronDoubleUp(16));
-        totalDownloadIcon.setGraphic(Icons.chevronDoubleDown(16));
 
         // The connect button's label is driven by the connection state below,
         // so its width is pinned from the four labels that state can produce
@@ -165,18 +157,6 @@ public class DashboardViewController {
         trafficDisplay = new TrafficDisplayBinder(trafficMonitor,
                 uploadSpeedLabel, downloadSpeedLabel, totalUploadLabel, totalDownloadLabel,
                 trafficSparkline);
-        latencySession = new LatencyTestSession(latencyTester, testLatencyButton,
-                latencyResultList);
-        // Picking a row makes that server active — and, if the tunnel is up,
-        // the existing server-switch handling restarts it.
-        latencySession.setOnServerChosen(server -> {
-            try {
-                ServiceLocator.get(ConfigStore.class).setActiveServer(server.getId());
-                log.info("Active server set from latency results: {}", server.getName());
-            } catch (IllegalArgumentException e) {
-                log.warn("ConfigStore unavailable; cannot apply the latency result");
-            }
-        });
         if (latencyTester != null) {
             // While connected, measure through the proxy instead of TCP-pinging
             // its address; the supplier returns null when the core is down.
@@ -593,10 +573,6 @@ public class DashboardViewController {
         }
     }
 
-    @FXML
-    private void onTestLatencyClicked() {
-        latencySession.toggle();
-    }
 
     /**
      * Connects on startup when the user enabled "Auto-connect on startup" in

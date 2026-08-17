@@ -30,9 +30,11 @@ import javafx.util.Duration;
  * <p>A width can also be shared across buttons rather than fitted to each —
  * see {@link #bindSharingWidth}, for pairs that are read side by side and so
  * have to agree. What no method here covers is a pair that needs both at
- * once, which is why {@code testLatencyButton} and {@code recheckButton} keep
- * their {@code prefWidth="140"} in the FXML: those two swap their labels
- * <em>and</em> line their edges up across the gap between two cards.</p>
+ * once — a button that swaps its label <em>and</em> lines its edge up with a
+ * button in another card. That pairing is gone now that the dashboard's Test
+ * Latency button has been removed; {@code recheckButton} keeps its
+ * {@code prefWidth="140"} as the last holdout, and could be measured like
+ * everything else here.</p>
  */
 final class ButtonLabels {
 
