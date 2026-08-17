@@ -18,6 +18,8 @@ import java.awt.TrayIcon;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import javafx.application.Platform;
 import javafx.collections.ListChangeListener;
 import javafx.stage.Stage;
@@ -39,6 +41,13 @@ public class TrayIconService {
 
     private static final Logger log = LoggerFactory.getLogger(TrayIconService.class);
     private static final int ICON_SIZE = 22;
+
+    /**
+     * How long {@link #uninstall()} waits for the AWT event thread. Long enough
+     * that a merely busy EDT still gets to remove the icon, short enough that a
+     * wedged one costs the user no visible pause on the way out.
+     */
+    private static final long UNINSTALL_TIMEOUT_MS = 1_000L;
 
     private final SingBoxEngine singBoxEngine;
     private final ConfigStore configStore;
@@ -120,12 +129,24 @@ public class TrayIconService {
     /**
      * Removes the tray icon from the system tray and detaches listeners.
      *
-     * <p>Runs synchronously on the AWT event thread so the icon really is
-     * gone by the time this method returns. This matters for the Quit flow
+     * <p>Waits for the AWT event thread to run the removal, so the icon really
+     * is gone by the time this method returns. This matters for the Quit flow
      * in {@link com.vlessclient.app.VlessClientApp#stop()} — that method
      * immediately calls {@code System.exit}, and any pending-but-unexecuted
      * {@code invokeLater} callback would be dropped, leaving a stale tray
      * icon behind in the menu bar.</p>
+     *
+     * <p>The wait is bounded, and deliberately not {@code invokeAndWait}. On
+     * macOS the caller is the FX application thread, which <em>is</em> the
+     * process main thread; by the time {@code stop()} runs, JavaFX has already
+     * torn down the AppKit run loop that thread was pumping. An EDT task that
+     * needs the main thread — AWT reaches for it via
+     * {@code performSelectorOnMainThread:waitUntilDone:YES}, for instance from
+     * {@code CInputMethod.getNativeLocale} — can then never complete, and a
+     * caller blocked in {@code invokeAndWait} never wakes: both threads wait on
+     * each other and the app hangs with no way out short of SIGKILL. A missing
+     * tray icon for the last instant of the process is a far cheaper outcome
+     * than that, so the wait gives up and shutdown carries on.</p>
      */
     public void uninstall() {
         if (singBoxEngine != null && stateListener != null) {
@@ -155,15 +176,25 @@ public class TrayIconService {
 
         if (EventQueue.isDispatchThread()) {
             removeTask.run();
-        } else {
+            return;
+        }
+
+        CountDownLatch removed = new CountDownLatch(1);
+        EventQueue.invokeLater(() -> {
             try {
-                EventQueue.invokeAndWait(removeTask);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                log.debug("Interrupted while uninstalling tray icon");
-            } catch (java.lang.reflect.InvocationTargetException e) {
-                log.debug("Error removing tray icon", e.getCause());
+                removeTask.run();
+            } finally {
+                removed.countDown();
             }
+        });
+        try {
+            if (!removed.await(UNINSTALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                log.warn("AWT did not remove the tray icon within {} ms; "
+                        + "continuing shutdown without it", UNINSTALL_TIMEOUT_MS);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.debug("Interrupted while uninstalling tray icon");
         }
     }
 
