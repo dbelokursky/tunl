@@ -21,10 +21,6 @@ public final class WindowsPlatformPaths implements PlatformPaths {
         return appData.resolve("VlessClient");
     }
 
-    @Override
-    public Path downloadsDir() {
-        return Path.of(System.getProperty("user.home"), "Downloads");
-    }
 
     private static Path resolveAppData() {
         String appdata = System.getenv("APPDATA");

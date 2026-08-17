@@ -136,4 +136,53 @@ class UpdateBootstrapTest {
         assertThat(staging.pending()).isPresent();
         assertThat(Files.exists(update.installer())).isTrue();
     }
+
+    /**
+     * An installer that cannot be applied here is not thrown away on the spot:
+     * UNSUPPORTED means the app is translocated or not in a bundle, which the
+     * user can still fix by moving it. But the download policy declines to
+     * fetch anything while one is staged, so a marker that never applies and
+     * never expires stops every later release from being downloaded at all.
+     * The week is what bounds that.
+     */
+    @Test
+    void aStagedUpdateThatNeverAppliesIsEventuallyThrownAway() throws Exception {
+        UpdateStaging staging = staging();
+        stage(staging, "9.9.9");
+        RecordingApplier applier = new RecordingApplier(UpdateApplier.Outcome.UNSUPPORTED);
+        long stagedAt = staging.stagedAt();
+        assertThat(stagedAt).as("stage() must record when it happened").isPositive();
+
+        // A day short of the limit: still the update this app is waiting for.
+        assertThat(UpdateBootstrap.applyPendingUpdate(staging, applier, "1.0.0",
+                stagedAt + UpdateBootstrap.STALE_AFTER_MS - 1)).isFalse();
+        assertThat(staging.pending()).as("cleared while still inside the window").isPresent();
+
+        assertThat(UpdateBootstrap.applyPendingUpdate(staging, applier, "1.0.0",
+                stagedAt + UpdateBootstrap.STALE_AFTER_MS + 1)).isFalse();
+        assertThat(staging.pending()).as("still waiting after the limit").isEmpty();
+        assertThat(Files.list(staging.dir()).toList())
+                .as("the installer itself has to go, not just the marker").isEmpty();
+    }
+
+    /**
+     * A marker written before stagedAt existed reads as 0. That has to mean
+     * "cannot tell", not "staged at the epoch" — otherwise the first launch of
+     * a build carrying this check deletes a perfectly good installer that the
+     * previous build had just downloaded.
+     */
+    @Test
+    void aMarkerWithoutATimestampIsNotTreatedAsAncient() throws Exception {
+        UpdateStaging staging = staging();
+        PendingUpdate update = stage(staging, "9.9.9");
+        Path marker = staging.dir().resolve("pending.json");
+        Files.writeString(marker, Files.readString(marker)
+                .replaceAll(",\\s*\"stagedAt\"\\s*:\\s*[0-9]+", ""));
+        assertThat(staging.stagedAt()).isZero();
+
+        RecordingApplier applier = new RecordingApplier(UpdateApplier.Outcome.HANDED_OFF);
+        assertThat(UpdateBootstrap.applyPendingUpdate(staging, applier, "1.0.0",
+                Long.MAX_VALUE / 2)).isTrue();
+        assertThat(applier.applied).containsExactly(update);
+    }
 }

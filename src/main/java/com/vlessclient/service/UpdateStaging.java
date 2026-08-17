@@ -71,8 +71,32 @@ public final class UpdateStaging {
         marker.put("installer", update.installer().toAbsolutePath().toString());
         marker.put("digest", update.digest());
         marker.put("attempts", 0);
+        marker.put("stagedAt", System.currentTimeMillis());
         Files.writeString(dir.resolve(MARKER_NAME), objectMapper.writeValueAsString(marker));
         log.info("Staged update {} at {}", update.version(), update.installer());
+    }
+
+    /**
+     * When the staged update was recorded, as epoch millis.
+     *
+     * <p>0 means the question cannot be answered — no marker, or one written
+     * before this field existed. Callers must read that as "not stale" rather
+     * than "stale forever ago": the alternative would throw away a perfectly
+     * good installer the first time a build that knows about this field meets
+     * a marker from one that did not.</p>
+     *
+     * @return the timestamp, or 0 when unknown
+     */
+    public long stagedAt() {
+        Path marker = dir.resolve(MARKER_NAME);
+        if (!Files.isRegularFile(marker)) {
+            return 0;
+        }
+        try {
+            return objectMapper.readTree(Files.readString(marker)).path("stagedAt").asLong(0);
+        } catch (IOException e) {
+            return 0;
+        }
     }
 
     /**

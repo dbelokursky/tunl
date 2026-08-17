@@ -14,8 +14,4 @@ public final class MacPlatformPaths implements PlatformPaths {
         return Path.of(home(), "Library", "Application Support", "VlessClient");
     }
 
-    @Override
-    public Path downloadsDir() {
-        return Path.of(home(), "Downloads");
-    }
 }
