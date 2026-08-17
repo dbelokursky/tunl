@@ -268,8 +268,20 @@ public final class UpdatesSection {
 
     private void refreshSingBoxVersionAsync() {
         Thread t = new Thread(() -> {
-            String label = withAvailableCore(detectSingBoxVersion());
-            Platform.runLater(() -> singboxVersionValue.setText(label));
+            // Two steps, not one. The core's own version comes from a local
+            // marker and is known at once; the release check behind
+            // withAvailableCore() can block for ten seconds where
+            // api.github.com is slow or blocked — which is the network this
+            // app exists for. Chaining them left the row on its "checking…"
+            // placeholder for that whole time, every time Settings opened,
+            // to add a suffix that is usually not even there.
+            String version = detectSingBoxVersion();
+            Platform.runLater(() -> singboxVersionValue.setText(version));
+
+            String annotated = withAvailableCore(version);
+            if (!annotated.equals(version)) {
+                Platform.runLater(() -> singboxVersionValue.setText(annotated));
+            }
         }, "singbox-version-refresh");
         t.setDaemon(true);
         t.start();
