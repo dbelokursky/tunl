@@ -8,6 +8,7 @@ import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.LatencyTester;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TrafficMonitor;
+import com.vlessclient.service.UpdateManager;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -73,6 +74,12 @@ public class ScreenshotGenerator extends ApplicationTest {
         // machine with a working install shows.
         ServiceLocator.register(SingBoxEngine.class,
                 new SingBoxEngine(Path.of("/usr/local/bin/sing-box")));
+        // An updater that is never started, so the dashboard's update banner
+        // stays shut. Whether a release happens to be pending on the machine
+        // running this is not a property of the app, and a README screenshot
+        // announcing "version X is available" is wrong for every reader on a
+        // later version. It also keeps the shot off the network.
+        ServiceLocator.register(UpdateManager.class, new UpdateManager());
 
         FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/MainView.fxml"));
         Parent root = loader.load();
@@ -83,7 +90,11 @@ public class ScreenshotGenerator extends ApplicationTest {
         // this the screenshots come out in stock Modena, which is not a UI the
         // project ships.
         scene.getStylesheets().setAll(
-                getClass().getResource("/css/dark.css").toExternalForm());
+                getClass().getResource("/css/dark.css").toExternalForm(),
+                // After the theme, so it wins: the headless text stack draws
+                // the system font's glyphs on top of each other, which is why
+                // the committed screenshots read "4.0 MƁ/s". See the file.
+                getClass().getResource("/css/screenshot-font.css").toExternalForm());
         stage.setScene(scene);
         stage.show();
     }
