@@ -79,7 +79,6 @@ public class SettingsViewController implements ViewShownAware {
     @FXML private TextField tunInterfaceNameField;
     @FXML private TextField tunIpv4Field;
 
-    @FXML private Label updatesLabel;
     @FXML private Button checkUpdatesButton;
 
     @FXML private Button appUpdateButton;
@@ -427,7 +426,6 @@ public class SettingsViewController implements ViewShownAware {
         }
         appVersionLabel.textProperty().bind(I18n.binding("settings.app.version"));
         singboxVersionLabel.textProperty().bind(I18n.binding("settings.singbox.version"));
-        updatesLabel.textProperty().bind(I18n.binding("settings.updates"));
         // Sized to its own label each, now that the pair shares one row: two
         // adjacent buttons at their natural widths read as two actions, which
         // is what they are. They were pinned to a shared width while they

@@ -198,23 +198,18 @@
             <Label fx:id="geoAttributionLabel" styleClass="hint-label"
                    wrapText="true" maxWidth="Infinity"/>
 
-            <!-- Updates: the app only. The sing-box core ships pinned with the
-                 app and moves with it, so it has no action here.
-                 No status block under this header — both version rows above
-                 carry their own news in parentheses, and a block restating the
-                 app's was the same fact written twice. -->
-            <VBox styleClass="updates-section" spacing="10">
-                <HBox alignment="CENTER_LEFT" spacing="10" styleClass="updates-header">
-                    <Label fx:id="updatesLabel" text="Updates" styleClass="section-header"/>
-                    <Region HBox.hgrow="ALWAYS"/>
-                    <!-- Present only while an update is staged and waiting, so
-                         the row is a single button in every other state. -->
-                    <Button fx:id="appUpdateButton" text="Restart now" visible="false"
-                            managed="false" styleClass="secondary-button"/>
-                    <Button fx:id="checkUpdatesButton" text="Check for updates"
-                            styleClass="secondary-button"/>
-                </HBox>
-            </VBox>
+            <!-- The update actions, and nothing else. There is no heading and
+                 no divider above them: both version rows already say what is
+                 happening to them, so a section called "Updates" separated by
+                 a rule was announcing a section that had become two buttons. -->
+            <HBox alignment="CENTER_RIGHT" spacing="10">
+                <!-- Present only while an update is staged and waiting, so the
+                     row is a single button in every other state. -->
+                <Button fx:id="appUpdateButton" text="Restart now" visible="false"
+                        managed="false" styleClass="secondary-button"/>
+                <Button fx:id="checkUpdatesButton" text="Check for updates"
+                        styleClass="secondary-button"/>
+            </HBox>
         </VBox>
 
     </VBox>

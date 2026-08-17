@@ -1024,47 +1024,8 @@
 
 /* ===== Core-update status line (Settings > About) =====
    Colour-coded verdict on its own row. */
-.update-status {
-    -fx-font-size: 12.5px;
-    -fx-font-weight: bold;
-    -fx-text-fill: -c-text-secondary;
-    -fx-padding: 2 0 0 0;
-}
-
-.update-status-ok        { -fx-text-fill: -c-accent-fg; }
-.update-status-available { -fx-text-fill: -c-warn; }
-.update-status-error     { -fx-text-fill: -c-danger-fg; }
-.update-status-muted     { -fx-text-fill: -c-text-secondary; -fx-font-weight: normal; }
 
 
-/* Updates block in Settings > About: app + sing-box rows under a divider. */
-.updates-section {
-    -fx-border-color: -c-border transparent transparent transparent;
-    -fx-border-width: 1 0 0 0;
-    -fx-padding: 12 0 0 0;
-}
-
-/* Each update component (App / sing-box) is a soft sub-block: name + action
-   on top, status below. */
-.update-item {
-    -fx-background-color: -c-surface-sunken;
-    -fx-background-radius: 8;
-    -fx-padding: 10 12;
-}
-
-/* Right side only, and the same 12 .update-item insets its contents by: it
-   puts "Check for updates" in the column the row's own button stands in, one
-   row below. The left side stays out of it — the header's label belongs to
-   the card's gutter with every other label in About, not to the sub-block. */
-.updates-header {
-    -fx-padding: 0 12 0 0;
-}
-
-/* Status line indented under the item name (past the dot). Defined after
-   .update-status so its left padding wins. */
-.update-item-detail {
-    -fx-padding: 0 0 0 17;
-}
 
 /* Subscription row: why the last refresh failed. Uses the on-surface red
    (-c-danger-fg), not the button-fill red. */
