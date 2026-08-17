@@ -21,20 +21,21 @@ import static org.assertj.core.api.Assertions.within;
 
 /**
  * Guards the pair the Updates block in Settings &gt; About is made of:
- * "Check for updates" over "Restart now", a row apart at the same edge of one
- * card. Sized to their own labels they come out at different widths, and two
- * widths that far apart read as two different controls rather than one used
- * twice.
+ * "Restart now" beside "Check for updates", at one edge of one card.
  *
- * <p>What the buttons should measure is derived here rather than written
+ * <p>What each button should measure is derived here rather than written
  * down, for the reason the production code measures it: the answer is
- * language specific — 161 in English, 201 in Russian — and a number in this
- * file would only restate the one in the code, passing just as happily if
- * both were wrong.</p>
+ * language specific — "Check for updates" needs 142px in English and 201 in
+ * Russian — and a number in this file would only restate the one in the code,
+ * passing just as happily if both were wrong.</p>
  *
- * <p>Width is half of it. The lower button sits inside a padded sub-block
- * and the upper one does not, so equal widths still leave the two staggered
- * unless the insets agree — hence the column check as well.</p>
+ * <p>The pair was pinned to a single shared width while it stood a row apart,
+ * where two unequal widths read as two different controls. That pin measured
+ * every button in the group but checked only one of them for a scene, so a
+ * sibling that had not been laid out yet measured zero and dragged the whole
+ * group down to the shorter label — which is how "Check for updates" came to
+ * be rendered in a 107px button. Sharing a row removed the reason for the pin
+ * along with the trap.</p>
  */
 public class SettingsUpdateButtonsTest extends ApplicationTest {
 
@@ -65,90 +66,91 @@ public class SettingsUpdateButtonsTest extends ApplicationTest {
     }
 
     @Test
-    void bothButtonsTakeTheWidthTheWidestLabelNeeds() {
+    void eachButtonIsAsWideAsItsOwnLabelNeeds() {
         Scene settings = loadSettings("light");
 
-        assertSharedWidth(settings, Locale.ENGLISH);
+        assertFits(settings, Locale.ENGLISH);
     }
 
     /**
-     * Equal widths only line the pair up if they start from the same edge.
-     * The lower button is inset by the padding {@code .update-item} puts
-     * around its contents, so {@code .updates-header} owes the upper one the
-     * same inset — and this fails if either number moves without the other.
-     *
-     * <p>Both themes, because both carry their own copy of the two rules and
-     * only one of them has to be forgotten for the pair to drift apart in a
-     * theme nobody screenshotted.</p>
-     */
-    @Test
-    void theTwoButtonsStandInOneColumn() {
-        for (String theme : List.of("light", "dark")) {
-            Scene settings = loadSettings(theme);
-
-            Bounds check = boundsOf(settings, button(settings, "#checkUpdatesButton"));
-            Bounds download = boundsOf(settings, button(settings, "#appUpdateButton"));
-
-            assertThat(download.getMaxX())
-                    .withFailMessage("in %s the buttons' right edges are %.1f apart — "
-                                    + "checkUpdatesButton ends at %.1f, appUpdateButton at "
-                                    + "%.1f. .updates-header's right padding has to match "
-                                    + ".update-item's",
-                            theme, Math.abs(check.getMaxX() - download.getMaxX()),
-                            check.getMaxX(), download.getMaxX())
-                    .isCloseTo(check.getMaxX(), within(SNAP));
-        }
-    }
-
-    /**
-     * The pin has to be re-measured on a language switch, and in both
-     * directions: releasing the old one first is what lets the pair shrink
+     * The width has to be re-measured on a language switch, and in both
+     * directions: releasing the old pin first is what lets a button shrink
      * back when the shorter language returns.
      */
     @Test
-    void theSharedWidthFollowsTheLanguage() {
+    void theWidthsFollowTheLanguage() {
         Scene settings = loadSettings("light");
 
         for (Locale locale : List.of(Locale.ENGLISH, Locale.of("ru"), Locale.ENGLISH)) {
             interact(() -> I18n.setLocale(locale));
-            assertSharedWidth(settings, locale);
+            assertFits(settings, locale);
         }
     }
 
     /**
-     * Both buttons hold exactly what the longer of the two labels needs in
-     * this language: equal to each other, wide enough that neither label is
-     * ellipsized, and no wider — a width left over from another language
-     * would clear the first two checks and fail this one.
+     * The pair shares one row, so what has to hold is that they sit on the
+     * same line and do not run into each other.
+     *
+     * <p>Both themes, because each carries its own copy of the header's rules
+     * and only one of them has to drift for the pair to break in a theme
+     * nobody screenshotted.</p>
      */
-    private void assertSharedWidth(Scene settings, Locale locale) {
-        Button check = button(settings, "#checkUpdatesButton");
-        Button restart = button(settings, "#appUpdateButton");
-        double needed = Math.max(
-                naturalWidth("settings.updates.check"),
-                naturalWidth("settings.update.restart"));
+    @Test
+    void theTwoButtonsShareOneRowWithoutOverlapping() {
+        for (String theme : List.of("light", "dark")) {
+            Scene settings = loadSettings(theme);
 
-        for (Button button : List.of(check, restart)) {
-            assertThat(widthOf(settings, button))
-                    .withFailMessage("in %s the pair should measure %.1f — what \"%s\" needs "
-                                    + "— but %s is %.1f: check=%.1f restart=%.1f",
-                            locale, needed, longerLabel(), button.getId(),
-                            widthOf(settings, button), widthOf(settings, check),
-                            widthOf(settings, restart))
-                    .isCloseTo(needed, within(SNAP));
+            Bounds check = boundsOf(settings, button(settings, "#checkUpdatesButton"));
+            Bounds restart = boundsOf(settings, button(settings, "#appUpdateButton"));
+
+            assertThat(centreY(restart))
+                    .withFailMessage("in %s the buttons are on different lines — "
+                                    + "appUpdateButton centres at %.1f, checkUpdatesButton at %.1f",
+                            theme, centreY(restart), centreY(check))
+                    .isCloseTo(centreY(check), within(SNAP));
+
+            assertThat(restart.getMaxX())
+                    .withFailMessage("in %s appUpdateButton ends at %.1f but "
+                                    + "checkUpdatesButton starts at %.1f — they overlap",
+                            theme, restart.getMaxX(), check.getMinX())
+                    .isLessThanOrEqualTo(check.getMinX());
         }
     }
 
-    private static String longerLabel() {
-        String check = I18n.get("settings.updates.check");
-        String restart = I18n.get("settings.update.restart");
-        return check.length() >= restart.length() ? check : restart;
+    /**
+     * Each button holds exactly what its own label needs in this language:
+     * wide enough that the label is not ellipsized, and no wider — a width
+     * left over from another language would clear the first check and fail
+     * this one.
+     */
+    private void assertFits(Scene settings, Locale locale) {
+        assertFits(settings, locale, "#checkUpdatesButton", "settings.updates.check");
+        assertFits(settings, locale, "#appUpdateButton", "settings.update.restart");
+    }
+
+    private void assertFits(Scene settings, Locale locale, String selector, String key) {
+        Button button = button(settings, selector);
+        double needed = naturalWidth(key);
+
+        assertThat(widthOf(settings, button))
+                .withFailMessage("in %s %s should measure %.1f — what \"%s\" needs — but it is "
+                                + "%.1f, so the label is clipped or the pin is stale",
+                        locale, selector, needed, I18n.get(key), widthOf(settings, button))
+                .isCloseTo(needed, within(SNAP));
+    }
+
+    private static double centreY(Bounds bounds) {
+        return bounds.getMinY() + bounds.getHeight() / 2;
     }
 
     /** Where the button ends up on screen, once the row has been laid out. */
     private Bounds boundsOf(Scene settings, Button button) {
         final Bounds[] bounds = new Bounds[1];
         interact(() -> {
+            // Same reason as widthOf: a hidden button is not laid out, so its
+            // position would be whatever it was before it was hidden.
+            button.setVisible(true);
+            button.setManaged(true);
             settings.getRoot().applyCss();
             settings.getRoot().layout();
             bounds[0] = button.localToScene(button.getBoundsInLocal());
@@ -156,10 +158,20 @@ public class SettingsUpdateButtonsTest extends ApplicationTest {
         return bounds[0];
     }
 
-    /** Laid-out width, which is what the row beside the button actually sees. */
+    /**
+     * Laid-out width, which is what the row beside the button actually sees.
+     *
+     * <p>Shown first, every time. The restart button is hidden whenever no
+     * update is staged, and this JVM runs a real updater that can find one —
+     * or stop finding one — at any moment. An unmanaged node is skipped by
+     * layout and keeps whatever width it last had, so a re-render landing
+     * mid-test would otherwise be read as a stale pin.</p>
+     */
     private double widthOf(Scene settings, Button button) {
         final double[] width = new double[1];
         interact(() -> {
+            button.setVisible(true);
+            button.setManaged(true);
             settings.getRoot().applyCss();
             settings.getRoot().layout();
             width[0] = button.getWidth();
@@ -218,12 +230,12 @@ public class SettingsUpdateButtonsTest extends ApplicationTest {
                 probe.getStylesheets().setAll(scene.getStylesheets());
                 new Stage().setScene(probe);
 
-                // The download button only appears once a release is out; it
-                // is measured and pinned either way, but it has to be laid out
-                // to have a width to read.
-                javafx.scene.Node download = root.lookup("#appUpdateButton");
-                download.setVisible(true);
-                download.setManaged(true);
+                // The restart button only appears once an update is staged;
+                // it is measured and pinned either way, but it has to be laid
+                // out to have a width to read.
+                javafx.scene.Node restart = root.lookup("#appUpdateButton");
+                restart.setVisible(true);
+                restart.setManaged(true);
 
                 root.applyCss();
                 root.layout();

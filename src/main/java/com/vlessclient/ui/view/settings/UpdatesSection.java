@@ -11,20 +11,25 @@ import com.vlessclient.ui.view.RestartToUpdate;
 import javafx.application.Platform;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
-import javafx.scene.layout.VBox;
-import javafx.scene.shape.Circle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * The "Updates" block of the Settings view: the app-update row and async
- * detection of the sing-box version shown under About. The sing-box core
- * itself is not updatable from here — it ships pinned with the app and moves
- * only when the app is updated. The row does say when a newer core exists,
- * which is a nudge to open a bump pull request, not an offer to install one.
- * Extracted from {@link com.vlessclient.ui.view.SettingsViewController},
- * which stays the FXML endpoint and hands its injected controls over via
- * {@link Controls}.
+ * The "Updates" block of the Settings view, and the two version rows above it
+ * that it keeps current.
+ *
+ * <p>Both rows read the same way: the version that is running, and in
+ * parentheses whatever is worth knowing beyond it. The app row used to repeat
+ * itself — a version on one line and a status block below restating it — so
+ * the block is gone and the app row now says its piece the way the sing-box
+ * row always has.</p>
+ *
+ * <p>The sing-box core is not updatable from here: it ships pinned with the
+ * app and moves only when the app is updated. Its row does say when a newer
+ * core exists, which is a nudge to open a bump pull request, not an offer to
+ * install one. Extracted from
+ * {@link com.vlessclient.ui.view.SettingsViewController}, which stays the FXML
+ * endpoint and hands its injected controls over via {@link Controls}.</p>
  */
 public final class UpdatesSection {
 
@@ -38,23 +43,16 @@ public final class UpdatesSection {
      * declared) by the Settings controller; this record just carries them.
      */
     public record Controls(
+            Label appVersionValue,
             Label singboxVersionValue,
             Button checkUpdatesButton,
-            VBox appUpdateRow,
-            Circle appUpdateDot,
-            Label appUpdateDetail,
-            Button appUpdateButton,
-            java.util.function.Consumer<String> appButtonLabel) {
+            Button appUpdateButton) {
     }
 
+    private final Label appVersionValue;
     private final Label singboxVersionValue;
     private final Button checkUpdatesButton;
-    private final VBox appUpdateRow;
-    private final Circle appUpdateDot;
-    private final Label appUpdateDetail;
     private final Button appUpdateButton;
-    /** Shows one of the button's bound labels; see {@link Controls}. */
-    private final java.util.function.Consumer<String> appButtonLabel;
 
     /** Asked once per run, from the background thread below. */
     private final SingBoxReleases singBoxReleases = new SingBoxReleases();
@@ -68,18 +66,15 @@ public final class UpdatesSection {
      * {@link #init()} runs.
      */
     public UpdatesSection(Controls controls) {
+        this.appVersionValue = controls.appVersionValue();
         this.singboxVersionValue = controls.singboxVersionValue();
         this.checkUpdatesButton = controls.checkUpdatesButton();
-        this.appUpdateRow = controls.appUpdateRow();
-        this.appUpdateDot = controls.appUpdateDot();
-        this.appUpdateDetail = controls.appUpdateDetail();
         this.appUpdateButton = controls.appUpdateButton();
-        this.appButtonLabel = controls.appButtonLabel();
     }
 
     /**
      * Builds the whole block: shows a placeholder while the sing-box version
-     * is detected off the FX thread, then wires the app-update row and the
+     * is detected off the FX thread, then wires the app version row and the
      * "Check for updates" button.
      */
     public void init() {
@@ -87,7 +82,7 @@ public final class UpdatesSection {
         // that off the FX thread so opening Settings never stalls.
         singboxVersionValue.setText(I18n.get("settings.updates.checking"));
         refreshSingBoxVersionAsync();
-        initAppUpdateRow();
+        initAppVersionRow();
         checkUpdatesButton.setOnAction(e -> runAppCheck());
         if (updateManager == null) {
             checkUpdatesButton.setVisible(false);
@@ -96,11 +91,11 @@ public final class UpdatesSection {
     }
 
     /**
-     * Refreshes the app-update row when the Settings view becomes visible
-     * again. The view is cached, so {@link #init()} runs once per app run —
-     * without this hook the row keeps showing the verdict of a check made
-     * before a release. Re-checks at most every 5 minutes, and quietly:
-     * a failure leaves the last verdict in place.
+     * Re-checks when the Settings view becomes visible again. The view is
+     * cached, so {@link #init()} runs once per app run — without this hook the
+     * row keeps showing the verdict of a check made before a release.
+     * Re-checks at most every 5 minutes, and quietly: a failure leaves the last
+     * verdict in place.
      */
     public void refreshOnOpen() {
         long now = System.currentTimeMillis();
@@ -110,64 +105,48 @@ public final class UpdatesSection {
         }
     }
 
-    // ----- app update row -----
+    // ----- app version row -----
 
-    private void initAppUpdateRow() {
+    private void initAppVersionRow() {
         try {
             updateManager = ServiceLocator.get(UpdateManager.class);
         } catch (IllegalArgumentException e) {
             updateManager = null;
-            appUpdateRow.setVisible(false);
-            appUpdateRow.setManaged(false);
+            appVersionValue.setText(AppVersion.VERSION);
+            hideRestartButton();
             return;
         }
-        // The button's label and action depend on which of the three states
-        // the row is in, so renderAppRow() owns both.
         // The background periodic check updates these on the FX thread, so the
         // row reflects a newer release even without pressing the button.
-        updateManager.updateAvailableProperty().addListener((o, ov, nv) -> renderAppRow());
-        updateManager.latestVersionProperty().addListener((o, ov, nv) -> renderAppRow());
+        updateManager.updateAvailableProperty().addListener((o, ov, nv) -> renderAppVersion());
+        updateManager.latestVersionProperty().addListener((o, ov, nv) -> renderAppVersion());
         // Same reason as the dashboard banner: the download finishing changes
         // no other property, so without this the row keeps saying an update is
         // merely available after it has been staged.
-        updateManager.stagedProperty().addListener((o, ov, nv) -> renderAppRow());
-        // Now that no button reports the download, this property is what moves
-        // the row on to "Downloading…" and back off it again.
-        updateManager.downloadingProperty().addListener((o, ov, nv) -> renderAppRow());
-        renderAppRow();
+        updateManager.stagedProperty().addListener((o, ov, nv) -> renderAppVersion());
+        // And this is what moves the row on to "downloading" and back off it.
+        updateManager.downloadingProperty().addListener((o, ov, nv) -> renderAppVersion());
+        appUpdateButton.setOnAction(e -> onRestartClicked());
+        renderAppVersion();
     }
 
-    /**
-     * What the app-update row is saying, each state carrying the status colour
-     * it is rendered in — the dot and the text take it from here rather than
-     * from a parallel switch that could fall out of step with this list.
-     */
+    /** What the app version row is saying beyond the version itself. */
     enum AppRowState {
 
         /** No newer release known. */
-        UP_TO_DATE("update-status-ok"),
+        UP_TO_DATE,
 
         /** Newer release exists, but this install updates through its packager. */
-        PACKAGE_MANAGER("update-status-available"),
+        PACKAGE_MANAGER,
 
         /** Its installer is being fetched right now. */
-        DOWNLOADING("update-status-muted"),
+        DOWNLOADING,
 
         /** Found, and not being fetched at this instant. */
-        AVAILABLE("update-status-available"),
+        AVAILABLE,
 
         /** Verified on disk and waiting for the restart that installs it. */
-        STAGED("update-status-ok");
-
-        private final String modifier;
-
-        AppRowState(String modifier) {
-            this.modifier = modifier;
-        }
-
-        String modifier() {
-            return modifier;
-        }
+        STAGED;
 
         /**
          * Whether this state has anything for the user to press. True for
@@ -212,7 +191,7 @@ public final class UpdatesSection {
         return downloading ? AppRowState.DOWNLOADING : AppRowState.AVAILABLE;
     }
 
-    private void renderAppRow() {
+    private void renderAppVersion() {
         if (updateManager == null) {
             return;
         }
@@ -221,35 +200,31 @@ public final class UpdatesSection {
                 updateManager.hasStagedUpdate(),
                 updateManager.downloadingProperty().get(),
                 UpdateApplier.current().selfUpdates());
-        if (state.offersRestart()) {
-            showAppButton("settings.update.restart", this::onRestartClicked);
-        } else {
-            hideAppButton();
-        }
-        setUpdateRow(rowText(state), state.modifier());
+        appUpdateButton.setVisible(state.offersRestart());
+        appUpdateButton.setManaged(state.offersRestart());
+        appVersionValue.setText(versionText(state));
     }
 
-    private String rowText(AppRowState state) {
+    /**
+     * The running version, plus what is happening to it. Up to date is the one
+     * state that adds nothing: a bare version number already says it, and a
+     * parenthetical confirming the absence of news is noise on the row a user
+     * reads most often.
+     */
+    private String versionText(AppRowState state) {
+        String latest = updateManager.latestVersionProperty().get();
         return switch (state) {
-            case UP_TO_DATE -> I18n.get("settings.updates.uptodate");
-            case PACKAGE_MANAGER -> I18n.get("settings.update.packagemanager");
-            case DOWNLOADING -> I18n.get("settings.update.downloading");
-            case STAGED -> I18n.get("settings.update.staged");
-            // The one line that is not a fixed string: what is running now and
-            // what is on its way.
-            case AVAILABLE ->
-                    AppVersion.VERSION + "  →  " + updateManager.latestVersionProperty().get();
+            case UP_TO_DATE -> AppVersion.VERSION;
+            case PACKAGE_MANAGER ->
+                    I18n.get("settings.version.packagemanager", AppVersion.VERSION, latest);
+            case DOWNLOADING ->
+                    I18n.get("settings.version.downloading", AppVersion.VERSION, latest);
+            case AVAILABLE -> I18n.get("settings.version.available", AppVersion.VERSION, latest);
+            case STAGED -> I18n.get("settings.version.ready", AppVersion.VERSION, latest);
         };
     }
 
-    private void showAppButton(String labelKey, Runnable action) {
-        appButtonLabel.accept(labelKey);
-        appUpdateButton.setOnAction(e -> action.run());
-        appUpdateButton.setVisible(true);
-        appUpdateButton.setManaged(true);
-    }
-
-    private void hideAppButton() {
+    private void hideRestartButton() {
         appUpdateButton.setVisible(false);
         appUpdateButton.setManaged(false);
     }
@@ -257,7 +232,7 @@ public final class UpdatesSection {
     /** Applies the staged update now; the dashboard banner offers the same. */
     private void onRestartClicked() {
         if (RestartToUpdate.start() == RestartToUpdate.Outcome.FAILED) {
-            setUpdateRow(I18n.get("settings.update.restart.failed"), "update-status-error");
+            appVersionValue.setText(I18n.get("settings.version.applyfailed", AppVersion.VERSION));
         }
     }
 
@@ -265,7 +240,7 @@ public final class UpdatesSection {
         if (updateManager == null) {
             return;
         }
-        setUpdateRow(I18n.get("settings.updates.checking"), "update-status-muted");
+        appVersionValue.setText(I18n.get("settings.version.checking", AppVersion.VERSION));
         Thread t = new Thread(() -> {
             UpdateManager.CheckResult result = updateManager.checkForUpdates();
             Platform.runLater(() -> renderCheckResult(result));
@@ -294,20 +269,21 @@ public final class UpdatesSection {
             return;
         }
         if (UpdateApplier.current().selfUpdates() && !updateManager.hasStagedUpdate()) {
-            setUpdateRow(I18n.get("settings.update.download.failed"), "update-status-error");
+            appVersionValue.setText(I18n.get("settings.version.downloadfailed",
+                    AppVersion.VERSION, updateManager.latestVersionProperty().get()));
             return;
         }
-        renderAppRow();
+        renderAppVersion();
     }
 
     /**
      * Renders what a check actually established.
      *
-     * <p>Previously every outcome fell through to {@link #renderAppRow()},
-     * which reads one flag — so a check that never reached GitHub was shown as
-     * "up to date", with a green dot. That is the failure mode worth being
-     * careful about: it is indistinguishable from good news, and it appears
-     * exactly in the networks this client is used in.</p>
+     * <p>Every outcome used to fall through to the one flag that says an update
+     * exists — so a check that never reached GitHub was shown as "up to date",
+     * with a green dot. That is the failure mode worth being careful about: it
+     * is indistinguishable from good news, and it appears exactly in the
+     * networks this client is used in.</p>
      */
     private void renderCheckResult(UpdateManager.CheckResult result) {
         boolean failed = result == UpdateManager.CheckResult.RATE_LIMITED
@@ -315,35 +291,13 @@ public final class UpdatesSection {
         // A failed check does not un-know what an earlier one found: with an
         // update already waiting, that stays the more useful thing to say.
         if (!failed || updateManager.updateAvailableProperty().get()) {
-            renderAppRow();
+            renderAppVersion();
             return;
         }
-        setUpdateRow(I18n.get(result == UpdateManager.CheckResult.RATE_LIMITED
-                ? "settings.update.check.ratelimited"
-                : "settings.update.check.failed"), "update-status-error");
-        hideAppButton();
-    }
-
-    /**
-     * Sets the app row's detail text + colour and its status dot. The dot
-     * carries the state (green ok / amber available / red error / grey idle),
-     * so no leading glyph is needed in the text.
-     */
-    private void setUpdateRow(String text, String modifier) {
-        appUpdateDetail.setText(text == null ? "" : text);
-        // update-item-detail indents the status under the item name; its
-        // padding wins over update-status because it's defined later in the CSS.
-        appUpdateDetail.getStyleClass().setAll("update-status", "update-item-detail", modifier);
-        appUpdateDot.getStyleClass().setAll(dotClassFor(modifier));
-    }
-
-    private static String dotClassFor(String modifier) {
-        return switch (modifier) {
-            case "update-status-ok" -> "status-circle-connected";
-            case "update-status-available" -> "status-circle-connecting";
-            case "update-status-error" -> "status-circle-error";
-            default -> "status-circle-disconnected";
-        };
+        appVersionValue.setText(I18n.get(result == UpdateManager.CheckResult.RATE_LIMITED
+                ? "settings.version.ratelimited"
+                : "settings.version.checkfailed", AppVersion.VERSION));
+        hideRestartButton();
     }
 
     // ----- sing-box version label -----
@@ -370,7 +324,8 @@ public final class UpdatesSection {
     }
 
     /**
-     * Appends the newer core version when one has been released.
+     * Appends the newer core version when one has been released, in the same
+     * shape the app row uses a few pixels above it.
      *
      * <p>Reporting only — nothing here installs a core. The pin moves through
      * a reviewed pull request, where the real-binary smoke suite gets to
@@ -387,7 +342,7 @@ public final class UpdatesSection {
             return version;
         }
         return singBoxReleases.newerThan(version)
-                .map(latest -> I18n.get("settings.singbox.update.available", version, latest))
+                .map(latest -> I18n.get("settings.version.available", version, latest))
                 .orElse(version);
     }
 
@@ -410,8 +365,8 @@ public final class UpdatesSection {
             log.debug("SingBoxInstaller not available");
             return I18n.get("settings.version.unknown");
         }
-        // Bare "1.13.14", matching the App Version row above it — the label
-        // already says "sing-box Version", so repeating it in the value read
+        // Bare "1.13.14", matching the app version row above it — the label
+        // already says "sing-box version", so repeating it in the value read
         // as stutter.
         return version != null ? version : I18n.get("settings.version.unknown");
     }

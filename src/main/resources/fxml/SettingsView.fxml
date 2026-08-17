@@ -199,27 +199,21 @@
                    wrapText="true" maxWidth="Infinity"/>
 
             <!-- Updates: the app only. The sing-box core ships pinned with the
-                 app and moves with it, so it has no row and no action here. -->
+                 app and moves with it, so it has no action here.
+                 No status block under this header — both version rows above
+                 carry their own news in parentheses, and a block restating the
+                 app's was the same fact written twice. -->
             <VBox styleClass="updates-section" spacing="10">
                 <HBox alignment="CENTER_LEFT" spacing="10" styleClass="updates-header">
                     <Label fx:id="updatesLabel" text="Updates" styleClass="section-header"/>
                     <Region HBox.hgrow="ALWAYS"/>
+                    <!-- Present only while an update is staged and waiting, so
+                         the row is a single button in every other state. -->
+                    <Button fx:id="appUpdateButton" text="Restart now" visible="false"
+                            managed="false" styleClass="secondary-button"/>
                     <Button fx:id="checkUpdatesButton" text="Check for updates"
                             styleClass="secondary-button"/>
                 </HBox>
-
-                <!-- App sub-block: name + action on top, status below -->
-                <VBox fx:id="appUpdateRow" styleClass="update-item" spacing="3">
-                    <HBox alignment="CENTER_LEFT" spacing="8">
-                        <Circle fx:id="appUpdateDot" radius="5"
-                                styleClass="status-circle-disconnected"/>
-                        <Label fx:id="appUpdateNameLabel" text="App" styleClass="service-name"/>
-                        <Region HBox.hgrow="ALWAYS"/>
-                        <Button fx:id="appUpdateButton" text="Restart now" visible="false"
-                                managed="false" styleClass="secondary-button"/>
-                    </HBox>
-                    <Label fx:id="appUpdateDetail" text="" styleClass="update-status"/>
-                </VBox>
             </VBox>
         </VBox>
 
