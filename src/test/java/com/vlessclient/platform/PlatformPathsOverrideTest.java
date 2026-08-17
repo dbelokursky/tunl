@@ -78,13 +78,14 @@ class PlatformPathsOverrideTest {
     }
 
     @Test
-    void downloadsStayOnTheRealOsLocation() {
-        // Downloads is the user's own folder rather than app state, and no
-        // test writes there; redirecting it would only obscure the real path.
+    void theOverrideReplacesOnlyTheDataDir() {
         PlatformPaths overridden = new PlatformPaths.OverriddenPlatformPaths(
                 Path.of("/tmp/whatever"), new MacPlatformPaths());
 
+        // Everything else is derived from it, so redirecting the root is the
+        // whole of the redirect.
         assertThat(overridden.dataDir()).isEqualTo(Path.of("/tmp/whatever"));
-        assertThat(overridden.downloadsDir()).isEqualTo(new MacPlatformPaths().downloadsDir());
+        assertThat(overridden.logsDir()).isEqualTo(Path.of("/tmp/whatever", "logs"));
+        assertThat(overridden.coreBinDir()).isEqualTo(Path.of("/tmp/whatever", "bin"));
     }
 }

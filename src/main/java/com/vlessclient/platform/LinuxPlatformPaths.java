@@ -33,11 +33,6 @@ public final class LinuxPlatformPaths implements PlatformPaths {
         return base.resolve("vless-client");
     }
 
-    @Override
-    public Path downloadsDir() {
-        Path fromUserDirs = parseUserDirsDownload();
-        return fromUserDirs != null ? fromUserDirs : home.resolve("Downloads");
-    }
 
     /**
      * Reads {@code XDG_DOWNLOAD_DIR} from {@code ~/.config/user-dirs.dirs}

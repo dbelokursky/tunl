@@ -32,6 +32,22 @@ public final class UpdateBootstrap {
      */
     static final int MAX_ATTEMPTS = 2;
 
+    /**
+     * How long a staged update may sit unapplied before it is thrown away.
+     *
+     * <p>Not primarily about the hundred megabytes. An applier that answers
+     * {@code UNSUPPORTED} — the app running translocated from a quarantined
+     * copy, or from somewhere that is not a bundle at all — records no attempt,
+     * because that is a condition the user can still fix by moving the app to
+     * Applications, and burning the installer for it would be wrong. But the
+     * download policy declines to fetch anything while an installer is already
+     * staged, so a marker that never applies and never expires does not merely
+     * take up room: it stops every later release from being downloaded at all.
+     * A week is long enough to move an app and short enough that being stuck is
+     * measured in days.</p>
+     */
+    static final long STALE_AFTER_MS = 7L * 24 * 60 * 60 * 1000;
+
     private UpdateBootstrap() {
     }
 
@@ -47,6 +63,11 @@ public final class UpdateBootstrap {
 
     static boolean applyPendingUpdate(
             UpdateStaging staging, UpdateApplier applier, String currentVersion) {
+        return applyPendingUpdate(staging, applier, currentVersion, System.currentTimeMillis());
+    }
+
+    static boolean applyPendingUpdate(UpdateStaging staging, UpdateApplier applier,
+                                      String currentVersion, long nowMs) {
         Optional<PendingUpdate> staged = staging.pending();
         if (staged.isEmpty()) {
             return false;
@@ -65,6 +86,17 @@ public final class UpdateBootstrap {
         if (staging.attempts() >= MAX_ATTEMPTS) {
             log.error("Staged update {} failed to apply {} times, giving up on it",
                     update.version(), MAX_ATTEMPTS);
+            staging.clear();
+            return false;
+        }
+
+        // 0 means the marker predates this field; leaving it alone is the safe
+        // reading, and it corrects itself the moment anything is staged again.
+        long stagedAt = staging.stagedAt();
+        if (stagedAt > 0 && nowMs - stagedAt > STALE_AFTER_MS) {
+            log.error("Staged update {} has been waiting {} days without applying, "
+                            + "clearing it so newer releases can be downloaded again",
+                    update.version(), (nowMs - stagedAt) / (24 * 60 * 60 * 1000));
             staging.clear();
             return false;
         }

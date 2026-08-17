@@ -27,9 +27,6 @@ public interface PlatformPaths {
         return dataDir().resolve("logs");
     }
 
-    /** User Downloads folder (an app-update installer lands here). */
-    Path downloadsDir();
-
     /**
      * System property that redirects {@link #dataDir()} away from the real
      * per-user location. Mirrors {@code vless.singbox.installDir}, and exists
@@ -76,14 +73,13 @@ public interface PlatformPaths {
     }
 
     /**
-     * Redirects the data dir while leaving Downloads on the real OS location —
-     * that one is the user's own folder, not app state, and nothing writes to
-     * it during tests.
+     * Redirects the data dir; everything else is derived from it.
+     *
+     * <p>{@code delegate} is kept because the per-OS answer is still the right
+     * one for anything this record does not override — today that is nothing,
+     * and the field is what keeps adding such a thing from meaning rewriting
+     * the redirect.</p>
      */
     record OverriddenPlatformPaths(Path dataDir, PlatformPaths delegate) implements PlatformPaths {
-        @Override
-        public Path downloadsDir() {
-            return delegate.downloadsDir();
-        }
     }
 }

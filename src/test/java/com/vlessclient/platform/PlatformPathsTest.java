@@ -21,7 +21,6 @@ class PlatformPathsTest {
                 .isEqualTo(Path.of(home, "Library", "Application Support", "VlessClient", "bin"));
         assertThat(paths.logsDir())
                 .isEqualTo(Path.of(home, "Library", "Application Support", "VlessClient", "logs"));
-        assertThat(paths.downloadsDir()).isEqualTo(Path.of(home, "Downloads"));
     }
 
     @Test
@@ -50,7 +49,6 @@ class PlatformPathsTest {
 
         assertThat(paths.dataDir())
                 .isEqualTo(home.resolve(".local").resolve("share").resolve("vless-client"));
-        assertThat(paths.downloadsDir()).isEqualTo(home.resolve("Downloads"));
     }
 
     @Test
@@ -65,8 +63,6 @@ class PlatformPathsTest {
 
         LinuxPlatformPaths paths = new LinuxPlatformPaths(home, null);
 
-        assertThat(paths.downloadsDir())
-                .isEqualTo(home.resolve("Stuff").resolve("Downloads"));
     }
 
     @Test
