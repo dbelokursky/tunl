@@ -43,7 +43,7 @@ public final class UpdatesSection {
             VBox appUpdateRow,
             Circle appUpdateDot,
             Label appUpdateDetail,
-            Button downloadAppButton,
+            Button appUpdateButton,
             java.util.function.Consumer<String> appButtonLabel) {
     }
 
@@ -52,7 +52,7 @@ public final class UpdatesSection {
     private final VBox appUpdateRow;
     private final Circle appUpdateDot;
     private final Label appUpdateDetail;
-    private final Button downloadAppButton;
+    private final Button appUpdateButton;
     /** Shows one of the button's bound labels; see {@link Controls}. */
     private final java.util.function.Consumer<String> appButtonLabel;
 
@@ -73,7 +73,7 @@ public final class UpdatesSection {
         this.appUpdateRow = controls.appUpdateRow();
         this.appUpdateDot = controls.appUpdateDot();
         this.appUpdateDetail = controls.appUpdateDetail();
-        this.downloadAppButton = controls.downloadAppButton();
+        this.appUpdateButton = controls.appUpdateButton();
         this.appButtonLabel = controls.appButtonLabel();
     }
 
@@ -128,50 +128,130 @@ public final class UpdatesSection {
         updateManager.updateAvailableProperty().addListener((o, ov, nv) -> renderAppRow());
         updateManager.latestVersionProperty().addListener((o, ov, nv) -> renderAppRow());
         // Same reason as the dashboard banner: the download finishing changes
-        // no other property, so without this the row keeps offering "Download"
-        // for something already downloaded.
+        // no other property, so without this the row keeps saying an update is
+        // merely available after it has been staged.
         updateManager.stagedProperty().addListener((o, ov, nv) -> renderAppRow());
+        // Now that no button reports the download, this property is what moves
+        // the row on to "Downloading…" and back off it again.
+        updateManager.downloadingProperty().addListener((o, ov, nv) -> renderAppRow());
         renderAppRow();
+    }
+
+    /**
+     * What the app-update row is saying, each state carrying the status colour
+     * it is rendered in — the dot and the text take it from here rather than
+     * from a parallel switch that could fall out of step with this list.
+     */
+    enum AppRowState {
+
+        /** No newer release known. */
+        UP_TO_DATE("update-status-ok"),
+
+        /** Newer release exists, but this install updates through its packager. */
+        PACKAGE_MANAGER("update-status-available"),
+
+        /** Its installer is being fetched right now. */
+        DOWNLOADING("update-status-muted"),
+
+        /** Found, and not being fetched at this instant. */
+        AVAILABLE("update-status-available"),
+
+        /** Verified on disk and waiting for the restart that installs it. */
+        STAGED("update-status-ok");
+
+        private final String modifier;
+
+        AppRowState(String modifier) {
+            this.modifier = modifier;
+        }
+
+        String modifier() {
+            return modifier;
+        }
+
+        /**
+         * Whether this state has anything for the user to press. True for
+         * exactly one of them: a restart is the only step the app cannot take
+         * on its own, since it means dropping the tunnel.
+         */
+        boolean offersRestart() {
+            return this == STAGED;
+        }
+    }
+
+    /**
+     * Chooses the row's state. Pure, and a copy of the shape
+     * {@code DashboardViewController.bannerState} already uses, so every
+     * combination can be checked without standing up a scene.
+     *
+     * <p>{@link AppRowState#STAGED} is the only state with anything to press.
+     * The download is never offered: every path that can notice an update also
+     * starts fetching it, so a button here could only duplicate a download
+     * already under way — and pressing it did exactly that, running a second
+     * fetch of the same installer into the same staging path.</p>
+     *
+     * @param updateAvailable whether a newer release was found
+     * @param staged          whether its installer is already verified on disk
+     * @param downloading     whether that installer is being fetched right now
+     * @param selfUpdates     whether this platform installs updates in-app
+     * @return the state to render
+     */
+    static AppRowState rowState(boolean updateAvailable, boolean staged,
+                                boolean downloading, boolean selfUpdates) {
+        if (!updateAvailable) {
+            return AppRowState.UP_TO_DATE;
+        }
+        if (!selfUpdates) {
+            // Linux: the package belongs to whatever installed it, so the row
+            // reports the new version and offers nothing to press.
+            return AppRowState.PACKAGE_MANAGER;
+        }
+        if (staged) {
+            return AppRowState.STAGED;
+        }
+        return downloading ? AppRowState.DOWNLOADING : AppRowState.AVAILABLE;
     }
 
     private void renderAppRow() {
         if (updateManager == null) {
             return;
         }
-        if (!updateManager.updateAvailableProperty().get()) {
-            setUpdateRow(I18n.get("settings.updates.uptodate"), "update-status-ok");
-            hideAppButton();
-            return;
-        }
-        if (!UpdateApplier.current().selfUpdates()) {
-            // Linux: the package belongs to whatever installed it, so the row
-            // reports the new version and offers nothing to press.
-            setUpdateRow(I18n.get("settings.update.packagemanager"), "update-status-available");
-            hideAppButton();
-            return;
-        }
-        if (updateManager.hasStagedUpdate()) {
-            // Already downloaded and verified, in this run or an earlier one:
-            // all that is left is the restart that lets it be installed.
-            setUpdateRow(I18n.get("settings.update.staged"), "update-status-ok");
+        AppRowState state = rowState(
+                updateManager.updateAvailableProperty().get(),
+                updateManager.hasStagedUpdate(),
+                updateManager.downloadingProperty().get(),
+                UpdateApplier.current().selfUpdates());
+        if (state.offersRestart()) {
             showAppButton("settings.update.restart", this::onRestartClicked);
-            return;
+        } else {
+            hideAppButton();
         }
-        String latest = updateManager.latestVersionProperty().get();
-        setUpdateRow(AppVersion.VERSION + "  →  " + latest, "update-status-available");
-        showAppButton("settings.update.download", this::onDownloadAppClicked);
+        setUpdateRow(rowText(state), state.modifier());
+    }
+
+    private String rowText(AppRowState state) {
+        return switch (state) {
+            case UP_TO_DATE -> I18n.get("settings.updates.uptodate");
+            case PACKAGE_MANAGER -> I18n.get("settings.update.packagemanager");
+            case DOWNLOADING -> I18n.get("settings.update.downloading");
+            case STAGED -> I18n.get("settings.update.staged");
+            // The one line that is not a fixed string: what is running now and
+            // what is on its way.
+            case AVAILABLE ->
+                    AppVersion.VERSION + "  →  " + updateManager.latestVersionProperty().get();
+        };
     }
 
     private void showAppButton(String labelKey, Runnable action) {
         appButtonLabel.accept(labelKey);
-        downloadAppButton.setOnAction(e -> action.run());
-        downloadAppButton.setVisible(true);
-        downloadAppButton.setManaged(true);
+        appUpdateButton.setOnAction(e -> action.run());
+        appUpdateButton.setVisible(true);
+        appUpdateButton.setManaged(true);
     }
 
     private void hideAppButton() {
-        downloadAppButton.setVisible(false);
-        downloadAppButton.setManaged(false);
+        appUpdateButton.setVisible(false);
+        appUpdateButton.setManaged(false);
     }
 
     /** Applies the staged update now; the dashboard banner offers the same. */
@@ -189,9 +269,35 @@ public final class UpdatesSection {
         Thread t = new Thread(() -> {
             UpdateManager.CheckResult result = updateManager.checkForUpdates();
             Platform.runLater(() -> renderCheckResult(result));
+            // The same follow-through the scheduled check and the tunnel-up
+            // check do. Pressing "Check for updates" and being told one exists,
+            // while nothing fetches it for up to six hours, was the gap left by
+            // dropping the Download button.
+            updateManager.autoDownloadIfAllowed();
+            Platform.runLater(() -> renderDownloadOutcome(result));
         }, "app-update-check");
         t.setDaemon(true);
         t.start();
+    }
+
+    /**
+     * Says so when the download this check kicked off did not land.
+     *
+     * <p>Only for the manual path: the user pressed a button and is watching
+     * the row, so silence reads as "nothing happened". The scheduled checks
+     * leave the row alone — an error raised by a check nobody asked for would
+     * still be sitting there hours later, describing a network that has since
+     * come back.</p>
+     */
+    private void renderDownloadOutcome(UpdateManager.CheckResult result) {
+        if (updateManager == null || result != UpdateManager.CheckResult.UPDATE_AVAILABLE) {
+            return;
+        }
+        if (UpdateApplier.current().selfUpdates() && !updateManager.hasStagedUpdate()) {
+            setUpdateRow(I18n.get("settings.update.download.failed"), "update-status-error");
+            return;
+        }
+        renderAppRow();
     }
 
     /**
@@ -216,34 +322,6 @@ public final class UpdatesSection {
                 ? "settings.update.check.ratelimited"
                 : "settings.update.check.failed"), "update-status-error");
         hideAppButton();
-    }
-
-    private void onDownloadAppClicked() {
-        if (updateManager == null) {
-            return;
-        }
-        String url = updateManager.downloadUrlProperty().get();
-        if (url == null || url.isBlank()) {
-            return;
-        }
-        downloadAppButton.setDisable(true);
-        setUpdateRow(I18n.get("settings.update.downloading"), "update-status-muted");
-        Thread t = new Thread(() -> {
-            java.nio.file.Path saved = updateManager.downloadUpdate(url);
-            Platform.runLater(() -> {
-                downloadAppButton.setDisable(false);
-                if (saved != null) {
-                    setUpdateRow(I18n.get("settings.update.staged"), "update-status-ok");
-                    downloadAppButton.setVisible(false);
-                    downloadAppButton.setManaged(false);
-                } else {
-                    setUpdateRow(I18n.get("settings.update.download.failed"),
-                            "update-status-error");
-                }
-            });
-        }, "app-update-download");
-        t.setDaemon(true);
-        t.start();
     }
 
     /**

@@ -252,31 +252,44 @@ public class DashboardViewController {
         /** A newer release exists but this install updates through apt/AUR. */
         PACKAGE_MANAGER,
 
-        /** Newer release seen; the background download has it in hand. */
+        /** Newer release seen, and its installer is being fetched right now. */
         DOWNLOADING,
+
+        /** Seen, but nothing is fetching it at this moment. */
+        AVAILABLE,
 
         /** Verified and staged — one restart away. */
         READY
     }
 
     /**
-     * Chooses the banner's state. Kept as a pure function of the three facts
-     * it depends on, so the combinations can be checked without a scene.
+     * Chooses the banner's state. Kept as a pure function of the facts it
+     * depends on, so the combinations can be checked without a scene.
+     *
+     * <p>{@code downloading} is asked rather than inferred. The banner used to
+     * treat "found but not staged" as proof a download was running and say so;
+     * on a network where the fetch times out — the network this client exists
+     * for — it then announced a background download that had already failed,
+     * and went on announcing it until the next check hours later.</p>
      *
      * @param updateAvailable whether a newer release was found
      * @param staged          whether its installer is already verified on disk
+     * @param downloading     whether that installer is being fetched right now
      * @param selfUpdates     whether this platform installs updates in-app
      * @return the state to render
      */
-    static UpdateBannerState bannerState(
-            boolean updateAvailable, boolean staged, boolean selfUpdates) {
+    static UpdateBannerState bannerState(boolean updateAvailable, boolean staged,
+                                         boolean downloading, boolean selfUpdates) {
         if (!updateAvailable) {
             return UpdateBannerState.HIDDEN;
         }
         if (!selfUpdates) {
             return UpdateBannerState.PACKAGE_MANAGER;
         }
-        return staged ? UpdateBannerState.READY : UpdateBannerState.DOWNLOADING;
+        if (staged) {
+            return UpdateBannerState.READY;
+        }
+        return downloading ? UpdateBannerState.DOWNLOADING : UpdateBannerState.AVAILABLE;
     }
 
     /**
@@ -303,6 +316,10 @@ public class DashboardViewController {
         // nothing more.
         updateManager.stagedProperty()
                 .addListener((o, was, is) -> refreshUpdateBanner());
+        // The fetch starting and stopping is now a fact the banner reads rather
+        // than one it guesses, so it has to hear about both edges.
+        updateManager.downloadingProperty()
+                .addListener((o, was, is) -> refreshUpdateBanner());
         // The title carries a version number, so it cannot be a plain binding;
         // re-render instead when the language changes under it.
         I18n.localeProperty().addListener((o, was, is) -> refreshUpdateBanner());
@@ -317,6 +334,7 @@ public class DashboardViewController {
                 ? UpdateBannerState.HIDDEN
                 : bannerState(updateManager.updateAvailableProperty().get(),
                         updateManager.hasStagedUpdate(),
+                        updateManager.downloadingProperty().get(),
                         UpdateApplier.current().selfUpdates());
 
         updateBanner.setVisible(state != UpdateBannerState.HIDDEN);
@@ -332,6 +350,7 @@ public class DashboardViewController {
         String hintKey = switch (state) {
             case READY -> "dashboard.update.hint.staged";
             case PACKAGE_MANAGER -> "dashboard.update.hint.packagemanager";
+            case AVAILABLE -> "dashboard.update.hint.pending";
             default -> "dashboard.update.hint.downloading";
         };
         updateBannerHint.setText(I18n.get(hintKey));

@@ -63,21 +63,36 @@ public class DashboardUpdateBannerTest extends ApplicationTest {
 
     @Test
     void nothingIsAnnouncedWithoutANewerRelease() {
-        assertThat(DashboardViewController.bannerState(false, false, true))
+        assertThat(DashboardViewController.bannerState(false, false, false, true))
                 .isEqualTo(UpdateBannerState.HIDDEN);
         // Staged but not newer cannot happen, and must still stay quiet.
-        assertThat(DashboardViewController.bannerState(false, true, true))
+        assertThat(DashboardViewController.bannerState(false, true, false, true))
                 .isEqualTo(UpdateBannerState.HIDDEN);
     }
 
     @Test
     void aStagedUpdateIsTheOnlyStateWithSomethingToPress() {
-        assertThat(DashboardViewController.bannerState(true, true, true))
+        assertThat(DashboardViewController.bannerState(true, true, false, true))
                 .isEqualTo(UpdateBannerState.READY);
         // Still downloading: the banner reports it, but there is no action —
         // the download runs on its own.
-        assertThat(DashboardViewController.bannerState(true, false, true))
+        assertThat(DashboardViewController.bannerState(true, false, true, true))
                 .isEqualTo(UpdateBannerState.DOWNLOADING);
+    }
+
+    /**
+     * A download that is not running must not be announced as one.
+     *
+     * <p>The banner used to read "found but not staged" as proof a fetch was
+     * under way. On a network where the fetch times out — the network this
+     * client exists for — it announced a background download that had already
+     * failed, and kept announcing it until the next check hours later, while
+     * the restart it promised never arrived because nothing was ever staged.</p>
+     */
+    @Test
+    void aFetchThatIsNotRunningIsNotReportedAsDownloading() {
+        assertThat(DashboardViewController.bannerState(true, false, false, true))
+                .isEqualTo(UpdateBannerState.AVAILABLE);
     }
 
     @Test
@@ -85,9 +100,12 @@ public class DashboardUpdateBannerTest extends ApplicationTest {
         // Linux: nothing was downloaded and nothing here can install it, so
         // the banner must not imply otherwise — even if a stale marker from an
         // earlier platform state claimed something was staged.
-        assertThat(DashboardViewController.bannerState(true, false, false))
-                .isEqualTo(UpdateBannerState.PACKAGE_MANAGER);
-        assertThat(DashboardViewController.bannerState(true, true, false))
-                .isEqualTo(UpdateBannerState.PACKAGE_MANAGER);
+        for (boolean staged : new boolean[] {false, true}) {
+            for (boolean downloading : new boolean[] {false, true}) {
+                assertThat(DashboardViewController.bannerState(true, staged, downloading, false))
+                        .as("staged=%s downloading=%s", staged, downloading)
+                        .isEqualTo(UpdateBannerState.PACKAGE_MANAGER);
+            }
+        }
     }
 }

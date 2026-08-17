@@ -215,7 +215,7 @@
                                 styleClass="status-circle-disconnected"/>
                         <Label fx:id="appUpdateNameLabel" text="App" styleClass="service-name"/>
                         <Region HBox.hgrow="ALWAYS"/>
-                        <Button fx:id="downloadAppButton" text="Download" visible="false"
+                        <Button fx:id="appUpdateButton" text="Restart now" visible="false"
                                 managed="false" styleClass="secondary-button"/>
                     </HBox>
                     <Label fx:id="appUpdateDetail" text="" styleClass="update-status"/>

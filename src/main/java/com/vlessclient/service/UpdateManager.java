@@ -62,12 +62,6 @@ public class UpdateManager {
     private volatile long lastEventCheckMs;
 
     /**
-     * SHA-256 published for the pending update's installer, captured alongside
-     * its URL so the download is checked against the digest of the same asset.
-     */
-    private volatile String expectedDigest = "";
-
-    /**
      * The release the last check found, held outside the JavaFX properties so
      * the background download can read it on its own thread. The properties
      * below drive the UI and are only ever touched on the FX thread.
@@ -109,6 +103,21 @@ public class UpdateManager {
     private final ReadOnlyBooleanWrapper updateAvailable = new ReadOnlyBooleanWrapper(false);
     private final ReadOnlyStringWrapper latestVersion = new ReadOnlyStringWrapper("");
     private final ReadOnlyStringWrapper downloadUrl = new ReadOnlyStringWrapper("");
+
+    /**
+     * True while an installer is being fetched. The download starts on its own
+     * now — no button asks for it — so this is the only thing that can tell the
+     * user why an available update has not turned into a staged one yet.
+     */
+    private final ReadOnlyBooleanWrapper downloading = new ReadOnlyBooleanWrapper(false);
+
+    /**
+     * The authority behind {@link #downloading} — that one is a JavaFX property
+     * and only ever touched on the FX thread, which is no use to the three
+     * background threads that have to agree on who is fetching.
+     */
+    private final java.util.concurrent.atomic.AtomicBoolean downloadInFlight =
+            new java.util.concurrent.atomic.AtomicBoolean();
 
     /**
      * Creates an update manager with a default HTTP client that follows
@@ -194,8 +203,15 @@ public class UpdateManager {
      * Downloads the release found by the last check, if the policy allows it
      * right now. Runs on the checker thread, so a slow download delays only
      * the next check.
+     *
+     * <p>Public because every check must be able to follow through, not only
+     * the two the scheduler owns. Settings' "Check for updates" calls it on its
+     * own thread after checking: without that, a manual check could report an
+     * available update and then do nothing about it until the next six-hourly
+     * tick — and since the download is no longer offered as a button, nothing
+     * else would have started it.</p>
      */
-    void autoDownloadIfAllowed() {
+    public void autoDownloadIfAllowed() {
         Candidate pending = candidate;
         if (pending == null) {
             return;
@@ -315,7 +331,6 @@ public class UpdateManager {
 
             if (isNewerVersion(version, AppVersion.VERSION)) {
                 log.info("Update available: {} -> {}", AppVersion.VERSION, version);
-                expectedDigest = asset.digest();
                 candidate = new Candidate(version, installerUrl, asset.digest());
                 Platform.runLater(() -> {
                     latestVersion.set(version);
@@ -336,18 +351,8 @@ public class UpdateManager {
     }
 
     /**
-     * Downloads the installer (DMG/MSI/DEB) for the pending update into the
-     * staging directory, verifying it and recording it as the update to apply
-     * at the next start.
-     *
-     * @return the saved file path, or {@code null} if the download failed
-     */
-    public Path downloadUpdate(String url) {
-        return downloadUpdate(url, expectedDigest);
-    }
-
-    /**
-     * Downloads and verifies the installer.
+     * Downloads and verifies the installer (DMG/MSI/DEB) into the staging
+     * directory, recording it as the update to apply at the next start.
      *
      * <p>The file is not merely offered to the user any more: it is what the
      * next start will hand to the OS installer without asking again. Two
@@ -364,11 +369,39 @@ public class UpdateManager {
      * <p>A failed check deletes the partial file: a rejected installer must
      * never be left sitting in Downloads where it could still be opened.</p>
      *
+     * <p>One at a time. Three callers can reach this — the six-hourly timer,
+     * the tunnel coming up, and Settings' own check — on three different
+     * threads, and the "is one already staged?" guard upstream cannot separate
+     * them: two threads both see nothing staged and both proceed. They would
+     * then write the same installer to the same path, and
+     * {@code Files.copy(REPLACE_EXISTING)} interleaving two streams into one
+     * file produces bytes that match neither, so the digest check rejects the
+     * result and both downloads are wasted.</p>
+     *
      * @param url            the asset URL to fetch
      * @param expectedDigest {@code sha256:<hex>} for that asset
-     * @return the saved file path, or {@code null} if download or verification failed
+     * @return the saved file path, or {@code null} if download or verification
+     *         failed, or another download was already running
      */
     Path downloadUpdate(String url, String expectedDigest) {
+        if (!downloadInFlight.compareAndSet(false, true)) {
+            log.info("An installer is already downloading; not starting a second fetch");
+            return null;
+        }
+        // Wrapped rather than flagged inline: the body returns null from a
+        // dozen places, and a flag left true by any one of them would leave the
+        // UI saying "Downloading…" for the rest of the run.
+        setDownloading(true);
+        try {
+            return fetchAndStage(url, expectedDigest);
+        } finally {
+            setDownloading(false);
+            downloadInFlight.set(false);
+        }
+    }
+
+    /** The download itself; separated so the gate around it can be tested. */
+    Path fetchAndStage(String url, String expectedDigest) {
         if (url == null || url.isBlank()) {
             log.warn("No download URL provided");
             return null;
@@ -526,6 +559,10 @@ public class UpdateManager {
         FxExecutor.run(() -> stagedObservable.set(value));
     }
 
+    private void setDownloading(boolean value) {
+        FxExecutor.run(() -> downloading.set(value));
+    }
+
     // -- Properties --
 
     public ReadOnlyBooleanProperty updateAvailableProperty() {
@@ -538,6 +575,10 @@ public class UpdateManager {
 
     public ReadOnlyStringProperty downloadUrlProperty() {
         return downloadUrl.getReadOnlyProperty();
+    }
+
+    public ReadOnlyBooleanProperty downloadingProperty() {
+        return downloading.getReadOnlyProperty();
     }
 
     // -- Version comparison utilities (package-private for testing) --
