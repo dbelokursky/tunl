@@ -7,7 +7,7 @@ import javafx.scene.layout.Region;
 /**
  * The scroll wrapper every content view is mounted in, so the whole page stays
  * reachable when the window is smaller than the content (otherwise buttons like
- * Test Latency are clipped off the bottom and can't be clicked at all).
+ * Re-check are clipped off the bottom and can't be clicked at all).
  *
  * <p>{@code fitToHeight} stretches the page to the viewport so views with a
  * {@code VBox.vgrow} child (the Logs list) can fill a tall window. On its own

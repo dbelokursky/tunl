@@ -39,7 +39,13 @@ public class SettingsViewTest extends ApplicationTest {
     public void start(Stage stage) throws Exception {
         FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/SettingsView.fxml"));
         Parent root = loader.load();
-        stage.setScene(new Scene(root, 700, 720));
+        Scene scene = new Scene(root, 700, 720);
+        // With no stylesheet this class measures a view the app never shows:
+        // every size rule lives in the CSS, so anything the styles get wrong
+        // is invisible here. That is how a field pinned to one line of height
+        // while asking for three rows passed unnoticed.
+        scene.getStylesheets().setAll(getClass().getResource("/css/light.css").toExternalForm());
+        stage.setScene(scene);
         stage.show();
     }
 
@@ -69,5 +75,27 @@ public class SettingsViewTest extends ApplicationTest {
     void mcpEnabledCheckReflectsSetting() {
         CheckBox enabled = lookup("#mcpEnabledCheck").query();
         assertThat(enabled).isNotNull();
+    }
+
+    /**
+     * The command has to be readable, not just present.
+     *
+     * <p>It is a TextArea asking for three rows, wearing the same
+     * {@code .form-field} class as the single-line fields above it — and that
+     * class pins a 34px height so every field in a form matches. The pin won,
+     * so the box rendered one row tall and cut the glyphs through the middle:
+     * a command nobody could read, next to a button offering to copy it.</p>
+     */
+    @Test
+    void mcpCommandAreaIsTallEnoughToReadTheCommand() {
+        TextArea command = lookup("#mcpCommandArea").query();
+        double singleLineField = lookup("#mcpPortField").query().getBoundsInLocal().getHeight();
+
+        assertThat(command.getBoundsInLocal().getHeight())
+                .withFailMessage("the MCP command area is %.1fpx tall, no more than the "
+                        + "%.1fpx single-line field beside it — it asks for %d rows",
+                        command.getBoundsInLocal().getHeight(), singleLineField,
+                        command.getPrefRowCount())
+                .isGreaterThan(singleLineField);
     }
 }

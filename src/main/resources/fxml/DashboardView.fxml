@@ -4,7 +4,6 @@
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
-<?import javafx.scene.control.Separator?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.StackPane?>
 <?import javafx.scene.layout.VBox?>
@@ -122,62 +121,37 @@
     <Label text="Real-time traffic" styleClass="section-header"/>
 
     <!-- Mirrored duplex card: upload plots up from the shared dashed axis and
-         download plots down, so a curve travels the way its name says. Each
-         legend and speed readout floats over the corners of ITS OWN half — so
-         they swap together with the curves, or they would label the wrong one.
-         The chevron graphics are set from the controller
-         (Icons.chevronDouble*). Overlay children pin to USE_PREF_SIZE so the
-         StackPane doesn't stretch them over the canvas. -->
-    <VBox styleClass="card, traffic-card" maxWidth="Infinity">
-        <StackPane>
-            <MirroredSparkline fx:id="trafficSparkline" prefHeight="150"/>
-            <HBox StackPane.alignment="TOP_LEFT" alignment="CENTER_LEFT" spacing="8"
-                  maxWidth="-Infinity" maxHeight="-Infinity" pickOnBounds="false">
-                <Label fx:id="uploadCardIcon" styleClass="stats-icon-upload"/>
-                <Label fx:id="uploadCardTitle" text="Upload" styleClass="stats-title"/>
-            </HBox>
-            <Label fx:id="uploadSpeedLabel" text="0 B/s" styleClass="speed-value"
-                   StackPane.alignment="TOP_RIGHT"
-                   maxWidth="-Infinity" maxHeight="-Infinity"/>
-            <HBox StackPane.alignment="BOTTOM_LEFT" alignment="CENTER_LEFT" spacing="8"
-                  maxWidth="-Infinity" maxHeight="-Infinity" pickOnBounds="false">
-                <Label fx:id="downloadCardIcon" styleClass="stats-icon-download"/>
-                <Label fx:id="downloadCardTitle" text="Download" styleClass="stats-title"/>
-            </HBox>
-            <Label fx:id="downloadSpeedLabel" text="0 B/s" styleClass="speed-value"
-                   StackPane.alignment="BOTTOM_RIGHT"
-                   maxWidth="-Infinity" maxHeight="-Infinity"/>
-        </StackPane>
-    </VBox>
+         download plots down, so a curve travels the way its name says. The
+         chevron graphics are set from the controller (Icons.chevronDouble*). -->
+    <VBox styleClass="card, traffic-card" maxWidth="Infinity" spacing="6">
+        <!-- Rows, not overlays. These used to float in the corners of a
+             StackPane over the canvas, which meant nothing stopped a curve
+             from running underneath a number — it only happened to miss at
+             the sample values we looked at. Laying them out above and below
+             the chart makes the collision impossible rather than unlikely,
+             and costs the height of two label rows.
 
-    <!-- Session totals + latency. Session metrics and the Test Latency button
-         sit on the top row; latency results are listed one-per-server below,
-         so a multi-server result never overflows the strip into ellipsis. -->
-    <VBox styleClass="card, totals-strip" spacing="10">
-        <HBox alignment="CENTER_LEFT" spacing="14">
-            <Label text="Session" styleClass="stats-title"/>
-
-            <HBox alignment="CENTER_LEFT" spacing="6">
-                <Label fx:id="totalUploadIcon" styleClass="stats-icon-upload"/>
-                <Label fx:id="totalUploadLabel" text="—" styleClass="stats-value"/>
-            </HBox>
-
-            <HBox alignment="CENTER_LEFT" spacing="6">
-                <Label fx:id="totalDownloadIcon" styleClass="stats-icon-download"/>
-                <Label fx:id="totalDownloadLabel" text="—" styleClass="stats-value"/>
-            </HBox>
-
+             Each row still belongs to its own half: the sparkline is
+             mirrored, upload plots up and download down, so the legend, the
+             session total and the speed for one direction all read on the
+             same side of the axis as its curve. -->
+        <HBox alignment="CENTER_LEFT" spacing="8">
+            <Label fx:id="uploadCardIcon" styleClass="stats-icon-upload"/>
+            <Label fx:id="uploadCardTitle" text="Upload" styleClass="stats-title"/>
+            <Label fx:id="totalUploadLabel" text="—" styleClass="session-total"/>
             <Region HBox.hgrow="ALWAYS" minWidth="8"/>
-
-            <Button fx:id="testLatencyButton" text="Test Latency"
-                    styleClass="secondary-button" prefWidth="140" minWidth="-Infinity"
-                    onAction="#onTestLatencyClicked"/>
+            <Label fx:id="uploadSpeedLabel" text="0 B/s" styleClass="speed-value"/>
         </HBox>
 
-        <!-- One row per server (dot + name + latency), populated on Test
-             Latency. Hidden until a measurement runs. -->
-        <VBox fx:id="latencyResultList" styleClass="latency-list" spacing="6"
-              visible="false" managed="false"/>
+        <MirroredSparkline fx:id="trafficSparkline" prefHeight="150"/>
+
+        <HBox alignment="CENTER_LEFT" spacing="8">
+            <Label fx:id="downloadCardIcon" styleClass="stats-icon-download"/>
+            <Label fx:id="downloadCardTitle" text="Download" styleClass="stats-title"/>
+            <Label fx:id="totalDownloadLabel" text="—" styleClass="session-total"/>
+            <Region HBox.hgrow="ALWAYS" minWidth="8"/>
+            <Label fx:id="downloadSpeedLabel" text="0 B/s" styleClass="speed-value"/>
+        </HBox>
     </VBox>
 
     <!-- Service availability: reachability of key services through the tunnel -->

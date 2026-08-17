@@ -58,7 +58,6 @@ public class DashboardFitTest extends ApplicationTest {
         });
 
         assertWithinWidth("#connectButton");
-        assertWithinWidth("#testLatencyButton");
         assertWithinWidth("#proxyModeCombo");
         // Pinned to a width of its own, so it can no longer shrink out of the
         // way when the row runs out of room — which is exactly what this guard

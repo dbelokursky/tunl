@@ -193,13 +193,8 @@ public class DashboardLayoutTest extends ApplicationTest {
         WaitForAsyncUtils.waitForFxEvents();
 
         double recheck = ((Region) lookup("#recheckButton").query()).getHeight();
-        double testLatency = ((Region) lookup("#testLatencyButton").query()).getHeight();
         double addTarget = ((Region) lookup("#addTargetButton").query()).getHeight();
 
-        assertThat(testLatency)
-                .withFailMessage("Test Latency is %.1fpx tall, Re-check %.1fpx",
-                        testLatency, recheck)
-                .isEqualTo(recheck);
         assertThat(addTarget)
                 .withFailMessage("the + button is %.1fpx tall, Re-check %.1fpx",
                         addTarget, recheck)
@@ -249,6 +244,33 @@ public class DashboardLayoutTest extends ApplicationTest {
                         + " of keeping its %.1fpx natural height and scrolling",
                         viewport, page.prefHeight(page.getWidth()))
                 .isGreaterThan(viewport);
+    }
+
+    /**
+     * No readout may sit on top of the chart.
+     *
+     * <p>These four labels used to be children of a StackPane over the
+     * sparkline, pinned to its corners. Nothing there stopped a curve from
+     * running underneath a number — it only happened to miss at the values
+     * anyone looked at, and a session total is exactly the kind of value that
+     * grows until it does not. They are rows above and below the canvas now,
+     * and this is the guard that keeps them there: put them back over the
+     * chart and the intersection below is no longer empty.</p>
+     */
+    @Test
+    void trafficReadoutsNeverOverlapTheChart() {
+        Bounds chart = toScene(lookup("#trafficSparkline").query());
+
+        for (String id : new String[] {"#uploadCardTitle", "#totalUploadLabel",
+                "#uploadSpeedLabel", "#downloadCardTitle", "#totalDownloadLabel",
+                "#downloadSpeedLabel"}) {
+            Bounds label = toScene(lookup(id).query());
+            assertThat(chart.intersects(label))
+                    .withFailMessage("%s at [%.1f..%.1f] vertically overlaps the chart "
+                            + "at [%.1f..%.1f]", id, label.getMinY(), label.getMaxY(),
+                            chart.getMinY(), chart.getMaxY())
+                    .isFalse();
+        }
     }
 
     private static Bounds toScene(Node node) {
