@@ -176,6 +176,29 @@ class UpdateManagerTest {
     }
 
     @Test
+    void theTimerChecksFourTimesADay() {
+        // Not a magic number worth restating: the point is that it is well
+        // under a day, because this app runs for weeks and a daily timer means
+        // one chance per launch-hour, and well over an hour, because 60
+        // unauthenticated requests per hour are shared with the whole address.
+        assertThat(UpdateManager.CHECK_INTERVAL_HOURS).isEqualTo(6);
+    }
+
+    @Test
+    void aFlappingTunnelDoesNotBecomeAFlappingCheck() {
+        UpdateManager manager = new UpdateManager();
+        long start = 1_000_000L;
+
+        assertThat(manager.claimEventCheck(start)).isTrue();
+        // Reconnects seconds apart — the case this exists for.
+        assertThat(manager.claimEventCheck(start + 1_000)).isFalse();
+        assertThat(manager.claimEventCheck(start + 60_000)).isFalse();
+        // Far enough out that asking again is worth a request.
+        assertThat(manager.claimEventCheck(start + UpdateManager.EVENT_CHECK_THROTTLE_MS))
+                .isTrue();
+    }
+
+    @Test
     void downloadPolicy_downloadsUnlessSomethingIsAlreadyStaged() {
         // Re-downloading on top of a verified installer that is already
         // waiting is the one case not worth the bytes; everything else is.
