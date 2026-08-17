@@ -119,6 +119,19 @@ public class ServiceLocator {
                 configStore, configGenerator, routingService, engine);
         register(ConnectionService.class, connectionService);
 
+        // A tunnel coming up is worth a check of its own. For a user whose
+        // network throttles or blocks GitHub — the reason this app exists —
+        // that is the moment a check can succeed at all, and no timer can know
+        // it. UpdateManager throttles the trigger, so a flapping tunnel does
+        // not turn into a flapping check.
+        if (engine != null) {
+            engine.connectionStateProperty().addListener((o, was, is) -> {
+                if (is == com.vlessclient.model.ConnectionState.CONNECTED) {
+                    updateManager.checkAfterEvent();
+                }
+            });
+        }
+
         // MCP control server: a facade over the services above, plus the server
         // that exposes it to agents. Started here so `mcp_enabled` takes effect
         // at launch; re-reconciled whenever settings are saved.

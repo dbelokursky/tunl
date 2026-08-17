@@ -41,7 +41,25 @@ public class UpdateManager {
     static final String RELEASE_DOWNLOAD_PREFIX =
             "https://github.com/dbelokursky/tunl/releases/download/";
     private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(15);
-    private static final long CHECK_INTERVAL_HOURS = 24;
+
+    /**
+     * How often the timer checks. Six hours rather than a day: this app runs
+     * for weeks at a stretch, so a daily timer means a release found at
+     * launch and then nothing until the same hour tomorrow. Four checks a day
+     * costs four requests out of the sixty an unauthenticated caller gets per
+     * hour, per address — and that budget is shared with everything else on
+     * the address, which is why this is not hourly.
+     */
+    static final long CHECK_INTERVAL_HOURS = 6;
+
+    /**
+     * The floor between checks triggered by an event rather than the timer.
+     * A tunnel that flaps would otherwise check on every reconnect.
+     */
+    static final long EVENT_CHECK_THROTTLE_MS = 15L * 60 * 1000;
+
+    /** When an event last claimed a check; 0 = never. */
+    private volatile long lastEventCheckMs;
 
     /**
      * SHA-256 published for the pending update's installer, captured alongside
@@ -119,7 +137,8 @@ public class UpdateManager {
     }
 
     /**
-     * Starts the periodic update check: once immediately, then every 24 hours.
+     * Starts the periodic update check: once immediately, then on the timer.
+     * A tunnel coming up checks too — see {@link #checkAfterEvent()}.
      */
     public void startPeriodicCheck() {
         scheduler.scheduleAtFixedRate(() -> {
@@ -133,9 +152,48 @@ public class UpdateManager {
     }
 
     /**
+     * Checks because something happened, not because the timer said so.
+     *
+     * <p>Wired to the tunnel coming up, which is the moment worth reacting
+     * to: for a user whose network throttles or blocks GitHub, that is when
+     * the check can succeed at all, and the timer has no way of knowing it.
+     * Throttled, because a reconnecting tunnel fires this far faster than a
+     * check is worth making.</p>
+     */
+    public void checkAfterEvent() {
+        if (!claimEventCheck(System.currentTimeMillis())) {
+            return;
+        }
+        // Onto the checker thread: callers are the FX thread or whatever
+        // thread the engine changed state on, and neither should wait on HTTP.
+        scheduler.execute(() -> {
+            try {
+                checkForUpdates();
+                autoDownloadIfAllowed();
+            } catch (Exception e) {
+                log.warn("Event-triggered update check failed", e);
+            }
+        });
+    }
+
+    /**
+     * Whether an event-triggered check may run now, recording it if so.
+     *
+     * @param nowMs the current time
+     * @return true when the caller may check
+     */
+    synchronized boolean claimEventCheck(long nowMs) {
+        if (lastEventCheckMs != 0 && nowMs - lastEventCheckMs < EVENT_CHECK_THROTTLE_MS) {
+            return false;
+        }
+        lastEventCheckMs = nowMs;
+        return true;
+    }
+
+    /**
      * Downloads the release found by the last check, if the policy allows it
      * right now. Runs on the checker thread, so a slow download delays only
-     * the next check — which is a day away.
+     * the next check.
      */
     void autoDownloadIfAllowed() {
         Candidate pending = candidate;
