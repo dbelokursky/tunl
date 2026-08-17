@@ -7,9 +7,12 @@ name: Bump sing-box
 # new core is usable before a single user sees it.
 on:
   schedule:
-    # Monday morning: a bump that lands early in the week has time to be
-    # noticed before it rides out in a release.
-    - cron: '0 6 * * 1'
+    # Daily, not weekly. A weekly cron means the gap between a core release
+    # and this repo hearing about it averages three and a half days and runs
+    # to seven — sing-box 1.13.19 shipped an hour after a Monday run and
+    # would have waited until the next one. The cost of checking more often
+    # is one API call: a run with nothing to do stops at the first step.
+    - cron: '0 6 * * *'
   workflow_dispatch:
     inputs:
       version:
