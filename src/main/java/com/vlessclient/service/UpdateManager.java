@@ -474,7 +474,14 @@ public class UpdateManager {
             return target;
         } catch (IOException | InterruptedException
                  | java.security.NoSuchAlgorithmException e) {
-            log.error("Failed to download update: {}", e.getMessage());
+            // With the exception, not just its message. A user reported
+            // "Failed to download update: closed" — one word, from somewhere
+            // inside java.net.http, for a download that succeeded on the same
+            // release from the same machine minutes later. The class and the
+            // frame it came from are the whole difference between diagnosing
+            // that and guessing at it, and this is a failure only a user's
+            // machine tends to produce.
+            log.error("Failed to download update from {}", url, e);
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }

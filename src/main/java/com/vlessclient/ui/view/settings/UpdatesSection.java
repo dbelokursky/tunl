@@ -268,7 +268,14 @@ public final class UpdatesSection {
         if (updateManager == null || result != UpdateManager.CheckResult.UPDATE_AVAILABLE) {
             return;
         }
-        if (UpdateApplier.current().selfUpdates() && !updateManager.hasStagedUpdate()) {
+        // Not downloading, or "nothing staged" is not a verdict yet. A fetch
+        // started by the six-hourly check or by the tunnel coming up can still
+        // be running: this check's own attempt was then declined rather than
+        // failed — one installer at a time — and calling that a failed download
+        // reports an error over a download that is going fine.
+        if (UpdateApplier.current().selfUpdates()
+                && !updateManager.hasStagedUpdate()
+                && !updateManager.downloadingProperty().get()) {
             appVersionValue.setText(I18n.get("settings.version.downloadfailed",
                     AppVersion.VERSION, updateManager.latestVersionProperty().get()));
             return;
