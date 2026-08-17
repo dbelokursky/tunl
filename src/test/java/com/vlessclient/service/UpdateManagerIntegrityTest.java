@@ -4,6 +4,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Path;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -86,6 +91,59 @@ class UpdateManagerIntegrityTest {
 
         assertThat(manager.downloadUpdate(null, DIGEST)).isNull();
         assertThat(manager.downloadUpdate("  ", DIGEST)).isNull();
+    }
+
+    /**
+     * Three threads can reach the download — the six-hourly timer, the tunnel
+     * coming up, and Settings' own check — and the "already staged?" guard
+     * upstream cannot separate them: both see nothing staged and both proceed.
+     * Two streams copied into one staging path with REPLACE_EXISTING produce
+     * bytes matching neither, so the digest check throws away both downloads.
+     */
+    @Test
+    void aSecondDownloadIsRefusedWhileOneIsRunning() throws Exception {
+        CountDownLatch inside = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        // Counts arrivals at the fetch itself, which is what the gate has to
+        // keep to one at a time. A refused caller returns null without ever
+        // getting here — and so does a failed one, so the count is the only
+        // thing that tells the two apart.
+        AtomicInteger fetches = new AtomicInteger();
+        UpdateManager manager = new UpdateManager() {
+            @Override
+            Path fetchAndStage(String url, String expectedDigest) {
+                fetches.incrementAndGet();
+                inside.countDown();
+                try {
+                    release.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return null;
+            }
+        };
+
+        Thread first = new Thread(() -> manager.downloadUpdate(OFFICIAL, DIGEST), "first");
+        first.setDaemon(true);
+        first.start();
+        assertThat(inside.await(10, TimeUnit.SECONDS))
+                .as("the first download never started").isTrue();
+
+        try {
+            manager.downloadUpdate(OFFICIAL, DIGEST);
+            assertThat(fetches)
+                    .as("a second fetch started alongside the first, into the same path")
+                    .hasValue(1);
+        } finally {
+            release.countDown();
+            first.join(TimeUnit.SECONDS.toMillis(10));
+        }
+
+        // The gate has to reopen, or the app would download nothing ever again.
+        assertThat(manager.downloadingProperty().get()).isFalse();
+        manager.downloadUpdate(OFFICIAL, DIGEST);
+        assertThat(fetches).as("the gate stayed shut after the first download finished")
+                .hasValue(2);
     }
 
     /**

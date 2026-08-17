@@ -112,6 +112,14 @@ public class UpdateManager {
     private final ReadOnlyBooleanWrapper downloading = new ReadOnlyBooleanWrapper(false);
 
     /**
+     * The authority behind {@link #downloading} — that one is a JavaFX property
+     * and only ever touched on the FX thread, which is no use to the three
+     * background threads that have to agree on who is fetching.
+     */
+    private final java.util.concurrent.atomic.AtomicBoolean downloadInFlight =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    /**
      * Creates an update manager with a default HTTP client that follows
      * redirects and uses the standard connect timeout.
      */
@@ -361,11 +369,25 @@ public class UpdateManager {
      * <p>A failed check deletes the partial file: a rejected installer must
      * never be left sitting in Downloads where it could still be opened.</p>
      *
+     * <p>One at a time. Three callers can reach this — the six-hourly timer,
+     * the tunnel coming up, and Settings' own check — on three different
+     * threads, and the "is one already staged?" guard upstream cannot separate
+     * them: two threads both see nothing staged and both proceed. They would
+     * then write the same installer to the same path, and
+     * {@code Files.copy(REPLACE_EXISTING)} interleaving two streams into one
+     * file produces bytes that match neither, so the digest check rejects the
+     * result and both downloads are wasted.</p>
+     *
      * @param url            the asset URL to fetch
      * @param expectedDigest {@code sha256:<hex>} for that asset
-     * @return the saved file path, or {@code null} if download or verification failed
+     * @return the saved file path, or {@code null} if download or verification
+     *         failed, or another download was already running
      */
     Path downloadUpdate(String url, String expectedDigest) {
+        if (!downloadInFlight.compareAndSet(false, true)) {
+            log.info("An installer is already downloading; not starting a second fetch");
+            return null;
+        }
         // Wrapped rather than flagged inline: the body returns null from a
         // dozen places, and a flag left true by any one of them would leave the
         // UI saying "Downloading…" for the rest of the run.
@@ -374,10 +396,12 @@ public class UpdateManager {
             return fetchAndStage(url, expectedDigest);
         } finally {
             setDownloading(false);
+            downloadInFlight.set(false);
         }
     }
 
-    private Path fetchAndStage(String url, String expectedDigest) {
+    /** The download itself; separated so the gate around it can be tested. */
+    Path fetchAndStage(String url, String expectedDigest) {
         if (url == null || url.isBlank()) {
             log.warn("No download URL provided");
             return null;
