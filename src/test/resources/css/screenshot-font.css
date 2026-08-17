@@ -1,0 +1,19 @@
+/*
+ * Screenshot-only font override. Applied on top of the theme by
+ * ScreenshotGenerator; never shipped.
+ *
+ * The headless JVM this runs in mis-advances glyphs in the system font: the
+ * character after certain letters is drawn on top of them, so "4.0 MB/s"
+ * comes out with the slash through the B and "SF Pro Display" with the r on
+ * the P. It is not a defect in the app — a normally launched client renders
+ * the same strings correctly — but it is baked into every README screenshot
+ * generated so far, which is how the docs came to show mangled numbers.
+ *
+ * Named fonts are unaffected (Helvetica Neue and Arial both render cleanly),
+ * so the fix is to name one. Helvetica Neue is the closest stand-in for the
+ * macOS system font the app actually uses.
+ */
+.root-pane,
+.speed-value {
+    -fx-font-family: "Helvetica Neue";
+}
