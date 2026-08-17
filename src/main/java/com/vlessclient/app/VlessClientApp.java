@@ -22,6 +22,7 @@ import java.net.URL;
 import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
@@ -43,6 +44,23 @@ import org.slf4j.LoggerFactory;
 public class VlessClientApp extends Application {
 
     private static final Logger log = LoggerFactory.getLogger(VlessClientApp.class);
+
+    /**
+     * How long {@link #stop()} gets to reach {@code System.exit} before the
+     * watchdog takes over. Must stay comfortably under the 30s the macOS
+     * update relay waits for this process to exit — past that the relay gives
+     * up and the update it was handed is not installed.
+     */
+    private static final long TEARDOWN_BUDGET_MS = 8_000L;
+
+    /**
+     * How long the stalled-teardown path gives the JVM's shutdown hooks —
+     * chiefly the one that stops sing-box — before halting anyway. Together
+     * with {@link #TEARDOWN_BUDGET_MS} this stays inside the relay's 30s wait.
+     */
+    private static final long HOOK_GRACE_MS = 3_000L;
+
+    private final AtomicBoolean teardownReachedExit = new AtomicBoolean();
 
     private TrayIconService trayIconService;
 
@@ -333,6 +351,14 @@ public class VlessClientApp extends Application {
 
     @Override
     public void stop() {
+        // Armed before the first teardown step, not after it. The tray removal
+        // below and everything in shutdown() runs on the FX application thread,
+        // which on macOS is the process main thread; anything there that waits
+        // on another thread can deadlock, and a watchdog started further down
+        // would never be reached. See TrayIconService#uninstall for the case
+        // that actually happened.
+        armTeardownWatchdog();
+
         if (trayIconService != null) {
             try {
                 trayIconService.uninstall();
@@ -362,9 +388,66 @@ public class VlessClientApp extends Application {
         }, "vless-jvm-exit");
         killer.setDaemon(true);
         killer.start();
+        teardownReachedExit.set(true);
         // In case the killer thread is somehow not enough, call System.exit
         // directly too. It waits for shutdown hooks (including our sing-box
         // stop) before handing control to `halt`.
+        System.exit(0);
+    }
+
+    /**
+     * Starts the thread that ends the process if {@link #stop()} never gets as
+     * far as calling {@code System.exit}.
+     *
+     * <p>Daemon, so it cannot itself keep a healthy JVM alive.</p>
+     */
+    private void armTeardownWatchdog() {
+        Thread watchdog = new Thread(() -> {
+            try {
+                Thread.sleep(TEARDOWN_BUDGET_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            if (teardownReachedExit.get()) {
+                return;
+            }
+            log.error("Shutdown stalled: stop() has not reached System.exit after {} ms",
+                    TEARDOWN_BUDGET_MS);
+            onTeardownStalled();
+        }, "vless-teardown-watchdog");
+        watchdog.setDaemon(true);
+        watchdog.start();
+    }
+
+    /**
+     * Decides what to do when teardown has wedged and the process is still up.
+     *
+     * <p>Runs on the watchdog thread, so it may block; the thread that got
+     * stuck is unreachable by definition and must not be waited on. This is the
+     * last code that runs before the process dies, so whatever the tunnel needs
+     * in order not to outlive the app has to happen here.</p>
+     */
+    private void onTeardownStalled() {
+        // halt() would end the process a few milliseconds sooner, but it runs
+        // no shutdown hooks — and one of those is what stops sing-box. Skipping
+        // it would leave the core running under sudo with the TUN device up and
+        // its ports held, so the tunnel would outlive the app that owns it and
+        // the next launch would find the ports taken. exit() runs the hooks.
+        Thread lastResort = new Thread(() -> {
+            try {
+                Thread.sleep(HOOK_GRACE_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            // Reached only if a hook is stuck too. Nothing else is going to end
+            // this process, and staying up is the one outcome already known to
+            // be worse than any of the alternatives.
+            log.error("Shutdown hooks did not finish either; halting");
+            Runtime.getRuntime().halt(1);
+        }, "vless-last-resort");
+        lastResort.setDaemon(true);
+        lastResort.start();
         System.exit(0);
     }
 
