@@ -24,11 +24,10 @@ public final class Launcher {
      * @param args the command-line arguments passed on to the JavaFX application
      */
     public static void main(String[] args) {
-        // Point logging at the per-OS logs directory. Must run before any
-        // class with a static logger loads (logback resolves ${vless.log.dir}
-        // on first use), so it sits at the very top of main().
-        System.setProperty("vless.log.dir",
-                com.vlessclient.platform.PlatformPaths.current().logsDir().toString());
+        // Nothing to do about logging here any more: logback asks
+        // PlatformPaths for the directory itself, through
+        // LogDirPropertyDefiner, so there is no property to set before the
+        // first class with a static logger loads.
 
         // An update downloaded during an earlier run installs here, before
         // anything else exists to tear down. A handoff means a helper is now

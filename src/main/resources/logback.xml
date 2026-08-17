@@ -3,11 +3,16 @@
 
     <property name="LOG_PATTERN"
               value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"/>
-    <!-- Launcher.main sets vless.log.dir to the per-OS logs directory before
-         logging initializes. The fallback keeps the macOS location for any
-         path that starts logging without the launcher (e.g. tests). -->
-    <property name="LOG_DIR"
-              value="${vless.log.dir:-${user.home}/Library/Application Support/VlessClient/logs}"/>
+    <!-- The default is computed, not written down: LogDirPropertyDefiner asks
+         PlatformPaths, so it is right on every OS and for every entry point,
+         and it follows the vless.data.dir redirect a test run sets. The
+         literal that used to stand here was the macOS path, and a test run
+         inherited it — into the developer's real logs, whose history this
+         appender then purged on start.
+         vless.log.dir still overrides, for pointing a support build's logs
+         somewhere specific. -->
+    <define name="DEFAULT_LOG_DIR" class="com.vlessclient.app.LogDirPropertyDefiner"/>
+    <property name="LOG_DIR" value="${vless.log.dir:-${DEFAULT_LOG_DIR}}"/>
     <property name="LOG_FILE" value="${LOG_DIR}/tunl.log"/>
 
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
