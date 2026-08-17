@@ -87,4 +87,34 @@ class UpdateManagerIntegrityTest {
         assertThat(manager.downloadUpdate(null, DIGEST)).isNull();
         assertThat(manager.downloadUpdate("  ", DIGEST)).isNull();
     }
+
+    /**
+     * The Settings row reads this flag to say "Downloading…", and nothing else
+     * reports the fetch now that no button asks for one. Every refusal above
+     * returns from a different point inside the download, so a flag cleared on
+     * the way out of only some of them would leave the row claiming a download
+     * is running for the rest of the session — with no button left to press.
+     */
+    @Test
+    void theDownloadingFlagIsClearedByEveryRefusalPath() {
+        UpdateManager manager = new UpdateManager();
+
+        assertThat(manager.downloadingProperty().get())
+                .as("nothing has been downloaded yet").isFalse();
+
+        for (String[] refusal : new String[][] {
+                {"https://evil.example.com/tunl_9.9.9.dmg", DIGEST},
+                {"https://github.com/dbelokursky/tunl/raw/main/x.dmg", DIGEST},
+                {OFFICIAL, ""},
+                {OFFICIAL, null},
+                {OFFICIAL, "md5:abcd"},
+                {null, DIGEST},
+                {"  ", DIGEST}}) {
+            assertThat(manager.downloadUpdate(refusal[0], refusal[1])).isNull();
+            assertThat(manager.downloadingProperty().get())
+                    .as("still flagged as downloading after refusing url=%s digest=%s",
+                            refusal[0], refusal[1])
+                    .isFalse();
+        }
+    }
 }

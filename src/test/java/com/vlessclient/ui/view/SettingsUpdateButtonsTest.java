@@ -21,8 +21,8 @@ import static org.assertj.core.api.Assertions.within;
 
 /**
  * Guards the pair the Updates block in Settings &gt; About is made of:
- * "Check for updates" over "Download", a row apart at the same edge of one
- * card. Sized to their own labels they come out 161px and 107px, and two
+ * "Check for updates" over "Restart now", a row apart at the same edge of one
+ * card. Sized to their own labels they come out at different widths, and two
  * widths that far apart read as two different controls rather than one used
  * twice.
  *
@@ -87,11 +87,11 @@ public class SettingsUpdateButtonsTest extends ApplicationTest {
             Scene settings = loadSettings(theme);
 
             Bounds check = boundsOf(settings, button(settings, "#checkUpdatesButton"));
-            Bounds download = boundsOf(settings, button(settings, "#downloadAppButton"));
+            Bounds download = boundsOf(settings, button(settings, "#appUpdateButton"));
 
             assertThat(download.getMaxX())
                     .withFailMessage("in %s the buttons' right edges are %.1f apart — "
-                                    + "checkUpdatesButton ends at %.1f, downloadAppButton at "
+                                    + "checkUpdatesButton ends at %.1f, appUpdateButton at "
                                     + "%.1f. .updates-header's right padding has to match "
                                     + ".update-item's",
                             theme, Math.abs(check.getMaxX() - download.getMaxX()),
@@ -123,26 +123,26 @@ public class SettingsUpdateButtonsTest extends ApplicationTest {
      */
     private void assertSharedWidth(Scene settings, Locale locale) {
         Button check = button(settings, "#checkUpdatesButton");
-        Button download = button(settings, "#downloadAppButton");
+        Button restart = button(settings, "#appUpdateButton");
         double needed = Math.max(
                 naturalWidth("settings.updates.check"),
-                naturalWidth("settings.update.download"));
+                naturalWidth("settings.update.restart"));
 
-        for (Button button : List.of(check, download)) {
+        for (Button button : List.of(check, restart)) {
             assertThat(widthOf(settings, button))
                     .withFailMessage("in %s the pair should measure %.1f — what \"%s\" needs "
-                                    + "— but %s is %.1f: check=%.1f download=%.1f",
+                                    + "— but %s is %.1f: check=%.1f restart=%.1f",
                             locale, needed, longerLabel(), button.getId(),
                             widthOf(settings, button), widthOf(settings, check),
-                            widthOf(settings, download))
+                            widthOf(settings, restart))
                     .isCloseTo(needed, within(SNAP));
         }
     }
 
     private static String longerLabel() {
         String check = I18n.get("settings.updates.check");
-        String download = I18n.get("settings.update.download");
-        return check.length() >= download.length() ? check : download;
+        String restart = I18n.get("settings.update.restart");
+        return check.length() >= restart.length() ? check : restart;
     }
 
     /** Where the button ends up on screen, once the row has been laid out. */
@@ -221,7 +221,7 @@ public class SettingsUpdateButtonsTest extends ApplicationTest {
                 // The download button only appears once a release is out; it
                 // is measured and pinned either way, but it has to be laid out
                 // to have a width to read.
-                javafx.scene.Node download = root.lookup("#downloadAppButton");
+                javafx.scene.Node download = root.lookup("#appUpdateButton");
                 download.setVisible(true);
                 download.setManaged(true);
 
