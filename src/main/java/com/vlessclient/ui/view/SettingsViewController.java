@@ -82,9 +82,6 @@ public class SettingsViewController implements ViewShownAware {
     @FXML private Label updatesLabel;
     @FXML private Button checkUpdatesButton;
 
-    @FXML private VBox appUpdateRow;
-    @FXML private Circle appUpdateDot;
-    @FXML private Label appUpdateDetail;
     @FXML private Button appUpdateButton;
 
     @FXML private CheckBox mcpEnabledCheck;
@@ -379,22 +376,17 @@ public class SettingsViewController implements ViewShownAware {
     }
 
     /**
-     * Fills the About block and hands the whole Updates block (app row, async
-     * sing-box version detection) over to {@link UpdatesSection}, which drives
-     * the controls listed here.
+     * Hands the About block's two version rows and the Updates header over to
+     * {@link UpdatesSection}, which drives the controls listed here. The app
+     * version is set there too, since what the row says depends on what the
+     * updater knows.
      */
     private void initAboutSection() {
-        appVersionValue.setText(AppVersion.VERSION);
         updatesSection = new UpdatesSection(new UpdatesSection.Controls(
+                appVersionValue,
                 singboxVersionValue,
                 checkUpdatesButton,
-                appUpdateRow,
-                appUpdateDot,
-                appUpdateDetail,
-                appUpdateButton,
-                // The button's label is bound, not set: the section says which
-                // of its labels to show, the controller knows how they bind.
-                key -> ButtonLabels.rebind(appUpdateButton, key)));
+                appUpdateButton));
         updatesSection.init();
     }
 
@@ -436,14 +428,13 @@ public class SettingsViewController implements ViewShownAware {
         appVersionLabel.textProperty().bind(I18n.binding("settings.app.version"));
         singboxVersionLabel.textProperty().bind(I18n.binding("settings.singbox.version"));
         updatesLabel.textProperty().bind(I18n.binding("settings.updates"));
-        // The Updates block's two buttons stand one row apart at the same
-        // edge of the card, so sizing each to its own label leaves the pair
-        // visibly mismatched. Bound as a group, they share a width.
-        // The lower button has only one label now that the download is never
-        // offered — it appears only once an update is staged and waiting.
-        ButtonLabels.bindSharingWidth(
-                Map.of(checkUpdatesButton, "settings.updates.check",
-                        appUpdateButton, "settings.update.restart"));
+        // Sized to its own label each, now that the pair shares one row: two
+        // adjacent buttons at their natural widths read as two actions, which
+        // is what they are. They were pinned to a shared width while they
+        // stood a row apart, where unequal widths read as two different
+        // controls instead of one used twice.
+        ButtonLabels.bind(checkUpdatesButton, "settings.updates.check");
+        ButtonLabels.bind(appUpdateButton, "settings.update.restart");
         advancedLabel.textProperty().bind(I18n.binding("settings.advanced"));
         proxyDnsLabel.textProperty().bind(I18n.binding("settings.proxy.dns"));
         directDnsLabel.textProperty().bind(I18n.binding("settings.direct.dns"));
