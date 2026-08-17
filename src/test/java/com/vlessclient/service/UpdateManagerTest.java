@@ -157,6 +157,25 @@ class UpdateManagerTest {
     }
 
     @Test
+    void finishingTheDownloadIsAnnounced_notJustRecorded() {
+        // The bug this pins: "staged" was a plain field, so the dashboard
+        // banner — which only ever hears about property changes — announced
+        // "downloading" and stayed there. By the time the download finished,
+        // updateAvailable and latestVersion were already at their final values
+        // and fired nothing, so the restart the banner offers was unreachable.
+        UpdateManager manager = new UpdateManager();
+        java.util.List<Boolean> announced = new java.util.ArrayList<>();
+        manager.stagedProperty().addListener((o, was, is) -> announced.add(is));
+
+        assertThat(manager.hasStagedUpdate()).isFalse();
+        manager.setStaged(true);
+
+        assertThat(manager.hasStagedUpdate()).isTrue();
+        assertThat(manager.stagedProperty().get()).isTrue();
+        assertThat(announced).containsExactly(true);
+    }
+
+    @Test
     void downloadPolicy_downloadsUnlessSomethingIsAlreadyStaged() {
         // Re-downloading on top of a verified installer that is already
         // waiting is the one case not worth the bytes; everything else is.

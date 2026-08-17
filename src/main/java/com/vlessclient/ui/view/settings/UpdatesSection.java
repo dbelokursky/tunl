@@ -127,6 +127,10 @@ public final class UpdatesSection {
         // row reflects a newer release even without pressing the button.
         updateManager.updateAvailableProperty().addListener((o, ov, nv) -> renderAppRow());
         updateManager.latestVersionProperty().addListener((o, ov, nv) -> renderAppRow());
+        // Same reason as the dashboard banner: the download finishing changes
+        // no other property, so without this the row keeps offering "Download"
+        // for something already downloaded.
+        updateManager.stagedProperty().addListener((o, ov, nv) -> renderAppRow());
         renderAppRow();
     }
 

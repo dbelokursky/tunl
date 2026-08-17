@@ -317,6 +317,12 @@ public class DashboardViewController {
                 .addListener((o, was, is) -> refreshUpdateBanner());
         updateManager.latestVersionProperty()
                 .addListener((o, was, is) -> refreshUpdateBanner());
+        // The one that turns "downloading" into an offer to restart. Without
+        // it the banner never hears that the download finished: by then the
+        // two properties above are already at their final values and fire
+        // nothing more.
+        updateManager.stagedProperty()
+                .addListener((o, was, is) -> refreshUpdateBanner());
         // The title carries a version number, so it cannot be a plain binding;
         // re-render instead when the language changes under it.
         I18n.localeProperty().addListener((o, was, is) -> refreshUpdateBanner());

@@ -70,6 +70,19 @@ public class UpdateManager {
      */
     private volatile boolean staged;
 
+    /**
+     * The same fact, as something the UI can subscribe to.
+     *
+     * <p>Two of them because the two readers sit on different threads: the
+     * download policy asks from the checker thread, where touching an FX
+     * property is not allowed, while the dashboard banner needs a change it
+     * can react to. With only the volatile, nothing ever told the banner the
+     * download had finished — it announced "downloading" and stayed there for
+     * the rest of the run, because the properties it does watch were already
+     * at their final values by then.</p>
+     */
+    private final ReadOnlyBooleanWrapper stagedObservable = new ReadOnlyBooleanWrapper(false);
+
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final ScheduledExecutorService scheduler;
@@ -136,7 +149,7 @@ public class UpdateManager {
                     + "its package manager", pending.version());
             return;
         }
-        staged = staging.pending().isPresent();
+        setStaged(staging.pending().isPresent());
         if (!UpdateDownloadPolicy.shouldDownloadNow(staged)) {
             log.info("Update {} available; deferring the download", pending.version());
             return;
@@ -365,7 +378,7 @@ public class UpdateManager {
                 return null;
             }
 
-            staged = true;
+            setStaged(true);
             log.info("Update downloaded, verified and staged: {}", target);
             return target;
         } catch (IOException | InterruptedException
@@ -429,6 +442,30 @@ public class UpdateManager {
      */
     public boolean hasStagedUpdate() {
         return staged;
+    }
+
+    /**
+     * Fires when an installer becomes (or stops being) ready to apply, so the
+     * dashboard banner can offer the restart the moment the download lands
+     * rather than at some later event that may never come.
+     *
+     * @return the observable form of {@link #hasStagedUpdate()}
+     */
+    public ReadOnlyBooleanProperty stagedProperty() {
+        return stagedObservable.getReadOnlyProperty();
+    }
+
+    /**
+     * Records the staged state in both forms at once. Package-private so a
+     * test can drive the transition the UI depends on.
+     *
+     * @param value whether a verified installer is now waiting
+     */
+    void setStaged(boolean value) {
+        staged = value;
+        // Marshals to the FX thread, and runs inline when there is no toolkit
+        // — which is what lets this be exercised in a plain unit test.
+        FxExecutor.run(() -> stagedObservable.set(value));
     }
 
     // -- Properties --
