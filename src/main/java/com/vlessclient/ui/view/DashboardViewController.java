@@ -7,6 +7,8 @@ import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.ServerSelection;
+import com.vlessclient.model.TunnelHealth;
+import com.vlessclient.model.TunnelStatus;
 import com.vlessclient.platform.UpdateApplier;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
@@ -16,6 +18,7 @@ import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.SingBoxInstaller;
 import com.vlessclient.service.TrafficMonitor;
+import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.service.UpdateManager;
 import com.vlessclient.ui.view.dashboard.AddHealthTargetDialog;
 import com.vlessclient.ui.view.dashboard.HealthCheckCoordinator;
@@ -98,6 +101,7 @@ public class DashboardViewController {
     // endpoint and hands each one the few controls it drives.
     private TrafficDisplayBinder trafficDisplay;
     private HealthCheckCoordinator healthChecks;
+    private TunnelHealthState healthState;
     private UpdateManager updateManager;
 
     /**
@@ -173,12 +177,29 @@ public class DashboardViewController {
                 }
             });
         }
+        try {
+            healthState = ServiceLocator.get(TunnelHealthState.class);
+        } catch (IllegalArgumentException e) {
+            log.warn("TunnelHealthState not available; "
+                    + "the status card will report process state only");
+            healthState = null;
+        }
+
         // The engine is supplied lazily because onRetryInstallClicked can swap
         // in a new SingBoxEngine after an in-app install.
         healthChecks = new HealthCheckCoordinator(
                 new HealthCheckCoordinator.Controls(healthCard, healthSummaryLabel,
                         serviceStatusList, reconnectBanner, reconnectBannerLabel),
-                reachabilityChecker, () -> singBoxEngine, this::connect, this::disconnect);
+                reachabilityChecker, healthState, () -> singBoxEngine,
+                this::connect, this::disconnect);
+
+        // A verdict arriving does not change the process state, so the hero
+        // card has to be repainted on its own signal — otherwise a tunnel that
+        // stops carrying traffic keeps claiming it is connected.
+        if (healthState != null) {
+            healthState.healthProperty().addListener(
+                    (obs, oldHealth, newHealth) -> updateUi(currentConnectionState()));
+        }
 
         initProxyModeCombo();
         initServerSelectionCombo();
@@ -559,11 +580,19 @@ public class DashboardViewController {
         onConnectClicked();
     }
 
-    @FXML
-    private void onConnectClicked() {
-        ConnectionState current = singBoxEngine != null
+    /**
+     * The process state to render and act on: the engine's when there is one,
+     * otherwise the local property the no-engine path drives.
+     */
+    private ConnectionState currentConnectionState() {
+        return singBoxEngine != null
                 ? singBoxEngine.connectionStateProperty().get()
                 : connectionState.get();
+    }
+
+    @FXML
+    private void onConnectClicked() {
+        ConnectionState current = currentConnectionState();
 
         if (current == ConnectionState.CONNECTED || current == ConnectionState.CONNECTING) {
             disconnect();
@@ -860,84 +889,20 @@ public class DashboardViewController {
         statusFlag.setManaged(false);
     }
 
+    /**
+     * Repaints the hero card. Deliberately split in two: what the dot and the
+     * wording say is a question about the <em>tunnel</em> — the process state
+     * refined by the reachability verdict, via {@link TunnelStatus#of} — while
+     * what the button offers is a question about the <em>process</em>. A
+     * tunnel that is up but carries nothing reads as a failure and still
+     * offers Disconnect, not Retry.
+     */
     private void updateUi(ConnectionState state) {
-        String haloClass;
-        switch (state) {
-            case CONNECTED -> {
-                statusCircle.setFill(Color.web("#2e7d32"));
-                statusCircle.getStyleClass().setAll("status-circle-connected");
-                haloClass = "status-halo-connected";
-                if (statusTitle != null) {
-                    statusTitle.setText(I18n.get("state.connected"));
-                    statusTitle.getStyleClass().setAll("status-title", "status-title-connected");
-                }
-                statusLabel.setText(activeServer != null
-                        ? I18n.get("dashboard.status.routing.through", activeServer.getName())
-                        : I18n.get("dashboard.status.routing"));
-                showStatusFlag(activeServer);
-                statusLabel.getStyleClass().setAll("status-subtitle");
-                connectButton.setText(I18n.get("button.disconnect"));
-                connectButton.setDisable(false);
-                connectButton.getStyleClass().removeAll("connect-button");
-                connectButton.getStyleClass().add("disconnect-button");
-            }
-            case CONNECTING -> {
-                hideStatusFlag();
-                statusCircle.setFill(Color.web("#ef6c00"));
-                statusCircle.getStyleClass().setAll("status-circle-connecting");
-                haloClass = "status-halo-connecting";
-                if (statusTitle != null) {
-                    statusTitle.setText(I18n.get("state.connecting"));
-                    statusTitle.getStyleClass().setAll("status-title", "status-title-connecting");
-                }
-                statusLabel.setText(I18n.get("dashboard.status.establishing"));
-                statusLabel.getStyleClass().setAll("status-subtitle");
-                connectButton.setText(I18n.get("button.cancel"));
-                connectButton.setDisable(false);
-            }
-            case ERROR -> {
-                hideStatusFlag();
-                statusCircle.setFill(Color.web("#c62828"));
-                statusCircle.getStyleClass().setAll("status-circle-error");
-                haloClass = "status-halo-error";
-                if (statusTitle != null) {
-                    statusTitle.setText(I18n.get("state.error"));
-                    statusTitle.getStyleClass().setAll("status-title", "status-title-error");
-                }
-                if (!statusLabel.getText().startsWith("Process exited")) {
-                    statusLabel.setText(I18n.get("dashboard.status.check.logs"));
-                }
-                statusLabel.getStyleClass().setAll("status-subtitle", "status-subtitle-error");
-                connectButton.setText(I18n.get("button.retry"));
-                connectButton.setDisable(false);
-                connectButton.getStyleClass().removeAll("disconnect-button");
-                connectButton.getStyleClass().add("connect-button");
-            }
-            default -> {
-                statusCircle.setFill(Color.web("#9e9e9e"));
-                statusCircle.getStyleClass().setAll("status-circle-disconnected");
-                haloClass = "status-halo-disconnected";
-                if (statusTitle != null) {
-                    statusTitle.setText(I18n.get("state.disconnected"));
-                    statusTitle.getStyleClass().setAll("status-title", "status-title-disconnected");
-                }
-                statusLabel.setText(activeServer != null
-                        ? I18n.get("dashboard.status.ready", activeServer.getName())
-                        : I18n.get("dashboard.status.add.server"));
-                statusLabel.getStyleClass().setAll("status-subtitle");
-                connectButton.setText(I18n.get("button.connect"));
-                connectButton.setDisable(false);
-                connectButton.getStyleClass().removeAll("disconnect-button");
-                connectButton.getStyleClass().add("connect-button");
-            }
-        }
+        TunnelStatus status = TunnelStatus.of(state, currentHealth());
 
-        if (statusHalo != null) {
-            statusHalo.getStyleClass().removeAll(
-                    "status-halo-connected", "status-halo-connecting",
-                    "status-halo-error", "status-halo-disconnected");
-            statusHalo.getStyleClass().add(haloClass);
-        }
+        paintStatusIndicator(status, state);
+        paintStatusSubtitle(status);
+        paintConnectButton(state);
 
         // serverNameLabel is no longer rendered in the hero card (state
         // subtitle conveys that information), but update it for anyone
@@ -950,6 +915,137 @@ public class DashboardViewController {
 
         if (state != ConnectionState.CONNECTED && state != ConnectionState.CONNECTING) {
             refreshConnectButtonAvailability();
+        }
+    }
+
+    private TunnelHealth currentHealth() {
+        return healthState != null ? healthState.get() : TunnelHealth.UNMONITORED;
+    }
+
+    /**
+     * The style-class suffix and fill shared by the dot, its halo and the
+     * title. Several statuses map onto one look on purpose — "verifying",
+     * "partly reachable" and "unverified" are all the same amber "do not trust
+     * this yet" — so the existing four style classes still cover the range.
+     */
+    private static String toneSuffix(TunnelStatus.Tone tone) {
+        return switch (tone) {
+            case OK -> "connected";
+            case PENDING -> "connecting";
+            case BAD -> "error";
+            case IDLE -> "disconnected";
+        };
+    }
+
+    private static Color toneFill(TunnelStatus.Tone tone) {
+        return switch (tone) {
+            case OK -> Color.web("#2e7d32");
+            case PENDING -> Color.web("#ef6c00");
+            case BAD -> Color.web("#c62828");
+            case IDLE -> Color.web("#9e9e9e");
+        };
+    }
+
+    private void paintStatusIndicator(TunnelStatus status, ConnectionState state) {
+        String suffix = toneSuffix(status.tone());
+
+        statusCircle.setFill(toneFill(status.tone()));
+        statusCircle.getStyleClass().setAll("status-circle-" + suffix);
+
+        if (statusHalo != null) {
+            statusHalo.getStyleClass().removeAll(
+                    "status-halo-connected", "status-halo-connecting",
+                    "status-halo-error", "status-halo-disconnected");
+            statusHalo.getStyleClass().add("status-halo-" + suffix);
+        }
+
+        if (statusTitle != null) {
+            statusTitle.setText(titleFor(status));
+            statusTitle.getStyleClass().setAll("status-title", "status-title-" + suffix);
+        }
+
+        // The exit-country flag belongs to a running core, whatever the probes
+        // then make of it.
+        if (state == ConnectionState.CONNECTED) {
+            showStatusFlag(activeServer);
+        } else {
+            hideStatusFlag();
+        }
+    }
+
+    private static String titleFor(TunnelStatus status) {
+        String key = switch (status) {
+            case CONNECTED -> "state.connected";
+            case CONNECTING -> "state.connecting";
+            case VERIFYING -> "state.verifying";
+            case DEGRADED -> "state.degraded";
+            case NO_TRAFFIC -> "state.no.traffic";
+            case UNVERIFIED -> "state.unverified";
+            case ERROR -> "state.error";
+            case DISCONNECTED -> "state.disconnected";
+        };
+        return I18n.get(key);
+    }
+
+    private void paintStatusSubtitle(TunnelStatus status) {
+        if (status == TunnelStatus.ERROR) {
+            // The engine's own message ("Process exited ...") says more than a
+            // generic line, so a repaint must not wipe it.
+            if (!statusLabel.getText().startsWith("Process exited")) {
+                statusLabel.setText(I18n.get("dashboard.status.check.logs"));
+            }
+        } else {
+            statusLabel.setText(subtitleFor(status));
+        }
+
+        if (status.tone() == TunnelStatus.Tone.BAD) {
+            statusLabel.getStyleClass().setAll("status-subtitle", "status-subtitle-error");
+        } else {
+            statusLabel.getStyleClass().setAll("status-subtitle");
+        }
+    }
+
+    private String subtitleFor(TunnelStatus status) {
+        return switch (status) {
+            case CONNECTED -> activeServer != null
+                    ? I18n.get("dashboard.status.routing.through", activeServer.getName())
+                    : I18n.get("dashboard.status.routing");
+            case CONNECTING -> I18n.get("dashboard.status.establishing");
+            case VERIFYING -> I18n.get("dashboard.status.verifying");
+            case DEGRADED -> I18n.get("dashboard.status.degraded");
+            case NO_TRAFFIC -> I18n.get("dashboard.status.no.traffic");
+            case UNVERIFIED -> I18n.get("dashboard.status.unverified");
+            case ERROR -> I18n.get("dashboard.status.check.logs");
+            case DISCONNECTED -> activeServer != null
+                    ? I18n.get("dashboard.status.ready", activeServer.getName())
+                    : I18n.get("dashboard.status.add.server");
+        };
+    }
+
+    private void paintConnectButton(ConnectionState state) {
+        switch (state) {
+            case CONNECTED -> {
+                connectButton.setText(I18n.get("button.disconnect"));
+                connectButton.setDisable(false);
+                connectButton.getStyleClass().removeAll("connect-button");
+                connectButton.getStyleClass().add("disconnect-button");
+            }
+            case CONNECTING -> {
+                connectButton.setText(I18n.get("button.cancel"));
+                connectButton.setDisable(false);
+            }
+            case ERROR -> {
+                connectButton.setText(I18n.get("button.retry"));
+                connectButton.setDisable(false);
+                connectButton.getStyleClass().removeAll("disconnect-button");
+                connectButton.getStyleClass().add("connect-button");
+            }
+            default -> {
+                connectButton.setText(I18n.get("button.connect"));
+                connectButton.setDisable(false);
+                connectButton.getStyleClass().removeAll("disconnect-button");
+                connectButton.getStyleClass().add("connect-button");
+            }
         }
     }
 

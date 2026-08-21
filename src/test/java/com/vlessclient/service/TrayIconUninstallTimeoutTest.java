@@ -41,7 +41,7 @@ class TrayIconUninstallTimeoutTest {
                 .as("AWT event thread never picked up the blocking task")
                 .isTrue();
 
-        TrayIconService tray = new TrayIconService(null, null, null, null);
+        TrayIconService tray = new TrayIconService(null, null, null, null, null);
         // On a separate thread so the old, unbounded behaviour fails this test
         // rather than hanging the whole suite on it.
         Thread caller = new Thread(tray::uninstall, "uninstall-caller");

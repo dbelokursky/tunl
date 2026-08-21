@@ -5,10 +5,12 @@ import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.HealthCheckTarget;
+import com.vlessclient.model.TunnelHealth;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TestConfigStores;
+import com.vlessclient.service.TunnelHealthState;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -48,6 +50,7 @@ class HealthCheckCoordinatorTest {
     private HBox banner;
     private Label bannerLabel;
     private FakeEngine engine;
+    private TunnelHealthState healthState;
 
     /** Engine whose connection state the test controls directly. */
     private static final class FakeEngine extends SingBoxEngine {
@@ -72,6 +75,21 @@ class HealthCheckCoordinatorTest {
         public CompletableFuture<List<ProbeResult>> checkAll(
                 List<HealthCheckTarget> targets, int httpProxyPort) {
             return CompletableFuture.completedFuture(results);
+        }
+    }
+
+    /** Leaves the probe outstanding until the test says otherwise. */
+    private static final class BlockingChecker extends ServiceReachabilityChecker {
+        private final CompletableFuture<List<ProbeResult>> pending = new CompletableFuture<>();
+
+        @Override
+        public CompletableFuture<List<ProbeResult>> checkAll(
+                List<HealthCheckTarget> targets, int httpProxyPort) {
+            return pending;
+        }
+
+        void complete(List<ProbeResult> results) {
+            pending.complete(results);
         }
     }
 
@@ -110,13 +128,15 @@ class HealthCheckCoordinatorTest {
         banner = new HBox();
         bannerLabel = new Label();
         engine = new FakeEngine();
+        healthState = new TunnelHealthState();
     }
 
-    private HealthCheckCoordinator coordinatorWith(FakeChecker checker) {
+    private HealthCheckCoordinator coordinatorWith(ServiceReachabilityChecker checker) {
         return new HealthCheckCoordinator(
                 new HealthCheckCoordinator.Controls(
                         healthCard, summaryLabel, statusList, banner, bannerLabel),
                 checker,
+                healthState,
                 () -> engine,
                 () -> { },
                 () -> { });
@@ -266,5 +286,105 @@ class HealthCheckCoordinatorTest {
 
         onFxAndWait(() -> coordinator.addTarget(new HealthCheckTarget("b", "https://b")));
         assertThat(settings.getHealthCheckTargets()).hasSize(2);
+    }
+
+    // ===== the verdict published to the rest of the app =====
+
+    @Test
+    void allReachablePublishesHealthy() throws Exception {
+        healthSettings(false,
+                new HealthCheckTarget("a", "https://a"), new HealthCheckTarget("b", "https://b"));
+        FakeChecker checker = new FakeChecker();
+        checker.results = List.of(probe("a", true), probe("b", true));
+
+        connectAndCheck(coordinatorWith(checker));
+
+        assertThat(healthState.get()).isEqualTo(TunnelHealth.HEALTHY);
+    }
+
+    @Test
+    void partiallyReachablePublishesDegraded() throws Exception {
+        healthSettings(false,
+                new HealthCheckTarget("a", "https://a"), new HealthCheckTarget("b", "https://b"));
+        FakeChecker checker = new FakeChecker();
+        checker.results = List.of(probe("a", true), probe("b", false));
+
+        connectAndCheck(coordinatorWith(checker));
+
+        assertThat(healthState.get()).isEqualTo(TunnelHealth.DEGRADED);
+    }
+
+    /** The reported bug: a core that started while nothing gets through. */
+    @Test
+    void allUnreachablePublishesBroken() throws Exception {
+        healthSettings(false, new HealthCheckTarget("a", "https://a"));
+        FakeChecker checker = new FakeChecker();
+        checker.results = List.of(probe("a", false));
+
+        connectAndCheck(coordinatorWith(checker));
+
+        assertThat(healthState.get()).isEqualTo(TunnelHealth.BROKEN);
+    }
+
+    @Test
+    void firstProbeOfAConnectionIsPublishedAsChecking() throws Exception {
+        healthSettings(false, new HealthCheckTarget("a", "https://a"));
+        BlockingChecker checker = new BlockingChecker();
+        HealthCheckCoordinator coordinator = coordinatorWith(checker);
+
+        engine.state.set(ConnectionState.CONNECTED);
+        onFxAndWait(() -> coordinator.onConnectionStateChanged(ConnectionState.CONNECTED));
+
+        assertThat(healthState.get())
+                .as("a tunnel with no verdict yet must not look verified")
+                .isEqualTo(TunnelHealth.CHECKING);
+
+        checker.complete(List.of(probe("a", true)));
+        flushFxEvents();
+        assertThat(healthState.get()).isEqualTo(TunnelHealth.HEALTHY);
+    }
+
+    @Test
+    void reProbeKeepsTheStandingVerdictInsteadOfBlinking() throws Exception {
+        healthSettings(false, new HealthCheckTarget("a", "https://a"));
+        FakeChecker settled = new FakeChecker();
+        settled.results = List.of(probe("a", true));
+        HealthCheckCoordinator coordinator = coordinatorWith(settled);
+        connectAndCheck(coordinator);
+        assertThat(healthState.get()).isEqualTo(TunnelHealth.HEALTHY);
+
+        // A periodic re-check runs the same path again. With a 5s default
+        // interval, flipping back to CHECKING here would strobe the tray icon.
+        onFxAndWait(coordinator::recheck);
+        assertThat(healthState.get()).isEqualTo(TunnelHealth.HEALTHY);
+    }
+
+    @Test
+    void disconnectClearsTheVerdict() throws Exception {
+        healthSettings(false, new HealthCheckTarget("a", "https://a"));
+        FakeChecker checker = new FakeChecker();
+        checker.results = List.of(probe("a", false));
+        HealthCheckCoordinator coordinator = coordinatorWith(checker);
+
+        connectAndCheck(coordinator);
+        assertThat(healthState.get()).isEqualTo(TunnelHealth.BROKEN);
+
+        engine.state.set(ConnectionState.DISCONNECTED);
+        onFxAndWait(() ->
+                coordinator.onConnectionStateChanged(ConnectionState.DISCONNECTED));
+
+        assertThat(healthState.get()).isEqualTo(TunnelHealth.UNMONITORED);
+    }
+
+    @Test
+    void disabledFeaturePublishesUnmonitored() throws Exception {
+        AppSettings settings = healthSettings(false, new HealthCheckTarget("a", "https://a"));
+        settings.setHealthCheckEnabled(false);
+
+        connectAndCheck(coordinatorWith(new FakeChecker()));
+
+        assertThat(healthState.get())
+                .as("switching the checks off must not leave the user amber forever")
+                .isEqualTo(TunnelHealth.UNMONITORED);
     }
 }
