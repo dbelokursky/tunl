@@ -3,6 +3,8 @@ package com.vlessclient.service;
 import com.vlessclient.app.I18n;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.model.TunnelHealth;
+import com.vlessclient.model.TunnelStatus;
 import java.awt.AWTException;
 import java.awt.Color;
 import java.awt.EventQueue;
@@ -32,6 +34,13 @@ import org.slf4j.LoggerFactory;
  * <p>Provides a tray icon with status indication and quick actions:
  * show window, connect/disconnect, server selection, and quit.</p>
  *
+ * <p>The icon reflects {@link TunnelStatus}, not the raw process state: a
+ * core that started but whose traffic reaches nothing must not look the same
+ * as a working tunnel. That means listening to two sources — the engine's
+ * {@link ConnectionState} and the reachability verdict in
+ * {@link TunnelHealthState} — and letting {@link TunnelStatus#of} combine
+ * them.</p>
+ *
  * <p>AWT and JavaFX run on separate event threads: AWT updates must be
  * wrapped in {@link EventQueue#invokeLater(Runnable)}, and any JavaFX
  * state touched from tray callbacks must be wrapped in
@@ -52,6 +61,7 @@ public class TrayIconService {
     private final SingBoxEngine singBoxEngine;
     private final ConfigStore configStore;
     private final ConnectionService connectionService;
+    private final TunnelHealthState healthState;
     private final Stage stage;
 
     private TrayIcon trayIcon;
@@ -61,6 +71,7 @@ public class TrayIconService {
     private Menu serversMenu;
     private ListChangeListener<ServerConfig> serversListener;
     private javafx.beans.value.ChangeListener<ConnectionState> stateListener;
+    private javafx.beans.value.ChangeListener<TunnelHealth> healthListener;
 
     /**
      * Creates a tray icon service bound to the given engine, stores and stage.
@@ -68,15 +79,20 @@ public class TrayIconService {
      * @param singBoxEngine     engine whose connection state drives the icon
      * @param configStore       store providing the selectable server list
      * @param connectionService owner of the connect/disconnect flow
+     * @param healthState       reachability verdict refining a running tunnel,
+     *                          may be null (the icon then reports process
+     *                          state alone)
      * @param stage             main window shown/hidden from the tray
      */
     public TrayIconService(SingBoxEngine singBoxEngine,
                            ConfigStore configStore,
                            ConnectionService connectionService,
+                           TunnelHealthState healthState,
                            Stage stage) {
         this.singBoxEngine = singBoxEngine;
         this.configStore = configStore;
         this.connectionService = connectionService;
+        this.healthState = healthState;
         this.stage = stage;
     }
 
@@ -97,7 +113,7 @@ public class TrayIconService {
         EventQueue.invokeLater(() -> {
             try {
                 popupMenu = buildPopupMenu();
-                Image icon = createStatusIcon(currentState());
+                Image icon = createStatusIcon(currentStatus());
                 trayIcon = new TrayIcon(icon, "Tunl", popupMenu);
                 trayIcon.setImageAutoSize(true);
                 trayIcon.addActionListener(e -> showMainWindow());
@@ -117,6 +133,14 @@ public class TrayIconService {
         if (singBoxEngine != null) {
             stateListener = (obs, oldVal, newVal) -> refreshTrayState();
             singBoxEngine.connectionStateProperty().addListener(stateListener);
+        }
+
+        // Listen for reachability verdicts: a tunnel that stops carrying
+        // traffic changes nothing about the process, so this is the only
+        // signal that can take the icon out of green.
+        if (healthState != null) {
+            healthListener = (obs, oldVal, newVal) -> refreshTrayState();
+            healthState.healthProperty().addListener(healthListener);
         }
 
         // Listen for server list changes.
@@ -152,6 +176,10 @@ public class TrayIconService {
         if (singBoxEngine != null && stateListener != null) {
             singBoxEngine.connectionStateProperty().removeListener(stateListener);
             stateListener = null;
+        }
+        if (healthState != null && healthListener != null) {
+            healthState.healthProperty().removeListener(healthListener);
+            healthListener = null;
         }
         if (configStore != null && serversListener != null) {
             configStore.getServers().removeListener(serversListener);
@@ -211,7 +239,7 @@ public class TrayIconService {
         toggleConnectItem.addActionListener(e -> onToggleConnect());
         menu.add(toggleConnectItem);
 
-        statusItem = new MenuItem(statusLabel(currentState()));
+        statusItem = new MenuItem(statusLabel(currentStatus()));
         statusItem.setEnabled(false);
         menu.add(statusItem);
 
@@ -240,14 +268,17 @@ public class TrayIconService {
                 return;
             }
             ConnectionState state = currentState();
+            TunnelStatus status = TunnelStatus.of(state, currentHealth());
 
-            trayIcon.setImage(createStatusIcon(state));
-            trayIcon.setToolTip("Tunl - " + statusLabel(state));
+            trayIcon.setImage(createStatusIcon(status));
+            trayIcon.setToolTip("Tunl - " + statusLabel(status));
 
             if (statusItem != null) {
-                statusItem.setLabel(statusLabel(state));
+                statusItem.setLabel(statusLabel(status));
             }
             if (toggleConnectItem != null) {
+                // Keyed off the process state, not the status: a tunnel that
+                // carries no traffic is still one the user disconnects.
                 boolean connected = state == ConnectionState.CONNECTED
                         || state == ConnectionState.CONNECTING;
                 toggleConnectItem.setLabel(
@@ -361,10 +392,27 @@ public class TrayIconService {
         return state != null ? state : ConnectionState.DISCONNECTED;
     }
 
-    private String statusLabel(ConnectionState state) {
-        String key = switch (state) {
+    private TunnelHealth currentHealth() {
+        if (healthState == null) {
+            return TunnelHealth.UNMONITORED;
+        }
+        TunnelHealth health = healthState.get();
+        return health != null ? health : TunnelHealth.UNMONITORED;
+    }
+
+    /** The status shown in the menu bar: process state refined by health. */
+    private TunnelStatus currentStatus() {
+        return TunnelStatus.of(currentState(), currentHealth());
+    }
+
+    private String statusLabel(TunnelStatus status) {
+        String key = switch (status) {
             case CONNECTED -> "tray.status.connected";
             case CONNECTING -> "tray.status.connecting";
+            case VERIFYING -> "tray.status.verifying";
+            case DEGRADED -> "tray.status.degraded";
+            case NO_TRAFFIC -> "tray.status.no.traffic";
+            case UNVERIFIED -> "tray.status.unverified";
             case ERROR -> "tray.status.error";
             case DISCONNECTED -> "tray.status.disconnected";
         };
@@ -372,9 +420,9 @@ public class TrayIconService {
     }
 
     /**
-     * Creates a simple colored-circle tray icon reflecting the given state.
+     * Creates a simple colored-circle tray icon reflecting the given status.
      */
-    static Image createStatusIcon(ConnectionState state) {
+    static Image createStatusIcon(TunnelStatus status) {
         BufferedImage img = new BufferedImage(ICON_SIZE, ICON_SIZE, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = img.createGraphics();
         try {
@@ -383,11 +431,11 @@ public class TrayIconService {
             g.fillRect(0, 0, ICON_SIZE, ICON_SIZE);
             g.setComposite(java.awt.AlphaComposite.SrcOver);
 
-            Color fill = switch (state) {
-                case CONNECTED -> new Color(46, 204, 113);
-                case CONNECTING -> new Color(243, 156, 18);
-                case ERROR -> new Color(231, 76, 60);
-                case DISCONNECTED -> new Color(149, 165, 166);
+            Color fill = switch (status.tone()) {
+                case OK -> new Color(46, 204, 113);
+                case PENDING -> new Color(243, 156, 18);
+                case BAD -> new Color(231, 76, 60);
+                case IDLE -> new Color(149, 165, 166);
             };
             g.setColor(fill);
             int pad = 3;

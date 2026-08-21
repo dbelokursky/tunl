@@ -5,9 +5,11 @@ import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.HealthCheckTarget;
+import com.vlessclient.model.TunnelHealth;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
+import com.vlessclient.service.TunnelHealthState;
 import java.util.List;
 import java.util.function.Supplier;
 import javafx.animation.PauseTransition;
@@ -36,6 +38,11 @@ import org.slf4j.LoggerFactory;
  *
  * <p>All state is mutated only on the FX thread, matching the original
  * controller semantics.</p>
+ *
+ * <p>Every verdict this loop reaches is also published to
+ * {@link TunnelHealthState}, because the health card is not the only thing
+ * that must not claim a dead tunnel is fine: the menu-bar icon reads the same
+ * signal, and it has no access to this view.</p>
  */
 public final class HealthCheckCoordinator {
 
@@ -61,6 +68,7 @@ public final class HealthCheckCoordinator {
     private final Label reconnectBannerLabel;
 
     private final ServiceReachabilityChecker reachabilityChecker;
+    private final TunnelHealthState healthState;
     private final Supplier<SingBoxEngine> engineSupplier;
     private final Runnable connectAction;
     private final Runnable disconnectAction;
@@ -76,17 +84,24 @@ public final class HealthCheckCoordinator {
     // the self-inflicted DISCONNECTED/ERROR transition is not mistaken for a
     // user disconnect that should cancel the health loop.
     private boolean suppressDisconnectHandling;
+    // Whether this connection has produced a verdict yet. Gates the CHECKING
+    // signal: with a 5s default interval, publishing it on every periodic
+    // re-probe would flicker the tray icon and the hero card twelve times a
+    // minute. Only the unproven window after a connect is worth showing.
+    private boolean hasVerdict;
 
     /**
      * Creates the coordinator over the given controls. The engine is read
      * through {@code engineSupplier} on every use because the controller may
      * swap in a new {@link SingBoxEngine} after an in-app install; the
      * connect/disconnect actions are the controller's own, so a reconnect
-     * behaves exactly like the user pressing the buttons.
+     * behaves exactly like the user pressing the buttons. {@code healthState}
+     * may be null, in which case verdicts are rendered here and nowhere else.
      */
     public HealthCheckCoordinator(
             Controls controls,
             ServiceReachabilityChecker reachabilityChecker,
+            TunnelHealthState healthState,
             Supplier<SingBoxEngine> engineSupplier,
             Runnable connectAction,
             Runnable disconnectAction) {
@@ -96,6 +111,7 @@ public final class HealthCheckCoordinator {
         this.reconnectBanner = controls.reconnectBanner();
         this.reconnectBannerLabel = controls.reconnectBannerLabel();
         this.reachabilityChecker = reachabilityChecker;
+        this.healthState = healthState;
         this.engineSupplier = engineSupplier;
         this.connectAction = connectAction;
         this.disconnectAction = disconnectAction;
@@ -118,7 +134,16 @@ public final class HealthCheckCoordinator {
         }
         if (state == ConnectionState.CONNECTED) {
             runReachabilityCheck();
-        } else if (state == ConnectionState.DISCONNECTED || state == ConnectionState.ERROR) {
+            return;
+        }
+        // Whatever the last verdict was, it described a tunnel that is no
+        // longer up — including during our own auto-reconnect restart, where
+        // the loop below is deliberately left standing. Drop it either way, so
+        // the next connect is judged on its own probe rather than inheriting
+        // the previous one's answer.
+        hasVerdict = false;
+        publishHealth(TunnelHealth.UNMONITORED);
+        if (state == ConnectionState.DISCONNECTED || state == ConnectionState.ERROR) {
             if (suppressDisconnectHandling) {
                 return;
             }
@@ -168,6 +193,7 @@ public final class HealthCheckCoordinator {
         cancelPeriodicCheck();
         if (reachabilityChecker == null || engine() == null) {
             setHealthCardVisible(false);
+            publishHealth(TunnelHealth.UNMONITORED);
             return;
         }
         AppSettings settings;
@@ -178,6 +204,7 @@ public final class HealthCheckCoordinator {
         }
         if (!settings.isHealthCheckEnabled()) {
             setHealthCardVisible(false);
+            publishHealth(TunnelHealth.UNMONITORED);
             return;
         }
         List<HealthCheckTarget> targets = settings.getHealthCheckTargets();
@@ -189,6 +216,7 @@ public final class HealthCheckCoordinator {
                 serviceStatusList.getChildren().clear();
             }
             healthSummaryLabel.setText(I18n.get("health.no.targets"));
+            publishHealth(TunnelHealth.UNMONITORED);
             return;
         }
         if (healthCheckInFlight) {
@@ -198,6 +226,9 @@ public final class HealthCheckCoordinator {
         setHealthCardVisible(true);
         renderPendingRows(targets);
         healthSummaryLabel.setText(I18n.get("dashboard.health.checking"));
+        if (!hasVerdict) {
+            publishHealth(TunnelHealth.CHECKING);
+        }
 
         healthCheckInFlight = true;
         final int gen = ++healthGeneration;
@@ -216,11 +247,48 @@ public final class HealthCheckCoordinator {
                     if (err != null) {
                         log.warn("Reachability check failed", err);
                         healthSummaryLabel.setText(I18n.get("dashboard.health.failed"));
+                        // A failed batch is not a healthy tunnel and not a
+                        // broken one — say so rather than leaving the last
+                        // answer standing.
+                        hasVerdict = true;
+                        publishHealth(TunnelHealth.UNKNOWN);
                         return;
                     }
                     renderResultRows(results);
+                    publishVerdict(results);
                     evaluateReconnect(results, settings);
                 }));
+    }
+
+    /**
+     * Turns a completed probe batch into the verdict the rest of the app sees.
+     * Partial reachability counts as {@link TunnelHealth#DEGRADED} rather than
+     * healthy: some services answering does not mean the route the user cares
+     * about is working, and the indicators say "unproven" in amber instead of
+     * claiming success.
+     */
+    private void publishVerdict(List<ServiceReachabilityChecker.ProbeResult> results) {
+        if (results == null || results.isEmpty()) {
+            publishHealth(TunnelHealth.UNMONITORED);
+            return;
+        }
+        hasVerdict = true;
+        long reachable = results.stream()
+                .filter(ServiceReachabilityChecker.ProbeResult::reachable)
+                .count();
+        if (reachable == results.size()) {
+            publishHealth(TunnelHealth.HEALTHY);
+        } else if (reachable == 0) {
+            publishHealth(TunnelHealth.BROKEN);
+        } else {
+            publishHealth(TunnelHealth.DEGRADED);
+        }
+    }
+
+    private void publishHealth(TunnelHealth health) {
+        if (healthState != null) {
+            healthState.set(health);
+        }
     }
 
     private void evaluateReconnect(List<ServiceReachabilityChecker.ProbeResult> results,
@@ -330,6 +398,8 @@ public final class HealthCheckCoordinator {
         reconnectAttempt = 0;
         healthGeneration++;            // invalidate any in-flight probe result
         healthCheckInFlight = false;
+        hasVerdict = false;
+        publishHealth(TunnelHealth.UNMONITORED);
         hideReconnectBanner();
         if (serviceStatusList != null) {
             serviceStatusList.getChildren().clear();

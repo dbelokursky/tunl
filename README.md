@@ -209,6 +209,19 @@ quit via **Quit** in the tray menu or `⌘Q`.
 | Windows | system tray |
 | Linux | wherever a tray exists (KDE/XFCE/…); stock GNOME has no tray — closing the window quits the app |
 
+The icon's colour answers "is my traffic getting out?", not "did the core
+start?" — it stays amber until the service checks come back:
+
+| Colour | Meaning |
+|---|---|
+| ⚪️ Grey | Disconnected |
+| 🟠 Amber | Connecting, verifying, or only some services reachable |
+| 🟢 Green | Connected and every checked service is reachable |
+| 🔴 Red | Failed to start, or connected with nothing getting through |
+
+With the service checks switched off there is nothing to verify, so a
+connected tunnel is simply green.
+
 ### Autostart
 
 | OS | Mechanism |
