@@ -11,6 +11,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,8 +41,6 @@ public class McpHttpServer {
     private static final String ENDPOINT = "/mcp";
     private static final String LOOPBACK = "127.0.0.1";
     private static final long MAX_BODY_BYTES = 1_048_576; // 1 MiB
-    private static final int STOP_DELAY_SECONDS = 1;
-
     private static final long SSE_POLL_MS = 15_000;
     private static final int MAX_SSE_STREAMS = 8;
 
@@ -52,6 +51,7 @@ public class McpHttpServer {
     private final McpNotifier notifier;
 
     private HttpServer httpServer;
+    private ExecutorService executor;
 
     public McpHttpServer(int port, String token, McpServer mcpServer, ObjectMapper mapper) {
         this(port, token, mcpServer, mapper, null);
@@ -81,10 +81,22 @@ public class McpHttpServer {
             return;
         }
         InetSocketAddress address = new InetSocketAddress(InetAddress.getByName(LOOPBACK), port);
-        httpServer = HttpServer.create(address, 0);
-        httpServer.createContext(ENDPOINT, this::handle);
-        httpServer.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
-        httpServer.start();
+        HttpServer candidate = HttpServer.create(address, 0);
+        ExecutorService candidateExecutor = null;
+        try {
+            candidateExecutor = Executors.newVirtualThreadPerTaskExecutor();
+            candidate.createContext(ENDPOINT, this::handle);
+            candidate.setExecutor(candidateExecutor);
+            candidate.start();
+        } catch (RuntimeException | Error e) {
+            candidate.stop(0);
+            if (candidateExecutor != null) {
+                candidateExecutor.shutdownNow();
+            }
+            throw e;
+        }
+        httpServer = candidate;
+        executor = candidateExecutor;
         log.info("MCP server listening on http://{}:{}{}",
                 LOOPBACK, httpServer.getAddress().getPort(), ENDPOINT);
     }
@@ -92,8 +104,23 @@ public class McpHttpServer {
     /** Stops the server if running. */
     public synchronized void stop() {
         if (httpServer != null) {
-            httpServer.stop(STOP_DELAY_SECONDS);
+            // An application exit is not a graceful-drain boundary: agents
+            // must reconnect to the next process anyway. Close exchanges
+            // immediately, then interrupt SSE handlers that may be blocked in
+            // their 15-second notification poll. Keeping the executor alive
+            // after HttpServer.stop() leaves request handlers alive beyond the
+            // server lifecycle and makes process teardown non-deterministic.
+            HttpServer serverToStop = httpServer;
+            ExecutorService executorToStop = executor;
             httpServer = null;
+            executor = null;
+            try {
+                serverToStop.stop(0);
+            } finally {
+                if (executorToStop != null) {
+                    executorToStop.shutdownNow();
+                }
+            }
             log.info("MCP server stopped");
         }
     }
