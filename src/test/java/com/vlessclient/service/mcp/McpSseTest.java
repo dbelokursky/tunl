@@ -7,6 +7,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -108,6 +111,33 @@ class McpSseTest {
             for (InputStream in : held) {
                 in.close();
             }
+        }
+    }
+
+    @Test
+    void stop_interruptsActiveStreamAndReleasesPort() throws Exception {
+        int port = server.boundPort();
+        HttpResponse<InputStream> response = client.send(
+                sseRequest(TOKEN), HttpResponse.BodyHandlers.ofInputStream());
+        assertThat(response.statusCode()).isEqualTo(200);
+
+        for (int i = 0; i < 100 && notifier.subscriberCount() == 0; i++) {
+            Thread.sleep(20);
+        }
+        assertThat(notifier.subscriberCount()).isEqualTo(1);
+
+        server.stop();
+        server = null;
+
+        for (int i = 0; i < 100 && notifier.subscriberCount() != 0; i++) {
+            Thread.sleep(20);
+        }
+        assertThat(notifier.subscriberCount()).isZero();
+        try (ServerSocket rebound = new ServerSocket()) {
+            rebound.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), port));
+            assertThat(rebound.isBound()).isTrue();
+        } finally {
+            response.body().close();
         }
     }
 }

@@ -186,14 +186,7 @@ public class ServiceLocator {
     public static void shutdown() {
         log.info("ServiceLocator shutting down");
 
-        try {
-            Object mcp = services.get(McpServerService.class);
-            if (mcp instanceof McpServerService mcpServerService) {
-                mcpServerService.stop();
-            }
-        } catch (Exception e) {
-            log.error("Error stopping MCP server during shutdown", e);
-        }
+        stopMcpServer();
 
         // Stop the engine early — right after MCP so no in-flight agent connect
         // survives it — and before the slow steps below. An in-flight
@@ -266,6 +259,22 @@ public class ServiceLocator {
         }
 
         services.clear();
+    }
+
+    /**
+     * Stops the process-owned MCP listener without changing the saved enable
+     * preference. Safe to invoke from both the ordinary JavaFX lifecycle and
+     * the JVM shutdown hook; {@link McpServerService#stop()} is idempotent.
+     */
+    public static void stopMcpServer() {
+        try {
+            Object mcp = services.get(McpServerService.class);
+            if (mcp instanceof McpServerService mcpServerService) {
+                mcpServerService.stop();
+            }
+        } catch (Exception e) {
+            log.error("Error stopping MCP server during shutdown", e);
+        }
     }
 
     /**

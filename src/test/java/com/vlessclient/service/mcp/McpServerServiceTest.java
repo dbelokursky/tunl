@@ -1,5 +1,6 @@
 package com.vlessclient.service.mcp;
 
+import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.service.ConfigStore;
 import java.net.InetAddress;
@@ -56,5 +57,33 @@ class McpServerServiceTest {
         assertThat(service.isRunning()).isTrue();
         assertThat(settings.isMcpEnabled()).isTrue();
         assertThat(service.getLastStartError()).isNull();
+    }
+
+    @Test
+    void applicationShutdownStopsServerAndReleasesPort() throws Exception {
+        ConfigStore store = new ConfigStore(tempDir);
+        AppSettings settings = store.getSettings();
+        int port;
+        try (ServerSocket available = new ServerSocket()) {
+            available.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
+            port = available.getLocalPort();
+        }
+        settings.setMcpPort(port);
+        settings.setMcpEnabled(true);
+        store.saveSettings(settings);
+
+        service = new McpServerService(store, new FakeAppControlService());
+        service.apply();
+        ServiceLocator.register(McpServerService.class, service);
+        assertThat(service.isRunning()).isTrue();
+
+        ServiceLocator.stopMcpServer();
+
+        assertThat(service.isRunning()).isFalse();
+        assertThat(settings.isMcpEnabled()).isTrue();
+        try (ServerSocket rebound = new ServerSocket()) {
+            rebound.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), port));
+            assertThat(rebound.isBound()).isTrue();
+        }
     }
 }
