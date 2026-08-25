@@ -96,6 +96,7 @@ public class SettingsViewController implements ViewShownAware {
     private Autostart autostart;
     private UpdatesSection updatesSection;
     private McpServerService mcpServerService;
+    private boolean updatingMcpControls;
     private boolean suppressLaunchAtLoginListener;
 
     /**
@@ -476,6 +477,9 @@ public class SettingsViewController implements ViewShownAware {
     private void initMcpSettings(AppSettings settings) {
         mcpEnabledCheck.setSelected(settings.isMcpEnabled());
         mcpEnabledCheck.selectedProperty().addListener((obs, oldVal, newVal) -> {
+            if (updatingMcpControls) {
+                return;
+            }
             settings.setMcpEnabled(newVal);
             saveSettings(settings);
             applyMcp();
@@ -508,8 +512,22 @@ public class SettingsViewController implements ViewShownAware {
     private void applyMcp() {
         if (mcpServerService != null) {
             mcpServerService.apply();
+            syncMcpEnabledCheck();
         }
         refreshMcpCommand();
+    }
+
+    private void syncMcpEnabledCheck() {
+        boolean enabled = configStore.getSettings().isMcpEnabled();
+        if (mcpEnabledCheck.isSelected() == enabled) {
+            return;
+        }
+        updatingMcpControls = true;
+        try {
+            mcpEnabledCheck.setSelected(enabled);
+        } finally {
+            updatingMcpControls = false;
+        }
     }
 
     private void refreshMcpCommand() {
@@ -519,7 +537,12 @@ public class SettingsViewController implements ViewShownAware {
             return;
         }
         mcpCommandArea.setText(mcpServerService.claudeAddCommand());
-        mcpStatusLabel.setText(mcpServerService.isRunning() ? "● running" : "○ stopped");
+        String startError = mcpServerService.getLastStartError();
+        if (startError != null) {
+            mcpStatusLabel.setText("○ failed — " + startError);
+        } else {
+            mcpStatusLabel.setText(mcpServerService.isRunning() ? "● running" : "○ stopped");
+        }
     }
 
     @FXML

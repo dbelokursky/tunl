@@ -16,6 +16,7 @@ import com.vlessclient.service.mcp.tools.MeasureLatencyTool;
 import com.vlessclient.service.mcp.tools.RefreshSubscriptionTool;
 import com.vlessclient.service.mcp.tools.SelectServerTool;
 import com.vlessclient.service.mcp.tools.SimpleReadTool;
+import java.net.BindException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,6 +43,7 @@ public class McpServerService {
     private McpHttpServer httpServer;
     private int runningPort = -1;
     private SingBoxEngine loggedEngine;
+    private String lastStartError;
 
     /**
      * Creates the service wired to the given config store and control facade.
@@ -86,6 +88,7 @@ public class McpServerService {
         int desiredPort = settings.getMcpPort();
 
         if (!shouldRun) {
+            lastStartError = null;
             stop();
             return;
         }
@@ -100,11 +103,33 @@ public class McpServerService {
             httpServer = new McpHttpServer(desiredPort, token, server, mapper, notifier);
             httpServer.start();
             runningPort = desiredPort;
+            lastStartError = null;
         } catch (Exception e) {
             log.error("Failed to start MCP server on port {}", desiredPort, e);
             httpServer = null;
             runningPort = -1;
+            lastStartError = describeStartFailure(e, desiredPort);
+
+            // "Enabled" must describe a server that is actually listening. If
+            // startup fails, retaining the desired state leaves the Settings
+            // checkbox checked while the status says "stopped". A later click
+            // then looks like it did nothing even though another bind was
+            // attempted. Roll back the persisted toggle so the UI can reflect
+            // the failure and the next enable is an unambiguous retry.
+            settings.setMcpEnabled(false);
+            configStore.saveSettings(settings);
         }
+    }
+
+    /**
+     * Returns the most recent startup failure in a form suitable for the
+     * Settings status label.
+     *
+     * @return the failure description, or {@code null} after a successful
+     *         start or an explicit stop
+     */
+    public synchronized String getLastStartError() {
+        return lastStartError;
     }
 
     /** Stops the server if it is running. */
@@ -114,10 +139,25 @@ public class McpServerService {
             httpServer = null;
             runningPort = -1;
         }
+        lastStartError = null;
     }
 
     public synchronized boolean isRunning() {
         return httpServer != null && httpServer.isRunning();
+    }
+
+    private static String describeStartFailure(Exception failure, int port) {
+        Throwable cause = failure;
+        while (cause != null) {
+            if (cause instanceof BindException) {
+                return "port " + port + " is already in use";
+            }
+            cause = cause.getCause();
+        }
+        String message = failure.getMessage();
+        return message == null || message.isBlank()
+                ? failure.getClass().getSimpleName()
+                : message;
     }
 
     /**
