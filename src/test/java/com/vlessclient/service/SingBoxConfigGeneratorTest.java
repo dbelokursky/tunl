@@ -1,13 +1,14 @@
 package com.vlessclient.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -20,7 +21,7 @@ class SingBoxConfigGeneratorTest {
     @BeforeEach
     void setUp() {
         generator = new SingBoxConfigGenerator();
-        mapper = new ObjectMapper();
+        mapper = JsonMapper.builder().build();
         defaultSettings = new AppSettings();
     }
 
@@ -76,15 +77,15 @@ class SingBoxConfigGeneratorTest {
         assertThat(inbounds.size()).isEqualTo(2);
 
         JsonNode socks = inbounds.get(0);
-        assertThat(socks.get("type").asText()).isEqualTo("socks");
-        assertThat(socks.get("tag").asText()).isEqualTo("socks-in");
-        assertThat(socks.get("listen").asText()).isEqualTo("127.0.0.1");
+        assertThat(socks.get("type").asString()).isEqualTo("socks");
+        assertThat(socks.get("tag").asString()).isEqualTo("socks-in");
+        assertThat(socks.get("listen").asString()).isEqualTo("127.0.0.1");
         assertThat(socks.get("listen_port").asInt()).isEqualTo(1080);
 
         JsonNode http = inbounds.get(1);
-        assertThat(http.get("type").asText()).isEqualTo("http");
-        assertThat(http.get("tag").asText()).isEqualTo("http-in");
-        assertThat(http.get("listen").asText()).isEqualTo("127.0.0.1");
+        assertThat(http.get("type").asString()).isEqualTo("http");
+        assertThat(http.get("tag").asString()).isEqualTo("http-in");
+        assertThat(http.get("listen").asString()).isEqualTo("127.0.0.1");
         assertThat(http.get("listen_port").asInt()).isEqualTo(1081);
     }
 
@@ -101,20 +102,20 @@ class SingBoxConfigGeneratorTest {
         assertThat(outbounds.size()).isEqualTo(3);
 
         JsonNode proxy = outbounds.get(0);
-        assertThat(proxy.get("type").asText()).isEqualTo("vless");
-        assertThat(proxy.get("tag").asText())
+        assertThat(proxy.get("type").asString()).isEqualTo("vless");
+        assertThat(proxy.get("tag").asString())
                 .isEqualTo(com.vlessclient.service.outbound.OutboundTags.server(server));
-        assertThat(proxy.get("server").asText()).isEqualTo("1.2.3.4");
+        assertThat(proxy.get("server").asString()).isEqualTo("1.2.3.4");
         assertThat(proxy.get("server_port").asInt()).isEqualTo(443);
-        assertThat(proxy.get("uuid").asText()).isEqualTo("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+        assertThat(proxy.get("uuid").asString()).isEqualTo("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
 
         JsonNode group = outbounds.get(1);
-        assertThat(group.get("tag").asText()).isEqualTo("proxy");
-        assertThat(group.get("type").asText()).isEqualTo("selector");
+        assertThat(group.get("tag").asString()).isEqualTo("proxy");
+        assertThat(group.get("type").asString()).isEqualTo("selector");
 
         JsonNode direct = outbounds.get(2);
-        assertThat(direct.get("type").asText()).isEqualTo("direct");
-        assertThat(direct.get("tag").asText()).isEqualTo("direct");
+        assertThat(direct.get("type").asString()).isEqualTo("direct");
+        assertThat(direct.get("tag").asString()).isEqualTo("direct");
     }
 
     @Test
@@ -134,8 +135,8 @@ class SingBoxConfigGeneratorTest {
 
         JsonNode transport = proxy.get("transport");
         assertThat(transport).isNotNull();
-        assertThat(transport.get("type").asText()).isEqualTo("ws");
-        assertThat(transport.get("path").asText()).isEqualTo("/ws");
+        assertThat(transport.get("type").asString()).isEqualTo("ws");
+        assertThat(transport.get("path").asString()).isEqualTo("/ws");
     }
 
     @Test
@@ -145,8 +146,8 @@ class SingBoxConfigGeneratorTest {
 
         JsonNode transport = proxy.get("transport");
         assertThat(transport).isNotNull();
-        assertThat(transport.get("type").asText()).isEqualTo("grpc");
-        assertThat(transport.get("service_name").asText()).isEqualTo("my-grpc-service");
+        assertThat(transport.get("type").asString()).isEqualTo("grpc");
+        assertThat(transport.get("service_name").asString()).isEqualTo("my-grpc-service");
     }
 
     // -- TLS tests --
@@ -159,13 +160,13 @@ class SingBoxConfigGeneratorTest {
         JsonNode tls = proxy.get("tls");
         assertThat(tls).isNotNull();
         assertThat(tls.get("enabled").asBoolean()).isTrue();
-        assertThat(tls.get("server_name").asText()).isEqualTo("example.com");
+        assertThat(tls.get("server_name").asString()).isEqualTo("example.com");
 
         JsonNode alpn = tls.get("alpn");
         assertThat(alpn).isNotNull();
         assertThat(alpn.size()).isEqualTo(2);
-        assertThat(alpn.get(0).asText()).isEqualTo("h2");
-        assertThat(alpn.get(1).asText()).isEqualTo("http/1.1");
+        assertThat(alpn.get(0).asString()).isEqualTo("h2");
+        assertThat(alpn.get(1).asString()).isEqualTo("http/1.1");
     }
 
     @Test
@@ -189,7 +190,7 @@ class SingBoxConfigGeneratorTest {
         String json = generator.generate(server, defaultSettings);
         JsonNode proxy = parse(json).get("outbounds").get(0);
 
-        assertThat(proxy.get("flow").asText()).isEqualTo("xtls-rprx-vision");
+        assertThat(proxy.get("flow").asString()).isEqualTo("xtls-rprx-vision");
     }
 
     @Test
@@ -231,13 +232,13 @@ class SingBoxConfigGeneratorTest {
         JsonNode tls = proxy.get("tls");
         assertThat(tls).isNotNull();
         assertThat(tls.get("enabled").asBoolean()).isTrue();
-        assertThat(tls.get("server_name").asText()).isEqualTo("reality.example.com");
+        assertThat(tls.get("server_name").asString()).isEqualTo("reality.example.com");
 
         JsonNode reality = tls.get("reality");
         assertThat(reality).isNotNull();
         assertThat(reality.get("enabled").asBoolean()).isTrue();
-        assertThat(reality.get("public_key").asText()).isEqualTo("abc123publickey");
-        assertThat(reality.get("short_id").asText()).isEqualTo("deadbeef");
+        assertThat(reality.get("public_key").asString()).isEqualTo("abc123publickey");
+        assertThat(reality.get("short_id").asString()).isEqualTo("deadbeef");
     }
 
     // -- Experimental / Clash API tests --
@@ -252,7 +253,7 @@ class SingBoxConfigGeneratorTest {
 
         JsonNode clashApi = experimental.get("clash_api");
         assertThat(clashApi).isNotNull();
-        assertThat(clashApi.get("external_controller").asText()).isEqualTo("127.0.0.1:9090");
+        assertThat(clashApi.get("external_controller").asString()).isEqualTo("127.0.0.1:9090");
     }
 
     @Test
@@ -268,7 +269,7 @@ class SingBoxConfigGeneratorTest {
         assertThat(root.get("inbounds").get(0).get("listen_port").asInt()).isEqualTo(2080);
         assertThat(root.get("inbounds").get(1).get("listen_port").asInt()).isEqualTo(2081);
         assertThat(root.get("experimental").get("clash_api")
-                .get("external_controller").asText()).isEqualTo("127.0.0.1:9091");
+                .get("external_controller").asString()).isEqualTo("127.0.0.1:9091");
     }
 
     // -- Log section test --
@@ -279,7 +280,7 @@ class SingBoxConfigGeneratorTest {
         JsonNode log = parse(json).get("log");
 
         assertThat(log).isNotNull();
-        assertThat(log.get("level").asText()).isEqualTo("info");
+        assertThat(log.get("level").asString()).isEqualTo("info");
         assertThat(log.get("timestamp").asBoolean()).isTrue();
     }
 
@@ -296,6 +297,6 @@ class SingBoxConfigGeneratorTest {
         JsonNode utls = tls.get("utls");
         assertThat(utls).isNotNull();
         assertThat(utls.get("enabled").asBoolean()).isTrue();
-        assertThat(utls.get("fingerprint").asText()).isEqualTo("chrome");
+        assertThat(utls.get("fingerprint").asString()).isEqualTo("chrome");
     }
 }

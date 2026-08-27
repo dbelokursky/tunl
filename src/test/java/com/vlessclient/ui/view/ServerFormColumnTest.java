@@ -1,6 +1,6 @@
 package com.vlessclient.ui.view;
 
-import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.app.UiTestServices;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Bounds;
 import javafx.scene.Group;
@@ -42,7 +42,7 @@ public class ServerFormColumnTest extends ApplicationTest {
         System.setProperty("prism.order", "sw");
         System.setProperty("prism.text", "t2k");
         System.setProperty("java.awt.headless", "true");
-        ServiceLocator.initialize();
+        UiTestServices.initialize();
     }
 
 

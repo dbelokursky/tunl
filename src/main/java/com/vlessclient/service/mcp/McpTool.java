@@ -1,6 +1,6 @@
 package com.vlessclient.service.mcp;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * A single MCP tool the agent can invoke.

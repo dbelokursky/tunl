@@ -1,11 +1,12 @@
 package com.vlessclient.service.mcp;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vlessclient.service.mcp.tools.GetStatusTool;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -16,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class McpHttpServerTest {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = JsonMapper.builder().build();
     private static final String TOKEN = "test-secret-token";
 
     private final FakeAppControlService control = new FakeAppControlService();
@@ -82,7 +83,7 @@ class McpHttpServerTest {
 
         assertThat(response.statusCode()).isEqualTo(200);
         JsonNode json = MAPPER.readTree(response.body());
-        assertThat(json.path("result").path("serverInfo").path("name").asText())
+        assertThat(json.path("result").path("serverInfo").path("name").asString())
                 .isEqualTo("vless-client");
     }
 
@@ -94,7 +95,7 @@ class McpHttpServerTest {
 
         assertThat(response.statusCode()).isEqualTo(200);
         JsonNode json = MAPPER.readTree(response.body());
-        assertThat(json.path("result").path("structuredContent").path("state").asText())
+        assertThat(json.path("result").path("structuredContent").path("state").asString())
                 .isEqualTo("CONNECTED");
         assertThat(json.path("result").path("structuredContent").path("socksPort").asInt())
                 .isEqualTo(1080);

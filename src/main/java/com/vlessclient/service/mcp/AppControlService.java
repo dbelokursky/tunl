@@ -170,7 +170,7 @@ public interface AppControlService {
      * @return the updated settings
      * @throws McpToolException if the key is not settable or the value is invalid
      */
-    SettingsInfo setSetting(String key, com.fasterxml.jackson.databind.JsonNode value)
+    SettingsInfo setSetting(String key, tools.jackson.databind.JsonNode value)
             throws McpToolException;
 
     /**

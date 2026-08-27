@@ -1,7 +1,5 @@
 package com.vlessclient.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.RoutingConfig;
@@ -11,6 +9,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -22,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class ClashApiSecretTest {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
     private static ServerConfig vlessServer() {
         ServerConfig s = new ServerConfig();
@@ -45,7 +46,7 @@ class ClashApiSecretTest {
         String cfg = new SingBoxConfigGenerator()
                 .generate(vlessServer(), settings, new RoutingConfig());
 
-        assertThat(clashApi(cfg).path("secret").asText()).isEqualTo("tok-abc-123");
+        assertThat(clashApi(cfg).path("secret").asString()).isEqualTo("tok-abc-123");
     }
 
     @Test

@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
-          java-version: '25-ea'
+          java-version: '25'
           distribution: 'temurin'
           cache: 'maven'
       # The sing-box tarballs are fetched at generate-resources on every build
@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
-          java-version: '25-ea'
+          java-version: '25'
           distribution: 'temurin'
           cache: 'maven'
       # The sing-box tarballs are fetched at generate-resources on every build
@@ -61,7 +61,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
-          java-version: '25-ea'
+          java-version: '25'
           distribution: 'temurin'
           cache: 'maven'
       # The sing-box tarballs are fetched at generate-resources on every build
@@ -82,7 +82,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
-          java-version: '25-ea'
+          java-version: '25'
           distribution: 'temurin'
           cache: 'maven'
       # The sing-box tarballs are fetched at generate-resources on every build
@@ -108,7 +108,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
-          java-version: '25-ea'
+          java-version: '25'
           distribution: 'temurin'
           cache: 'maven'
       # The sing-box tarballs are fetched at generate-resources on every build
@@ -137,7 +137,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
-          java-version: '25-ea'
+          java-version: '25'
           distribution: 'temurin'
           cache: 'maven'
       # The sing-box tarballs are fetched at generate-resources on every build
@@ -166,7 +166,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
-          java-version: '25-ea'
+          java-version: '25'
           distribution: 'temurin'
           cache: 'maven'
       # The sing-box tarballs are fetched at generate-resources on every build
@@ -195,7 +195,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
-          java-version: '25-ea'
+          java-version: '25'
           distribution: 'temurin'
           cache: 'maven'
       # The sing-box tarballs are fetched at generate-resources on every build

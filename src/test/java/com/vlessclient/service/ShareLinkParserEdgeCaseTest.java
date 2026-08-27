@@ -281,13 +281,12 @@ class ShareLinkParserEdgeCaseTest {
         }
 
         @Test
-        void booleanPortCoercedByJackson() {
-            // Pins Jackson's asInt() coercion: true -> 1. Documents, not endorses.
+        void booleanPortFallsBackToDefault() {
             String json = "{\"add\":\"h.example\",\"id\":\"u\",\"port\":true}";
 
             ServerConfig config = parser.parse("vmess://" + b64(json));
 
-            assertThat(config.getPort()).isEqualTo(1);
+            assertThat(config.getPort()).isEqualTo(443);
         }
 
         @Test

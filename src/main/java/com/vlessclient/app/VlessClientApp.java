@@ -115,8 +115,9 @@ public class VlessClientApp extends Application {
     /**
      * Rewrites the macOS LaunchAgent (when "Launch at login" is enabled) so it
      * points at the current application location. Harmless no-op otherwise.
-     * Kept out of {@link ServiceLocator#initialize()} so headless UI tests,
-     * which call that method directly, never touch the real LaunchAgents dir.
+     * Kept out of {@link ServiceLocator#initialize()} so building a service
+     * graph never touches the real LaunchAgents directory. Headless UI tests
+     * also use the locator's dormant startup mode.
      */
     private void refreshLoginItem() {
         try {

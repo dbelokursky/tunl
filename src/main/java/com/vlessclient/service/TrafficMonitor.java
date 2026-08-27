@@ -1,7 +1,5 @@
 package com.vlessclient.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.URI;
@@ -17,6 +15,9 @@ import javafx.beans.property.ReadOnlyLongProperty;
 import javafx.beans.property.SimpleLongProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Streams live upload/download traffic stats from the sing-box Clash API and
@@ -29,7 +30,7 @@ import org.slf4j.LoggerFactory;
 public class TrafficMonitor {
 
     private static final Logger log = LoggerFactory.getLogger(TrafficMonitor.class);
-    private static final ObjectMapper objectMapper = new ObjectMapper();
+    private static final ObjectMapper objectMapper = JsonMapper.builder().build();
 
     private static final long KB = 1024L;
     private static final long MB = 1024L * 1024L;

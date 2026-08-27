@@ -1,13 +1,13 @@
 package com.vlessclient.service.outbound;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TlsConfig;
 import com.vlessclient.model.TransportConfig;
 import com.vlessclient.model.TransportType;
 import java.util.Map;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Base class for the per-protocol sing-box outbound builders. Holds the shared

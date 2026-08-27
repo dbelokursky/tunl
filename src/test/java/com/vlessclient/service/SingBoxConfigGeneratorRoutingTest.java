@@ -1,7 +1,5 @@
 package com.vlessclient.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.RoutingConfig;
@@ -10,6 +8,9 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
 
@@ -30,7 +31,7 @@ class SingBoxConfigGeneratorRoutingTest {
     @BeforeEach
     void setUp() {
         generator = new SingBoxConfigGenerator();
-        mapper = new ObjectMapper();
+        mapper = JsonMapper.builder().build();
         defaultSettings = new AppSettings();
     }
 
@@ -57,7 +58,7 @@ class SingBoxConfigGeneratorRoutingTest {
             return false;
         }
         for (JsonNode s : suffix) {
-            if (".local".equals(s.asText())) {
+            if (".local".equals(s.asString())) {
                 return true;
             }
         }
@@ -87,30 +88,30 @@ class SingBoxConfigGeneratorRoutingTest {
         assertThat(rules.size()).isEqualTo(3);
         assertThat(isLocalDomainRule(rules.get(1))).isTrue();
         assertThat(rules.get(2).get("ip_is_private").asBoolean()).isTrue();
-        assertThat(rules.get(2).get("outbound").asText()).isEqualTo("direct");
+        assertThat(rules.get(2).get("outbound").asString()).isEqualTo("direct");
 
         JsonNode bypass = rules.get(0);
-        assertThat(bypass.get("action").asText()).isEqualTo("route");
-        assertThat(bypass.get("outbound").asText()).isEqualTo("direct");
+        assertThat(bypass.get("action").asString()).isEqualTo("route");
+        assertThat(bypass.get("outbound").asString()).isEqualTo("direct");
 
         JsonNode domains = bypass.get("domain");
         assertThat(domains.size()).isEqualTo(2);
-        assertThat(domains.get(0).asText()).isEqualTo("example.com");
-        assertThat(domains.get(1).asText()).isEqualTo("api.openai.com");
+        assertThat(domains.get(0).asString()).isEqualTo("example.com");
+        assertThat(domains.get(1).asString()).isEqualTo("api.openai.com");
 
         JsonNode suffixes = bypass.get("domain_suffix");
         assertThat(suffixes.size()).isEqualTo(2);
-        assertThat(suffixes.get(0).asText()).isEqualTo("github.com");
-        assertThat(suffixes.get(1).asText()).isEqualTo("corp.local");
+        assertThat(suffixes.get(0).asString()).isEqualTo("github.com");
+        assertThat(suffixes.get(1).asString()).isEqualTo("corp.local");
 
         JsonNode keywords = bypass.get("domain_keyword");
         assertThat(keywords.size()).isEqualTo(1);
-        assertThat(keywords.get(0).asText()).isEqualTo("google");
+        assertThat(keywords.get(0).asString()).isEqualTo("google");
 
         JsonNode cidrs = bypass.get("ip_cidr");
         assertThat(cidrs.size()).isEqualTo(2);
-        assertThat(cidrs.get(0).asText()).isEqualTo("192.168.0.0/16");
-        assertThat(cidrs.get(1).asText()).isEqualTo("203.0.113.42/32");
+        assertThat(cidrs.get(0).asString()).isEqualTo("192.168.0.0/16");
+        assertThat(cidrs.get(1).asString()).isEqualTo("203.0.113.42/32");
     }
 
     @Test
@@ -136,7 +137,7 @@ class SingBoxConfigGeneratorRoutingTest {
 
         JsonNode route = root.get("route");
         assertThat(route).isNotNull();
-        assertThat(route.get("final").asText()).isEqualTo("proxy");
+        assertThat(route.get("final").asString()).isEqualTo("proxy");
         assertThat(route.get("auto_detect_interface").asBoolean()).isTrue();
         JsonNode rules = route.get("rules");
         assertThat(rules).isNotNull();
@@ -145,7 +146,7 @@ class SingBoxConfigGeneratorRoutingTest {
         assertThat(rules.size()).isEqualTo(2);
         assertThat(isLocalDomainRule(rules.get(0))).isTrue();
         assertThat(rules.get(1).get("ip_is_private").asBoolean()).isTrue();
-        assertThat(rules.get(1).get("outbound").asText()).isEqualTo("direct");
+        assertThat(rules.get(1).get("outbound").asString()).isEqualTo("direct");
     }
 
     @Test
@@ -160,10 +161,10 @@ class SingBoxConfigGeneratorRoutingTest {
 
         JsonNode local = rules.get(0);
         assertThat(isLocalDomainRule(local)).isTrue();
-        assertThat(local.get("domain").get(0).asText()).isEqualTo("localhost");
-        assertThat(local.get("domain_suffix").get(0).asText()).isEqualTo(".local");
-        assertThat(local.get("action").asText()).isEqualTo("route");
-        assertThat(local.get("outbound").asText()).isEqualTo("direct");
+        assertThat(local.get("domain").get(0).asString()).isEqualTo("localhost");
+        assertThat(local.get("domain_suffix").get(0).asString()).isEqualTo(".local");
+        assertThat(local.get("action").asString()).isEqualTo("route");
+        assertThat(local.get("outbound").asString()).isEqualTo("direct");
     }
 
     @Test
@@ -183,33 +184,33 @@ class SingBoxConfigGeneratorRoutingTest {
 
         assertThat(isLocalDomainRule(rules.get(0))).isTrue();
         assertThat(rules.get(1).get("ip_is_private").asBoolean()).isTrue();
-        assertThat(rules.get(1).get("outbound").asText()).isEqualTo("direct");
+        assertThat(rules.get(1).get("outbound").asString()).isEqualTo("direct");
 
-        assertThat(rules.get(2).get("rule_set").get(0).asText())
+        assertThat(rules.get(2).get("rule_set").get(0).asString())
                 .isEqualTo("geosite-category-ru");
-        assertThat(rules.get(2).get("outbound").asText()).isEqualTo("direct");
+        assertThat(rules.get(2).get("outbound").asString()).isEqualTo("direct");
 
-        assertThat(rules.get(3).get("rule_set").get(0).asText()).isEqualTo("geoip-ru");
-        assertThat(rules.get(3).get("outbound").asText()).isEqualTo("direct");
+        assertThat(rules.get(3).get("rule_set").get(0).asString()).isEqualTo("geoip-ru");
+        assertThat(rules.get(3).get("outbound").asString()).isEqualTo("direct");
 
         JsonNode ruleSet = route.get("rule_set");
         assertThat(ruleSet).isNotNull();
         assertThat(ruleSet.size()).isEqualTo(2);
-        assertThat(ruleSet.get(0).get("tag").asText()).isEqualTo("geosite-category-ru");
-        assertThat(ruleSet.get(0).get("type").asText()).isEqualTo("remote");
-        assertThat(ruleSet.get(0).get("format").asText()).isEqualTo("binary");
-        assertThat(ruleSet.get(0).get("url").asText())
+        assertThat(ruleSet.get(0).get("tag").asString()).isEqualTo("geosite-category-ru");
+        assertThat(ruleSet.get(0).get("type").asString()).isEqualTo("remote");
+        assertThat(ruleSet.get(0).get("format").asString()).isEqualTo("binary");
+        assertThat(ruleSet.get(0).get("url").asString())
                 .isEqualTo("https://raw.githubusercontent.com/SagerNet/sing-geosite/"
                         + "rule-set/geosite-category-ru.srs");
         // Through the tunnel: GitHub raw is often blocked when dialed
         // directly on the networks this client is for.
-        assertThat(ruleSet.get(0).get("download_detour").asText()).isEqualTo("proxy");
-        assertThat(ruleSet.get(1).get("tag").asText()).isEqualTo("geoip-ru");
-        assertThat(ruleSet.get(1).get("url").asText())
+        assertThat(ruleSet.get(0).get("download_detour").asString()).isEqualTo("proxy");
+        assertThat(ruleSet.get(1).get("tag").asString()).isEqualTo("geoip-ru");
+        assertThat(ruleSet.get(1).get("url").asString())
                 .isEqualTo("https://raw.githubusercontent.com/SagerNet/sing-geoip/"
                         + "rule-set/geoip-ru.srs");
 
-        assertThat(route.get("final").asText()).isEqualTo("proxy");
+        assertThat(route.get("final").asString()).isEqualTo("proxy");
     }
 
     @Test
@@ -222,9 +223,9 @@ class SingBoxConfigGeneratorRoutingTest {
         JsonNode route = parse(json).get("route");
 
         // rules[0]=local-domain, rules[1]=private-ip; preset rules start at 2.
-        assertThat(route.get("rules").get(2).get("rule_set").get(0).asText())
+        assertThat(route.get("rules").get(2).get("rule_set").get(0).asString())
                 .isEqualTo("geosite-cn");
-        assertThat(route.get("rule_set").get(0).get("url").asText())
+        assertThat(route.get("rule_set").get(0).get("url").asString())
                 .endsWith("/geosite-cn.srs");
     }
 
@@ -243,12 +244,12 @@ class SingBoxConfigGeneratorRoutingTest {
         assertThat(rules.size()).isEqualTo(3);
         assertThat(isLocalDomainRule(rules.get(0))).isTrue();
         assertThat(rules.get(1).get("ip_is_private").asBoolean()).isTrue();
-        assertThat(rules.get(2).get("rule_set").get(0).asText()).isEqualTo("geoip-de");
+        assertThat(rules.get(2).get("rule_set").get(0).asString()).isEqualTo("geoip-de");
 
         JsonNode ruleSet = route.get("rule_set");
         assertThat(ruleSet.size()).isEqualTo(1);
-        assertThat(ruleSet.get(0).get("tag").asText()).isEqualTo("geoip-de");
-        assertThat(ruleSet.get(0).get("url").asText()).endsWith("/geoip-de.srs");
+        assertThat(ruleSet.get(0).get("tag").asString()).isEqualTo("geoip-de");
+        assertThat(ruleSet.get(0).get("url").asString()).endsWith("/geoip-de.srs");
     }
 
     @Test
@@ -267,25 +268,25 @@ class SingBoxConfigGeneratorRoutingTest {
         assertThat(rules.size()).isEqualTo(4);
 
         JsonNode geositeRule = rules.get(2);
-        assertThat(geositeRule.get("rule_set").get(0).asText())
+        assertThat(geositeRule.get("rule_set").get(0).asString())
                 .isEqualTo("geosite-category-ru");
-        assertThat(geositeRule.get("rule_set").get(1).asText()).isEqualTo("geosite-cn");
-        assertThat(geositeRule.get("outbound").asText()).isEqualTo("direct");
+        assertThat(geositeRule.get("rule_set").get(1).asString()).isEqualTo("geosite-cn");
+        assertThat(geositeRule.get("outbound").asString()).isEqualTo("direct");
 
         JsonNode geoipRule = rules.get(3);
-        assertThat(geoipRule.get("rule_set").get(0).asText()).isEqualTo("geoip-ru");
-        assertThat(geoipRule.get("rule_set").get(1).asText()).isEqualTo("geoip-kz");
-        assertThat(geoipRule.get("rule_set").get(2).asText()).isEqualTo("geoip-cn");
-        assertThat(geoipRule.get("outbound").asText()).isEqualTo("direct");
+        assertThat(geoipRule.get("rule_set").get(0).asString()).isEqualTo("geoip-ru");
+        assertThat(geoipRule.get("rule_set").get(1).asString()).isEqualTo("geoip-kz");
+        assertThat(geoipRule.get("rule_set").get(2).asString()).isEqualTo("geoip-cn");
+        assertThat(geoipRule.get("outbound").asString()).isEqualTo("direct");
 
         // route.rule_set declares each tag exactly once, in insertion order.
         JsonNode ruleSet = route.get("rule_set");
         assertThat(ruleSet.size()).isEqualTo(5);
-        assertThat(ruleSet.get(0).get("tag").asText()).isEqualTo("geosite-category-ru");
-        assertThat(ruleSet.get(1).get("tag").asText()).isEqualTo("geoip-ru");
-        assertThat(ruleSet.get(2).get("tag").asText()).isEqualTo("geoip-kz");
-        assertThat(ruleSet.get(3).get("tag").asText()).isEqualTo("geosite-cn");
-        assertThat(ruleSet.get(4).get("tag").asText()).isEqualTo("geoip-cn");
+        assertThat(ruleSet.get(0).get("tag").asString()).isEqualTo("geosite-category-ru");
+        assertThat(ruleSet.get(1).get("tag").asString()).isEqualTo("geoip-ru");
+        assertThat(ruleSet.get(2).get("tag").asString()).isEqualTo("geoip-kz");
+        assertThat(ruleSet.get(3).get("tag").asString()).isEqualTo("geosite-cn");
+        assertThat(ruleSet.get(4).get("tag").asString()).isEqualTo("geoip-cn");
     }
 
     @Test
@@ -318,41 +319,41 @@ class SingBoxConfigGeneratorRoutingTest {
         // Local-bypass block (always prepended)
         assertThat(isLocalDomainRule(rules.get(0))).isTrue();
         assertThat(rules.get(1).get("ip_is_private").asBoolean()).isTrue();
-        assertThat(rules.get(1).get("outbound").asText()).isEqualTo("direct");
+        assertThat(rules.get(1).get("outbound").asString()).isEqualTo("direct");
 
         // domain_suffix rule
-        assertThat(rules.get(2).get("domain_suffix").get(0).asText()).isEqualTo(".google.com");
-        assertThat(rules.get(2).get("outbound").asText()).isEqualTo("proxy");
+        assertThat(rules.get(2).get("domain_suffix").get(0).asString()).isEqualTo(".google.com");
+        assertThat(rules.get(2).get("outbound").asString()).isEqualTo("proxy");
 
         // ip_cidr rule
-        assertThat(rules.get(3).get("ip_cidr").get(0).asText()).isEqualTo("10.0.0.0/8");
-        assertThat(rules.get(3).get("outbound").asText()).isEqualTo("direct");
+        assertThat(rules.get(3).get("ip_cidr").get(0).asString()).isEqualTo("10.0.0.0/8");
+        assertThat(rules.get(3).get("outbound").asString()).isEqualTo("direct");
 
         // geosite rule — migrated to rule_set reference
-        assertThat(rules.get(4).get("rule_set").get(0).asText()).isEqualTo("geosite-cn");
-        assertThat(rules.get(4).get("outbound").asText()).isEqualTo("direct");
+        assertThat(rules.get(4).get("rule_set").get(0).asString()).isEqualTo("geosite-cn");
+        assertThat(rules.get(4).get("outbound").asString()).isEqualTo("direct");
 
         // geoip rule — migrated to rule_set reference
-        assertThat(rules.get(5).get("rule_set").get(0).asText()).isEqualTo("geoip-cn");
-        assertThat(rules.get(5).get("outbound").asText()).isEqualTo("direct");
+        assertThat(rules.get(5).get("rule_set").get(0).asString()).isEqualTo("geoip-cn");
+        assertThat(rules.get(5).get("outbound").asString()).isEqualTo("direct");
 
         JsonNode ruleSet = root.get("route").get("rule_set");
         assertThat(ruleSet).isNotNull();
         assertThat(ruleSet.size()).isEqualTo(2);
-        assertThat(ruleSet.get(0).get("tag").asText()).isEqualTo("geosite-cn");
-        assertThat(ruleSet.get(1).get("tag").asText()).isEqualTo("geoip-cn");
+        assertThat(ruleSet.get(0).get("tag").asString()).isEqualTo("geosite-cn");
+        assertThat(ruleSet.get(1).get("tag").asString()).isEqualTo("geoip-cn");
 
         // domain rule
-        assertThat(rules.get(6).get("domain").get(0).asText()).isEqualTo("example.com");
-        assertThat(rules.get(6).get("outbound").asText()).isEqualTo("block");
+        assertThat(rules.get(6).get("domain").get(0).asString()).isEqualTo("example.com");
+        assertThat(rules.get(6).get("outbound").asString()).isEqualTo("block");
 
         // domain_keyword rule
-        assertThat(rules.get(7).get("domain_keyword").get(0).asText()).isEqualTo("ads");
-        assertThat(rules.get(7).get("outbound").asText()).isEqualTo("block");
+        assertThat(rules.get(7).get("domain_keyword").get(0).asString()).isEqualTo("ads");
+        assertThat(rules.get(7).get("outbound").asString()).isEqualTo("block");
 
         // domain_regex rule
-        assertThat(rules.get(8).get("domain_regex").get(0).asText()).isEqualTo(".*\\.ads\\..*");
-        assertThat(rules.get(8).get("outbound").asText()).isEqualTo("block");
+        assertThat(rules.get(8).get("domain_regex").get(0).asString()).isEqualTo(".*\\.ads\\..*");
+        assertThat(rules.get(8).get("outbound").asString()).isEqualTo("block");
     }
 
     @Test
@@ -410,8 +411,8 @@ class SingBoxConfigGeneratorRoutingTest {
         assertThat(isLocalDomainRule(rules.get(0))).isTrue();
         JsonNode privateRule = rules.get(1);
         assertThat(privateRule.get("ip_is_private").asBoolean()).isTrue();
-        assertThat(privateRule.get("action").asText()).isEqualTo("route");
-        assertThat(privateRule.get("outbound").asText()).isEqualTo("direct");
+        assertThat(privateRule.get("action").asString()).isEqualTo("route");
+        assertThat(privateRule.get("outbound").asString()).isEqualTo("direct");
     }
 
     @Test
@@ -431,9 +432,9 @@ class SingBoxConfigGeneratorRoutingTest {
         assertThat(rules.size()).isEqualTo(3);
         assertThat(isLocalDomainRule(rules.get(0))).isTrue();
         assertThat(rules.get(1).get("ip_is_private").asBoolean()).isTrue();
-        assertThat(rules.get(1).get("outbound").asText()).isEqualTo("direct");
-        assertThat(rules.get(2).get("ip_cidr").get(0).asText()).isEqualTo("10.0.0.0/8");
-        assertThat(rules.get(2).get("outbound").asText()).isEqualTo("proxy");
+        assertThat(rules.get(1).get("outbound").asString()).isEqualTo("direct");
+        assertThat(rules.get(2).get("ip_cidr").get(0).asString()).isEqualTo("10.0.0.0/8");
+        assertThat(rules.get(2).get("outbound").asString()).isEqualTo("proxy");
     }
 
     @Test
@@ -449,7 +450,7 @@ class SingBoxConfigGeneratorRoutingTest {
         // [ user-bypass, local-domain, private-ip ]
         assertThat(rules.size()).isEqualTo(3);
         assertThat(rules.get(0).has("domain")).isTrue();
-        assertThat(rules.get(0).get("domain").get(0).asText()).isEqualTo("internal.example.com");
+        assertThat(rules.get(0).get("domain").get(0).asString()).isEqualTo("internal.example.com");
         assertThat(isLocalDomainRule(rules.get(1))).isTrue();
         assertThat(rules.get(2).get("ip_is_private").asBoolean()).isTrue();
     }
@@ -488,7 +489,7 @@ class SingBoxConfigGeneratorRoutingTest {
         assertThat(rules.size()).isEqualTo(2);
         assertThat(isLocalDomainRule(rules.get(0))).isTrue();
         assertThat(rules.get(1).get("ip_is_private").asBoolean()).isTrue();
-        assertThat(rules.get(1).get("outbound").asText()).isEqualTo("direct");
-        assertThat(route.get("final").asText()).isEqualTo("proxy");
+        assertThat(rules.get(1).get("outbound").asString()).isEqualTo("direct");
+        assertThat(route.get("final").asString()).isEqualTo("proxy");
     }
 }
