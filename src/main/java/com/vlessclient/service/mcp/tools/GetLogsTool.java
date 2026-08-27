@@ -1,11 +1,12 @@
 package com.vlessclient.service.mcp.tools;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.service.mcp.AppControlService;
 import com.vlessclient.service.mcp.McpTool;
 import java.util.List;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * {@code get_logs} — returns recent sing-box log lines (newest last), optionally
@@ -13,7 +14,7 @@ import java.util.List;
  */
 public class GetLogsTool implements McpTool {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = JsonMapper.builder().build();
     private static final int DEFAULT_LIMIT = 100;
 
     private final AppControlService control;
@@ -55,7 +56,7 @@ public class GetLogsTool implements McpTool {
         JsonNode limitNode = arguments.get("limit");
         int limit = limitNode != null && limitNode.isInt() ? limitNode.asInt() : DEFAULT_LIMIT;
         JsonNode filterNode = arguments.get("filter");
-        String filter = filterNode != null && filterNode.isTextual() ? filterNode.asText() : null;
+        String filter = filterNode != null && filterNode.isString() ? filterNode.asString() : null;
 
         List<String> lines = control.getLogs(limit, filter);
         ObjectNode result = MAPPER.createObjectNode();

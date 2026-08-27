@@ -1,7 +1,5 @@
 package com.vlessclient.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.platform.SystemProxyGuard;
@@ -20,6 +18,10 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Manages the sing-box process lifecycle: starting, stopping, and monitoring
@@ -528,15 +530,15 @@ public class SingBoxEngine {
      */
     static SystemProxyTarget extractSystemProxyTarget(String configJson) {
         try {
-            JsonNode inbounds = new ObjectMapper().readTree(configJson).path("inbounds");
+            JsonNode inbounds = JsonMapper.builder().build().readTree(configJson).path("inbounds");
             for (JsonNode inbound : inbounds) {
                 if (inbound.path("set_system_proxy").asBoolean(false)) {
                     return new SystemProxyTarget(
-                            inbound.path("listen").asText("127.0.0.1"),
+                            inbound.path("listen").asString("127.0.0.1"),
                             inbound.path("listen_port").asInt());
                 }
             }
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             log.debug("Could not parse config for set_system_proxy", e);
         }
         return null;

@@ -2,9 +2,8 @@ package com.vlessclient.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import tools.jackson.databind.json.JsonMapper;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import com.vlessclient.model.Subscription;
 import java.io.IOException;
@@ -17,6 +16,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Subscription URLs embed the account token, which is why
@@ -96,10 +97,10 @@ class SubscriptionServiceRedactionTest {
         // deliberately keeps the url in plaintext ("a readable config always
         // wins over a lost URL"). lastError has no such excuse — it is a
         // derived string that never needed the token in the first place.
-        JsonNode persisted = new ObjectMapper()
+        JsonNode persisted = JsonMapper.builder().build()
                 .readTree(Files.readString(tempDir.resolve("subscriptions.json")))
                 .path("subscriptions").path(0);
-        assertThat(persisted.path("lastError").asText())
+        assertThat(persisted.path("lastError").asString())
                 .as("the error persisted beside the url field")
                 .contains("HTTP 401")
                 .doesNotContain(TOKEN);

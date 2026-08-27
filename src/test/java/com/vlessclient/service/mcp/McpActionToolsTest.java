@@ -1,20 +1,21 @@
 package com.vlessclient.service.mcp;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.service.mcp.tools.ConnectTool;
 import com.vlessclient.service.mcp.tools.DisconnectTool;
 import com.vlessclient.service.mcp.tools.MeasureLatencyTool;
 import com.vlessclient.service.mcp.tools.RefreshSubscriptionTool;
 import com.vlessclient.service.mcp.tools.SelectServerTool;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class McpActionToolsTest {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
     private final FakeAppControlService control = new FakeAppControlService();
 

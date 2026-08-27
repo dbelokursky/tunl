@@ -1,13 +1,14 @@
 package com.vlessclient.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -20,7 +21,7 @@ class SingBoxConfigGeneratorMultiProtocolTest {
     @BeforeEach
     void setUp() {
         generator = new SingBoxConfigGenerator();
-        mapper = new ObjectMapper();
+        mapper = JsonMapper.builder().build();
         defaultSettings = new AppSettings();
     }
 
@@ -59,17 +60,17 @@ class SingBoxConfigGeneratorMultiProtocolTest {
 
         JsonNode group = null;
         for (JsonNode node : outbounds) {
-            if ("proxy".equals(node.path("tag").asText())) {
+            if ("proxy".equals(node.path("tag").asString())) {
                 group = node;
             }
         }
         assertThat(group).as("a node tagged proxy must exist").isNotNull();
-        assertThat(group.get("type").asText()).isEqualTo("selector");
-        assertThat(group.get("outbounds").get(0).asText()).isEqualTo(memberTag(server));
+        assertThat(group.get("type").asString()).isEqualTo("selector");
+        assertThat(group.get("outbounds").get(0).asString()).isEqualTo(memberTag(server));
 
         // The server itself is a member, not the entry point.
-        assertThat(outbounds.get(0).get("tag").asText()).isEqualTo(memberTag(server));
-        assertThat(outbounds.get(0).get("type").asText()).isEqualTo("vless");
+        assertThat(outbounds.get(0).get("tag").asString()).isEqualTo(memberTag(server));
+        assertThat(outbounds.get(0).get("type").asString()).isEqualTo("vless");
     }
 
     /**
@@ -86,7 +87,7 @@ class SingBoxConfigGeneratorMultiProtocolTest {
 
         assertThat(memberTag(first)).isNotEqualTo(memberTag(second));
         assertThat(mapper.readTree(generator.generate(first, defaultSettings))
-                .get("outbounds").get(0).get("tag").asText())
+                .get("outbounds").get(0).get("tag").asString())
                 .isEqualTo(memberTag(first));
     }
 
@@ -112,13 +113,13 @@ class SingBoxConfigGeneratorMultiProtocolTest {
 
         JsonNode proxy = proxyOutbound(server);
 
-        assertThat(proxy.get("type").asText()).isEqualTo("vmess");
-        assertThat(proxy.get("tag").asText()).isEqualTo(memberTag(server));
-        assertThat(proxy.get("server").asText()).isEqualTo("vmess.example.com");
+        assertThat(proxy.get("type").asString()).isEqualTo("vmess");
+        assertThat(proxy.get("tag").asString()).isEqualTo(memberTag(server));
+        assertThat(proxy.get("server").asString()).isEqualTo("vmess.example.com");
         assertThat(proxy.get("server_port").asInt()).isEqualTo(443);
-        assertThat(proxy.get("uuid").asText()).isEqualTo("b1c2d3e4-f5a6-7890-abcd-ef1234567890");
+        assertThat(proxy.get("uuid").asString()).isEqualTo("b1c2d3e4-f5a6-7890-abcd-ef1234567890");
         assertThat(proxy.get("alter_id").asInt()).isEqualTo(0);
-        assertThat(proxy.get("security").asText()).isEqualTo("auto");
+        assertThat(proxy.get("security").asString()).isEqualTo("auto");
     }
 
     @Test
@@ -134,11 +135,11 @@ class SingBoxConfigGeneratorMultiProtocolTest {
 
         JsonNode proxy = proxyOutbound(server);
 
-        assertThat(proxy.get("type").asText()).isEqualTo("vmess");
+        assertThat(proxy.get("type").asString()).isEqualTo("vmess");
         JsonNode transport = proxy.get("transport");
         assertThat(transport).isNotNull();
-        assertThat(transport.get("type").asText()).isEqualTo("ws");
-        assertThat(transport.get("path").asText()).isEqualTo("/vmess-ws");
+        assertThat(transport.get("type").asString()).isEqualTo("ws");
+        assertThat(transport.get("path").asString()).isEqualTo("/vmess-ws");
     }
 
     @Test
@@ -156,7 +157,7 @@ class SingBoxConfigGeneratorMultiProtocolTest {
         JsonNode tls = proxy.get("tls");
         assertThat(tls).isNotNull();
         assertThat(tls.get("enabled").asBoolean()).isTrue();
-        assertThat(tls.get("server_name").asText()).isEqualTo("vmess.example.com");
+        assertThat(tls.get("server_name").asString()).isEqualTo("vmess.example.com");
     }
 
     // -- Trojan tests --
@@ -173,11 +174,11 @@ class SingBoxConfigGeneratorMultiProtocolTest {
 
         JsonNode proxy = proxyOutbound(server);
 
-        assertThat(proxy.get("type").asText()).isEqualTo("trojan");
-        assertThat(proxy.get("tag").asText()).isEqualTo(memberTag(server));
-        assertThat(proxy.get("server").asText()).isEqualTo("trojan.example.com");
+        assertThat(proxy.get("type").asString()).isEqualTo("trojan");
+        assertThat(proxy.get("tag").asString()).isEqualTo(memberTag(server));
+        assertThat(proxy.get("server").asString()).isEqualTo("trojan.example.com");
         assertThat(proxy.get("server_port").asInt()).isEqualTo(443);
-        assertThat(proxy.get("password").asText()).isEqualTo("my-trojan-password");
+        assertThat(proxy.get("password").asString()).isEqualTo("my-trojan-password");
         assertThat(proxy.has("uuid")).isFalse();
     }
 
@@ -195,11 +196,11 @@ class SingBoxConfigGeneratorMultiProtocolTest {
 
         JsonNode proxy = proxyOutbound(server);
 
-        assertThat(proxy.get("type").asText()).isEqualTo("trojan");
+        assertThat(proxy.get("type").asString()).isEqualTo("trojan");
         JsonNode transport = proxy.get("transport");
         assertThat(transport).isNotNull();
-        assertThat(transport.get("type").asText()).isEqualTo("grpc");
-        assertThat(transport.get("service_name").asText()).isEqualTo("trojan-grpc");
+        assertThat(transport.get("type").asString()).isEqualTo("grpc");
+        assertThat(transport.get("service_name").asString()).isEqualTo("trojan-grpc");
     }
 
     @Test
@@ -218,7 +219,7 @@ class SingBoxConfigGeneratorMultiProtocolTest {
         JsonNode tls = proxy.get("tls");
         assertThat(tls).isNotNull();
         assertThat(tls.get("enabled").asBoolean()).isTrue();
-        assertThat(tls.get("server_name").asText()).isEqualTo("trojan.example.com");
+        assertThat(tls.get("server_name").asString()).isEqualTo("trojan.example.com");
         assertThat(tls.get("alpn").size()).isEqualTo(2);
     }
 
@@ -235,12 +236,12 @@ class SingBoxConfigGeneratorMultiProtocolTest {
 
         JsonNode proxy = proxyOutbound(server);
 
-        assertThat(proxy.get("type").asText()).isEqualTo("shadowsocks");
-        assertThat(proxy.get("tag").asText()).isEqualTo(memberTag(server));
-        assertThat(proxy.get("server").asText()).isEqualTo("ss.example.com");
+        assertThat(proxy.get("type").asString()).isEqualTo("shadowsocks");
+        assertThat(proxy.get("tag").asString()).isEqualTo(memberTag(server));
+        assertThat(proxy.get("server").asString()).isEqualTo("ss.example.com");
         assertThat(proxy.get("server_port").asInt()).isEqualTo(8388);
-        assertThat(proxy.get("method").asText()).isEqualTo("aes-256-gcm");
-        assertThat(proxy.get("password").asText()).isEqualTo("ss-password-123");
+        assertThat(proxy.get("method").asString()).isEqualTo("aes-256-gcm");
+        assertThat(proxy.get("password").asString()).isEqualTo("ss-password-123");
     }
 
     @Test
@@ -288,18 +289,18 @@ class SingBoxConfigGeneratorMultiProtocolTest {
 
         JsonNode proxy = proxyOutbound(server);
 
-        assertThat(proxy.get("type").asText()).isEqualTo("hysteria2");
-        assertThat(proxy.get("tag").asText()).isEqualTo(memberTag(server));
-        assertThat(proxy.get("server").asText()).isEqualTo("hy2.example.com");
+        assertThat(proxy.get("type").asString()).isEqualTo("hysteria2");
+        assertThat(proxy.get("tag").asString()).isEqualTo(memberTag(server));
+        assertThat(proxy.get("server").asString()).isEqualTo("hy2.example.com");
         assertThat(proxy.get("server_port").asInt()).isEqualTo(443);
-        assertThat(proxy.get("password").asText()).isEqualTo("hy2-auth-password");
+        assertThat(proxy.get("password").asString()).isEqualTo("hy2-auth-password");
         assertThat(proxy.has("obfs")).isFalse();
 
         JsonNode tls = proxy.get("tls");
         assertThat(tls).isNotNull();
         assertThat(tls.get("enabled").asBoolean()).isTrue();
-        assertThat(tls.get("server_name").asText()).isEqualTo("hy2.example.com");
-        assertThat(tls.get("alpn").get(0).asText()).isEqualTo("h3");
+        assertThat(tls.get("server_name").asString()).isEqualTo("hy2.example.com");
+        assertThat(tls.get("alpn").get(0).asString()).isEqualTo("h3");
     }
 
     @Test
@@ -315,11 +316,11 @@ class SingBoxConfigGeneratorMultiProtocolTest {
 
         JsonNode proxy = proxyOutbound(server);
 
-        assertThat(proxy.get("type").asText()).isEqualTo("hysteria2");
+        assertThat(proxy.get("type").asString()).isEqualTo("hysteria2");
         JsonNode obfs = proxy.get("obfs");
         assertThat(obfs).isNotNull();
-        assertThat(obfs.get("type").asText()).isEqualTo("salamander");
-        assertThat(obfs.get("password").asText()).isEqualTo("my-obfs-password");
+        assertThat(obfs.get("type").asString()).isEqualTo("salamander");
+        assertThat(obfs.get("password").asString()).isEqualTo("my-obfs-password");
     }
 
     @Test
@@ -356,14 +357,14 @@ class SingBoxConfigGeneratorMultiProtocolTest {
 
         JsonNode endpoint = wireguardEndpoint(server);
 
-        assertThat(endpoint.get("type").asText()).isEqualTo("wireguard");
-        assertThat(endpoint.get("tag").asText()).isEqualTo(memberTag(server));
-        assertThat(endpoint.get("private_key").asText()).isEqualTo("wg-private-key-base64");
+        assertThat(endpoint.get("type").asString()).isEqualTo("wireguard");
+        assertThat(endpoint.get("tag").asString()).isEqualTo(memberTag(server));
+        assertThat(endpoint.get("private_key").asString()).isEqualTo("wg-private-key-base64");
 
         JsonNode address = endpoint.get("address");
         assertThat(address).isNotNull();
         assertThat(address.isArray()).isTrue();
-        assertThat(address.get(0).asText()).isEqualTo("10.0.0.2/32");
+        assertThat(address.get(0).asString()).isEqualTo("10.0.0.2/32");
 
         JsonNode peers = endpoint.get("peers");
         assertThat(peers).isNotNull();
@@ -371,15 +372,15 @@ class SingBoxConfigGeneratorMultiProtocolTest {
         assertThat(peers.size()).isEqualTo(1);
 
         JsonNode peer = peers.get(0);
-        assertThat(peer.get("address").asText()).isEqualTo("wg.example.com");
+        assertThat(peer.get("address").asString()).isEqualTo("wg.example.com");
         assertThat(peer.get("port").asInt()).isEqualTo(51820);
-        assertThat(peer.get("public_key").asText()).isEqualTo("wg-peer-public-key-base64");
+        assertThat(peer.get("public_key").asString()).isEqualTo("wg-peer-public-key-base64");
 
         JsonNode allowedIps = peer.get("allowed_ips");
         assertThat(allowedIps).isNotNull();
         assertThat(allowedIps.isArray()).isTrue();
-        assertThat(allowedIps.get(0).asText()).isEqualTo("0.0.0.0/0");
-        assertThat(allowedIps.get(1).asText()).isEqualTo("::/0");
+        assertThat(allowedIps.get(0).asString()).isEqualTo("0.0.0.0/0");
+        assertThat(allowedIps.get(1).asString()).isEqualTo("::/0");
 
         JsonNode reserved = peer.get("reserved");
         assertThat(reserved).isNotNull();
@@ -406,14 +407,14 @@ class SingBoxConfigGeneratorMultiProtocolTest {
         // traffic would bypass the tunnel.
         JsonNode outbounds = root.get("outbounds");
         assertThat(outbounds.size()).isEqualTo(2);
-        assertThat(outbounds.get(0).get("tag").asText()).isEqualTo("proxy");
-        assertThat(outbounds.get(0).get("type").asText()).isEqualTo("selector");
+        assertThat(outbounds.get(0).get("tag").asString()).isEqualTo("proxy");
+        assertThat(outbounds.get(0).get("type").asString()).isEqualTo("selector");
         // A selector referencing an endpoint is legal — verified against the
         // real core before this shape was adopted.
-        assertThat(outbounds.get(0).get("outbounds").get(0).asText())
+        assertThat(outbounds.get(0).get("outbounds").get(0).asString())
                 .isEqualTo(memberTag(server));
-        assertThat(outbounds.get(1).get("tag").asText()).isEqualTo("direct");
-        assertThat(root.get("route").get("final").asText()).isEqualTo("proxy");
+        assertThat(outbounds.get(1).get("tag").asString()).isEqualTo("direct");
+        assertThat(root.get("route").get("final").asString()).isEqualTo("proxy");
     }
 
     @Test
@@ -428,8 +429,8 @@ class SingBoxConfigGeneratorMultiProtocolTest {
 
         JsonNode endpoint = wireguardEndpoint(server);
 
-        assertThat(endpoint.get("type").asText()).isEqualTo("wireguard");
-        assertThat(endpoint.get("private_key").asText()).isEqualTo("wg-private-key");
+        assertThat(endpoint.get("type").asString()).isEqualTo("wireguard");
+        assertThat(endpoint.get("private_key").asString()).isEqualTo("wg-private-key");
         assertThat(endpoint.has("address")).isFalse();
 
         JsonNode peer = endpoint.get("peers").get(0);
@@ -449,7 +450,7 @@ class SingBoxConfigGeneratorMultiProtocolTest {
 
         JsonNode endpoint = wireguardEndpoint(server);
 
-        assertThat(endpoint.get("type").asText()).isEqualTo("wireguard");
+        assertThat(endpoint.get("type").asString()).isEqualTo("wireguard");
         JsonNode reserved = endpoint.get("peers").get(0).get("reserved");
         assertThat(reserved).isNotNull();
         assertThat(reserved.isArray()).isTrue();
@@ -500,7 +501,7 @@ class SingBoxConfigGeneratorMultiProtocolTest {
 
         JsonNode endpoint = wireguardEndpoint(server);
 
-        assertThat(endpoint.get("type").asText()).isEqualTo("wireguard");
+        assertThat(endpoint.get("type").asString()).isEqualTo("wireguard");
         assertThat(endpoint.get("peers").get(0).has("reserved")).isFalse();
     }
 

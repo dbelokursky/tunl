@@ -1,6 +1,5 @@
 package com.vlessclient.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -10,6 +9,8 @@ import java.time.Duration;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Reports whether a newer sing-box has been released than the one this build
@@ -37,7 +38,7 @@ public final class SingBoxReleases {
     private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(10);
 
     private final HttpClient httpClient;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
     /** Remembered for the run: the answer cannot usefully change mid-session. */
     private volatile Optional<String> cached;
@@ -132,7 +133,7 @@ public final class SingBoxReleases {
      */
     Optional<String> parseTag(String json) {
         try {
-            String tag = objectMapper.readTree(json).path("tag_name").asText("");
+            String tag = objectMapper.readTree(json).path("tag_name").asString("");
             String version = UpdateManager.stripVersionPrefix(tag);
             return version.isBlank() ? Optional.empty() : Optional.of(version);
         } catch (Exception e) {

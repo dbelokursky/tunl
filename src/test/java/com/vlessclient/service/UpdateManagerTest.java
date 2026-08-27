@@ -69,7 +69,7 @@ class UpdateManagerTest {
                   ]
                 }
                 """;
-        var assets = new com.fasterxml.jackson.databind.ObjectMapper()
+        var assets = tools.jackson.databind.json.JsonMapper.builder().build()
                 .readTree(json).path("assets");
 
         String url = UpdateManager.findInstallerAssetUrl(assets);
@@ -90,7 +90,7 @@ class UpdateManagerTest {
                   ]
                 }
                 """;
-        var assets = new com.fasterxml.jackson.databind.ObjectMapper()
+        var assets = tools.jackson.databind.json.JsonMapper.builder().build()
                 .readTree(json).path("assets");
 
         assertThat(UpdateManager.findInstallerAssetUrl(assets)).isEmpty();

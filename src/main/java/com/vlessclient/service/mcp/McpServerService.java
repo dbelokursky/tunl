@@ -1,8 +1,5 @@
 package com.vlessclient.service.mcp;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.app.AppVersion;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.service.ConfigStore;
@@ -19,6 +16,10 @@ import com.vlessclient.service.mcp.tools.SimpleReadTool;
 import java.net.BindException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Owns the lifecycle of the local MCP control server and keeps it in sync with
@@ -37,7 +38,7 @@ public class McpServerService {
     private final ConfigStore configStore;
     private final AppControlService control;
     private final McpTokenStore tokenStore;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper = JsonMapper.builder().build();
     private final McpNotifier notifier = new McpNotifier(mapper);
 
     private McpHttpServer httpServer;
@@ -334,7 +335,7 @@ public class McpServerService {
         ObjectNode schema = mapper.createObjectNode();
         schema.put("type", "object");
         ObjectNode props = mapper.createObjectNode();
-        com.fasterxml.jackson.databind.node.ArrayNode required = mapper.createArrayNode();
+        tools.jackson.databind.node.ArrayNode required = mapper.createArrayNode();
         for (Object part : parts) {
             if (part instanceof Prop p) {
                 ObjectNode node = mapper.createObjectNode();
@@ -357,7 +358,7 @@ public class McpServerService {
 
     private static String str(ObjectNode args, String field) {
         JsonNode node = args.get(field);
-        return node != null && node.isTextual() ? node.asText() : null;
+        return node != null && node.isString() ? node.asString() : null;
     }
 
     private static boolean bool(ObjectNode args, String field) {

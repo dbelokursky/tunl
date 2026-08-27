@@ -1,9 +1,5 @@
 package com.vlessclient.service.mcp;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.service.Redact;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -13,6 +9,10 @@ import java.util.Set;
 import java.util.function.BooleanSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Transport-agnostic MCP server: the JSON-RPC 2.0 protocol engine.
@@ -123,11 +123,11 @@ public class McpServer {
         boolean isNotification = idNode == null || idNode.isNull();
 
         JsonNode methodNode = message.get("method");
-        if (methodNode == null || !methodNode.isTextual()) {
+        if (methodNode == null || !methodNode.isString()) {
             // No method → this is a response echoed to us; nothing to do.
             return isNotification ? null : error(idNode, INVALID_REQUEST, "Missing method");
         }
-        String method = methodNode.asText();
+        String method = methodNode.asString();
         ObjectNode params = message.get("params") instanceof ObjectNode p
                 ? p : mapper.createObjectNode();
 
@@ -178,7 +178,8 @@ public class McpServer {
         ObjectNode res = mapper.createObjectNode();
         JsonNode requested = params.get("protocolVersion");
         res.put("protocolVersion",
-                requested != null && requested.isTextual() ? requested.asText() : PROTOCOL_VERSION);
+                requested != null && requested.isString()
+                        ? requested.asString() : PROTOCOL_VERSION);
 
         ObjectNode capabilities = mapper.createObjectNode();
         capabilities.set("tools", mapper.createObjectNode().put("listChanged", false));
@@ -233,10 +234,10 @@ public class McpServer {
 
     private ObjectNode readResource(ObjectNode params) {
         JsonNode uriNode = params.get("uri");
-        if (uriNode == null || !uriNode.isTextual()) {
+        if (uriNode == null || !uriNode.isString()) {
             throw new IllegalArgumentException("resources/read requires a 'uri'");
         }
-        String uri = uriNode.asText();
+        String uri = uriNode.asString();
         McpResource resource = resources.get(uri);
         if (resource == null) {
             throw new IllegalArgumentException("Unknown resource: " + uri);
@@ -260,10 +261,10 @@ public class McpServer {
 
     private ObjectNode callTool(ObjectNode params) {
         JsonNode nameNode = params.get("name");
-        if (nameNode == null || !nameNode.isTextual()) {
+        if (nameNode == null || !nameNode.isString()) {
             throw new IllegalArgumentException("tools/call requires a 'name'");
         }
-        String toolName = nameNode.asText();
+        String toolName = nameNode.asString();
         McpTool tool = tools.get(toolName);
         if (tool == null) {
             return toolError("Unknown tool: " + toolName);
@@ -301,18 +302,18 @@ public class McpServer {
      */
     private String auditArgs(ObjectNode arguments) {
         ObjectNode copy = arguments.deepCopy();
-        // Snapshot the names: mutating while iterating fieldNames() reads as a
+        // Snapshot the names: mutating while iterating propertyNames() reads as a
         // bug even where LinkedHashMap tolerates a same-key replace.
         List<String> fields = new ArrayList<>();
-        copy.fieldNames().forEachRemaining(fields::add);
+        fields.addAll(copy.propertyNames());
         for (String field : fields) {
             JsonNode value = copy.get(field);
-            if (value == null || !value.isTextual()) {
+            if (value == null || !value.isString()) {
                 continue;
             }
             copy.put(field, SECRET_ARG_KEYS.contains(field)
                     ? Redact.REDACTED
-                    : Redact.urlsIn(value.asText()));
+                    : Redact.urlsIn(value.asString()));
         }
         return copy.toString();
     }

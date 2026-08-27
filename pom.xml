@@ -29,7 +29,7 @@
         <maven.compiler.target>25</maven.compiler.target>
         <javafx.version>25-ea+5</javafx.version>
         <junit.version>5.12.2</junit.version>
-        <jackson.version>2.18.3</jackson.version>
+        <jackson.version>3.2.2</jackson.version>
         <main.class>com.vlessclient.app.Launcher</main.class>
         <!-- singbox.version is read from src/main/resources/singbox.properties
              by the properties-maven-plugin (initialize phase) — the single
@@ -41,6 +41,18 @@
              JaCoCo agent is skipped (prepare-agent overwrites this). -->
         <argLine></argLine>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>tools.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>${jackson.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <!-- JavaFX -->
@@ -62,9 +74,8 @@
 
         <!-- Jackson for JSON -->
         <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
+            <groupId>tools.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
-            <version>${jackson.version}</version>
         </dependency>
 
         <!-- SLF4J + Logback -->

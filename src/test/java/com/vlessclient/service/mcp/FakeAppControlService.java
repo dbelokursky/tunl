@@ -178,7 +178,7 @@ class FakeAppControlService implements AppControlService {
     }
 
     @Override
-    public SettingsInfo setSetting(String key, com.fasterxml.jackson.databind.JsonNode value)
+    public SettingsInfo setSetting(String key, tools.jackson.databind.JsonNode value)
             throws McpToolException {
         if (key == null || value == null) {
             throw new McpToolException("Both 'key' and 'value' are required.");

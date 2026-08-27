@@ -1,10 +1,11 @@
 package com.vlessclient.service.mcp;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.service.mcp.tools.GetStatusTool;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -12,7 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class McpServerTest {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
     private final FakeAppControlService control = new FakeAppControlService();
 
@@ -37,9 +38,9 @@ class McpServerTest {
     void initialize_returnsServerInfoAndProtocol() {
         JsonNode response = serverWithMutations(true).handle(request("initialize", null));
 
-        assertThat(response.path("result").path("serverInfo").path("name").asText())
+        assertThat(response.path("result").path("serverInfo").path("name").asString())
                 .isEqualTo("vless-client");
-        assertThat(response.path("result").path("protocolVersion").asText()).isNotEmpty();
+        assertThat(response.path("result").path("protocolVersion").asString()).isNotEmpty();
         assertThat(response.path("result").path("capabilities").has("tools")).isTrue();
     }
 
@@ -50,7 +51,7 @@ class McpServerTest {
 
         JsonNode response = serverWithMutations(true).handle(request("initialize", params));
 
-        assertThat(response.path("result").path("protocolVersion").asText()).isEqualTo("2024-11-05");
+        assertThat(response.path("result").path("protocolVersion").asString()).isEqualTo("2024-11-05");
     }
 
     @Test
@@ -59,8 +60,8 @@ class McpServerTest {
 
         JsonNode tools = response.path("result").path("tools");
         assertThat(tools).isNotEmpty();
-        assertThat(tools.get(0).path("name").asText()).isEqualTo("get_status");
-        assertThat(tools.get(0).path("inputSchema").path("type").asText()).isEqualTo("object");
+        assertThat(tools.get(0).path("name").asString()).isEqualTo("get_status");
+        assertThat(tools.get(0).path("inputSchema").path("type").asString()).isEqualTo("object");
     }
 
     @Test
@@ -73,9 +74,9 @@ class McpServerTest {
 
         JsonNode result = response.path("result");
         assertThat(result.path("isError").asBoolean()).isFalse();
-        assertThat(result.path("structuredContent").path("state").asText()).isEqualTo("CONNECTED");
-        assertThat(result.path("structuredContent").path("activeServer").asText()).isEqualTo("Tokyo");
-        assertThat(result.path("content").get(0).path("type").asText()).isEqualTo("text");
+        assertThat(result.path("structuredContent").path("state").asString()).isEqualTo("CONNECTED");
+        assertThat(result.path("structuredContent").path("activeServer").asString()).isEqualTo("Tokyo");
+        assertThat(result.path("content").get(0).path("type").asString()).isEqualTo("text");
     }
 
     @Test

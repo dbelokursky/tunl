@@ -1,6 +1,5 @@
 package com.vlessclient.service.mcp;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
@@ -22,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import tools.jackson.databind.JsonNode;
 
 /**
  * Production {@link AppControlService} backed by the real application services.
@@ -442,10 +442,10 @@ public class DefaultAppControlService implements AppControlService {
     }
 
     private String asText(JsonNode value, String key) throws McpToolException {
-        if (!value.isTextual()) {
+        if (!value.isString()) {
             throw new McpToolException("Setting '" + key + "' expects a string.");
         }
-        return value.asText();
+        return value.asString();
     }
 
     private int asPort(JsonNode value, String key) throws McpToolException {

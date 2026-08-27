@@ -1,11 +1,12 @@
 package com.vlessclient.service.mcp.tools;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.service.mcp.AppControlService;
 import com.vlessclient.service.mcp.McpTool;
 import com.vlessclient.service.mcp.McpToolException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * {@code connect} — connects the tunnel, optionally selecting a server and/or
@@ -14,7 +15,7 @@ import com.vlessclient.service.mcp.McpToolException;
  */
 public class ConnectTool implements McpTool {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
     private final AppControlService control;
 
@@ -64,6 +65,6 @@ public class ConnectTool implements McpTool {
 
     private String text(ObjectNode args, String field) {
         JsonNode node = args.get(field);
-        return node != null && node.isTextual() ? node.asText() : null;
+        return node != null && node.isString() ? node.asString() : null;
     }
 }

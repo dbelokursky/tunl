@@ -1,9 +1,10 @@
 package com.vlessclient.service.mcp.tools;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.service.mcp.McpTool;
 import java.util.function.Supplier;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * A read-only MCP tool that takes no arguments and returns whatever a
@@ -13,7 +14,7 @@ import java.util.function.Supplier;
  */
 public class SimpleReadTool implements McpTool {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
     private final String name;
     private final String description;

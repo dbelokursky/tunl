@@ -1,7 +1,5 @@
 package com.vlessclient.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vlessclient.app.AppVersion;
 import java.io.IOException;
 import java.io.InputStream;
@@ -23,6 +21,9 @@ import javafx.beans.property.ReadOnlyStringProperty;
 import javafx.beans.property.ReadOnlyStringWrapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Checks GitHub Releases for new versions and downloads updates.
@@ -137,7 +138,7 @@ public class UpdateManager {
     UpdateManager(HttpClient httpClient, UpdateStaging staging) {
         this.httpClient = httpClient;
         this.staging = staging;
-        this.objectMapper = new ObjectMapper();
+        this.objectMapper = JsonMapper.builder().build();
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "update-checker");
             t.setDaemon(true);
@@ -322,7 +323,7 @@ public class UpdateManager {
     CheckResult processReleaseResponse(String json) {
         try {
             JsonNode root = objectMapper.readTree(json);
-            String tagName = root.path("tag_name").asText("");
+            String tagName = root.path("tag_name").asString("");
             String version = stripVersionPrefix(tagName);
 
             InstallerAsset asset = findInstallerAsset(
@@ -681,13 +682,13 @@ public class UpdateManager {
         }
         InstallerAsset fallback = InstallerAsset.NONE;
         for (JsonNode asset : assets) {
-            String name = asset.path("name").asText("");
+            String name = asset.path("name").asString("");
             if (!name.endsWith(extension)) {
                 continue;
             }
             InstallerAsset candidate = new InstallerAsset(
-                    asset.path("browser_download_url").asText(""),
-                    asset.path("digest").asText(""));
+                    asset.path("browser_download_url").asString(""),
+                    asset.path("digest").asString(""));
             if (name.contains(arch)) {
                 return candidate;
             }
