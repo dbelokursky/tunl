@@ -25,9 +25,8 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.source>25</maven.compiler.source>
-        <maven.compiler.target>25</maven.compiler.target>
-        <javafx.version>25-ea+5</javafx.version>
+        <maven.compiler.release>25</maven.compiler.release>
+        <javafx.version>28-ea+5</javafx.version>
         <junit.version>5.12.2</junit.version>
         <jackson.version>3.2.2</jackson.version>
         <main.class>com.vlessclient.app.Launcher</main.class>
@@ -173,8 +172,7 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.14.0</version>
                 <configuration>
-                    <source>25</source>
-                    <target>25</target>
+                    <release>${maven.compiler.release}</release>
                 </configuration>
             </plugin>
 

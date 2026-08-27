@@ -7,7 +7,7 @@
 Durable decisions that apply across all phases:
 
 - **Core engine**: sing-box binary bundled in `.app` bundle (`Contents/Resources/sing-box`). Java app generates sing-box JSON config and manages it as a child process via `ProcessBuilder`. All protocol handling is delegated to sing-box — no custom protocol implementations in Java.
-- **Tech stack**: Java 25, JavaFX 25, Maven. No Spring framework — manual DI or Guice for fast startup. MVVM pattern in UI (FXML Views → ViewModel classes with JavaFX properties → Service layer).
+- **Tech stack**: Java 25, JavaFX 28, Maven. No Spring framework — manual DI or Guice for fast startup. MVVM pattern in UI (FXML Views → ViewModel classes with JavaFX properties → Service layer).
 - **Proxy modes**: Two modes — SOCKS/HTTP system proxy (no root) and TUN (requires root via privileged helper). sing-box binds a local SOCKS5 + HTTP proxy; for TUN mode sing-box creates the TUN device itself.
 - **Persistence paths** (all under `~/Library/Application Support/VlessClient/`):
   - `servers.json` — server configurations
@@ -33,7 +33,7 @@ Durable decisions that apply across all phases:
 
 The tracer bullet: a working JavaFX app that can connect to a VLESS server through sing-box.
 
-Set up the Maven project with JavaFX 25 dependencies and jpackage plugin. Create the main application window with a sidebar skeleton (Dashboard, Servers sections — other sections can be placeholder). On the Servers view, provide a form to manually enter a VLESS server (address, port, UUID, encryption, flow, transport type = tcp). Store the config in memory (no persistence yet).
+Set up the Maven project with JavaFX 28 dependencies and jpackage plugin. Create the main application window with a sidebar skeleton (Dashboard, Servers sections — other sections can be placeholder). On the Servers view, provide a form to manually enter a VLESS server (address, port, UUID, encryption, flow, transport type = tcp). Store the config in memory (no persistence yet).
 
 Build the SingBox Engine module: take the entered server config, generate a minimal sing-box JSON configuration (one VLESS outbound, a SOCKS5 inbound on localhost), write it to a temp file, and start sing-box as a child process. The Dashboard view shows connected/disconnected status and a connect/disconnect button. When connected, sing-box binds a SOCKS5 proxy on `127.0.0.1:1080`.
 
