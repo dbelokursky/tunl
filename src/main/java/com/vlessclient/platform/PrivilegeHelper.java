@@ -63,11 +63,14 @@ public final class PrivilegeHelper {
 
     private static final Path SUDOERS_FILE = Path.of("/etc/sudoers.d/vless-client");
 
+    /** Root-owned directory containing the privileged core and run directory. */
+    private static final Path ELEVATED_DIR = Path.of("/usr/local/libexec/vless-client");
+
     /** Root-owned copy of sing-box the sudoers rule authorizes for {@code sudo -n}. */
-    static final Path ELEVATED_BINARY = Path.of("/usr/local/libexec/vless-client/sing-box");
+    static final Path ELEVATED_BINARY = ELEVATED_DIR.resolve("sing-box");
 
     /** User-owned 0700 directory holding the one config the rule allows. */
-    static final Path ELEVATED_RUN_DIR = Path.of("/usr/local/libexec/vless-client/run");
+    static final Path ELEVATED_RUN_DIR = ELEVATED_DIR.resolve("run");
 
     /**
      * The only config path {@code sudo -n} will accept. Deliberately fixed and
@@ -294,7 +297,7 @@ public final class PrivilegeHelper {
     static String configureShellCommand(Path userBinary, String user) {
         String src = singleQuote(userBinary.toAbsolutePath().toString());
         String dst = singleQuote(ELEVATED_BINARY.toString());
-        String dstDir = singleQuote(ELEVATED_BINARY.getParent().toString());
+        String dstDir = singleQuote(ELEVATED_DIR.toString());
         String runDir = singleQuote(ELEVATED_RUN_DIR.toString());
         String owner = singleQuote(user);
         String target = singleQuote(SUDOERS_FILE.toString());

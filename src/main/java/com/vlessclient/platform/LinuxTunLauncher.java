@@ -61,7 +61,7 @@ public final class LinuxTunLauncher implements TunLauncher {
         ProcessBuilder pb = direct
                 ? new ProcessBuilder("/bin/sh", "-c", wrapper)
                 : new ProcessBuilder(elevator, "/bin/sh", "-c", wrapper);
-        pb.directory(binary.getParent().toFile());
+        pb.directory(SecureFiles.parentDirectory(binary).toFile());
         pb.redirectErrorStream(true);
         Process process = pb.start();
         log.info("Started sing-box TUN via {}", direct

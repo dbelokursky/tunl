@@ -32,6 +32,21 @@ public final class SecureFiles {
     private SecureFiles() {
     }
 
+    /**
+     * Returns the absolute parent directory for a file path.
+     *
+     * @throws IOException when {@code path} does not identify a file beneath
+     *                     a directory (for example, a filesystem root)
+     */
+    public static Path parentDirectory(Path path) throws IOException {
+        Path absolute = path.toAbsolutePath();
+        Path parent = absolute.getParent();
+        if (parent == null || absolute.getFileName() == null) {
+            throw new IOException("Path does not identify a file: " + path);
+        }
+        return parent;
+    }
+
     /** Creates {@code dir} and its parents, restricted to the owner on POSIX. */
     public static void createPrivateDir(Path dir) throws IOException {
         Files.createDirectories(dir);
@@ -47,18 +62,23 @@ public final class SecureFiles {
      * crash mid-write can't truncate the previous one.
      */
     public static void writePrivately(Path target, byte[] data) throws IOException {
-        Path dir = target.toAbsolutePath().getParent();
-        Path tmp = Files.createTempFile(dir, target.getFileName().toString(), ".tmp");
+        Path absoluteTarget = target.toAbsolutePath();
+        Path dir = parentDirectory(absoluteTarget);
+        Path fileName = absoluteTarget.getFileName();
+        if (fileName == null) {
+            throw new IOException("Path does not identify a file: " + target);
+        }
+        Path tmp = Files.createTempFile(dir, fileName.toString(), ".tmp");
         try {
             if (POSIX) {
                 Files.setPosixFilePermissions(tmp, PosixFilePermissions.fromString("rw-------"));
             }
             Files.write(tmp, data);
             try {
-                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING,
+                Files.move(tmp, absoluteTarget, StandardCopyOption.REPLACE_EXISTING,
                         StandardCopyOption.ATOMIC_MOVE);
             } catch (AtomicMoveNotSupportedException e) {
-                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+                Files.move(tmp, absoluteTarget, StandardCopyOption.REPLACE_EXISTING);
             }
         } finally {
             Files.deleteIfExists(tmp);

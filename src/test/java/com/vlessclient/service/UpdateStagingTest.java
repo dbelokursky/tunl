@@ -3,6 +3,8 @@ package com.vlessclient.service;
 import com.vlessclient.platform.PendingUpdate;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -75,6 +77,20 @@ class UpdateStagingTest {
         Files.writeString(update.installer(), "something else entirely");
 
         assertThat(staging.verify(update)).isFalse();
+    }
+
+    @Test
+    void sha256IncludesEveryByteAcrossMultipleReadBuffers() throws Exception {
+        byte[] contents = new byte[20_000];
+        for (int i = 0; i < contents.length; i++) {
+            contents[i] = (byte) (i % 251);
+        }
+        Path installer = tempDir.resolve("large-installer.bin");
+        Files.write(installer, contents);
+        String expected = "sha256:" + HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(contents));
+
+        assertThat(UpdateStaging.sha256(installer)).isEqualTo(expected);
     }
 
     @Test

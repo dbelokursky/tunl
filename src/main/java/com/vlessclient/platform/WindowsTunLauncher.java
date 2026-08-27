@@ -66,7 +66,7 @@ public final class WindowsTunLauncher implements TunLauncher {
         ProcessBuilder pb = new ProcessBuilder(
                 "powershell", "-NoProfile",
                 "-EncodedCommand", encode(outerCommand(encodedWrapper, logOut, logErr)));
-        pb.directory(binary.getParent().toFile());
+        pb.directory(SecureFiles.parentDirectory(binary).toFile());
         pb.redirectErrorStream(true);
         Process process = pb.start();
         log.info("Started sing-box TUN launch via UAC elevation (prompt expected)");

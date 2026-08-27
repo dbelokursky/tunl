@@ -1,5 +1,6 @@
 package com.vlessclient.service.mcp;
 
+import com.vlessclient.platform.SecureFiles;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -67,7 +68,7 @@ public class McpTokenStore {
         RANDOM.nextBytes(bytes);
         String token = HexFormat.of().formatHex(bytes);
 
-        Files.createDirectories(tokenPath.getParent());
+        Files.createDirectories(SecureFiles.parentDirectory(tokenPath));
         Files.writeString(tokenPath, token, StandardCharsets.UTF_8);
         restrictPermissions(tokenPath);
         log.info("Generated new MCP token at {}", tokenPath);

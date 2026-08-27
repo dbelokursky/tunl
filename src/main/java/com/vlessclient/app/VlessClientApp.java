@@ -561,7 +561,7 @@ public class VlessClientApp extends Application {
                     stage.getIcons().add(new Image(iconStream));
                     loaded++;
                 }
-            } catch (Exception e) {
+            } catch (IOException | RuntimeException e) {
                 log.debug("Failed to load icon {}", path);
             }
         }
@@ -570,7 +570,7 @@ public class VlessClientApp extends Application {
                 if (fallback != null) {
                     stage.getIcons().add(new Image(fallback));
                 }
-            } catch (Exception e) {
+            } catch (IOException | RuntimeException e) {
                 log.debug("No application icon found, using default");
             }
         }

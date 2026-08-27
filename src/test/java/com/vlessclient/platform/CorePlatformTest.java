@@ -104,6 +104,20 @@ class CorePlatformTest {
     }
 
     @Test
+    void windows_extractRejectsAnEmptyFileName(@TempDir Path tmp) throws Exception {
+        Path zip = tmp.resolve("empty-name.zip");
+        try (ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(zip))) {
+            zos.putNextEntry(new ZipEntry(""));
+            zos.write("not a file".getBytes());
+            zos.closeEntry();
+        }
+
+        assertThatThrownBy(() -> new WindowsCorePlatform().extract(zip, tmp.resolve("out")))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("does not name a file");
+    }
+
+    @Test
     @EnabledOnOs({OS.MAC, OS.LINUX})
     void mac_extractsTarGz(@TempDir Path tmp) throws Exception {
         // Build a real .tar.gz with the system tar so the macOS extractor path

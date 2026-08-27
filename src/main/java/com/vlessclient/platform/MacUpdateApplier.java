@@ -131,7 +131,7 @@ final class MacUpdateApplier implements UpdateApplier {
         }
 
         try {
-            Path workDir = update.installer().getParent();
+            Path workDir = SecureFiles.parentDirectory(update.installer());
 
             // Passed as the -c body rather than written to a file, so nothing
             // lands on disk between here and the run that could be swapped

@@ -31,7 +31,7 @@ final class WindowsUpdateApplier implements UpdateApplier {
         }
 
         try {
-            Path workDir = update.installer().getParent();
+            Path workDir = SecureFiles.parentDirectory(update.installer());
             String relay = relayScript(
                     ProcessHandle.current().pid(), update.installer(), launcher);
 

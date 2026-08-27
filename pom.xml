@@ -29,6 +29,7 @@
         <javafx.version>28-ea+5</javafx.version>
         <junit.version>5.12.2</junit.version>
         <jackson.version>3.2.2</jackson.version>
+        <spotbugs.baselineFile>${project.basedir}/config/spotbugs-baseline.xml</spotbugs.baselineFile>
         <main.class>com.vlessclient.app.Launcher</main.class>
         <!-- singbox.version is read from src/main/resources/singbox.properties
              by the properties-maven-plugin (initialize phase) — the single
@@ -358,13 +359,21 @@
             <plugin>
                 <groupId>com.github.spotbugs</groupId>
                 <artifactId>spotbugs-maven-plugin</artifactId>
-                <version>4.8.6.6</version>
+                <version>4.10.4.0</version>
                 <configuration>
                     <effort>Max</effort>
                     <threshold>Medium</threshold>
-                    <failOnError>false</failOnError>
+                    <failOnError>true</failOnError>
+                    <excludeBugsFile>${spotbugs.baselineFile}</excludeBugsFile>
                     <xmlOutput>true</xmlOutput>
                 </configuration>
+                <executions>
+                    <execution>
+                        <id>spotbugs-check</id>
+                        <phase>verify</phase>
+                        <goals><goal>check</goal></goals>
+                    </execution>
+                </executions>
             </plugin>
 
             <plugin>

@@ -10,6 +10,7 @@ import com.vlessclient.platform.SecureFiles;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -42,6 +43,7 @@ public class ConfigStore {
 
     private static final String SERVERS_FILE = "servers.json";
     private static final String SETTINGS_FILE = "settings.json";
+    private static final SecureRandom CLASH_API_RANDOM = new SecureRandom();
 
     /**
      * Version stream of servers.json: v0 is the pre-envelope bare array,
@@ -116,7 +118,7 @@ public class ConfigStore {
 
     private static String newClashApiSecret() {
         byte[] bytes = new byte[24];
-        new java.security.SecureRandom().nextBytes(bytes);
+        CLASH_API_RANDOM.nextBytes(bytes);
         return java.util.HexFormat.of().formatHex(bytes);
     }
 

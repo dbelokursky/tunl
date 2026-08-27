@@ -41,7 +41,7 @@ jobs:
       # while one opened by GITHUB_TOKEN gets a run parked in
       # "action_required" until a human approves it. Everything below works
       # either way; only that last click differs.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.BUMP_TOKEN || github.token }}
 

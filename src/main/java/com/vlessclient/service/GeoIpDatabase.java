@@ -164,7 +164,7 @@ public class GeoIpDatabase {
                 return false;
             }
 
-            SecureFiles.createPrivateDir(databasePath.getParent());
+            SecureFiles.createPrivateDir(SecureFiles.parentDirectory(databasePath));
             Path staging = databasePath.resolveSibling(DB_FILE + ".part");
             try (InputStream in = new GZIPInputStream(response.body())) {
                 long written = Files.copy(in, staging, StandardCopyOption.REPLACE_EXISTING);

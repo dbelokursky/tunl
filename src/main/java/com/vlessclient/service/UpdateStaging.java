@@ -7,7 +7,6 @@ import java.io.InputStream;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
@@ -226,11 +225,11 @@ public final class UpdateStaging {
      */
     static String sha256(Path file) throws IOException, NoSuchAlgorithmException {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        try (InputStream in = Files.newInputStream(file);
-                DigestInputStream digesting = new DigestInputStream(in, digest)) {
+        try (InputStream in = Files.newInputStream(file)) {
             byte[] buffer = new byte[8192];
-            while (digesting.read(buffer) != -1) {
-                // reading is what updates the digest
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                digest.update(buffer, 0, read);
             }
         }
         return "sha256:" + HexFormat.of().formatHex(digest.digest());
