@@ -24,7 +24,7 @@ import org.slf4j.LoggerFactory;
  * <p>Detection reads the {@code AppleInterfaceStyle} default via a fresh
  * subprocess each poll. This was chosen deliberately over the JavaFX
  * {@code Platform.getPreferences().colorScheme} property, which does not report
- * macOS appearance changes on the JavaFX 25-ea runtime this app bundles (its
+ * macOS appearance changes on the JavaFX runtime this app bundles (its
  * listener never fires and its initial value is unreliable). A fresh
  * {@code defaults} read, by contrast, always reflects the current setting.</p>
  */

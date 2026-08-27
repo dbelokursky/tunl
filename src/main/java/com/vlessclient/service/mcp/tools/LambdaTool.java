@@ -1,8 +1,8 @@
 package com.vlessclient.service.mcp.tools;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.service.mcp.McpTool;
 import com.vlessclient.service.mcp.McpToolException;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * A tool defined inline from a name, description, schema, mutating flag and a

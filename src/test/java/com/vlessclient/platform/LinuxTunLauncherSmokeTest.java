@@ -155,13 +155,13 @@ class LinuxTunLauncherSmokeTest {
         server.getTls().setEnabled(true);
         server.getTls().setServerName("example.com");
 
-        com.fasterxml.jackson.databind.ObjectMapper mapper =
-                new com.fasterxml.jackson.databind.ObjectMapper();
-        com.fasterxml.jackson.databind.node.ObjectNode config = (com.fasterxml.jackson.databind.node.ObjectNode)
+        tools.jackson.databind.ObjectMapper mapper =
+                tools.jackson.databind.json.JsonMapper.builder().build();
+        tools.jackson.databind.node.ObjectNode config = (tools.jackson.databind.node.ObjectNode)
                 mapper.readTree(generator.generate(server, settings));
-        for (com.fasterxml.jackson.databind.JsonNode inbound : config.get("inbounds")) {
-            if ("tun".equals(inbound.path("type").asText())) {
-                ((com.fasterxml.jackson.databind.node.ObjectNode) inbound)
+        for (tools.jackson.databind.JsonNode inbound : config.get("inbounds")) {
+            if ("tun".equals(inbound.path("type").asString())) {
+                ((tools.jackson.databind.node.ObjectNode) inbound)
                         .put("auto_route", false);
             }
         }

@@ -1,7 +1,5 @@
 package com.vlessclient.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
@@ -10,6 +8,9 @@ import com.vlessclient.service.outbound.OutboundTags;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -28,7 +29,7 @@ class SingBoxConfigGeneratorSelectionTest {
     @BeforeEach
     void setUp() {
         generator = new SingBoxConfigGenerator();
-        mapper = new ObjectMapper();
+        mapper = JsonMapper.builder().build();
         settings = new AppSettings();
     }
 
@@ -36,7 +37,7 @@ class SingBoxConfigGeneratorSelectionTest {
         JsonNode root = mapper.readTree(
                 generator.generate(candidates, active, settings, null));
         for (JsonNode outbound : root.get("outbounds")) {
-            if (OutboundTags.PROXY.equals(outbound.path("tag").asText())) {
+            if (OutboundTags.PROXY.equals(outbound.path("tag").asString())) {
                 return outbound;
             }
         }
@@ -50,9 +51,9 @@ class SingBoxConfigGeneratorSelectionTest {
 
         JsonNode group = group(servers, servers.get(1));
 
-        assertThat(group.get("type").asText()).isEqualTo("selector");
+        assertThat(group.get("type").asString()).isEqualTo("selector");
         assertThat(group.get("outbounds")).hasSize(1);
-        assertThat(group.get("outbounds").get(0).asText())
+        assertThat(group.get("outbounds").get(0).asString())
                 .isEqualTo(OutboundTags.server(servers.get(1)));
         // No probing when the user picked the server.
         assertThat(group.has("url")).isFalse();
@@ -67,12 +68,12 @@ class SingBoxConfigGeneratorSelectionTest {
 
         // urltest, not the Clash-only "fallback": the real core rejects that
         // type outright, which is why there is no separate fallback mode.
-        assertThat(group.get("type").asText()).isEqualTo("urltest");
+        assertThat(group.get("type").asString()).isEqualTo("urltest");
         assertThat(group.get("outbounds")).hasSize(3);
         // Without url+interval the core would never re-measure and the mode
         // would silently behave like a plain selector.
-        assertThat(group.get("url").asText()).contains("generate_204");
-        assertThat(group.get("interval").asText()).isNotBlank();
+        assertThat(group.get("url").asString()).contains("generate_204");
+        assertThat(group.get("interval").asString()).isNotBlank();
     }
 
     @Test
@@ -88,7 +89,7 @@ class SingBoxConfigGeneratorSelectionTest {
         for (ServerConfig server : servers) {
             boolean found = false;
             for (JsonNode outbound : root.get("outbounds")) {
-                found |= OutboundTags.server(server).equals(outbound.path("tag").asText());
+                found |= OutboundTags.server(server).equals(outbound.path("tag").asString());
             }
             assertThat(found).as("outbound for %s", server.getName()).isTrue();
         }
@@ -106,7 +107,7 @@ class SingBoxConfigGeneratorSelectionTest {
                 generator.generate(List.of(vless, wireguard), vless, settings, null));
 
         assertThat(root.get("endpoints")).hasSize(1);
-        assertThat(root.get("endpoints").get(0).get("tag").asText())
+        assertThat(root.get("endpoints").get(0).get("tag").asString())
                 .isEqualTo(OutboundTags.server(wireguard));
         // Referenced by the group all the same — a selector may point at an
         // endpoint, confirmed against the real core.
@@ -141,7 +142,7 @@ class SingBoxConfigGeneratorSelectionTest {
         JsonNode group = group(List.of(), active);
 
         assertThat(group.get("outbounds")).hasSize(1);
-        assertThat(group.get("outbounds").get(0).asText())
+        assertThat(group.get("outbounds").get(0).asString())
                 .isEqualTo(OutboundTags.server(active));
     }
 

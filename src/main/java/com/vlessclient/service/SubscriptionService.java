@@ -1,10 +1,5 @@
 package com.vlessclient.service;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.Subscription;
 import com.vlessclient.platform.PlatformPaths;
@@ -33,6 +28,13 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Manages subscriptions: fetching remote server lists, parsing them, and keeping the
@@ -156,7 +158,9 @@ public class SubscriptionService {
         this.dataDir = dataDir;
         this.httpClient = httpClient;
         this.sealer = sealer;
-        this.objectMapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
+        this.objectMapper = JsonMapper.builder()
+                .enable(SerializationFeature.INDENT_OUTPUT)
+                .build();
         this.subscriptions = FXCollections.observableArrayList();
         loadSubscriptions();
     }
@@ -612,7 +616,7 @@ public class SubscriptionService {
                         objectMapper.writeValueAsString(live), Subscription.class);
                 copy.setUrl(sealed);
                 out.add(copy);
-            } catch (IOException e) {
+            } catch (JacksonException e) {
                 log.warn("Could not copy subscription '{}' for sealing; keeping plaintext",
                         live.getName(), e);
                 out.add(live);
@@ -661,7 +665,7 @@ public class SubscriptionService {
             loaded.forEach(this::unsealInPlace);
             subscriptions.addAll(loaded);
             log.info("Loaded {} subscriptions from {}", subscriptions.size(), file);
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             log.error("Failed to load subscriptions from {}", file, e);
         }
     }

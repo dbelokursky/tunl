@@ -1,13 +1,13 @@
 package com.vlessclient.service;
 
+import com.sun.net.httpserver.HttpServer;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
-import com.vlessclient.platform.CorePlatform;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.RoutingRule;
 import com.vlessclient.model.ServerConfig;
-import com.sun.net.httpserver.HttpServer;
+import com.vlessclient.platform.CorePlatform;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
@@ -369,13 +369,13 @@ class SingBoxRealBinarySmokeTest {
         settings.setHttpPort(freePort());
         settings.setClashApiPort(clashPort);
 
-        com.fasterxml.jackson.databind.ObjectMapper mapper =
-                new com.fasterxml.jackson.databind.ObjectMapper();
-        com.fasterxml.jackson.databind.node.ObjectNode config = (com.fasterxml.jackson.databind.node.ObjectNode)
+        tools.jackson.databind.ObjectMapper mapper =
+                tools.jackson.databind.json.JsonMapper.builder().build();
+        tools.jackson.databind.node.ObjectNode config = (tools.jackson.databind.node.ObjectNode)
                 mapper.readTree(generator.generate(serverFor(Protocol.VLESS), settings));
-        for (com.fasterxml.jackson.databind.JsonNode inbound : config.get("inbounds")) {
-            if ("tun".equals(inbound.path("type").asText())) {
-                ((com.fasterxml.jackson.databind.node.ObjectNode) inbound)
+        for (tools.jackson.databind.JsonNode inbound : config.get("inbounds")) {
+            if ("tun".equals(inbound.path("type").asString())) {
+                ((tools.jackson.databind.node.ObjectNode) inbound)
                         .put("auto_route", false);
             }
         }
@@ -423,14 +423,14 @@ class SingBoxRealBinarySmokeTest {
         settings.setHttpPort(freePort());
         settings.setClashApiPort(freePort());
 
-        com.fasterxml.jackson.databind.ObjectMapper mapper =
-                new com.fasterxml.jackson.databind.ObjectMapper();
-        com.fasterxml.jackson.databind.node.ObjectNode config = (com.fasterxml.jackson.databind.node.ObjectNode)
+        tools.jackson.databind.ObjectMapper mapper =
+                tools.jackson.databind.json.JsonMapper.builder().build();
+        tools.jackson.databind.node.ObjectNode config = (tools.jackson.databind.node.ObjectNode)
                 mapper.readTree(generator.generate(serverFor(Protocol.VLESS), settings));
-        for (com.fasterxml.jackson.databind.JsonNode inbound : config.get("inbounds")) {
-            if ("tun".equals(inbound.path("type").asText())) {
+        for (tools.jackson.databind.JsonNode inbound : config.get("inbounds")) {
+            if ("tun".equals(inbound.path("type").asString())) {
                 // Never reroute the CI runner's own traffic.
-                ((com.fasterxml.jackson.databind.node.ObjectNode) inbound)
+                ((tools.jackson.databind.node.ObjectNode) inbound)
                         .put("auto_route", false);
             }
         }

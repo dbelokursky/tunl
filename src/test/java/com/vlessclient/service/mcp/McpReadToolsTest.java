@@ -1,12 +1,13 @@
 package com.vlessclient.service.mcp;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.service.mcp.tools.GetLogsTool;
 import com.vlessclient.service.mcp.tools.GetStatusTool;
 import com.vlessclient.service.mcp.tools.SimpleReadTool;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -15,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class McpReadToolsTest {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
     private final FakeAppControlService control = new FakeAppControlService();
 
@@ -56,7 +57,7 @@ class McpReadToolsTest {
     void toolsList_hasAllSevenReadTools() {
         JsonNode tools = call(buildServer(), "tools/list", null).path("result").path("tools");
         List<String> names = new ArrayList<>();
-        tools.forEach(t -> names.add(t.path("name").asText()));
+        tools.forEach(t -> names.add(t.path("name").asString()));
         assertThat(names).containsExactlyInAnyOrder("get_status", "get_traffic", "list_servers",
                 "get_logs", "list_subscriptions", "get_routing", "get_settings");
     }
@@ -66,7 +67,7 @@ class McpReadToolsTest {
         JsonNode result = call(buildServer(), "tools/call", toolCall("get_traffic", null))
                 .path("result").path("structuredContent");
         assertThat(result.path("downloadSpeedBytesPerSec").asLong()).isEqualTo(4096);
-        assertThat(result.path("totalDownload").asText()).isEqualTo("2 MB");
+        assertThat(result.path("totalDownload").asString()).isEqualTo("2 MB");
     }
 
     @Test
@@ -76,7 +77,7 @@ class McpReadToolsTest {
         JsonNode servers = result.path("structuredContent");
         // structuredContent is only set for object results; a list comes back as text content.
         JsonNode text = result.path("content").get(0).path("text");
-        assertThat(text.asText()).contains("Tokyo").contains("Berlin");
+        assertThat(text.asString()).contains("Tokyo").contains("Berlin");
         assertThat(servers.isMissingNode() || servers.isNull() || !servers.isObject()).isTrue();
     }
 
@@ -87,21 +88,21 @@ class McpReadToolsTest {
         JsonNode result = call(buildServer(), "tools/call", toolCall("get_logs", args))
                 .path("result").path("structuredContent");
         assertThat(result.path("count").asInt()).isEqualTo(1);
-        assertThat(result.path("lines").get(0).asText()).contains("WARN");
+        assertThat(result.path("lines").get(0).asString()).contains("WARN");
     }
 
     @Test
     void getRouting_returnsPresetAndRules() {
         JsonNode result = call(buildServer(), "tools/call", toolCall("get_routing", null))
                 .path("result").path("content").get(0).path("text");
-        assertThat(result.asText()).contains("route_all").contains("example.com");
+        assertThat(result.asString()).contains("route_all").contains("example.com");
     }
 
     @Test
     void getSettings_omitsToken() {
         JsonNode text = call(buildServer(), "tools/call", toolCall("get_settings", null))
                 .path("result").path("content").get(0).path("text");
-        assertThat(text.asText()).contains("mcpPort").doesNotContain("token");
+        assertThat(text.asString()).contains("mcpPort").doesNotContain("token");
     }
 
     @Test
@@ -109,7 +110,7 @@ class McpReadToolsTest {
         JsonNode resources = call(buildServer(), "resources/list", null)
                 .path("result").path("resources");
         List<String> uris = new ArrayList<>();
-        resources.forEach(r -> uris.add(r.path("uri").asText()));
+        resources.forEach(r -> uris.add(r.path("uri").asString()));
         assertThat(uris).contains("vless://status", "vless://logs/recent");
     }
 
@@ -119,9 +120,9 @@ class McpReadToolsTest {
         params.put("uri", "vless://status");
         JsonNode contents = call(buildServer(), "resources/read", params)
                 .path("result").path("contents").get(0);
-        assertThat(contents.path("uri").asText()).isEqualTo("vless://status");
-        assertThat(contents.path("mimeType").asText()).isEqualTo("application/json");
-        assertThat(contents.path("text").asText()).contains("CONNECTED");
+        assertThat(contents.path("uri").asString()).isEqualTo("vless://status");
+        assertThat(contents.path("mimeType").asString()).isEqualTo("application/json");
+        assertThat(contents.path("text").asString()).contains("CONNECTED");
     }
 
     @Test

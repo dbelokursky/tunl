@@ -1,10 +1,5 @@
 package com.vlessclient.service;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
@@ -29,6 +24,13 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Persists servers and application settings as JSON in the platform data
@@ -97,7 +99,9 @@ public class ConfigStore {
     ConfigStore(Path dataDir, SecretSealer sealer) {
         this.dataDir = dataDir;
         this.sealer = sealer;
-        this.objectMapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
+        this.objectMapper = JsonMapper.builder()
+                .enable(SerializationFeature.INDENT_OUTPUT)
+                .build();
         this.servers = FXCollections.observableArrayList();
         this.settings = new AppSettings();
         ensureDataDir();
@@ -331,7 +335,7 @@ public class ConfigStore {
         try {
             String json = objectMapper.writeValueAsString(original.get());
             copy = objectMapper.readValue(json, ServerConfig.class);
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             log.error("Failed to duplicate server: {}", serverId, e);
             return;
         }
@@ -440,7 +444,7 @@ public class ConfigStore {
                     copy.setFlow(sealedFlow);
                 }
                 out.add(copy);
-            } catch (IOException e) {
+            } catch (JacksonException e) {
                 log.warn("Could not copy server '{}' for sealing; keeping plaintext",
                         live.getName(), e);
                 out.add(live);
@@ -526,7 +530,7 @@ public class ConfigStore {
             loaded.forEach(this::unsealInPlace);
             servers.addAll(loaded);
             log.info("Loaded {} servers from {}", servers.size(), file);
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             log.error("Failed to load servers from {}", file, e);
         }
     }
@@ -589,7 +593,7 @@ public class ConfigStore {
             // saving always stamps the version this build writes.
             settings.setConfigVersion(AppSettings.CURRENT_CONFIG_VERSION);
             log.info("Loaded settings from {}", file);
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             log.error("Failed to load settings from {}", file, e);
         }
     }

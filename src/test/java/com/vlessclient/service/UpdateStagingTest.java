@@ -106,11 +106,14 @@ class UpdateStagingTest {
     }
 
     @Test
-    void unreadableMarkerIsTreatedAsNoUpdate() throws Exception {
+    void unreadableMarkerIsHandledAcrossAllAccessors() throws Exception {
         UpdateStaging staging = staging();
         Files.createDirectories(staging.dir());
         Files.writeString(staging.dir().resolve("pending.json"), "{ not json");
 
+        assertThat(staging.stagedAt()).isZero();
+        assertThat(staging.attempts()).isZero();
+        staging.recordAttempt();
         assertThat(staging.pending()).isEmpty();
     }
 }

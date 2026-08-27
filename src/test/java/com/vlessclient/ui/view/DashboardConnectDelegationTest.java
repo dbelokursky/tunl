@@ -1,6 +1,7 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.app.UiTestServices;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConnectionService;
@@ -51,7 +52,7 @@ public class DashboardConnectDelegationTest extends ApplicationTest {
         System.setProperty("prism.text", "t2k");
         System.setProperty("java.awt.headless", "true");
         try {
-            ServiceLocator.initialize();
+            UiTestServices.initialize();
         } catch (Exception e) {
             // Tolerate service initialization failures in headless CI.
         }

@@ -1,5 +1,6 @@
 package com.vlessclient.ui.view;
 
+import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.service.UpdateBootstrap;
 import javafx.application.Platform;
 
@@ -43,6 +44,10 @@ public final class RestartToUpdate {
      */
     public static Outcome start() {
         if (UpdateBootstrap.applyPendingUpdate()) {
+            // Stop accepting agent connections before JavaFX begins the rest
+            // of application teardown. The update relay may relaunch within
+            // seconds, and the new process must be able to bind the same port.
+            ServiceLocator.stopMcpServer();
             // The normal quit path — tray teardown, sing-box stop — which is
             // exactly the exit the applier's helper is waiting for.
             Platform.exit();

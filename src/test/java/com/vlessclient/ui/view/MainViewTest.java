@@ -1,6 +1,6 @@
 package com.vlessclient.ui.view;
 
-import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.app.UiTestServices;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
@@ -27,7 +27,7 @@ public class MainViewTest extends ApplicationTest {
         System.setProperty("prism.text", "t2k");
         System.setProperty("java.awt.headless", "true");
         try {
-            ServiceLocator.initialize();
+            UiTestServices.initialize();
         } catch (Exception e) {
             // Tolerate service initialization failures in headless CI
         }

@@ -1,11 +1,5 @@
 package com.vlessclient.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ProxyMode;
@@ -28,6 +22,13 @@ import java.util.List;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Builds the JSON configuration handed to the sing-box core from a
@@ -69,8 +70,9 @@ public class SingBoxConfigGenerator {
 
     /** Test seam: inject the host's system-proxy capability check. */
     SingBoxConfigGenerator(com.vlessclient.platform.SystemProxySupport systemProxySupport) {
-        this.mapper = new ObjectMapper();
-        this.mapper.enable(SerializationFeature.INDENT_OUTPUT);
+        this.mapper = JsonMapper.builder()
+                .enable(SerializationFeature.INDENT_OUTPUT)
+                .build();
         this.systemProxySupport = systemProxySupport;
         this.vlessBuilder = new VlessOutboundBuilder(mapper);
         this.vmessBuilder = new VmessOutboundBuilder(mapper);
@@ -176,7 +178,7 @@ public class SingBoxConfigGenerator {
 
         try {
             return mapper.writeValueAsString(root);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new RuntimeException("Failed to generate sing-box config", e);
         }
     }
@@ -331,7 +333,7 @@ public class SingBoxConfigGenerator {
             JsonNode privateFlag = rule.get("ip_is_private");
             JsonNode outbound = rule.get("outbound");
             if (privateFlag != null && privateFlag.asBoolean()
-                    && outbound != null && "direct".equals(outbound.asText())) {
+                    && outbound != null && "direct".equals(outbound.asString())) {
                 return true;
             }
         }
@@ -381,7 +383,7 @@ public class SingBoxConfigGenerator {
             JsonNode suffix = rules.get(i) != null ? rules.get(i).get("domain_suffix") : null;
             if (suffix != null && suffix.isArray()) {
                 for (JsonNode s : suffix) {
-                    if (".local".equals(s.asText())) {
+                    if (".local".equals(s.asString())) {
                         return true;
                     }
                 }

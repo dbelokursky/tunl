@@ -1,8 +1,5 @@
 package com.vlessclient.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
@@ -12,13 +9,17 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Parses protocol-specific share link URIs into {@link ServerConfig} instances.
  */
 public class ShareLinkParser {
 
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
 
     /**
      * Parses a share link URI, dispatching by its scheme.
@@ -137,7 +138,7 @@ public class ShareLinkParser {
         JsonNode node;
         try {
             node = OBJECT_MAPPER.readTree(json);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new IllegalArgumentException("Invalid vmess JSON: " + e.getMessage());
         }
 
@@ -545,7 +546,7 @@ public class ShareLinkParser {
         if (value == null || value.isNull()) {
             return defaultValue;
         }
-        return value.asText(defaultValue);
+        return value.asString(defaultValue);
     }
 
     private int getJsonInt(JsonNode node, String field, int defaultValue) {
@@ -553,14 +554,14 @@ public class ShareLinkParser {
         if (value == null || value.isNull()) {
             return defaultValue;
         }
-        if (value.isTextual()) {
+        if (value.isString()) {
             try {
-                return Integer.parseInt(value.asText());
+                return Integer.parseInt(value.asString());
             } catch (NumberFormatException e) {
                 return defaultValue;
             }
         }
-        return value.asInt(defaultValue);
+        return value.isNumber() ? value.asInt(defaultValue) : defaultValue;
     }
 
     private String decodeBase64(String encoded) {

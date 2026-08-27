@@ -1,7 +1,5 @@
 package com.vlessclient.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ProxyMode;
@@ -10,6 +8,9 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -21,7 +22,7 @@ class SingBoxConfigGeneratorTunTest {
     @BeforeEach
     void setUp() {
         generator = new SingBoxConfigGenerator();
-        mapper = new ObjectMapper();
+        mapper = JsonMapper.builder().build();
     }
 
     private ServerConfig createVlessServer() {
@@ -59,18 +60,18 @@ class SingBoxConfigGeneratorTunTest {
 
         boolean hasTun = false;
         for (JsonNode inbound : inbounds) {
-            if ("tun".equals(inbound.get("type").asText())) {
+            if ("tun".equals(inbound.get("type").asString())) {
                 hasTun = true;
-                assertThat(inbound.get("tag").asText()).isEqualTo("tun-in");
+                assertThat(inbound.get("tag").asString()).isEqualTo("tun-in");
                 // The default interface name is platform-dependent (utunN is
                 // a macOS kernel requirement; Windows names the adapter
                 // freely), so pin against the settings value, not a literal.
-                assertThat(inbound.get("interface_name").asText())
+                assertThat(inbound.get("interface_name").asString())
                         .isEqualTo(new AppSettings().getTunInterfaceName());
                 JsonNode addr = inbound.get("address");
                 assertThat(addr).isNotNull();
                 assertThat(addr.isArray()).isTrue();
-                assertThat(addr.get(0).asText()).isEqualTo("172.19.0.1/30");
+                assertThat(addr.get(0).asString()).isEqualTo("172.19.0.1/30");
                 break;
             }
         }
@@ -91,7 +92,7 @@ class SingBoxConfigGeneratorTunTest {
 
         JsonNode tun = null;
         for (JsonNode inbound : inbounds) {
-            if ("tun".equals(inbound.get("type").asText())) {
+            if ("tun".equals(inbound.get("type").asString())) {
                 tun = inbound;
                 break;
             }
@@ -105,7 +106,7 @@ class SingBoxConfigGeneratorTunTest {
         // stack=gvisor (not system) — without strict_route's PF rules the
         // system stack silently drops TCP traffic from the TUN on macOS;
         // gvisor's userspace TCP/IP has no such dependency. v0.1.8 fix.
-        assertThat(tun.get("stack").asText()).isEqualTo("gvisor");
+        assertThat(tun.get("stack").asString()).isEqualTo("gvisor");
         // sing-box 1.13 removed sniff/sniff_override_destination from inbounds
         assertThat(tun.has("sniff")).isFalse();
         assertThat(tun.has("sniff_override_destination")).isFalse();
@@ -123,7 +124,7 @@ class SingBoxConfigGeneratorTunTest {
 
         JsonNode tun = null;
         for (JsonNode inbound : inbounds) {
-            if ("tun".equals(inbound.get("type").asText())) {
+            if ("tun".equals(inbound.get("type").asString())) {
                 tun = inbound;
                 break;
             }
@@ -136,7 +137,7 @@ class SingBoxConfigGeneratorTunTest {
 
         java.util.List<String> entries = new java.util.ArrayList<>();
         for (JsonNode e : exclude) {
-            entries.add(e.asText());
+            entries.add(e.asString());
         }
         // IPv4 private + link-local + multicast (mDNS, SSDP).
         assertThat(entries).contains(
@@ -172,7 +173,7 @@ class SingBoxConfigGeneratorTunTest {
         boolean hasSocks = false;
         boolean hasHttp = false;
         for (JsonNode inbound : inbounds) {
-            String type = inbound.get("type").asText();
+            String type = inbound.get("type").asString();
             if ("socks".equals(type)) {
                 hasSocks = true;
             }
@@ -197,35 +198,35 @@ class SingBoxConfigGeneratorTunTest {
         // proxy-dns, direct-dns, and the local resolver for localhost/*.local.
         assertThat(servers.size()).isEqualTo(3);
 
-        assertThat(servers.get(0).get("tag").asText()).isEqualTo("proxy-dns");
-        assertThat(servers.get(0).get("type").asText()).isEqualTo("https");
-        assertThat(servers.get(0).get("server").asText()).isEqualTo("1.1.1.1");
-        assertThat(servers.get(0).get("path").asText()).isEqualTo("/dns-query");
-        assertThat(servers.get(0).get("detour").asText()).isEqualTo("proxy");
+        assertThat(servers.get(0).get("tag").asString()).isEqualTo("proxy-dns");
+        assertThat(servers.get(0).get("type").asString()).isEqualTo("https");
+        assertThat(servers.get(0).get("server").asString()).isEqualTo("1.1.1.1");
+        assertThat(servers.get(0).get("path").asString()).isEqualTo("/dns-query");
+        assertThat(servers.get(0).get("detour").asString()).isEqualTo("proxy");
 
-        assertThat(servers.get(1).get("tag").asText()).isEqualTo("direct-dns");
-        assertThat(servers.get(1).get("type").asText()).isEqualTo("https");
-        assertThat(servers.get(1).get("server").asText()).isEqualTo("223.5.5.5");
-        assertThat(servers.get(1).get("path").asText()).isEqualTo("/dns-query");
+        assertThat(servers.get(1).get("tag").asString()).isEqualTo("direct-dns");
+        assertThat(servers.get(1).get("type").asString()).isEqualTo("https");
+        assertThat(servers.get(1).get("server").asString()).isEqualTo("223.5.5.5");
+        assertThat(servers.get(1).get("path").asString()).isEqualTo("/dns-query");
         // sing-box 1.13 rejects detour: "direct" pointing at an empty direct
         // outbound, so direct-dns no longer sets the detour field.
         assertThat(servers.get(1).has("detour")).isFalse();
 
         // Local resolver so localhost / *.local resolve on the LAN via the OS
         // (mDNS) instead of the remote DoH server, which can't answer them.
-        assertThat(servers.get(2).get("tag").asText()).isEqualTo("local-dns");
-        assertThat(servers.get(2).get("type").asText()).isEqualTo("local");
+        assertThat(servers.get(2).get("tag").asString()).isEqualTo("local-dns");
+        assertThat(servers.get(2).get("type").asString()).isEqualTo("local");
 
         JsonNode dnsRules = dns.get("rules");
         assertThat(dnsRules).isNotNull();
         assertThat(dnsRules.size()).isEqualTo(1);
-        assertThat(dnsRules.get(0).get("domain").get(0).asText()).isEqualTo("localhost");
-        assertThat(dnsRules.get(0).get("domain_suffix").get(0).asText()).isEqualTo(".local");
-        assertThat(dnsRules.get(0).get("server").asText()).isEqualTo("local-dns");
+        assertThat(dnsRules.get(0).get("domain").get(0).asString()).isEqualTo("localhost");
+        assertThat(dnsRules.get(0).get("domain_suffix").get(0).asString()).isEqualTo(".local");
+        assertThat(dnsRules.get(0).get("server").asString()).isEqualTo("local-dns");
 
         // sing-box 1.13 uses dns.final instead of a match-all rule
-        assertThat(dns.get("final").asText()).isEqualTo("proxy-dns");
-        assertThat(dns.get("strategy").asText()).isEqualTo("prefer_ipv4");
+        assertThat(dns.get("final").asString()).isEqualTo("proxy-dns");
+        assertThat(dns.get("strategy").asString()).isEqualTo("prefer_ipv4");
     }
 
     @Test
@@ -236,7 +237,7 @@ class SingBoxConfigGeneratorTunTest {
         assertThat(inbounds.size()).isEqualTo(2);
 
         for (JsonNode inbound : inbounds) {
-            assertThat(inbound.get("type").asText()).isNotEqualTo("tun");
+            assertThat(inbound.get("type").asString()).isNotEqualTo("tun");
         }
     }
 
@@ -258,11 +259,11 @@ class SingBoxConfigGeneratorTunTest {
         String json = generator.generate(createVlessServer(), settings);
         JsonNode dns = parse(json).get("dns");
 
-        assertThat(dns.get("servers").get(0).get("server").asText()).isEqualTo("8.8.8.8");
-        assertThat(dns.get("servers").get(0).get("type").asText()).isEqualTo("https");
-        assertThat(dns.get("servers").get(1).get("server").asText()).isEqualTo("9.9.9.9");
-        assertThat(dns.get("servers").get(1).get("type").asText()).isEqualTo("https");
-        assertThat(dns.get("strategy").asText()).isEqualTo("prefer_ipv6");
+        assertThat(dns.get("servers").get(0).get("server").asString()).isEqualTo("8.8.8.8");
+        assertThat(dns.get("servers").get(0).get("type").asString()).isEqualTo("https");
+        assertThat(dns.get("servers").get(1).get("server").asString()).isEqualTo("9.9.9.9");
+        assertThat(dns.get("servers").get(1).get("type").asString()).isEqualTo("https");
+        assertThat(dns.get("strategy").asString()).isEqualTo("prefer_ipv6");
     }
 
     @Test
@@ -275,13 +276,13 @@ class SingBoxConfigGeneratorTunTest {
 
         JsonNode tun = null;
         for (JsonNode inbound : inbounds) {
-            if ("tun".equals(inbound.get("type").asText())) {
+            if ("tun".equals(inbound.get("type").asString())) {
                 tun = inbound;
                 break;
             }
         }
         assertThat(tun).isNotNull();
-        assertThat(tun.get("interface_name").asText()).isEqualTo("utun42");
+        assertThat(tun.get("interface_name").asString()).isEqualTo("utun42");
     }
 
     @Test
@@ -294,12 +295,12 @@ class SingBoxConfigGeneratorTunTest {
 
         // sniff, hijack-dns, local-domain, ip_is_private — in that exact order.
         assertThat(rules.size()).isEqualTo(4);
-        assertThat(rules.get(0).get("action").asText()).isEqualTo("sniff");
-        assertThat(rules.get(1).get("action").asText()).isEqualTo("hijack-dns");
-        assertThat(rules.get(2).get("domain_suffix").get(0).asText()).isEqualTo(".local");
-        assertThat(rules.get(2).get("outbound").asText()).isEqualTo("direct");
+        assertThat(rules.get(0).get("action").asString()).isEqualTo("sniff");
+        assertThat(rules.get(1).get("action").asString()).isEqualTo("hijack-dns");
+        assertThat(rules.get(2).get("domain_suffix").get(0).asString()).isEqualTo(".local");
+        assertThat(rules.get(2).get("outbound").asString()).isEqualTo("direct");
         assertThat(rules.get(3).get("ip_is_private").asBoolean()).isTrue();
-        assertThat(rules.get(3).get("outbound").asText()).isEqualTo("direct");
+        assertThat(rules.get(3).get("outbound").asString()).isEqualTo("direct");
     }
 
     @Test
@@ -322,7 +323,7 @@ class SingBoxConfigGeneratorTunTest {
             JsonNode suffix = rules.get(i).get("domain_suffix");
             if (suffix != null && suffix.isArray()) {
                 for (JsonNode s : suffix) {
-                    if (".local".equals(s.asText())) {
+                    if (".local".equals(s.asString())) {
                         localDomainCount++;
                     }
                 }
@@ -334,9 +335,9 @@ class SingBoxConfigGeneratorTunTest {
 
         // Order: sniff, hijack-dns (TUN-only), then the local-bypass rules
         // buildRoute already emitted.
-        assertThat(rules.get(0).get("action").asText()).isEqualTo("sniff");
-        assertThat(rules.get(1).get("action").asText()).isEqualTo("hijack-dns");
-        assertThat(rules.get(2).get("domain_suffix").get(0).asText()).isEqualTo(".local");
+        assertThat(rules.get(0).get("action").asString()).isEqualTo("sniff");
+        assertThat(rules.get(1).get("action").asString()).isEqualTo("hijack-dns");
+        assertThat(rules.get(2).get("domain_suffix").get(0).asString()).isEqualTo(".local");
         assertThat(rules.get(3).get("ip_is_private").asBoolean()).isTrue();
     }
 
@@ -350,13 +351,13 @@ class SingBoxConfigGeneratorTunTest {
 
         JsonNode tun = null;
         for (JsonNode inbound : inbounds) {
-            if ("tun".equals(inbound.get("type").asText())) {
+            if ("tun".equals(inbound.get("type").asString())) {
                 tun = inbound;
                 break;
             }
         }
         assertThat(tun).isNotNull();
-        assertThat(tun.get("address").get(0).asText()).isEqualTo("10.10.0.1/24");
+        assertThat(tun.get("address").get(0).asString()).isEqualTo("10.10.0.1/24");
     }
 
     @Test
@@ -367,7 +368,7 @@ class SingBoxConfigGeneratorTunTest {
         // networks that block it before the tunnel even came up.
         String json = generator.generate(createVlessServer(), tunSettings());
 
-        assertThat(parse(json).get("route").get("default_domain_resolver").asText())
+        assertThat(parse(json).get("route").get("default_domain_resolver").asString())
                 .isEqualTo("local-dns");
     }
 
@@ -380,14 +381,14 @@ class SingBoxConfigGeneratorTunTest {
         JsonNode tunCache = parse(generator.generate(createVlessServer(), tun))
                 .get("experimental").get("cache_file");
         assertThat(tunCache.get("enabled").asBoolean()).isTrue();
-        assertThat(tunCache.get("path").asText()).endsWith("sing-box-tun.db");
+        assertThat(tunCache.get("path").asString()).endsWith("sing-box-tun.db");
 
         AppSettings sysProxy = new AppSettings();
         JsonNode proxyCache = parse(generator.generate(createVlessServer(), sysProxy))
                 .get("experimental").get("cache_file");
-        assertThat(proxyCache.get("path").asText()).endsWith("sing-box-system_proxy.db");
+        assertThat(proxyCache.get("path").asString()).endsWith("sing-box-system_proxy.db");
 
-        assertThat(tunCache.get("path").asText())
-                .isNotEqualTo(proxyCache.get("path").asText());
+        assertThat(tunCache.get("path").asString())
+                .isNotEqualTo(proxyCache.get("path").asString());
     }
 }

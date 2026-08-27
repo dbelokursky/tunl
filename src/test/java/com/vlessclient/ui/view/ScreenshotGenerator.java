@@ -1,6 +1,7 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.app.UiTestServices;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
@@ -8,7 +9,6 @@ import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.LatencyTester;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TrafficMonitor;
-import com.vlessclient.service.UpdateManager;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -62,7 +62,7 @@ public class ScreenshotGenerator extends ApplicationTest {
         System.setProperty("prism.order", "sw");
         System.setProperty("prism.text", "t2k");
         System.setProperty("java.awt.headless", "true");
-        ServiceLocator.initialize();
+        UiTestServices.initialize();
     }
 
     @Override
@@ -74,13 +74,6 @@ public class ScreenshotGenerator extends ApplicationTest {
         // machine with a working install shows.
         ServiceLocator.register(SingBoxEngine.class,
                 new SingBoxEngine(Path.of("/usr/local/bin/sing-box")));
-        // An updater that is never started, so the dashboard's update banner
-        // stays shut. Whether a release happens to be pending on the machine
-        // running this is not a property of the app, and a README screenshot
-        // announcing "version X is available" is wrong for every reader on a
-        // later version. It also keeps the shot off the network.
-        ServiceLocator.register(UpdateManager.class, new UpdateManager());
-
         FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/MainView.fxml"));
         Parent root = loader.load();
         mainController = loader.getController();

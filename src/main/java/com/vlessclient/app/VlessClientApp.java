@@ -73,9 +73,24 @@ public class VlessClientApp extends Application {
         // support or when the ICON_IMAGE feature is unavailable.
         setDockIcon();
         installQuitHandler();
+        installMcpShutdownHook();
         ServiceLocator.initialize();
         clearStaleSystemProxy();
         refreshLoginItem();
+    }
+
+    /**
+     * Covers SIGTERM and direct {@link System#exit(int)} calls that do not
+     * reach the JavaFX {@link #stop()} callback. Runtime.halt and SIGKILL
+     * cannot run hooks, so the normal lifecycle also stops MCP explicitly.
+     */
+    private void installMcpShutdownHook() {
+        Thread hook = new Thread(ServiceLocator::stopMcpServer, "tunl-mcp-shutdown");
+        try {
+            Runtime.getRuntime().addShutdownHook(hook);
+        } catch (IllegalStateException | SecurityException e) {
+            log.warn("Could not install MCP shutdown hook: {}", e.getMessage());
+        }
     }
 
     /**
@@ -101,8 +116,9 @@ public class VlessClientApp extends Application {
     /**
      * Rewrites the macOS LaunchAgent (when "Launch at login" is enabled) so it
      * points at the current application location. Harmless no-op otherwise.
-     * Kept out of {@link ServiceLocator#initialize()} so headless UI tests,
-     * which call that method directly, never touch the real LaunchAgents dir.
+     * Kept out of {@link ServiceLocator#initialize()} so building a service
+     * graph never touches the real LaunchAgents directory. Headless UI tests
+     * also use the locator's dormant startup mode.
      */
     private void refreshLoginItem() {
         try {
@@ -359,6 +375,12 @@ public class VlessClientApp extends Application {
         // would never be reached. See TrayIconService#uninstall for the case
         // that actually happened.
         armTeardownWatchdog();
+
+        // Release the loopback control port before AWT tray teardown, which
+        // can consume its full timeout on macOS. Update relays start the new
+        // process as soon as this one exits, so MCP cannot be left until a
+        // later, potentially unreachable cleanup step.
+        ServiceLocator.stopMcpServer();
 
         if (trayIconService != null) {
             try {

@@ -24,6 +24,7 @@ import com.vlessclient.service.mcp.DefaultAppControlService;
 import com.vlessclient.service.mcp.McpServerService;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
@@ -39,6 +40,12 @@ public class ServiceLocator {
     private static final Map<Class<?>, Object> services = new ConcurrentHashMap<>();
     private static String singBoxPath;
 
+    /** Controls whether process-owned background services are activated. */
+    enum StartupMode {
+        APPLICATION,
+        TEST
+    }
+
     private ServiceLocator() {
     }
 
@@ -46,6 +53,20 @@ public class ServiceLocator {
      * Creates and registers all service instances.
      */
     public static void initialize() {
+        initialize(StartupMode.APPLICATION);
+    }
+
+    /**
+     * Creates the application service graph, optionally leaving process-owned
+     * background work dormant for headless UI tests.
+     *
+     * <p>The test graph deliberately contains the same service types as the
+     * application graph so FXML controllers exercise their real wiring. Only
+     * activation is suppressed here; test code can replace network-capable
+     * services with deterministic doubles before loading a view.</p>
+     */
+    static void initialize(StartupMode mode) {
+        Objects.requireNonNull(mode, "mode");
         SingBoxInstaller installer = new SingBoxInstaller();
         register(SingBoxInstaller.class, installer);
 
@@ -82,7 +103,6 @@ public class ServiceLocator {
         // machine.
         GeoIpDatabase geoIp = new GeoIpDatabase();
         CountryResolver countryResolver = new CountryResolver(geoIp);
-        countryResolver.warmUp();
         register(GeoIpDatabase.class, geoIp);
         register(CountryResolver.class, countryResolver);
 
@@ -109,11 +129,9 @@ public class ServiceLocator {
         SubscriptionService subscriptionService =
                 new SubscriptionService(configStore, shareLinkParser);
         register(SubscriptionService.class, subscriptionService);
-        subscriptionService.startAutoRefresh();
 
         UpdateManager updateManager = new UpdateManager();
         register(UpdateManager.class, updateManager);
-        updateManager.startPeriodicCheck();
 
         register(Autostart.class, Autostart.current());
 
@@ -124,19 +142,6 @@ public class ServiceLocator {
         ConnectionService connectionService = new ConnectionService(
                 configStore, configGenerator, routingService, engine);
         register(ConnectionService.class, connectionService);
-
-        // A tunnel coming up is worth a check of its own. For a user whose
-        // network throttles or blocks GitHub — the reason this app exists —
-        // that is the moment a check can succeed at all, and no timer can know
-        // it. UpdateManager throttles the trigger, so a flapping tunnel does
-        // not turn into a flapping check.
-        if (engine != null) {
-            engine.connectionStateProperty().addListener((o, was, is) -> {
-                if (is == com.vlessclient.model.ConnectionState.CONNECTED) {
-                    updateManager.checkAfterEvent();
-                }
-            });
-        }
 
         // MCP control server: a facade over the services above, plus the server
         // that exposes it to agents. Started here so `mcp_enabled` takes effect
@@ -150,9 +155,45 @@ public class ServiceLocator {
         if (engine != null) {
             mcpServerService.attachLogSource(engine);
         }
-        mcpServerService.apply();
 
-        log.info("ServiceLocator initialized");
+        runStartupTasks(mode,
+                countryResolver::warmUp,
+                subscriptionService::startAutoRefresh,
+                updateManager::startPeriodicCheck,
+                () -> attachUpdateCheckListener(engine, updateManager),
+                mcpServerService::apply);
+
+        log.info("ServiceLocator initialized in {} mode", mode);
+    }
+
+    /** Runs process-owned work only for the real application bootstrap. */
+    static void runStartupTasks(StartupMode mode, Runnable... tasks) {
+        Objects.requireNonNull(mode, "mode");
+        Objects.requireNonNull(tasks, "tasks");
+        if (mode == StartupMode.TEST) {
+            log.info("Background services remain stopped for UI tests");
+            return;
+        }
+        for (Runnable task : tasks) {
+            Objects.requireNonNull(task, "task").run();
+        }
+    }
+
+    private static void attachUpdateCheckListener(
+            SingBoxEngine engine, UpdateManager updateManager) {
+        if (engine == null) {
+            return;
+        }
+        // A tunnel coming up is worth a check of its own. For a user whose
+        // network throttles or blocks GitHub — the reason this app exists —
+        // that is the moment a check can succeed at all, and no timer can know
+        // it. UpdateManager throttles the trigger, so a flapping tunnel does
+        // not turn into a flapping check.
+        engine.connectionStateProperty().addListener((o, was, is) -> {
+            if (is == com.vlessclient.model.ConnectionState.CONNECTED) {
+                updateManager.checkAfterEvent();
+            }
+        });
     }
 
     /**
@@ -192,14 +233,7 @@ public class ServiceLocator {
     public static void shutdown() {
         log.info("ServiceLocator shutting down");
 
-        try {
-            Object mcp = services.get(McpServerService.class);
-            if (mcp instanceof McpServerService mcpServerService) {
-                mcpServerService.stop();
-            }
-        } catch (Exception e) {
-            log.error("Error stopping MCP server during shutdown", e);
-        }
+        stopMcpServer();
 
         // Stop the engine early — right after MCP so no in-flight agent connect
         // survives it — and before the slow steps below. An in-flight
@@ -272,6 +306,22 @@ public class ServiceLocator {
         }
 
         services.clear();
+    }
+
+    /**
+     * Stops the process-owned MCP listener without changing the saved enable
+     * preference. Safe to invoke from both the ordinary JavaFX lifecycle and
+     * the JVM shutdown hook; {@link McpServerService#stop()} is idempotent.
+     */
+    public static void stopMcpServer() {
+        try {
+            Object mcp = services.get(McpServerService.class);
+            if (mcp instanceof McpServerService mcpServerService) {
+                mcpServerService.stop();
+            }
+        } catch (Exception e) {
+            log.error("Error stopping MCP server during shutdown", e);
+        }
     }
 
     /**

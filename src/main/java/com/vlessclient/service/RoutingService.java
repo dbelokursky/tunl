@@ -1,7 +1,5 @@
 package com.vlessclient.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.RoutingRule;
 import com.vlessclient.platform.PlatformPaths;
@@ -13,6 +11,10 @@ import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Loads and persists the routing configuration (bypass countries, bypass
@@ -90,7 +92,9 @@ public class RoutingService {
 
     RoutingService(Path dataDir) {
         this.dataDir = dataDir;
-        this.objectMapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
+        this.objectMapper = JsonMapper.builder()
+                .enable(SerializationFeature.INDENT_OUTPUT)
+                .build();
         ensureDataDir();
         loadConfig();
     }
@@ -175,7 +179,7 @@ public class RoutingService {
             this.config = objectMapper.readValue(file.toFile(), RoutingConfig.class);
             log.info("Loaded routing config from {}", file);
             migrateLegacyPreset(file);
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             log.error("Failed to load routing config from {}", file, e);
             this.config = new RoutingConfig();
         }

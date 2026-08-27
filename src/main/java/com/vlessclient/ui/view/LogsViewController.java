@@ -29,14 +29,19 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.ScrollBar;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
+import javafx.scene.control.skin.VirtualFlow;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
+import javafx.scene.input.KeyEvent;
+import javafx.scene.input.MouseEvent;
+import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.Region;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
@@ -63,6 +68,9 @@ public class LogsViewController {
 
     private ObservableList<String> sourceLogLines;
     private FilteredList<String> filteredLogLines;
+    private ViewportAnchor pendingViewportAnchor;
+    private boolean viewportRestoreScheduled;
+    private boolean filterChangeInProgress;
 
     /**
      * Builds the log toolbar (level filter, search, icon buttons), binds the
@@ -129,6 +137,22 @@ public class LogsViewController {
         logListView.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
         logListView.setCellFactory(lv -> new LogLineCell(lv));
 
+        // A queued restore belongs to the viewport position that existed when
+        // a log line arrived. If the user navigates before it runs, their new
+        // position wins and the stale restore must be discarded.
+        logListView.addEventFilter(
+                ScrollEvent.SCROLL, event -> discardPendingViewportRestore());
+        logListView.addEventFilter(MouseEvent.MOUSE_PRESSED, event -> {
+            if (isScrollBarTarget(event.getTarget())) {
+                discardPendingViewportRestore();
+            }
+        });
+        logListView.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+            if (isViewportNavigationKey(event.getCode())) {
+                discardPendingViewportRestore();
+            }
+        });
+
         // Keyboard copy: Cmd+C / Ctrl+C copies selected rows
         KeyCombination copyCombo = new KeyCodeCombination(
                 KeyCode.C, KeyCombination.SHORTCUT_DOWN);
@@ -161,59 +185,151 @@ public class LogsViewController {
 
         // Re-enabling auto-scroll should immediately snap to the tail.
         autoScrollCheckBox.selectedProperty().addListener((obs, was, isOn) -> {
+            discardPendingViewportRestore();
             if (isOn && !filteredLogLines.isEmpty()) {
                 logListView.scrollTo(filteredLogLines.size() - 1);
             }
         });
 
         filteredLogLines.addListener((ListChangeListener<String>) change -> {
+            // setPredicate() reports the whole FilteredList as a replacement
+            // from index zero. It is a user-requested refilter, not a ring-
+            // buffer trim, and applyFilter() applies its own viewport policy.
+            if (filterChangeInProgress) {
+                return;
+            }
             if (filteredLogLines.isEmpty()) {
+                discardPendingViewportRestore();
                 return;
             }
             if (autoScrollCheckBox.isSelected()) {
+                discardPendingViewportRestore();
                 logListView.scrollTo(filteredLogLines.size() - 1);
                 return;
             }
             // Auto-scroll is off: hold the lines the user is reading in place.
-            // VirtualFlow pins the viewport to the tail cell while it is
-            // visible, and LogReader's ring buffer trims the oldest line off
-            // the front, shifting every index down by one. A scrollbar-ratio
-            // freeze survives neither — ratio 1.0 always maps to the new
-            // bottom, which is why toggling the box used to keep following the
-            // tail. Anchor on the first visible row index instead (captured
-            // here, before the pulse re-lays-out the flow) and re-assert it on
-            // the next pulse, compensating for any front-trimmed line.
-            int firstVisible = firstVisibleIndex();
-            if (firstVisible < 0) {
-                return;
-            }
-            int anchor = Math.max(0, firstVisible - removedFromFront(change));
-            Platform.runLater(() -> logListView.scrollTo(anchor));
+            // ListView.scrollTo(index) only makes a row visible. If that row
+            // is already on screen, VirtualFlow remains pinned to the tail and
+            // shifts it as new rows arrive. Capture both the first row and its
+            // exact pixel offset, then restore them after the list mutation.
+            queueViewportRestore(change);
         });
     }
 
     /**
-     * Index of the first row intersecting the viewport, or {@code -1} when no
-     * rendered cell is visible. Called from a list-change notification — before
-     * the pulse re-lays-out the flow — it reports the pre-change (old) index
-     * space, which is exactly what the anchor restore needs.
+     * Coalesces all list mutations waiting in the FX queue into one restore.
+     * LogReader appends and trims in separate operations, so a burst can emit
+     * many changes before JavaFX lays the list out again.
      */
-    private int firstVisibleIndex() {
-        Bounds viewport = logListView.localToScene(logListView.getBoundsInLocal());
-        double top = viewport.getMinY();
-        double bottom = viewport.getMaxY();
-        int first = -1;
-        for (Node node : logListView.lookupAll(".list-cell")) {
-            if (!(node instanceof ListCell<?> cell) || cell.isEmpty()) {
-                continue;
+    private void queueViewportRestore(ListChangeListener.Change<? extends String> change) {
+        if (pendingViewportAnchor == null) {
+            pendingViewportAnchor = firstVisibleAnchor();
+        }
+        if (pendingViewportAnchor == null) {
+            return;
+        }
+
+        int removed = removedFromFront(change);
+        if (removed > 0) {
+            pendingViewportAnchor = pendingViewportAnchor.shiftedBy(-removed);
+        }
+        scheduleViewportRestore();
+    }
+
+    private void queueViewportRestore(ViewportAnchor anchor) {
+        pendingViewportAnchor = anchor;
+        scheduleViewportRestore();
+    }
+
+    private void scheduleViewportRestore() {
+        if (viewportRestoreScheduled) {
+            return;
+        }
+        viewportRestoreScheduled = true;
+        Platform.runLater(() -> {
+            viewportRestoreScheduled = false;
+            ViewportAnchor anchor = pendingViewportAnchor;
+            pendingViewportAnchor = null;
+            if (anchor != null) {
+                restoreViewport(anchor);
             }
-            Bounds b = cell.localToScene(cell.getBoundsInLocal());
-            if (b.getMaxY() > top + 1 && b.getMinY() < bottom - 1
-                    && (first < 0 || cell.getIndex() < first)) {
-                first = cell.getIndex();
+        });
+    }
+
+    private void discardPendingViewportRestore() {
+        pendingViewportAnchor = null;
+    }
+
+    /**
+     * Captures the first rendered row and its vertical offset from the flow.
+     * Called from a list-change notification, before the next layout pulse.
+     */
+    private ViewportAnchor firstVisibleAnchor() {
+        VirtualFlow<ListCell<String>> flow = virtualFlow();
+        if (flow == null) {
+            return null;
+        }
+        ListCell<String> cell = flow.getFirstVisibleCell();
+        if (cell == null || cell.isEmpty()) {
+            return null;
+        }
+        return new ViewportAnchor(cell.getItem(), cell.getIndex(), offsetFromFlow(flow, cell));
+    }
+
+    /**
+     * Restores an exact row-and-pixel viewport anchor after JavaFX has observed
+     * an item-list change. The selected-state check discards a queued restore
+     * if the user has already switched tail following back on.
+     */
+    private void restoreViewport(ViewportAnchor anchor) {
+        if (autoScrollCheckBox.isSelected() || filteredLogLines.isEmpty()) {
+            return;
+        }
+        VirtualFlow<ListCell<String>> flow = virtualFlow();
+        if (flow == null) {
+            return;
+        }
+
+        int index = indexOfIdentity(anchor.item());
+        if (index < 0) {
+            index = Math.min(anchor.index(), filteredLogLines.size() - 1);
+        }
+        flow.scrollToTop(index);
+        flow.layout();
+
+        ListCell<String> cell = flow.getFirstVisibleCell();
+        if (cell != null && cell.getIndex() == index) {
+            double currentOffset = offsetFromFlow(flow, cell);
+            flow.scrollPixels(currentOffset - anchor.offset());
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private VirtualFlow<ListCell<String>> virtualFlow() {
+        Node node = logListView.lookup(".virtual-flow");
+        if (node instanceof VirtualFlow<?> flow) {
+            return (VirtualFlow<ListCell<String>>) flow;
+        }
+        return null;
+    }
+
+    private int indexOfIdentity(String item) {
+        if (item == null) {
+            return -1;
+        }
+        for (int i = 0; i < filteredLogLines.size(); i++) {
+            if (filteredLogLines.get(i) == item) {
+                return i;
             }
         }
-        return first;
+        return -1;
+    }
+
+    private static double offsetFromFlow(
+            VirtualFlow<ListCell<String>> flow, ListCell<String> cell) {
+        Bounds flowBounds = flow.localToScene(flow.getBoundsInLocal());
+        Bounds cellBounds = cell.localToScene(cell.getBoundsInLocal());
+        return cellBounds.getMinY() - flowBounds.getMinY();
     }
 
     /**
@@ -231,6 +347,33 @@ public class LogsViewController {
         }
         change.reset();
         return removed;
+    }
+
+    private static boolean isScrollBarTarget(Object target) {
+        Node node = target instanceof Node targetNode ? targetNode : null;
+        while (node != null) {
+            if (node instanceof ScrollBar) {
+                return true;
+            }
+            node = node.getParent();
+        }
+        return false;
+    }
+
+    private static boolean isViewportNavigationKey(KeyCode code) {
+        return code == KeyCode.UP
+                || code == KeyCode.DOWN
+                || code == KeyCode.PAGE_UP
+                || code == KeyCode.PAGE_DOWN
+                || code == KeyCode.HOME
+                || code == KeyCode.END;
+    }
+
+    private record ViewportAnchor(String item, int index, double offset) {
+
+        private ViewportAnchor shiftedBy(int delta) {
+            return new ViewportAnchor(item, Math.max(0, index + delta), offset);
+        }
     }
 
     @FXML
@@ -287,7 +430,56 @@ public class LogsViewController {
         Predicate<String> levelPredicate = buildLevelPredicate(level);
         Predicate<String> searchPredicate = buildSearchPredicate(searchText);
 
-        filteredLogLines.setPredicate(levelPredicate.and(searchPredicate));
+        ViewportAnchor visible = autoScrollCheckBox.isSelected()
+                ? null : firstVisibleAnchor();
+        int sourceIndex = sourceIndexOf(visible);
+        discardPendingViewportRestore();
+
+        filterChangeInProgress = true;
+        try {
+            filteredLogLines.setPredicate(levelPredicate.and(searchPredicate));
+        } finally {
+            filterChangeInProgress = false;
+        }
+
+        if (filteredLogLines.isEmpty()) {
+            return;
+        }
+        if (autoScrollCheckBox.isSelected()) {
+            logListView.scrollTo(filteredLogLines.size() - 1);
+            return;
+        }
+        if (visible != null) {
+            int index = indexOfIdentity(visible.item());
+            if (index < 0) {
+                index = nearestFilteredIndex(sourceIndex);
+            }
+            queueViewportRestore(new ViewportAnchor(
+                    filteredLogLines.get(index), index, visible.offset()));
+        }
+    }
+
+    private int sourceIndexOf(ViewportAnchor anchor) {
+        if (anchor == null || filteredLogLines.isEmpty()) {
+            return -1;
+        }
+        int index = indexOfIdentity(anchor.item());
+        if (index < 0) {
+            index = Math.min(anchor.index(), filteredLogLines.size() - 1);
+        }
+        return filteredLogLines.getSourceIndex(index);
+    }
+
+    private int nearestFilteredIndex(int sourceIndex) {
+        if (sourceIndex < 0) {
+            return 0;
+        }
+        for (int i = 0; i < filteredLogLines.size(); i++) {
+            if (filteredLogLines.getSourceIndex(i) >= sourceIndex) {
+                return i;
+            }
+        }
+        return filteredLogLines.size() - 1;
     }
 
     private Predicate<String> buildLevelPredicate(String level) {

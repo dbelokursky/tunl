@@ -1,9 +1,10 @@
 package com.vlessclient.service.mcp.tools;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.service.mcp.AppControlService;
 import com.vlessclient.service.mcp.McpTool;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * {@code get_status} — returns a live snapshot of the connection: state, active
@@ -11,7 +12,7 @@ import com.vlessclient.service.mcp.McpTool;
  */
 public class GetStatusTool implements McpTool {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
     private final AppControlService control;
 

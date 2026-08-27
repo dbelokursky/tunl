@@ -1,8 +1,8 @@
 package com.vlessclient.service.outbound;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.model.ServerConfig;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Builds the sing-box Trojan proxy outbound: password auth (stored in the

@@ -1,12 +1,13 @@
 package com.vlessclient.service.mcp;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.service.ConfigStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -20,7 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class McpServerBuildTest {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
     @TempDir
     Path tempDir;
@@ -58,7 +59,7 @@ class McpServerBuildTest {
         JsonNode tools = call(service.buildServer(), "tools/list", null)
                 .path("result").path("tools");
         List<String> names = new ArrayList<>();
-        tools.forEach(t -> names.add(t.path("name").asText()));
+        tools.forEach(t -> names.add(t.path("name").asString()));
         assertThat(names).contains(
                 "get_status", "get_traffic", "list_servers", "get_logs", "list_subscriptions",
                 "get_routing", "get_settings",
@@ -79,7 +80,7 @@ class McpServerBuildTest {
         JsonNode tools = call(disabled.buildServer(), "tools/list", null)
                 .path("result").path("tools");
         List<String> names = new ArrayList<>();
-        tools.forEach(t -> names.add(t.path("name").asText()));
+        tools.forEach(t -> names.add(t.path("name").asString()));
         assertThat(names).contains("get_status").doesNotContain("connect", "add_server",
                 "delete_server");
     }
@@ -90,7 +91,7 @@ class McpServerBuildTest {
                 .path("result").path("tools");
         JsonNode addServer = null;
         for (JsonNode t : tools) {
-            if (t.path("name").asText().equals("add_server")) {
+            if (t.path("name").asString().equals("add_server")) {
                 addServer = t;
             }
         }
@@ -131,7 +132,7 @@ class McpServerBuildTest {
         JsonNode resources = call(service.buildServer(), "resources/list", null)
                 .path("result").path("resources");
         List<String> uris = new ArrayList<>();
-        resources.forEach(r -> uris.add(r.path("uri").asText()));
+        resources.forEach(r -> uris.add(r.path("uri").asString()));
         assertThat(uris).contains("vless://status", "vless://traffic", "vless://servers",
                 "vless://routing", "vless://settings", "vless://logs/recent");
     }

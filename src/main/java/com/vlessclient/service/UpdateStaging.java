@@ -1,8 +1,5 @@
 package com.vlessclient.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.platform.PendingUpdate;
 import com.vlessclient.platform.PlatformPaths;
 import java.io.IOException;
@@ -17,6 +14,11 @@ import java.util.HexFormat;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Where a downloaded update waits between the run that fetched it and the run
@@ -36,7 +38,7 @@ public final class UpdateStaging {
     private static final String MARKER_NAME = "pending.json";
 
     private final Path dir;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
     /** Stages updates under the per-user data directory. */
     public UpdateStaging() {
@@ -94,7 +96,7 @@ public final class UpdateStaging {
         }
         try {
             return objectMapper.readTree(Files.readString(marker)).path("stagedAt").asLong(0);
-        } catch (IOException e) {
+        } catch (IOException | JacksonException e) {
             return 0;
         }
     }
@@ -116,7 +118,7 @@ public final class UpdateStaging {
         }
         try {
             return objectMapper.readTree(Files.readString(marker)).path("attempts").asInt(0);
-        } catch (IOException e) {
+        } catch (IOException | JacksonException e) {
             return 0;
         }
     }
@@ -131,7 +133,7 @@ public final class UpdateStaging {
             ObjectNode root = (ObjectNode) objectMapper.readTree(Files.readString(marker));
             root.put("attempts", root.path("attempts").asInt(0) + 1);
             Files.writeString(marker, objectMapper.writeValueAsString(root));
-        } catch (IOException | ClassCastException e) {
+        } catch (IOException | JacksonException | ClassCastException e) {
             log.warn("Failed to record an apply attempt: {}", e.getMessage());
         }
     }
@@ -150,17 +152,17 @@ public final class UpdateStaging {
         }
         try {
             JsonNode root = objectMapper.readTree(Files.readString(marker));
-            Path installer = Path.of(root.path("installer").asText(""));
+            Path installer = Path.of(root.path("installer").asString(""));
             if (!Files.isRegularFile(installer)) {
                 log.warn("Staged installer {} is gone, clearing the marker", installer);
                 clear();
                 return Optional.empty();
             }
             return Optional.of(new PendingUpdate(
-                    root.path("version").asText(""),
+                    root.path("version").asString(""),
                     installer,
-                    root.path("digest").asText("")));
-        } catch (IOException | IllegalArgumentException e) {
+                    root.path("digest").asString("")));
+        } catch (IOException | JacksonException | IllegalArgumentException e) {
             log.warn("Unreadable update marker, clearing it: {}", e.getMessage());
             clear();
             return Optional.empty();

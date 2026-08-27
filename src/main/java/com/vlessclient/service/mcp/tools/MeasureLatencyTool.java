@@ -1,11 +1,12 @@
 package com.vlessclient.service.mcp.tools;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.service.mcp.AppControlService;
 import com.vlessclient.service.mcp.McpTool;
 import com.vlessclient.service.mcp.McpToolException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * {@code measure_latency} — pings one server, or all servers when no id is
@@ -14,7 +15,7 @@ import com.vlessclient.service.mcp.McpToolException;
  */
 public class MeasureLatencyTool implements McpTool {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
     private final AppControlService control;
 
@@ -50,7 +51,7 @@ public class MeasureLatencyTool implements McpTool {
     @Override
     public Object call(ObjectNode arguments) throws McpToolException {
         JsonNode node = arguments.get("serverId");
-        String serverId = node != null && node.isTextual() ? node.asText() : null;
+        String serverId = node != null && node.isString() ? node.asString() : null;
         ObjectNode result = MAPPER.createObjectNode();
         result.set("results", MAPPER.valueToTree(control.measureLatency(serverId)));
         return result;

@@ -1,8 +1,5 @@
 package com.vlessclient.service.mcp;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vlessclient.app.AppVersion;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.service.ConfigStore;
@@ -16,8 +13,13 @@ import com.vlessclient.service.mcp.tools.MeasureLatencyTool;
 import com.vlessclient.service.mcp.tools.RefreshSubscriptionTool;
 import com.vlessclient.service.mcp.tools.SelectServerTool;
 import com.vlessclient.service.mcp.tools.SimpleReadTool;
+import java.net.BindException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Owns the lifecycle of the local MCP control server and keeps it in sync with
@@ -36,12 +38,13 @@ public class McpServerService {
     private final ConfigStore configStore;
     private final AppControlService control;
     private final McpTokenStore tokenStore;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper = JsonMapper.builder().build();
     private final McpNotifier notifier = new McpNotifier(mapper);
 
     private McpHttpServer httpServer;
     private int runningPort = -1;
     private SingBoxEngine loggedEngine;
+    private String lastStartError;
 
     /**
      * Creates the service wired to the given config store and control facade.
@@ -86,6 +89,7 @@ public class McpServerService {
         int desiredPort = settings.getMcpPort();
 
         if (!shouldRun) {
+            lastStartError = null;
             stop();
             return;
         }
@@ -100,11 +104,33 @@ public class McpServerService {
             httpServer = new McpHttpServer(desiredPort, token, server, mapper, notifier);
             httpServer.start();
             runningPort = desiredPort;
+            lastStartError = null;
         } catch (Exception e) {
             log.error("Failed to start MCP server on port {}", desiredPort, e);
             httpServer = null;
             runningPort = -1;
+            lastStartError = describeStartFailure(e, desiredPort);
+
+            // "Enabled" must describe a server that is actually listening. If
+            // startup fails, retaining the desired state leaves the Settings
+            // checkbox checked while the status says "stopped". A later click
+            // then looks like it did nothing even though another bind was
+            // attempted. Roll back the persisted toggle so the UI can reflect
+            // the failure and the next enable is an unambiguous retry.
+            settings.setMcpEnabled(false);
+            configStore.saveSettings(settings);
         }
+    }
+
+    /**
+     * Returns the most recent startup failure in a form suitable for the
+     * Settings status label.
+     *
+     * @return the failure description, or {@code null} after a successful
+     *         start or an explicit stop
+     */
+    public synchronized String getLastStartError() {
+        return lastStartError;
     }
 
     /** Stops the server if it is running. */
@@ -114,10 +140,25 @@ public class McpServerService {
             httpServer = null;
             runningPort = -1;
         }
+        lastStartError = null;
     }
 
     public synchronized boolean isRunning() {
         return httpServer != null && httpServer.isRunning();
+    }
+
+    private static String describeStartFailure(Exception failure, int port) {
+        Throwable cause = failure;
+        while (cause != null) {
+            if (cause instanceof BindException) {
+                return "port " + port + " is already in use";
+            }
+            cause = cause.getCause();
+        }
+        String message = failure.getMessage();
+        return message == null || message.isBlank()
+                ? failure.getClass().getSimpleName()
+                : message;
     }
 
     /**
@@ -294,7 +335,7 @@ public class McpServerService {
         ObjectNode schema = mapper.createObjectNode();
         schema.put("type", "object");
         ObjectNode props = mapper.createObjectNode();
-        com.fasterxml.jackson.databind.node.ArrayNode required = mapper.createArrayNode();
+        tools.jackson.databind.node.ArrayNode required = mapper.createArrayNode();
         for (Object part : parts) {
             if (part instanceof Prop p) {
                 ObjectNode node = mapper.createObjectNode();
@@ -317,7 +358,7 @@ public class McpServerService {
 
     private static String str(ObjectNode args, String field) {
         JsonNode node = args.get(field);
-        return node != null && node.isTextual() ? node.asText() : null;
+        return node != null && node.isString() ? node.asString() : null;
     }
 
     private static boolean bool(ObjectNode args, String field) {

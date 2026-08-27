@@ -1,7 +1,5 @@
 package com.vlessclient.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ProxyMode;
@@ -9,6 +7,9 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -28,7 +29,7 @@ class SystemProxyAutoConfigTest {
         // Capability forced on: these tests pin the settings/mode matrix,
         // not the host gate (covered separately below).
         generator = new SingBoxConfigGenerator(() -> true);
-        mapper = new ObjectMapper();
+        mapper = JsonMapper.builder().build();
     }
 
     private ServerConfig server() {
@@ -46,7 +47,7 @@ class SystemProxyAutoConfigTest {
     private JsonNode httpInbound(AppSettings settings) throws Exception {
         JsonNode config = mapper.readTree(generator.generate(server(), settings));
         for (JsonNode inbound : config.get("inbounds")) {
-            if ("http".equals(inbound.path("type").asText())) {
+            if ("http".equals(inbound.path("type").asString())) {
                 return inbound;
             }
         }
@@ -110,7 +111,7 @@ class SystemProxyAutoConfigTest {
 
         JsonNode config = mapper.readTree(generator.generate(server(), settings));
         for (JsonNode inbound : config.get("inbounds")) {
-            if ("socks".equals(inbound.path("type").asText())) {
+            if ("socks".equals(inbound.path("type").asString())) {
                 assertThat(inbound.has("set_system_proxy")).isFalse();
             }
         }
