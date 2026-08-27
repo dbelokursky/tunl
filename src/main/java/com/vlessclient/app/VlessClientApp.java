@@ -10,6 +10,7 @@ import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.SingBoxInstaller;
 import com.vlessclient.service.ThemeManager;
 import com.vlessclient.service.TrayIconService;
+import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.ui.view.MainViewController;
 import com.vlessclient.ui.view.SingBoxInstallerDialog;
 import java.awt.Desktop;
@@ -519,8 +520,16 @@ public class VlessClientApp extends Application {
             }
             ConfigStore configStore = ServiceLocator.get(ConfigStore.class);
             ConnectionService connectionService = ServiceLocator.get(ConnectionService.class);
+            TunnelHealthState healthState = null;
+            try {
+                healthState = ServiceLocator.get(TunnelHealthState.class);
+            } catch (IllegalArgumentException e) {
+                log.debug("TunnelHealthState not available; "
+                        + "tray icon will report process state only");
+            }
 
-            trayIconService = new TrayIconService(engine, configStore, connectionService, stage);
+            trayIconService = new TrayIconService(
+                    engine, configStore, connectionService, healthState, stage);
             ServiceLocator.register(TrayIconService.class, trayIconService);
             trayIconService.install();
         } catch (Throwable e) {

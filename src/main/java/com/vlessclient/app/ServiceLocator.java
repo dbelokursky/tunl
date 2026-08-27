@@ -17,6 +17,7 @@ import com.vlessclient.service.SingBoxInstaller;
 import com.vlessclient.service.SubscriptionService;
 import com.vlessclient.service.ThemeManager;
 import com.vlessclient.service.TrafficMonitor;
+import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.service.UpdateManager;
 import com.vlessclient.service.mcp.AppControlService;
 import com.vlessclient.service.mcp.DefaultAppControlService;
@@ -116,6 +117,11 @@ public class ServiceLocator {
 
         ServiceReachabilityChecker reachabilityChecker = new ServiceReachabilityChecker();
         register(ServiceReachabilityChecker.class, reachabilityChecker);
+
+        // Where that checker's verdict is published. The Dashboard's health
+        // loop writes it; the tray icon reads it, which is the only way the
+        // menu bar can tell "the core started" apart from "traffic gets out".
+        register(TunnelHealthState.class, new TunnelHealthState());
 
         RoutingService routingService = new RoutingService();
         register(RoutingService.class, routingService);
