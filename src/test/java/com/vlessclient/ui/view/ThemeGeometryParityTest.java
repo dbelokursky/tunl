@@ -1,7 +1,7 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
-import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.app.UiTestServices;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -53,7 +53,7 @@ public class ThemeGeometryParityTest extends ApplicationTest {
         System.setProperty("prism.order", "sw");
         System.setProperty("prism.text", "t2k");
         System.setProperty("java.awt.headless", "true");
-        ServiceLocator.initialize();
+        UiTestServices.initialize();
     }
 
     @AfterEach
