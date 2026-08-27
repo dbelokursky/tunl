@@ -1,5 +1,6 @@
 package com.vlessclient.service;
 
+import com.vlessclient.platform.SecureFiles;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -293,7 +294,7 @@ public class SingBoxInstaller {
 
     private void writeMarker(Path marker, String version) {
         try {
-            Files.createDirectories(marker.getParent());
+            Files.createDirectories(SecureFiles.parentDirectory(marker));
             Files.writeString(marker, version);
         } catch (IOException e) {
             log.debug("Could not record the cached sing-box version: {}", e.getMessage());
@@ -577,11 +578,16 @@ public class SingBoxInstaller {
         try (var stream = Files.walk(dir)) {
             return stream
                     .filter(Files::isRegularFile)
-                    .filter(p -> p.getFileName().toString().equals(binaryName))
+                    .filter(p -> hasFileName(p, binaryName))
                     .findFirst()
                     .orElseThrow(() -> new IOException(
                             "sing-box binary not found in extracted archive at " + dir));
         }
+    }
+
+    private static boolean hasFileName(Path path, String expected) {
+        Path fileName = path.getFileName();
+        return fileName != null && fileName.toString().equals(expected);
     }
 
     void makeExecutable(Path binary) throws IOException {

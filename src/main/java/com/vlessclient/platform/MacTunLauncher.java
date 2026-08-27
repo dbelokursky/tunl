@@ -90,7 +90,7 @@ public final class MacTunLauncher implements TunLauncher {
                 PrivilegeHelper.elevatedBinary(), published, stopSignalFile);
 
         ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", shellCommand);
-        pb.directory(binary.getParent().toFile());
+        pb.directory(SecureFiles.parentDirectory(binary).toFile());
         pb.redirectErrorStream(true);
         Process process = pb.start();
         log.info("Started sing-box via sudo -n (no password prompt)");
@@ -147,7 +147,7 @@ public final class MacTunLauncher implements TunLauncher {
                 "do shell script \"" + shellCommand.replace("\\", "\\\\")
                         .replace("\"", "\\\"") + "\" with administrator privileges"
         );
-        pb.directory(binary.getParent().toFile());
+        pb.directory(SecureFiles.parentDirectory(binary).toFile());
         pb.redirectErrorStream(true);
         Process process = pb.start();
         log.info("Started sing-box via osascript (password prompt expected)");
@@ -191,7 +191,7 @@ public final class MacTunLauncher implements TunLauncher {
      */
     private static Path publishConfig(Path configFile) throws IOException {
         Path target = PrivilegeHelper.elevatedConfig();
-        SecureFiles.createPrivateDir(target.getParent());
+        SecureFiles.createPrivateDir(SecureFiles.parentDirectory(target));
         SecureFiles.writePrivately(target, Files.readAllBytes(configFile));
         return target;
     }

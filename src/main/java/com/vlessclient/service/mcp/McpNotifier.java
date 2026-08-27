@@ -75,7 +75,9 @@ public class McpNotifier {
         }
         for (Subscriber subscriber : subscribers) {
             // offer (non-blocking): drop for a client that has fallen too far behind.
-            subscriber.queue.offer(frame);
+            if (!subscriber.queue.offer(frame)) {
+                log.trace("Dropped a log notification for a slow MCP subscriber");
+            }
         }
     }
 

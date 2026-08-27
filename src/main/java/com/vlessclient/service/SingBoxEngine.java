@@ -2,6 +2,7 @@ package com.vlessclient.service;
 
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
+import com.vlessclient.platform.SecureFiles;
 import com.vlessclient.platform.SystemProxyGuard;
 import com.vlessclient.platform.TunLauncher;
 import java.io.IOException;
@@ -258,7 +259,7 @@ public class SingBoxEngine {
                 "-c",
                 tempConfigFile.toAbsolutePath().toString()
         );
-        pb.directory(singBoxBinary.getParent().toFile());
+        pb.directory(SecureFiles.parentDirectory(singBoxBinary).toFile());
         pb.redirectErrorStream(true);
 
         process = pb.start();
@@ -608,9 +609,7 @@ public class SingBoxEngine {
                 }
             }
         } catch (InterruptedException e) {
-            if (p != null) {
-                p.destroyForcibly();
-            }
+            p.destroyForcibly();
             Thread.currentThread().interrupt();
         }
         if (stopSignalFile != null) {

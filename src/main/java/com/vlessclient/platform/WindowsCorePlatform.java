@@ -39,7 +39,10 @@ public final class WindowsCorePlatform implements CorePlatform {
                 if (entry.isDirectory()) {
                     Files.createDirectories(target);
                 } else {
-                    Files.createDirectories(target.getParent());
+                    if (target.equals(root)) {
+                        throw new IOException("Zip entry does not name a file: " + entry.getName());
+                    }
+                    Files.createDirectories(SecureFiles.parentDirectory(target));
                     Files.copy(zis, target, StandardCopyOption.REPLACE_EXISTING);
                 }
             }

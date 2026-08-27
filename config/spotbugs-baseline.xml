@@ -1,0 +1,773 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<BugCollection version='4.10.4'>
+  <!-- Existing findings reviewed with SpotBugs 4.10.4 on 2026-08-27. Keep only intentional framework and lifecycle patterns; do not regenerate blindly. -->
+  <Project projectName='Tunl'/>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='a085ffcb39e6fdeb0c6c3ce35fee130b' cweid='493' rank='18' abbrev='MS' category='MALICIOUS_CODE' priority='2' type='MS_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.app.I18n' primary='true'/>
+    <Method isStatic='true' classname='com.vlessclient.app.I18n' signature='()Ljavafx/beans/property/ReadOnlyObjectProperty;' name='localeProperty' primary='true'/>
+    <Field isStatic='true' classname='com.vlessclient.app.I18n' signature='Ljavafx/beans/property/ObjectProperty;' name='locale' primary='true'/>
+    <SourceLine endBytecode='3' classname='com.vlessclient.app.I18n' start='86' end='86' sourcepath='com/vlessclient/app/I18n.java' sourcefile='I18n.java' startBytecode='3' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='3dd76b95694e43038c6d4055f243fb1d' cweid='382' rank='16' abbrev='Dm' category='BAD_PRACTICE' priority='2' type='DM_EXIT' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.app.VlessClientApp' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.app.VlessClientApp' signature='()V' name='onTeardownStalled' primary='true'/>
+    <SourceLine endBytecode='26' classname='com.vlessclient.app.VlessClientApp' start='474' end='474' sourcepath='com/vlessclient/app/VlessClientApp.java' sourcefile='VlessClientApp.java' startBytecode='26' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='f48bfbf8941820c3ea3cf7935bf3463d' cweid='382' rank='16' abbrev='Dm' category='BAD_PRACTICE' priority='2' type='DM_EXIT' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.app.VlessClientApp' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.app.VlessClientApp' signature='()V' name='stop' primary='true'/>
+    <SourceLine endBytecode='87' classname='com.vlessclient.app.VlessClientApp' start='418' end='418' sourcepath='com/vlessclient/app/VlessClientApp.java' sourcefile='VlessClientApp.java' startBytecode='87' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='b1e724a215f727f1d80b25f03ff34afe' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.model.AppSettings' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.model.AppSettings' signature='()Ljava/util/List;' name='getHealthCheckTargets' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.model.AppSettings' signature='Ljava/util/List;' name='healthCheckTargets' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.model.AppSettings' start='331' end='331' sourcepath='com/vlessclient/model/AppSettings.java' sourcefile='AppSettings.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='35048f004992b93ffddf87a1edb7e329' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.model.AppSettings' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.model.AppSettings' signature='(Ljava/util/List;)V' name='setHealthCheckTargets' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.model.AppSettings' signature='Ljava/util/List;' name='healthCheckTargets' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='2' name='healthCheckTargets' register='1'/>
+    <SourceLine endBytecode='2' classname='com.vlessclient.model.AppSettings' start='335' end='335' sourcepath='com/vlessclient/model/AppSettings.java' sourcefile='AppSettings.java' startBytecode='2' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='a26c6f88c59f5e33f5088f81273a843f' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.model.RoutingConfig' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.model.RoutingConfig' signature='()Ljava/util/List;' name='getBypassCountries' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.model.RoutingConfig' signature='Ljava/util/List;' name='bypassCountries' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.model.RoutingConfig' start='110' end='110' sourcepath='com/vlessclient/model/RoutingConfig.java' sourcefile='RoutingConfig.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='bb174fdf1b7c3a4c863b236ee07b7957' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.model.RoutingConfig' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.model.RoutingConfig' signature='()Ljava/util/List;' name='getBypassList' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.model.RoutingConfig' signature='Ljava/util/List;' name='bypassList' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.model.RoutingConfig' start='81' end='81' sourcepath='com/vlessclient/model/RoutingConfig.java' sourcefile='RoutingConfig.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='4277346af848e86cde5e1bb840a3f6ea' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.model.RoutingConfig' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.model.RoutingConfig' signature='()Ljava/util/List;' name='getRules' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.model.RoutingConfig' signature='Ljava/util/List;' name='rules' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.model.RoutingConfig' start='153' end='153' sourcepath='com/vlessclient/model/RoutingConfig.java' sourcefile='RoutingConfig.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='110f455ecb188abde3aef56943e6738b' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.model.RoutingConfig' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.model.RoutingConfig' signature='(Ljava/util/List;)V' name='setRules' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.model.RoutingConfig' signature='Ljava/util/List;' name='rules' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='2' name='rules' register='1'/>
+    <SourceLine endBytecode='2' classname='com.vlessclient.model.RoutingConfig' start='157' end='157' sourcepath='com/vlessclient/model/RoutingConfig.java' sourcefile='RoutingConfig.java' startBytecode='2' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='beef2634357c35610b0f12d3c5ce8f9b' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.model.ServerConfig' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.model.ServerConfig' signature='()Lcom/vlessclient/model/TlsConfig;' name='getTls' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.model.ServerConfig' signature='Lcom/vlessclient/model/TlsConfig;' name='tls' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.model.ServerConfig' start='129' end='129' sourcepath='com/vlessclient/model/ServerConfig.java' sourcefile='ServerConfig.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='1da20d5ec4ed4736f1d4babde36b89a5' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.model.ServerConfig' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.model.ServerConfig' signature='()Lcom/vlessclient/model/TransportConfig;' name='getTransport' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.model.ServerConfig' signature='Lcom/vlessclient/model/TransportConfig;' name='transport' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.model.ServerConfig' start='121' end='121' sourcepath='com/vlessclient/model/ServerConfig.java' sourcefile='ServerConfig.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='bec86282dc4049cec6d21acdef19f4d5' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.model.ServerConfig' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.model.ServerConfig' signature='(Lcom/vlessclient/model/TlsConfig;)V' name='setTls' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.model.ServerConfig' signature='Lcom/vlessclient/model/TlsConfig;' name='tls' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='2' name='tls' register='1'/>
+    <SourceLine endBytecode='2' classname='com.vlessclient.model.ServerConfig' start='133' end='133' sourcepath='com/vlessclient/model/ServerConfig.java' sourcefile='ServerConfig.java' startBytecode='2' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='96c629f7db4ab06c08068ccf7fcb003e' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.model.ServerConfig' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.model.ServerConfig' signature='(Lcom/vlessclient/model/TransportConfig;)V' name='setTransport' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.model.ServerConfig' signature='Lcom/vlessclient/model/TransportConfig;' name='transport' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='2' name='transport' register='1'/>
+    <SourceLine endBytecode='2' classname='com.vlessclient.model.ServerConfig' start='125' end='125' sourcepath='com/vlessclient/model/ServerConfig.java' sourcefile='ServerConfig.java' startBytecode='2' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='c095ad8f3e9182c2c9383d3a77a31807' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.model.Subscription' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.model.Subscription' signature='()Ljava/util/List;' name='getServerIds' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.model.Subscription' signature='Ljava/util/List;' name='serverIds' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.model.Subscription' start='88' end='88' sourcepath='com/vlessclient/model/Subscription.java' sourcefile='Subscription.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='ac9bd8894b999c61f236a7cd433ee6d8' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.model.Subscription' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.model.Subscription' signature='(Ljava/util/List;)V' name='setServerIds' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.model.Subscription' signature='Ljava/util/List;' name='serverIds' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='2' name='serverIds' register='1'/>
+    <SourceLine endBytecode='2' classname='com.vlessclient.model.Subscription' start='92' end='92' sourcepath='com/vlessclient/model/Subscription.java' sourcefile='Subscription.java' startBytecode='2' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='4f481905990e403702ab0c8f772ad8a6' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.model.TransportConfig' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.model.TransportConfig' signature='()Ljava/util/Map;' name='getHeaders' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.model.TransportConfig' signature='Ljava/util/Map;' name='headers' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.model.TransportConfig' start='66' end='66' sourcepath='com/vlessclient/model/TransportConfig.java' sourcefile='TransportConfig.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='538d5ff002467c09674aa3c55eb479ca' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.model.TransportConfig' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.model.TransportConfig' signature='(Ljava/util/Map;)V' name='setHeaders' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.model.TransportConfig' signature='Ljava/util/Map;' name='headers' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='2' name='headers' register='1'/>
+    <SourceLine endBytecode='2' classname='com.vlessclient.model.TransportConfig' start='70' end='70' sourcepath='com/vlessclient/model/TransportConfig.java' sourcefile='TransportConfig.java' startBytecode='2' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='91e3b97ac199a83ce0cc615a3197a0b7' cweid='440' rank='17' abbrev='DMI' category='STYLE' priority='2' type='DMI_HARDCODED_ABSOLUTE_FILENAME' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.platform.PrivilegeHelper' primary='true'/>
+    <Method isStatic='true' classname='com.vlessclient.platform.PrivilegeHelper' signature='()V' name='&lt;clinit&gt;' primary='true'/>
+    <String role='FILE_NAME' value='/usr/local/libexec/vless-client'/>
+    <SourceLine endBytecode='28' classname='com.vlessclient.platform.PrivilegeHelper' start='67' end='67' sourcepath='com/vlessclient/platform/PrivilegeHelper.java' sourcefile='PrivilegeHelper.java' startBytecode='28' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='b597f9a1bccae59f58eff8210d20b023' rank='20' abbrev='FS' category='BAD_PRACTICE' priority='2' type='VA_FORMAT_STRING_USES_NEWLINE' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.platform.WindowsUpdateApplier' primary='true'/>
+    <Method isStatic='true' classname='com.vlessclient.platform.WindowsUpdateApplier' signature='(JLjava/nio/file/Path;Ljava/nio/file/Path;)Ljava/lang/String;' name='relayScript' primary='true'/>
+    <Method isStatic='false' role='METHOD_CALLED' classname='java.lang.String' signature='([Ljava/lang/Object;)Ljava/lang/String;' name='formatted'/>
+    <String role='STRING_FORMAT_STRING' value='# Applies a Tunl update once the app being replaced has exited.\n# Written by WindowsUpdateApplier; regenerated on every update.\n$ErrorActionPreference = &apos;Continue&apos;\n$waitFor = %d\n$msi = %s\n$exe = %s\n\nWrite-Output "waiting for pid $waitFor to exit"\ntry { Wait-Process -Id $waitFor -Timeout 30 -ErrorAction Stop } catch { }\nif (Get-Process -Id $waitFor -ErrorAction SilentlyContinue) {\n    Write-Output "pid $waitFor still running, aborting"\n    exit 1\n}\n\n# /qb keeps a progress bar on screen: the app has just vanished,\n# so something has to show that the update is running.\n$installed = Start-Process msiexec `\n    -ArgumentList &apos;/i&apos;, $msi, &apos;/qb&apos;, &apos;/norestart&apos; -Wait -PassThru\n# 3010 is "success, reboot pending" and is not a failure here.\nif ($installed.ExitCode -ne 0 -and $installed.ExitCode -ne 3010) {\n    Write-Output "msiexec failed with $($installed.ExitCode)"\n    Start-Process $msi\n    exit 1\n}\n\nWrite-Output "installed, relaunching"\nStart-Process $exe\n'/>
+    <SourceLine endBytecode='37' classname='com.vlessclient.platform.WindowsUpdateApplier' start='106' end='106' sourcepath='com/vlessclient/platform/WindowsUpdateApplier.java' sourcefile='WindowsUpdateApplier.java' startBytecode='37' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='f90202266b2a1b56322772ed7b882784' rank='16' abbrev='CT' category='BAD_PRACTICE' priority='2' type='CT_CONSTRUCTOR_THROW' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.ConfigStore' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.ConfigStore' signature='()V' name='&lt;init&gt;' primary='true'/>
+    <SourceLine endBytecode='12' classname='com.vlessclient.service.ConfigStore' start='86' end='86' sourcepath='com/vlessclient/service/ConfigStore.java' sourcefile='ConfigStore.java' startBytecode='12' primary='true'/>
+    <SourceLine endBytecode='12' classname='com.vlessclient.service.ConfigStore' start='86' end='86' sourcepath='com/vlessclient/service/ConfigStore.java' sourcefile='ConfigStore.java' startBytecode='12'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='180ca27bbb0adc4e025fc3b1ab3cacfc' rank='16' abbrev='CT' category='BAD_PRACTICE' priority='2' type='CT_CONSTRUCTOR_THROW' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.ConfigStore' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.ConfigStore' signature='(Ljava/nio/file/Path;)V' name='&lt;init&gt;' primary='true'/>
+    <SourceLine endBytecode='5' classname='com.vlessclient.service.ConfigStore' start='98' end='98' sourcepath='com/vlessclient/service/ConfigStore.java' sourcefile='ConfigStore.java' startBytecode='5' primary='true'/>
+    <SourceLine endBytecode='5' classname='com.vlessclient.service.ConfigStore' start='98' end='98' sourcepath='com/vlessclient/service/ConfigStore.java' sourcefile='ConfigStore.java' startBytecode='5'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='5c27605b5f3bd0deadd449ad25719b36' rank='16' abbrev='CT' category='BAD_PRACTICE' priority='2' type='CT_CONSTRUCTOR_THROW' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.ConfigStore' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.ConfigStore' signature='(Ljava/nio/file/Path;Lcom/vlessclient/platform/SecretSealer;)V' name='&lt;init&gt;' primary='true'/>
+    <SourceLine endBytecode='74' classname='com.vlessclient.service.ConfigStore' start='110' end='110' sourcepath='com/vlessclient/service/ConfigStore.java' sourcefile='ConfigStore.java' startBytecode='74' primary='true'/>
+    <SourceLine endBytecode='74' classname='com.vlessclient.service.ConfigStore' start='110' end='110' sourcepath='com/vlessclient/service/ConfigStore.java' sourcefile='ConfigStore.java' startBytecode='74'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='be75d1b23bc0ff91dec8d090f8f8434f' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.ConfigStore' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.ConfigStore' signature='()Ljavafx/collections/ObservableList;' name='getServers' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.ConfigStore' signature='Ljavafx/collections/ObservableList;' name='servers' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.service.ConfigStore' start='126' end='126' sourcepath='com/vlessclient/service/ConfigStore.java' sourcefile='ConfigStore.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='5d95d8df20e569edbd581df7a6c11aac' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.ConfigStore' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.ConfigStore' signature='()Lcom/vlessclient/model/AppSettings;' name='getSettings' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.ConfigStore' signature='Lcom/vlessclient/model/AppSettings;' name='settings' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.service.ConfigStore' start='367' end='367' sourcepath='com/vlessclient/service/ConfigStore.java' sourcefile='ConfigStore.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='1030418976e6f991ba9482aaacd518e9' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.ConfigStore' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.ConfigStore' signature='(Lcom/vlessclient/model/AppSettings;)V' name='saveSettings' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.ConfigStore' signature='Lcom/vlessclient/model/AppSettings;' name='settings' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='38' name='settings' register='1'/>
+    <SourceLine endBytecode='38' classname='com.vlessclient.service.ConfigStore' start='393' end='393' sourcepath='com/vlessclient/service/ConfigStore.java' sourcefile='ConfigStore.java' startBytecode='38' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='e5604ed61151a89737494d9b6c1a50a0' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.ConnectionService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.ConnectionService' signature='()Lcom/vlessclient/service/SingBoxEngine;' name='getEngine' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.ConnectionService' signature='Lcom/vlessclient/service/SingBoxEngine;' name='engine' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.service.ConnectionService' start='115' end='115' sourcepath='com/vlessclient/service/ConnectionService.java' sourcefile='ConnectionService.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='565d373d650b5744a66d346bf12a7388' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.ConnectionService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.ConnectionService' signature='(Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/SingBoxConfigGenerator;Lcom/vlessclient/service/RoutingService;Lcom/vlessclient/service/SingBoxEngine;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.ConnectionService' signature='Lcom/vlessclient/service/SingBoxConfigGenerator;' name='configGenerator' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='11' name='configGenerator' register='2'/>
+    <SourceLine endBytecode='11' classname='com.vlessclient.service.ConnectionService' start='98' end='98' sourcepath='com/vlessclient/service/ConnectionService.java' sourcefile='ConnectionService.java' startBytecode='11' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='c3119ad7fb9c71d3fc88555d24d0e5f' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.ConnectionService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.ConnectionService' signature='(Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/SingBoxConfigGenerator;Lcom/vlessclient/service/RoutingService;Lcom/vlessclient/service/SingBoxEngine;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.ConnectionService' signature='Lcom/vlessclient/service/ConfigStore;' name='configStore' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='6' name='configStore' register='1'/>
+    <SourceLine endBytecode='6' classname='com.vlessclient.service.ConnectionService' start='97' end='97' sourcepath='com/vlessclient/service/ConnectionService.java' sourcefile='ConnectionService.java' startBytecode='6' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='c6d2dc657bdfb8aa0da10d8014ec1f1d' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.ConnectionService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.ConnectionService' signature='(Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/SingBoxConfigGenerator;Lcom/vlessclient/service/RoutingService;Lcom/vlessclient/service/SingBoxEngine;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.ConnectionService' signature='Lcom/vlessclient/service/SingBoxEngine;' name='engine' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='22' name='engine' register='4'/>
+    <SourceLine endBytecode='22' classname='com.vlessclient.service.ConnectionService' start='100' end='100' sourcepath='com/vlessclient/service/ConnectionService.java' sourcefile='ConnectionService.java' startBytecode='22' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='39a838be4bb886cd453a8fddf7dfe1fe' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.ConnectionService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.ConnectionService' signature='(Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/SingBoxConfigGenerator;Lcom/vlessclient/service/RoutingService;Lcom/vlessclient/service/SingBoxEngine;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.ConnectionService' signature='Lcom/vlessclient/service/RoutingService;' name='routingService' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='16' name='routingService' register='3'/>
+    <SourceLine endBytecode='16' classname='com.vlessclient.service.ConnectionService' start='99' end='99' sourcepath='com/vlessclient/service/ConnectionService.java' sourcefile='ConnectionService.java' startBytecode='16' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='131bf0b8646ecd3ea42f8a41d9809169' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.ConnectionService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.ConnectionService' signature='(Lcom/vlessclient/service/SingBoxEngine;)V' name='setEngine' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.ConnectionService' signature='Lcom/vlessclient/service/SingBoxEngine;' name='engine' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='2' name='engine' register='1'/>
+    <SourceLine endBytecode='2' classname='com.vlessclient.service.ConnectionService' start='110' end='110' sourcepath='com/vlessclient/service/ConnectionService.java' sourcefile='ConnectionService.java' startBytecode='2' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='4dba1c16649d1042fbb6d4349172b35d' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.ConnectionService$ConnectAttempt' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.ConnectionService$ConnectAttempt' signature='()Lcom/vlessclient/model/ServerConfig;' name='server' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.ConnectionService$ConnectAttempt' signature='Lcom/vlessclient/model/ServerConfig;' name='server' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.service.ConnectionService$ConnectAttempt' start='66' end='66' sourcepath='com/vlessclient/service/ConnectionService.java' sourcefile='ConnectionService.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='cb570d4737494d46a80932bb0873c483' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.ConnectionService$ConnectAttempt' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.ConnectionService$ConnectAttempt' signature='(Lcom/vlessclient/service/ConnectionService$Outcome;Lcom/vlessclient/model/ServerConfig;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.ConnectionService$ConnectAttempt' signature='Lcom/vlessclient/model/ServerConfig;' name='server' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='11' name='server' register='2'/>
+    <SourceLine endBytecode='11' classname='com.vlessclient.service.ConnectionService$ConnectAttempt' start='66' end='66' sourcepath='com/vlessclient/service/ConnectionService.java' sourcefile='ConnectionService.java' startBytecode='11' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='21ead259390bb5bd4ee11df5634644f9' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.LogReader' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.LogReader' signature='(Ljava/io/InputStream;Ljavafx/collections/ObservableList;ILjava/util/function/Consumer;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.LogReader' signature='Ljavafx/collections/ObservableList;' name='logLines' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='11' name='logLines' register='2'/>
+    <SourceLine endBytecode='11' classname='com.vlessclient.service.LogReader' start='41' end='41' sourcepath='com/vlessclient/service/LogReader.java' sourcefile='LogReader.java' startBytecode='11' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='17d58bb1300b7947e7c6688ad807c500' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.RoutingService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.RoutingService' signature='()Lcom/vlessclient/model/RoutingConfig;' name='getConfig' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.RoutingService' signature='Lcom/vlessclient/model/RoutingConfig;' name='config' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.service.RoutingService' start='103' end='103' sourcepath='com/vlessclient/service/RoutingService.java' sourcefile='RoutingService.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='a92eb2dceb980682fb2b435c32e44430' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.RoutingService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.RoutingService' signature='(Lcom/vlessclient/model/RoutingConfig;)V' name='saveConfig' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.RoutingService' signature='Lcom/vlessclient/model/RoutingConfig;' name='config' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='2' name='config' register='1'/>
+    <SourceLine endBytecode='2' classname='com.vlessclient.service.RoutingService' start='112' end='112' sourcepath='com/vlessclient/service/RoutingService.java' sourcefile='RoutingService.java' startBytecode='2' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='3e30b311f24e90ec859f8db621c0a0ad' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.SingBoxEngine' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.SingBoxEngine' signature='()Ljavafx/collections/ObservableList;' name='getLogLines' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.SingBoxEngine' signature='Ljavafx/collections/ObservableList;' name='logLines' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.service.SingBoxEngine' start='420' end='420' sourcepath='com/vlessclient/service/SingBoxEngine.java' sourcefile='SingBoxEngine.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='3c904a0cdef5d5a511faa43c0930eae2' rank='16' abbrev='CT' category='BAD_PRACTICE' priority='2' type='CT_CONSTRUCTOR_THROW' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.SubscriptionService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.SubscriptionService' signature='(Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/ShareLinkParser;)V' name='&lt;init&gt;' primary='true'/>
+    <SourceLine endBytecode='36' classname='com.vlessclient.service.SubscriptionService' start='88' end='88' sourcepath='com/vlessclient/service/SubscriptionService.java' sourcefile='SubscriptionService.java' startBytecode='36' primary='true'/>
+    <SourceLine endBytecode='36' classname='com.vlessclient.service.SubscriptionService' start='88' end='88' sourcepath='com/vlessclient/service/SubscriptionService.java' sourcefile='SubscriptionService.java' startBytecode='36'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='896881dfdf52c2f4ab9b1119cf80f633' rank='16' abbrev='CT' category='BAD_PRACTICE' priority='2' type='CT_CONSTRUCTOR_THROW' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.SubscriptionService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.SubscriptionService' signature='(Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/ShareLinkParser;Ljava/nio/file/Path;Ljava/net/http/HttpClient;)V' name='&lt;init&gt;' primary='true'/>
+    <SourceLine endBytecode='9' classname='com.vlessclient.service.SubscriptionService' start='151' end='151' sourcepath='com/vlessclient/service/SubscriptionService.java' sourcefile='SubscriptionService.java' startBytecode='9' primary='true'/>
+    <SourceLine endBytecode='9' classname='com.vlessclient.service.SubscriptionService' start='151' end='151' sourcepath='com/vlessclient/service/SubscriptionService.java' sourcefile='SubscriptionService.java' startBytecode='9'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='ff09ba95e17f921423bffc63f6d4e9ed' rank='16' abbrev='CT' category='BAD_PRACTICE' priority='2' type='CT_CONSTRUCTOR_THROW' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.SubscriptionService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.SubscriptionService' signature='(Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/ShareLinkParser;Ljava/nio/file/Path;Ljava/net/http/HttpClient;Lcom/vlessclient/platform/SecretSealer;)V' name='&lt;init&gt;' primary='true'/>
+    <SourceLine endBytecode='87' classname='com.vlessclient.service.SubscriptionService' start='165' end='165' sourcepath='com/vlessclient/service/SubscriptionService.java' sourcefile='SubscriptionService.java' startBytecode='87' primary='true'/>
+    <SourceLine endBytecode='87' classname='com.vlessclient.service.SubscriptionService' start='165' end='165' sourcepath='com/vlessclient/service/SubscriptionService.java' sourcefile='SubscriptionService.java' startBytecode='87'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='97b3b7f2a28398d0c178fb4eabaaeae' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.SubscriptionService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.SubscriptionService' signature='()Ljavafx/collections/ObservableList;' name='getSubscriptions' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.SubscriptionService' signature='Ljavafx/collections/ObservableList;' name='subscriptions' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.service.SubscriptionService' start='169' end='169' sourcepath='com/vlessclient/service/SubscriptionService.java' sourcefile='SubscriptionService.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='8c34dcbeaf466845c5fe49274f9a0a0e' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.ThemeManager' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.ThemeManager' signature='(Ljavafx/scene/Scene;)V' name='applyTheme' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.ThemeManager' signature='Ljavafx/scene/Scene;' name='scene' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='2' name='scene' register='1'/>
+    <SourceLine endBytecode='2' classname='com.vlessclient.service.ThemeManager' start='80' end='80' sourcepath='com/vlessclient/service/ThemeManager.java' sourcefile='ThemeManager.java' startBytecode='2' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='e2087dcd3f3bd5b021dcd44b0fbf0e39' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.TrafficMonitor' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.TrafficMonitor' signature='()Ljavafx/beans/property/ReadOnlyLongProperty;' name='downloadSpeedProperty' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.TrafficMonitor' signature='Ljavafx/beans/property/LongProperty;' name='downloadSpeed' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.service.TrafficMonitor' start='67' end='67' sourcepath='com/vlessclient/service/TrafficMonitor.java' sourcefile='TrafficMonitor.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='d29bb0111eb3992fb3af8f375c1d52f5' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.TrafficMonitor' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.TrafficMonitor' signature='()Ljavafx/beans/property/ReadOnlyLongProperty;' name='totalDownloadProperty' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.TrafficMonitor' signature='Ljavafx/beans/property/LongProperty;' name='totalDownload' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.service.TrafficMonitor' start='75' end='75' sourcepath='com/vlessclient/service/TrafficMonitor.java' sourcefile='TrafficMonitor.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='6f8df492a9171ba1bbd027c71c1b0760' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.TrafficMonitor' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.TrafficMonitor' signature='()Ljavafx/beans/property/ReadOnlyLongProperty;' name='totalUploadProperty' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.TrafficMonitor' signature='Ljavafx/beans/property/LongProperty;' name='totalUpload' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.service.TrafficMonitor' start='71' end='71' sourcepath='com/vlessclient/service/TrafficMonitor.java' sourcefile='TrafficMonitor.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='66e68a37f2cd08fc511a70444f61e302' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.TrafficMonitor' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.TrafficMonitor' signature='()Ljavafx/beans/property/ReadOnlyLongProperty;' name='uploadSpeedProperty' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.TrafficMonitor' signature='Ljavafx/beans/property/LongProperty;' name='uploadSpeed' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.service.TrafficMonitor' start='63' end='63' sourcepath='com/vlessclient/service/TrafficMonitor.java' sourcefile='TrafficMonitor.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='8a0c64f1535aa0cb1dafaed7c4db15b0' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.TrayIconService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.TrayIconService' signature='(Lcom/vlessclient/service/SingBoxEngine;Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/ConnectionService;Lcom/vlessclient/service/TunnelHealthState;Ljavafx/stage/Stage;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.TrayIconService' signature='Lcom/vlessclient/service/ConfigStore;' name='configStore' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='11' name='configStore' register='2'/>
+    <SourceLine endBytecode='11' classname='com.vlessclient.service.TrayIconService' start='93' end='93' sourcepath='com/vlessclient/service/TrayIconService.java' sourcefile='TrayIconService.java' startBytecode='11' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='11e9f51e415e8ab9ad37ca5fece4fbbb' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.TrayIconService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.TrayIconService' signature='(Lcom/vlessclient/service/SingBoxEngine;Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/ConnectionService;Lcom/vlessclient/service/TunnelHealthState;Ljavafx/stage/Stage;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.TrayIconService' signature='Lcom/vlessclient/service/ConnectionService;' name='connectionService' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='16' name='connectionService' register='3'/>
+    <SourceLine endBytecode='16' classname='com.vlessclient.service.TrayIconService' start='94' end='94' sourcepath='com/vlessclient/service/TrayIconService.java' sourcefile='TrayIconService.java' startBytecode='16' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='864d9b9da4eccdb7c4aaf511ffedbb90' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.TrayIconService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.TrayIconService' signature='(Lcom/vlessclient/service/SingBoxEngine;Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/ConnectionService;Lcom/vlessclient/service/TunnelHealthState;Ljavafx/stage/Stage;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.TrayIconService' signature='Lcom/vlessclient/service/TunnelHealthState;' name='healthState' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='22' name='healthState' register='4'/>
+    <SourceLine endBytecode='22' classname='com.vlessclient.service.TrayIconService' start='95' end='95' sourcepath='com/vlessclient/service/TrayIconService.java' sourcefile='TrayIconService.java' startBytecode='22' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='64cc31288701bdb0abee028b791b4423' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.TrayIconService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.TrayIconService' signature='(Lcom/vlessclient/service/SingBoxEngine;Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/ConnectionService;Lcom/vlessclient/service/TunnelHealthState;Ljavafx/stage/Stage;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.TrayIconService' signature='Lcom/vlessclient/service/SingBoxEngine;' name='singBoxEngine' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='6' name='singBoxEngine' register='1'/>
+    <SourceLine endBytecode='6' classname='com.vlessclient.service.TrayIconService' start='92' end='92' sourcepath='com/vlessclient/service/TrayIconService.java' sourcefile='TrayIconService.java' startBytecode='6' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='bff45c4426497ca03fdf1c1c91bd45b0' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.TrayIconService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.TrayIconService' signature='(Lcom/vlessclient/service/SingBoxEngine;Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/ConnectionService;Lcom/vlessclient/service/TunnelHealthState;Ljavafx/stage/Stage;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.TrayIconService' signature='Ljavafx/stage/Stage;' name='stage' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='28' name='stage' register='5'/>
+    <SourceLine endBytecode='28' classname='com.vlessclient.service.TrayIconService' start='96' end='96' sourcepath='com/vlessclient/service/TrayIconService.java' sourcefile='TrayIconService.java' startBytecode='28' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='af7070556a39e9ef53553d3bc4170598' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.DefaultAppControlService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.DefaultAppControlService' signature='(Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/TrafficMonitor;Lcom/vlessclient/service/SubscriptionService;Lcom/vlessclient/service/RoutingService;Lcom/vlessclient/service/ConnectionService;Lcom/vlessclient/service/LatencyTester;Lcom/vlessclient/service/ShareLinkParser;Lcom/vlessclient/service/SingBoxEngine;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.DefaultAppControlService' signature='Lcom/vlessclient/service/ConfigStore;' name='configStore' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='6' name='configStore' register='1'/>
+    <SourceLine endBytecode='6' classname='com.vlessclient.service.mcp.DefaultAppControlService' start='71' end='71' sourcepath='com/vlessclient/service/mcp/DefaultAppControlService.java' sourcefile='DefaultAppControlService.java' startBytecode='6' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='1c88b97fc2db7b94737b902f251f1ea0' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.DefaultAppControlService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.DefaultAppControlService' signature='(Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/TrafficMonitor;Lcom/vlessclient/service/SubscriptionService;Lcom/vlessclient/service/RoutingService;Lcom/vlessclient/service/ConnectionService;Lcom/vlessclient/service/LatencyTester;Lcom/vlessclient/service/ShareLinkParser;Lcom/vlessclient/service/SingBoxEngine;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.DefaultAppControlService' signature='Lcom/vlessclient/service/ConnectionService;' name='connectionService' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='28' name='connectionService' register='5'/>
+    <SourceLine endBytecode='28' classname='com.vlessclient.service.mcp.DefaultAppControlService' start='75' end='75' sourcepath='com/vlessclient/service/mcp/DefaultAppControlService.java' sourcefile='DefaultAppControlService.java' startBytecode='28' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='59d6c06e26279cba7cd4ef2bdb26143f' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.DefaultAppControlService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.DefaultAppControlService' signature='(Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/TrafficMonitor;Lcom/vlessclient/service/SubscriptionService;Lcom/vlessclient/service/RoutingService;Lcom/vlessclient/service/ConnectionService;Lcom/vlessclient/service/LatencyTester;Lcom/vlessclient/service/ShareLinkParser;Lcom/vlessclient/service/SingBoxEngine;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.DefaultAppControlService' signature='Lcom/vlessclient/service/SingBoxEngine;' name='engine' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='46' name='engine' register='8'/>
+    <SourceLine endBytecode='46' classname='com.vlessclient.service.mcp.DefaultAppControlService' start='78' end='78' sourcepath='com/vlessclient/service/mcp/DefaultAppControlService.java' sourcefile='DefaultAppControlService.java' startBytecode='46' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='808751cb606b06dc76f5529823af992' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.DefaultAppControlService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.DefaultAppControlService' signature='(Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/TrafficMonitor;Lcom/vlessclient/service/SubscriptionService;Lcom/vlessclient/service/RoutingService;Lcom/vlessclient/service/ConnectionService;Lcom/vlessclient/service/LatencyTester;Lcom/vlessclient/service/ShareLinkParser;Lcom/vlessclient/service/SingBoxEngine;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.DefaultAppControlService' signature='Lcom/vlessclient/service/LatencyTester;' name='latencyTester' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='34' name='latencyTester' register='6'/>
+    <SourceLine endBytecode='34' classname='com.vlessclient.service.mcp.DefaultAppControlService' start='76' end='76' sourcepath='com/vlessclient/service/mcp/DefaultAppControlService.java' sourcefile='DefaultAppControlService.java' startBytecode='34' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='edf5bf38a5b54ee2b2a9eaf469b067b3' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.DefaultAppControlService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.DefaultAppControlService' signature='(Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/TrafficMonitor;Lcom/vlessclient/service/SubscriptionService;Lcom/vlessclient/service/RoutingService;Lcom/vlessclient/service/ConnectionService;Lcom/vlessclient/service/LatencyTester;Lcom/vlessclient/service/ShareLinkParser;Lcom/vlessclient/service/SingBoxEngine;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.DefaultAppControlService' signature='Lcom/vlessclient/service/RoutingService;' name='routingService' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='22' name='routingService' register='4'/>
+    <SourceLine endBytecode='22' classname='com.vlessclient.service.mcp.DefaultAppControlService' start='74' end='74' sourcepath='com/vlessclient/service/mcp/DefaultAppControlService.java' sourcefile='DefaultAppControlService.java' startBytecode='22' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='b472f5f43a0cf860485e0488a2e78169' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.DefaultAppControlService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.DefaultAppControlService' signature='(Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/TrafficMonitor;Lcom/vlessclient/service/SubscriptionService;Lcom/vlessclient/service/RoutingService;Lcom/vlessclient/service/ConnectionService;Lcom/vlessclient/service/LatencyTester;Lcom/vlessclient/service/ShareLinkParser;Lcom/vlessclient/service/SingBoxEngine;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.DefaultAppControlService' signature='Lcom/vlessclient/service/SubscriptionService;' name='subscriptionService' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='16' name='subscriptionService' register='3'/>
+    <SourceLine endBytecode='16' classname='com.vlessclient.service.mcp.DefaultAppControlService' start='73' end='73' sourcepath='com/vlessclient/service/mcp/DefaultAppControlService.java' sourcefile='DefaultAppControlService.java' startBytecode='16' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='621d97f26a607b898f05721623ff5153' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.DefaultAppControlService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.DefaultAppControlService' signature='(Lcom/vlessclient/service/SingBoxEngine;)V' name='setEngine' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.DefaultAppControlService' signature='Lcom/vlessclient/service/SingBoxEngine;' name='engine' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='2' name='engine' register='1'/>
+    <SourceLine endBytecode='2' classname='com.vlessclient.service.mcp.DefaultAppControlService' start='86' end='86' sourcepath='com/vlessclient/service/mcp/DefaultAppControlService.java' sourcefile='DefaultAppControlService.java' startBytecode='2' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='b2677e914f1cc2804a73caa8a94019d9' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.McpHttpServer' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.McpHttpServer' signature='(ILjava/lang/String;Lcom/vlessclient/service/mcp/McpServer;Ltools/jackson/databind/ObjectMapper;Lcom/vlessclient/service/mcp/McpNotifier;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.McpHttpServer' signature='Ltools/jackson/databind/ObjectMapper;' name='mapper' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='22' name='mapper' register='4'/>
+    <SourceLine endBytecode='22' classname='com.vlessclient.service.mcp.McpHttpServer' start='74' end='74' sourcepath='com/vlessclient/service/mcp/McpHttpServer.java' sourcefile='McpHttpServer.java' startBytecode='22' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='6cedc4bc8a01f274f332a6d2d6be99b2' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.McpHttpServer' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.McpHttpServer' signature='(ILjava/lang/String;Lcom/vlessclient/service/mcp/McpServer;Ltools/jackson/databind/ObjectMapper;Lcom/vlessclient/service/mcp/McpNotifier;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.McpHttpServer' signature='Lcom/vlessclient/service/mcp/McpServer;' name='mcpServer' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='16' name='mcpServer' register='3'/>
+    <SourceLine endBytecode='16' classname='com.vlessclient.service.mcp.McpHttpServer' start='73' end='73' sourcepath='com/vlessclient/service/mcp/McpHttpServer.java' sourcefile='McpHttpServer.java' startBytecode='16' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='94b55765cea708e431e5e2dd0f268624' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.McpNotifier' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.McpNotifier' signature='(Ltools/jackson/databind/ObjectMapper;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.McpNotifier' signature='Ltools/jackson/databind/ObjectMapper;' name='mapper' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='17' name='mapper' register='1'/>
+    <SourceLine endBytecode='17' classname='com.vlessclient.service.mcp.McpNotifier' start='29' end='29' sourcepath='com/vlessclient/service/mcp/McpNotifier.java' sourcefile='McpNotifier.java' startBytecode='17' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='caf5fb978b4dbd03135aa565018d6b78' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.McpServer' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.McpServer' signature='(Ljava/lang/String;Ljava/lang/String;Ltools/jackson/databind/ObjectMapper;Ljava/util/function/BooleanSupplier;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.McpServer' signature='Ltools/jackson/databind/ObjectMapper;' name='mapper' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='45' name='mapper' register='3'/>
+    <SourceLine endBytecode='45' classname='com.vlessclient.service.mcp.McpServer' start='73' end='73' sourcepath='com/vlessclient/service/mcp/McpServer.java' sourcefile='McpServer.java' startBytecode='45' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='c069b2a6d64760ddbee5fbf209af7833' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.McpServerService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.McpServerService' signature='(Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/mcp/AppControlService;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.McpServerService' signature='Lcom/vlessclient/service/ConfigStore;' name='configStore' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='36' name='configStore' register='1'/>
+    <SourceLine endBytecode='36' classname='com.vlessclient.service.mcp.McpServerService' start='56' end='56' sourcepath='com/vlessclient/service/mcp/McpServerService.java' sourcefile='McpServerService.java' startBytecode='36' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='8c664b4b028c752ce3bdc6fc8fd688f3' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.McpServerService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.McpServerService' signature='(Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/mcp/AppControlService;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.McpServerService' signature='Lcom/vlessclient/service/mcp/AppControlService;' name='control' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='41' name='control' register='2'/>
+    <SourceLine endBytecode='41' classname='com.vlessclient.service.mcp.McpServerService' start='57' end='57' sourcepath='com/vlessclient/service/mcp/McpServerService.java' sourcefile='McpServerService.java' startBytecode='41' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='86cba0c38b1ea66e77e772d646788d73' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.McpServerService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.McpServerService' signature='(Lcom/vlessclient/service/SingBoxEngine;)V' name='attachLogSource' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.McpServerService' signature='Lcom/vlessclient/service/SingBoxEngine;' name='loggedEngine' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='15' name='engine' register='1'/>
+    <SourceLine endBytecode='15' classname='com.vlessclient.service.mcp.McpServerService' start='70' end='70' sourcepath='com/vlessclient/service/mcp/McpServerService.java' sourcefile='McpServerService.java' startBytecode='15' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='1c38af0bd631df653efe57ccc4f1401a' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.RoutingInfo' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.RoutingInfo' signature='()Ljava/util/List;' name='bypassList' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.RoutingInfo' signature='Ljava/util/List;' name='bypassList' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.service.mcp.RoutingInfo' start='12' end='12' sourcepath='com/vlessclient/service/mcp/RoutingInfo.java' sourcefile='RoutingInfo.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='d10e7cc900dbbfeeed9e3a53a4d5c16f' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.RoutingInfo' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.RoutingInfo' signature='()Ljava/util/List;' name='rules' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.RoutingInfo' signature='Ljava/util/List;' name='rules' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.service.mcp.RoutingInfo' start='12' end='12' sourcepath='com/vlessclient/service/mcp/RoutingInfo.java' sourcefile='RoutingInfo.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='13c69d2784949f2f6a2ff68850e1d32f' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.RoutingInfo' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.RoutingInfo' signature='(Ljava/lang/String;Ljava/util/List;Ljava/util/List;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.RoutingInfo' signature='Ljava/util/List;' name='bypassList' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='11' name='bypassList' register='2'/>
+    <SourceLine endBytecode='11' classname='com.vlessclient.service.mcp.RoutingInfo' start='12' end='12' sourcepath='com/vlessclient/service/mcp/RoutingInfo.java' sourcefile='RoutingInfo.java' startBytecode='11' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='a83ea0320a9c1068bcff3fb5804441bd' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.RoutingInfo' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.RoutingInfo' signature='(Ljava/lang/String;Ljava/util/List;Ljava/util/List;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.RoutingInfo' signature='Ljava/util/List;' name='rules' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='16' name='rules' register='3'/>
+    <SourceLine endBytecode='16' classname='com.vlessclient.service.mcp.RoutingInfo' start='12' end='12' sourcepath='com/vlessclient/service/mcp/RoutingInfo.java' sourcefile='RoutingInfo.java' startBytecode='16' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='43d0bafb14cc40fa528809f3b07fa4c4' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.tools.ConnectTool' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.tools.ConnectTool' signature='(Lcom/vlessclient/service/mcp/AppControlService;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.tools.ConnectTool' signature='Lcom/vlessclient/service/mcp/AppControlService;' name='control' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='6' name='control' register='1'/>
+    <SourceLine endBytecode='6' classname='com.vlessclient.service.mcp.tools.ConnectTool' start='23' end='23' sourcepath='com/vlessclient/service/mcp/tools/ConnectTool.java' sourcefile='ConnectTool.java' startBytecode='6' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='4aa884294a3c35efebf3c61df437035a' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.tools.DisconnectTool' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.tools.DisconnectTool' signature='(Lcom/vlessclient/service/mcp/AppControlService;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.tools.DisconnectTool' signature='Lcom/vlessclient/service/mcp/AppControlService;' name='control' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='6' name='control' register='1'/>
+    <SourceLine endBytecode='6' classname='com.vlessclient.service.mcp.tools.DisconnectTool' start='19' end='19' sourcepath='com/vlessclient/service/mcp/tools/DisconnectTool.java' sourcefile='DisconnectTool.java' startBytecode='6' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='4fa61afcafd6c219e7880f6685b6b7d1' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.tools.GetLogsTool' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.tools.GetLogsTool' signature='(Lcom/vlessclient/service/mcp/AppControlService;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.tools.GetLogsTool' signature='Lcom/vlessclient/service/mcp/AppControlService;' name='control' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='6' name='control' register='1'/>
+    <SourceLine endBytecode='6' classname='com.vlessclient.service.mcp.tools.GetLogsTool' start='23' end='23' sourcepath='com/vlessclient/service/mcp/tools/GetLogsTool.java' sourcefile='GetLogsTool.java' startBytecode='6' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='12b373e196d71c8a9054871b5e6a0ec3' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.tools.GetStatusTool' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.tools.GetStatusTool' signature='(Lcom/vlessclient/service/mcp/AppControlService;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.tools.GetStatusTool' signature='Lcom/vlessclient/service/mcp/AppControlService;' name='control' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='6' name='control' register='1'/>
+    <SourceLine endBytecode='6' classname='com.vlessclient.service.mcp.tools.GetStatusTool' start='20' end='20' sourcepath='com/vlessclient/service/mcp/tools/GetStatusTool.java' sourcefile='GetStatusTool.java' startBytecode='6' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='78503b362f4f8b4ba369c6f920f39f2c' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.tools.LambdaTool' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.tools.LambdaTool' signature='()Ltools/jackson/databind/node/ObjectNode;' name='inputSchema' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.tools.LambdaTool' signature='Ltools/jackson/databind/node/ObjectNode;' name='inputSchema' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.service.mcp.tools.LambdaTool' start='60' end='60' sourcepath='com/vlessclient/service/mcp/tools/LambdaTool.java' sourcefile='LambdaTool.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='c572e0d667ace9e3a09b3cc9d8e3f300' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.tools.LambdaTool' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.tools.LambdaTool' signature='(Ljava/lang/String;Ljava/lang/String;ZLtools/jackson/databind/node/ObjectNode;Lcom/vlessclient/service/mcp/tools/LambdaTool$Handler;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.tools.LambdaTool' signature='Ltools/jackson/databind/node/ObjectNode;' name='inputSchema' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='22' name='inputSchema' register='4'/>
+    <SourceLine endBytecode='22' classname='com.vlessclient.service.mcp.tools.LambdaTool' start='39' end='39' sourcepath='com/vlessclient/service/mcp/tools/LambdaTool.java' sourcefile='LambdaTool.java' startBytecode='22' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='74c54ab852a0183aed797fc6a5126011' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.tools.MeasureLatencyTool' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.tools.MeasureLatencyTool' signature='(Lcom/vlessclient/service/mcp/AppControlService;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.tools.MeasureLatencyTool' signature='Lcom/vlessclient/service/mcp/AppControlService;' name='control' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='6' name='control' register='1'/>
+    <SourceLine endBytecode='6' classname='com.vlessclient.service.mcp.tools.MeasureLatencyTool' start='23' end='23' sourcepath='com/vlessclient/service/mcp/tools/MeasureLatencyTool.java' sourcefile='MeasureLatencyTool.java' startBytecode='6' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='c297525c99c70f8b3c87595ff3dff7bd' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.tools.RefreshSubscriptionTool' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.tools.RefreshSubscriptionTool' signature='(Lcom/vlessclient/service/mcp/AppControlService;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.tools.RefreshSubscriptionTool' signature='Lcom/vlessclient/service/mcp/AppControlService;' name='control' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='6' name='control' register='1'/>
+    <SourceLine endBytecode='6' classname='com.vlessclient.service.mcp.tools.RefreshSubscriptionTool' start='22' end='22' sourcepath='com/vlessclient/service/mcp/tools/RefreshSubscriptionTool.java' sourcefile='RefreshSubscriptionTool.java' startBytecode='6' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='210c5894df0b7cf79a9abb9629b4c55d' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.mcp.tools.SelectServerTool' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.mcp.tools.SelectServerTool' signature='(Lcom/vlessclient/service/mcp/AppControlService;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.mcp.tools.SelectServerTool' signature='Lcom/vlessclient/service/mcp/AppControlService;' name='control' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='6' name='control' register='1'/>
+    <SourceLine endBytecode='6' classname='com.vlessclient.service.mcp.tools.SelectServerTool' start='21' end='21' sourcepath='com/vlessclient/service/mcp/tools/SelectServerTool.java' sourcefile='SelectServerTool.java' startBytecode='6' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='213baafc0cd9851e88c79e3af533e72f' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.outbound.WireguardEndpointBuilder' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.outbound.WireguardEndpointBuilder' signature='(Ltools/jackson/databind/ObjectMapper;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.service.outbound.WireguardEndpointBuilder' signature='Ltools/jackson/databind/ObjectMapper;' name='mapper' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='6' name='mapper' register='1'/>
+    <SourceLine endBytecode='6' classname='com.vlessclient.service.outbound.WireguardEndpointBuilder' start='23' end='23' sourcepath='com/vlessclient/service/outbound/WireguardEndpointBuilder.java' sourcefile='WireguardEndpointBuilder.java' startBytecode='6' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='f2bec810f1386847f3bb13fbf132b36e' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.DashboardViewController' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.DashboardViewController' signature='()Ljavafx/beans/property/ObjectProperty;' name='connectionStateProperty' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.DashboardViewController' signature='Ljavafx/beans/property/ObjectProperty;' name='connectionState' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.ui.view.DashboardViewController' start='1062' end='1062' sourcepath='com/vlessclient/ui/view/DashboardViewController.java' sourcefile='DashboardViewController.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='de71e5753484e73038fa3a44767eccd8' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.DashboardViewController' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.DashboardViewController' signature='(Lcom/vlessclient/model/ServerConfig;)V' name='setActiveServer' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.DashboardViewController' signature='Lcom/vlessclient/model/ServerConfig;' name='activeServer' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='2' name='server' register='1'/>
+    <SourceLine endBytecode='2' classname='com.vlessclient.ui.view.DashboardViewController' start='1053' end='1053' sourcepath='com/vlessclient/ui/view/DashboardViewController.java' sourcefile='DashboardViewController.java' startBytecode='2' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='acc91270863d6433211c8abcdfb98aad' cweid='595' rank='16' abbrev='ES' category='BAD_PRACTICE' priority='2' type='ES_COMPARING_PARAMETER_STRING_WITH_EQ' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.LogsViewController' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.LogsViewController' signature='(Ljava/lang/String;)I' name='indexOfIdentity' primary='true'/>
+    <Type role='TYPE_FOUND' descriptor='Ljava/lang/String;'/>
+    <LocalVariable role='LOCAL_VARIABLE_VALUE_OF' pc='27' name='item' register='1'/>
+    <Method isStatic='false' role='METHOD_RETURN_VALUE_OF' classname='javafx.collections.transformation.FilteredList' signature='(I)Ljava/lang/Object;' name='get'/>
+    <SourceLine endBytecode='28' classname='com.vlessclient.ui.view.LogsViewController' start='321' end='321' sourcepath='com/vlessclient/ui/view/LogsViewController.java' sourcefile='LogsViewController.java' startBytecode='28' primary='true'/>
+    <Property name='edu.umd.cs.findbugs.detect.RefComparisonWarningProperty.STATIC_AND_PARAMETER' value='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='4bd7b5152961352771719b448f23785b' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.MirroredSparkline' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.MirroredSparkline' signature='()Ljavafx/beans/property/ObjectProperty;' name='downFillColorProperty' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.MirroredSparkline' signature='Ljavafx/beans/property/ObjectProperty;' name='downFillColor' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.ui.view.MirroredSparkline' start='159' end='159' sourcepath='com/vlessclient/ui/view/MirroredSparkline.java' sourcefile='MirroredSparkline.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='fd286daa8c0c0b243d6b31d4701e30e' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.MirroredSparkline' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.MirroredSparkline' signature='()Ljavafx/beans/property/ObjectProperty;' name='downLineColorProperty' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.MirroredSparkline' signature='Ljavafx/beans/property/ObjectProperty;' name='downLineColor' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.ui.view.MirroredSparkline' start='151' end='151' sourcepath='com/vlessclient/ui/view/MirroredSparkline.java' sourcefile='MirroredSparkline.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='c2d5a3d7988fad781afb9f929ac14b6e' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.MirroredSparkline' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.MirroredSparkline' signature='()Ljavafx/beans/property/ObjectProperty;' name='upFillColorProperty' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.MirroredSparkline' signature='Ljavafx/beans/property/ObjectProperty;' name='upFillColor' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.ui.view.MirroredSparkline' start='175' end='175' sourcepath='com/vlessclient/ui/view/MirroredSparkline.java' sourcefile='MirroredSparkline.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='2d70d783f83b52b4fa570168c36aadf5' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.MirroredSparkline' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.MirroredSparkline' signature='()Ljavafx/beans/property/ObjectProperty;' name='upLineColorProperty' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.MirroredSparkline' signature='Ljavafx/beans/property/ObjectProperty;' name='upLineColor' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.ui.view.MirroredSparkline' start='167' end='167' sourcepath='com/vlessclient/ui/view/MirroredSparkline.java' sourcefile='MirroredSparkline.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='9a74b946c9b29e711b682d8870e11267' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.ServerFormController' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.ServerFormController' signature='(Lcom/vlessclient/model/ServerConfig;)V' name='setServerConfig' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.ServerFormController' signature='Lcom/vlessclient/model/ServerConfig;' name='editingServer' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='2' name='server' register='1'/>
+    <SourceLine endBytecode='2' classname='com.vlessclient.ui.view.ServerFormController' start='171' end='171' sourcepath='com/vlessclient/ui/view/ServerFormController.java' sourcefile='ServerFormController.java' startBytecode='2' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='b6efeb8822068d2093ff754a05974c44' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.SingBoxInstallerDialog' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.SingBoxInstallerDialog' signature='(Lcom/vlessclient/service/SingBoxInstaller;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.SingBoxInstallerDialog' signature='Lcom/vlessclient/service/SingBoxInstaller;' name='installer' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='6' name='installer' register='1'/>
+    <SourceLine endBytecode='6' classname='com.vlessclient.ui.view.SingBoxInstallerDialog' start='54' end='54' sourcepath='com/vlessclient/ui/view/SingBoxInstallerDialog.java' sourcefile='SingBoxInstallerDialog.java' startBytecode='6' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='d06988910d472138b5fefc76ef770041' cweid='413' rank='14' abbrev='AT' category='MT_CORRECTNESS' priority='2' type='AT_NONATOMIC_OPERATIONS_ON_SHARED_VARIABLE' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='()V' name='cancelHealthLoop' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='I' name='healthGeneration' primary='true'/>
+    <SourceLine endBytecode='35' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' start='399' end='399' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='35' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='e138adfb89e581042dc4f4761f1394ac' cweid='413' rank='14' abbrev='AT' category='MT_CORRECTNESS' priority='2' type='AT_NONATOMIC_OPERATIONS_ON_SHARED_VARIABLE' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='()V' name='restartReachabilityCheck' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='I' name='healthGeneration' primary='true'/>
+    <SourceLine endBytecode='31' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' start='542' end='542' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='31' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='4047e7e16d5daed6f48b3800da4d6eaf' cweid='413' rank='14' abbrev='AT' category='MT_CORRECTNESS' priority='2' type='AT_STALE_THREAD_WRITE_OF_PRIMITIVE' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='()V' name='cancelHealthLoop' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='Z' name='hasVerdict' primary='true'/>
+    <SourceLine endBytecode='45' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' start='401' end='401' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='45' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='931688a6da859953d48a8ae1c5551539' cweid='413' rank='14' abbrev='AT' category='MT_CORRECTNESS' priority='2' type='AT_STALE_THREAD_WRITE_OF_PRIMITIVE' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='(Lcom/vlessclient/model/ConnectionState;)V' name='onConnectionStateChanged' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='Z' name='hasVerdict' primary='true'/>
+    <SourceLine endBytecode='22' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' start='144' end='144' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='22' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='aee9d07cb399deb02f87b09cb7c3b839' cweid='413' rank='14' abbrev='AT' category='MT_CORRECTNESS' priority='2' type='AT_STALE_THREAD_WRITE_OF_PRIMITIVE' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='()V' name='runReachabilityCheck' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='I' name='healthGeneration' primary='true'/>
+    <SourceLine endBytecode='184' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' start='234' end='234' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='184' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='77891cdd1bcdcc7d4515352b43debf89' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='(Lcom/vlessclient/ui/view/dashboard/HealthCheckCoordinator$Controls;Lcom/vlessclient/service/ServiceReachabilityChecker;Lcom/vlessclient/service/TunnelHealthState;Ljava/util/function/Supplier;Ljava/lang/Runnable;Ljava/lang/Runnable;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='Lcom/vlessclient/service/TunnelHealthState;' name='healthState' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='51' name='healthState' register='3'/>
+    <SourceLine endBytecode='51' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' start='114' end='114' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='51' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='4507498d497a1e052cee69f31d3c8203' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' signature='()Ljavafx/scene/layout/VBox;' name='healthCard' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' signature='Ljavafx/scene/layout/VBox;' name='healthCard' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' start='56' end='56' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='ff18c8438a77846d1edc83ed28b24be' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' signature='()Ljavafx/scene/control/Label;' name='healthSummaryLabel' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' signature='Ljavafx/scene/control/Label;' name='healthSummaryLabel' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' start='56' end='56' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='e6f54d31d5208a6ee6581f1579480281' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' signature='()Ljavafx/scene/layout/HBox;' name='reconnectBanner' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' signature='Ljavafx/scene/layout/HBox;' name='reconnectBanner' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' start='56' end='56' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='1eb62a0fc10c97bc2d908ad0bd620050' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' signature='()Ljavafx/scene/control/Label;' name='reconnectBannerLabel' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' signature='Ljavafx/scene/control/Label;' name='reconnectBannerLabel' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' start='56' end='56' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='6c1892b8ce5c25c392699ea06a83b4fc' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' signature='()Ljavafx/scene/layout/VBox;' name='serviceStatusList' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' signature='Ljavafx/scene/layout/VBox;' name='serviceStatusList' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' start='56' end='56' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='ecce887a115c124e4a11c029c3ce8ccd' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' signature='(Ljavafx/scene/layout/VBox;Ljavafx/scene/control/Label;Ljavafx/scene/layout/VBox;Ljavafx/scene/layout/HBox;Ljavafx/scene/control/Label;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' signature='Ljavafx/scene/layout/VBox;' name='healthCard' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='6' name='healthCard' register='1'/>
+    <SourceLine endBytecode='6' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' start='56' end='56' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='6' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='6c2e79693dc8bf67eb33107733be4d8' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' signature='(Ljavafx/scene/layout/VBox;Ljavafx/scene/control/Label;Ljavafx/scene/layout/VBox;Ljavafx/scene/layout/HBox;Ljavafx/scene/control/Label;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' signature='Ljavafx/scene/control/Label;' name='healthSummaryLabel' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='11' name='healthSummaryLabel' register='2'/>
+    <SourceLine endBytecode='11' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' start='56' end='56' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='11' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='b91b43977be5fc4c97fcb710a87b4a28' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' signature='(Ljavafx/scene/layout/VBox;Ljavafx/scene/control/Label;Ljavafx/scene/layout/VBox;Ljavafx/scene/layout/HBox;Ljavafx/scene/control/Label;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' signature='Ljavafx/scene/layout/HBox;' name='reconnectBanner' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='22' name='reconnectBanner' register='4'/>
+    <SourceLine endBytecode='22' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' start='56' end='56' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='22' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='11e1d55b7453d8a1cb1a6495df05f413' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' signature='(Ljavafx/scene/layout/VBox;Ljavafx/scene/control/Label;Ljavafx/scene/layout/VBox;Ljavafx/scene/layout/HBox;Ljavafx/scene/control/Label;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' signature='Ljavafx/scene/control/Label;' name='reconnectBannerLabel' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='28' name='reconnectBannerLabel' register='5'/>
+    <SourceLine endBytecode='28' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' start='56' end='56' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='28' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='f93bed5d4eb8cae021cd893b27adeb11' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' signature='(Ljavafx/scene/layout/VBox;Ljavafx/scene/control/Label;Ljavafx/scene/layout/VBox;Ljavafx/scene/layout/HBox;Ljavafx/scene/control/Label;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' signature='Ljavafx/scene/layout/VBox;' name='serviceStatusList' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='16' name='serviceStatusList' register='3'/>
+    <SourceLine endBytecode='16' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator$Controls' start='56' end='56' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='16' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='f2b3d81aa59618afee2a2d4e91a4d640' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.TrafficDisplayBinder' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.TrafficDisplayBinder' signature='(Lcom/vlessclient/service/TrafficMonitor;Ljavafx/scene/control/Label;Ljavafx/scene/control/Label;Ljavafx/scene/control/Label;Ljavafx/scene/control/Label;Lcom/vlessclient/ui/view/MirroredSparkline;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.TrafficDisplayBinder' signature='Ljavafx/scene/control/Label;' name='downloadSpeedLabel' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='16' name='downloadSpeedLabel' register='3'/>
+    <SourceLine endBytecode='16' classname='com.vlessclient.ui.view.dashboard.TrafficDisplayBinder' start='44' end='44' sourcepath='com/vlessclient/ui/view/dashboard/TrafficDisplayBinder.java' sourcefile='TrafficDisplayBinder.java' startBytecode='16' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='b513e81ad250c7638a95f39481571403' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.TrafficDisplayBinder' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.TrafficDisplayBinder' signature='(Lcom/vlessclient/service/TrafficMonitor;Ljavafx/scene/control/Label;Ljavafx/scene/control/Label;Ljavafx/scene/control/Label;Ljavafx/scene/control/Label;Lcom/vlessclient/ui/view/MirroredSparkline;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.TrafficDisplayBinder' signature='Ljavafx/scene/control/Label;' name='totalDownloadLabel' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='28' name='totalDownloadLabel' register='5'/>
+    <SourceLine endBytecode='28' classname='com.vlessclient.ui.view.dashboard.TrafficDisplayBinder' start='46' end='46' sourcepath='com/vlessclient/ui/view/dashboard/TrafficDisplayBinder.java' sourcefile='TrafficDisplayBinder.java' startBytecode='28' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='4460245d39d931a40262f3c3f8a8030c' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.TrafficDisplayBinder' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.TrafficDisplayBinder' signature='(Lcom/vlessclient/service/TrafficMonitor;Ljavafx/scene/control/Label;Ljavafx/scene/control/Label;Ljavafx/scene/control/Label;Ljavafx/scene/control/Label;Lcom/vlessclient/ui/view/MirroredSparkline;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.TrafficDisplayBinder' signature='Ljavafx/scene/control/Label;' name='totalUploadLabel' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='22' name='totalUploadLabel' register='4'/>
+    <SourceLine endBytecode='22' classname='com.vlessclient.ui.view.dashboard.TrafficDisplayBinder' start='45' end='45' sourcepath='com/vlessclient/ui/view/dashboard/TrafficDisplayBinder.java' sourcefile='TrafficDisplayBinder.java' startBytecode='22' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='fd86fa68f047f23a92df98ad74a8379f' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.TrafficDisplayBinder' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.TrafficDisplayBinder' signature='(Lcom/vlessclient/service/TrafficMonitor;Ljavafx/scene/control/Label;Ljavafx/scene/control/Label;Ljavafx/scene/control/Label;Ljavafx/scene/control/Label;Lcom/vlessclient/ui/view/MirroredSparkline;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.TrafficDisplayBinder' signature='Lcom/vlessclient/ui/view/MirroredSparkline;' name='trafficSparkline' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='34' name='trafficSparkline' register='6'/>
+    <SourceLine endBytecode='34' classname='com.vlessclient.ui.view.dashboard.TrafficDisplayBinder' start='47' end='47' sourcepath='com/vlessclient/ui/view/dashboard/TrafficDisplayBinder.java' sourcefile='TrafficDisplayBinder.java' startBytecode='34' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='c72fc25403e83b2989518495af93ea6a' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.dashboard.TrafficDisplayBinder' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.TrafficDisplayBinder' signature='(Lcom/vlessclient/service/TrafficMonitor;Ljavafx/scene/control/Label;Ljavafx/scene/control/Label;Ljavafx/scene/control/Label;Ljavafx/scene/control/Label;Lcom/vlessclient/ui/view/MirroredSparkline;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.TrafficDisplayBinder' signature='Ljavafx/scene/control/Label;' name='uploadSpeedLabel' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='11' name='uploadSpeedLabel' register='2'/>
+    <SourceLine endBytecode='11' classname='com.vlessclient.ui.view.dashboard.TrafficDisplayBinder' start='43' end='43' sourcepath='com/vlessclient/ui/view/dashboard/TrafficDisplayBinder.java' sourcefile='TrafficDisplayBinder.java' startBytecode='11' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='d14a564665c8578d478c99a0896a73de' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' signature='()Ljavafx/scene/control/Button;' name='appUpdateButton' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' signature='Ljavafx/scene/control/Button;' name='appUpdateButton' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' start='45' end='45' sourcepath='com/vlessclient/ui/view/settings/UpdatesSection.java' sourcefile='UpdatesSection.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='577a871d8988df5c88162917abad3192' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' signature='()Ljavafx/scene/control/Label;' name='appVersionValue' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' signature='Ljavafx/scene/control/Label;' name='appVersionValue' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' start='45' end='45' sourcepath='com/vlessclient/ui/view/settings/UpdatesSection.java' sourcefile='UpdatesSection.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='dd6a44de71d5cd8e0bd6584f3669ee42' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' signature='()Ljavafx/scene/control/Button;' name='checkUpdatesButton' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' signature='Ljavafx/scene/control/Button;' name='checkUpdatesButton' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' start='45' end='45' sourcepath='com/vlessclient/ui/view/settings/UpdatesSection.java' sourcefile='UpdatesSection.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='328d52635b974df20a35b6a42cd6214a' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' signature='()Ljavafx/scene/control/Label;' name='singboxVersionValue' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' signature='Ljavafx/scene/control/Label;' name='singboxVersionValue' primary='true'/>
+    <SourceLine endBytecode='4' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' start='45' end='45' sourcepath='com/vlessclient/ui/view/settings/UpdatesSection.java' sourcefile='UpdatesSection.java' startBytecode='4' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='5aeb448c35f057b3a4c9a04722978445' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' signature='(Ljavafx/scene/control/Label;Ljavafx/scene/control/Label;Ljavafx/scene/control/Button;Ljavafx/scene/control/Button;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' signature='Ljavafx/scene/control/Button;' name='appUpdateButton' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='22' name='appUpdateButton' register='4'/>
+    <SourceLine endBytecode='22' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' start='45' end='45' sourcepath='com/vlessclient/ui/view/settings/UpdatesSection.java' sourcefile='UpdatesSection.java' startBytecode='22' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='4f75c5b9848ae16318501fc59676d47b' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' signature='(Ljavafx/scene/control/Label;Ljavafx/scene/control/Label;Ljavafx/scene/control/Button;Ljavafx/scene/control/Button;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' signature='Ljavafx/scene/control/Label;' name='appVersionValue' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='6' name='appVersionValue' register='1'/>
+    <SourceLine endBytecode='6' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' start='45' end='45' sourcepath='com/vlessclient/ui/view/settings/UpdatesSection.java' sourcefile='UpdatesSection.java' startBytecode='6' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='8d11cf614a45905e0822e081e9f77fbb' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' signature='(Ljavafx/scene/control/Label;Ljavafx/scene/control/Label;Ljavafx/scene/control/Button;Ljavafx/scene/control/Button;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' signature='Ljavafx/scene/control/Button;' name='checkUpdatesButton' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='16' name='checkUpdatesButton' register='3'/>
+    <SourceLine endBytecode='16' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' start='45' end='45' sourcepath='com/vlessclient/ui/view/settings/UpdatesSection.java' sourcefile='UpdatesSection.java' startBytecode='16' primary='true'/>
+  </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='644feb22580a04819346205be0839f56' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' signature='(Ljavafx/scene/control/Label;Ljavafx/scene/control/Label;Ljavafx/scene/control/Button;Ljavafx/scene/control/Button;)V' name='&lt;init&gt;' primary='true'/>
+    <Field isStatic='false' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' signature='Ljavafx/scene/control/Label;' name='singboxVersionValue' primary='true'/>
+    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='11' name='singboxVersionValue' register='2'/>
+    <SourceLine endBytecode='11' classname='com.vlessclient.ui.view.settings.UpdatesSection$Controls' start='45' end='45' sourcepath='com/vlessclient/ui/view/settings/UpdatesSection.java' sourcefile='UpdatesSection.java' startBytecode='11' primary='true'/>
+  </BugInstance>
+</BugCollection>

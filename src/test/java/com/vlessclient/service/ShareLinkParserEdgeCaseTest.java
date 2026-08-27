@@ -15,10 +15,8 @@ import org.junit.jupiter.api.Test;
 /**
  * Edge-case and malformed-input coverage for {@link ShareLinkParser}.
  *
- * <p>These tests pin the parser's current contract: almost every failure class surfaces as
+ * <p>These tests pin the parser's contract: malformed share links surface as
  * {@link IllegalArgumentException} (or a subclass such as {@link NumberFormatException}).
- * Known deviations from that contract are pinned in clearly named tests carrying a TODO
- * comment; they document existing behavior and must be updated when the parser is fixed.
  */
 class ShareLinkParserEdgeCaseTest {
 
@@ -57,15 +55,14 @@ class ShareLinkParserEdgeCaseTest {
                     .hasMessageContaining("must not be null or blank");
         }
 
-        // TODO(parser): ShareLinkParser.parse (line 34) does substring(0, indexOf("://")),
-        // so any input without "://" escapes as StringIndexOutOfBoundsException instead of
-        // IllegalArgumentException. Update this pin when the parser validates the separator.
         @Test
-        void inputWithoutSchemeSeparatorThrowsStringIndexOutOfBounds() {
+        void inputWithoutSchemeSeparatorThrowsClearValidationError() {
             assertThatThrownBy(() -> parser.parse("not a share link"))
-                    .isInstanceOf(StringIndexOutOfBoundsException.class);
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("must contain ://");
             assertThatThrownBy(() -> parser.parse("example.com:443"))
-                    .isInstanceOf(StringIndexOutOfBoundsException.class);
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("must contain ://");
         }
 
         @Test
@@ -458,24 +455,18 @@ class ShareLinkParserEdgeCaseTest {
             assertThat(config.getTls().isEnabled()).isFalse();
         }
 
-        // TODO(parser): ShareLinkParser.parseTrojan (line 240) URL-decodes the userinfo a
-        // second time even though URI.getUserInfo() already percent-decoded it. A password
-        // containing a literal '%' (correctly single-encoded as %25 in the link) therefore
-        // fails to parse. Remove this pin when the double decode is fixed.
         @Test
-        void trojanPasswordWithLiteralPercentThrowsOnDoubleDecode() {
-            assertThatThrownBy(() -> parser.parse("trojan://100%25pass@host.example:443#n"))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("URLDecoder");
+        void trojanPasswordWithLiteralPercentIsDecodedOnce() {
+            ServerConfig config = parser.parse("trojan://100%25pass@host.example:443#n");
+
+            assertThat(config.getUuid()).isEqualTo("100%pass");
         }
 
-        // TODO(parser): same double decode as above - a raw '+' in the userinfo (a legal
-        // literal per RFC 3986) is form-decoded into a space.
         @Test
-        void trojanRawPlusInPasswordDecodedAsSpace() {
+        void trojanRawPlusInPasswordRemainsLiteral() {
             ServerConfig config = parser.parse("trojan://pass+word@host.example:443#n");
 
-            assertThat(config.getUuid()).isEqualTo("pass word");
+            assertThat(config.getUuid()).isEqualTo("pass+word");
         }
 
         @Test
@@ -489,6 +480,20 @@ class ShareLinkParserEdgeCaseTest {
         void hysteria2NonNumericPortRejected() {
             assertThatThrownBy(() -> parser.parse("hysteria2://pw@host.example:notaport"))
                     .isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        void hysteria2PasswordWithLiteralPercentIsDecodedOnce() {
+            ServerConfig config = parser.parse("hysteria2://100%25pass@host.example:443#n");
+
+            assertThat(config.getUuid()).isEqualTo("100%pass");
+        }
+
+        @Test
+        void hysteria2RawPlusInPasswordRemainsLiteral() {
+            ServerConfig config = parser.parse("hysteria2://pass+word@host.example:443#n");
+
+            assertThat(config.getUuid()).isEqualTo("pass+word");
         }
     }
 
@@ -759,12 +764,8 @@ class ShareLinkParserEdgeCaseTest {
             assertThat(parsed.getEncryption()).isEqualTo("salamander");
         }
 
-        // TODO(parser): export/parse are NOT inverse for trojan passwords containing a
-        // literal '%'. The exporter correctly emits %25, but parseTrojan (line 240)
-        // decodes twice and rejects its own output. Fix the double decode, then flip
-        // this test to assert a successful round trip.
         @Test
-        void trojanPasswordWithLiteralPercentFailsToRoundTrip() {
+        void trojanPasswordWithLiteralPercentRoundTrips() {
             ServerConfig original = new ServerConfig();
             original.setProtocol(Protocol.TROJAN);
             original.setUuid("50%off");
@@ -775,15 +776,11 @@ class ShareLinkParserEdgeCaseTest {
             String exported = exporter.export(original);
 
             assertThat(exported).startsWith("trojan://50%25off@");
-            assertThatThrownBy(() -> parser.parse(exported))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("URLDecoder");
+            assertThat(parser.parse(exported).getUuid()).isEqualTo(original.getUuid());
         }
 
-        // TODO(parser): same double decode - a '+' in the password comes back as a
-        // space after a round trip ("pass word+x" -> "pass word x").
         @Test
-        void trojanPasswordWithPlusCorruptedOnRoundTrip() {
+        void trojanPasswordWithSpaceAndPlusRoundTrips() {
             ServerConfig original = new ServerConfig();
             original.setProtocol(Protocol.TROJAN);
             original.setUuid("pass word+x");
@@ -793,7 +790,23 @@ class ShareLinkParserEdgeCaseTest {
 
             ServerConfig parsed = parser.parse(exporter.export(original));
 
-            assertThat(parsed.getUuid()).isEqualTo("pass word x");
+            assertThat(parsed.getUuid()).isEqualTo(original.getUuid());
+        }
+
+        @Test
+        void hysteria2PasswordWithPercentSpaceAndPlusRoundTrips() {
+            ServerConfig original = new ServerConfig();
+            original.setProtocol(Protocol.HYSTERIA2);
+            original.setUuid("50% off+x");
+            original.setAddress("host.example");
+            original.setPort(443);
+            original.setName("HY2 Password");
+
+            String exported = exporter.export(original);
+            ServerConfig parsed = parser.parse(exported);
+
+            assertThat(exported).startsWith("hysteria2://50%25%20off%2Bx@");
+            assertThat(parsed.getUuid()).isEqualTo(original.getUuid());
         }
     }
 }

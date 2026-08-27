@@ -8,6 +8,7 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -26,13 +27,18 @@ public class ShareLinkParser {
      *
      * @param uri the share link URI to parse
      * @return the parsed server configuration
-     * @throws IllegalArgumentException if {@code uri} is null, blank, or has an unsupported scheme
+     * @throws IllegalArgumentException if {@code uri} is null, blank, malformed, or has an
+     *         unsupported scheme
      */
     public ServerConfig parse(String uri) {
         if (uri == null || uri.isBlank()) {
             throw new IllegalArgumentException("URI must not be null or blank");
         }
-        String scheme = uri.substring(0, uri.indexOf("://")).toLowerCase();
+        int schemeEnd = uri.indexOf("://");
+        if (schemeEnd < 0) {
+            throw new IllegalArgumentException("Share link URI must contain ://");
+        }
+        String scheme = uri.substring(0, schemeEnd).toLowerCase(Locale.ROOT);
         return switch (scheme) {
             case "vless" -> parseVless(uri);
             case "vmess" -> parseVmess(uri);
@@ -238,7 +244,6 @@ public class ShareLinkParser {
         if (password == null || password.isBlank()) {
             throw new IllegalArgumentException("Missing password in Trojan URI");
         }
-        password = URLDecoder.decode(password, StandardCharsets.UTF_8);
 
         String host = parsed.getHost();
         if (host == null || host.isBlank()) {
@@ -424,7 +429,6 @@ public class ShareLinkParser {
         if (password == null || password.isBlank()) {
             throw new IllegalArgumentException("Missing password in Hysteria2 URI");
         }
-        password = URLDecoder.decode(password, StandardCharsets.UTF_8);
 
         String host = parsed.getHost();
         if (host == null || host.isBlank()) {

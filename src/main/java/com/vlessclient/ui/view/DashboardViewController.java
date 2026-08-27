@@ -806,11 +806,8 @@ public class DashboardViewController {
     private ServerConfig findActiveServer() {
         try {
             ConfigStore configStore = ServiceLocator.get(ConfigStore.class);
-            if (configStore == null) {
-                return activeServer;
-            }
             List<ServerConfig> servers = configStore.getServers();
-            if (servers == null || servers.isEmpty()) {
+            if (servers.isEmpty()) {
                 return null;
             }
             Optional<ServerConfig> active = servers.stream()
@@ -826,8 +823,8 @@ public class DashboardViewController {
     private void refreshConnectButtonAvailability() {
         try {
             ConfigStore configStore = ServiceLocator.get(ConfigStore.class);
-            List<ServerConfig> servers = configStore != null ? configStore.getServers() : null;
-            if (servers == null || servers.isEmpty()) {
+            List<ServerConfig> servers = configStore.getServers();
+            if (servers.isEmpty()) {
                 connectButton.setDisable(true);
                 connectButton.setTooltip(new Tooltip(I18n.get("dashboard.no.servers")));
             } else if (findActiveServer() == null) {

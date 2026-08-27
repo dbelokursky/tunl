@@ -234,7 +234,7 @@ public class ShareLinkExporter {
                                     ServerConfig config, Map<String, String> params) {
         StringBuilder sb = new StringBuilder();
         sb.append(scheme).append("://");
-        sb.append(encode(userInfo));
+        sb.append(encodeUserInfo(userInfo));
         sb.append("@");
         sb.append(config.getAddress());
         sb.append(":");
@@ -299,5 +299,9 @@ public class ShareLinkExporter {
 
     private String encode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private String encodeUserInfo(String value) {
+        return encode(value).replace("+", "%20");
     }
 }
