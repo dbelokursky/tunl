@@ -30,6 +30,14 @@ public class TransportConfig {
     public TransportConfig() {
     }
 
+    TransportConfig(TransportConfig source) {
+        this.type = source.type;
+        this.path = source.path;
+        this.host = source.host;
+        this.serviceName = source.serviceName;
+        this.headers = new HashMap<>(source.headers);
+    }
+
     public TransportType getType() {
         return type;
     }
@@ -67,6 +75,6 @@ public class TransportConfig {
     }
 
     public void setHeaders(Map<String, String> headers) {
-        this.headers = headers;
+        this.headers = headers == null ? new HashMap<>() : new HashMap<>(headers);
     }
 }

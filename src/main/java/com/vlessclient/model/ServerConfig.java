@@ -122,7 +122,7 @@ public class ServerConfig {
     }
 
     public void setTransport(TransportConfig transport) {
-        this.transport = transport;
+        this.transport = transport == null ? null : new TransportConfig(transport);
     }
 
     public TlsConfig getTls() {
@@ -130,7 +130,7 @@ public class ServerConfig {
     }
 
     public void setTls(TlsConfig tls) {
-        this.tls = tls;
+        this.tls = tls == null ? null : new TlsConfig(tls);
     }
 
     public boolean isActive() {

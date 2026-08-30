@@ -89,7 +89,7 @@ public class Subscription {
     }
 
     public void setServerIds(List<String> serverIds) {
-        this.serverIds = serverIds;
+        this.serverIds = serverIds == null ? new ArrayList<>() : new ArrayList<>(serverIds);
     }
 
     /** Why the last refresh failed, or null when it succeeded. */

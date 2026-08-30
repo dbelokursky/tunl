@@ -82,7 +82,8 @@ public class RoutingConfig {
     }
 
     public void setBypassList(List<String> bypassList) {
-        this.bypassList = bypassList != null ? bypassList : new ArrayList<>();
+        this.bypassList = bypassList == null
+                ? new ArrayList<>() : new ArrayList<>(bypassList);
     }
 
     /**
@@ -154,6 +155,6 @@ public class RoutingConfig {
     }
 
     public void setRules(List<RoutingRule> rules) {
-        this.rules = rules;
+        this.rules = rules == null ? new ArrayList<>() : new ArrayList<>(rules);
     }
 }

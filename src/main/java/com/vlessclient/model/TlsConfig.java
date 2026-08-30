@@ -37,6 +37,17 @@ public class TlsConfig {
     public TlsConfig() {
     }
 
+    TlsConfig(TlsConfig source) {
+        this.enabled = source.enabled;
+        this.serverName = source.serverName;
+        this.alpn = source.alpn;
+        this.fingerprint = source.fingerprint;
+        this.allowInsecure = source.allowInsecure;
+        this.reality = source.reality;
+        this.realityPublicKey = source.realityPublicKey;
+        this.realityShortId = source.realityShortId;
+    }
+
     public boolean isEnabled() {
         return enabled;
     }

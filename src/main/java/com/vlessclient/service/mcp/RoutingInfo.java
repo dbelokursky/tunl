@@ -15,6 +15,14 @@ public record RoutingInfo(
         List<RuleInfo> rules) {
 
     /**
+     * Creates an immutable routing snapshot detached from the source lists.
+     */
+    public RoutingInfo {
+        bypassList = List.copyOf(bypassList);
+        rules = List.copyOf(rules);
+    }
+
+    /**
      * One routing rule.
      *
      * @param id     rule id
