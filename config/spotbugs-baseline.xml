@@ -1,6 +1,6 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <BugCollection version='4.10.4'>
-  <!-- Existing findings reviewed with SpotBugs 4.10.4 on 2026-08-27. Keep only intentional framework and lifecycle patterns; do not regenerate blindly. -->
+  <!-- Existing findings reviewed with SpotBugs 4.10.4 on 2026-08-30. Keep only intentional framework and lifecycle patterns; do not regenerate blindly. -->
   <Project projectName='Tunl'/>
   <BugInstance instanceOccurrenceNum='0' instanceHash='a085ffcb39e6fdeb0c6c3ce35fee130b' cweid='493' rank='18' abbrev='MS' category='MALICIOUS_CODE' priority='2' type='MS_EXPOSE_REP' instanceOccurrenceMax='0'>
     <Class classname='com.vlessclient.app.I18n' primary='true'/>
@@ -534,15 +534,6 @@
     <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='2' name='server' register='1'/>
     <SourceLine endBytecode='2' classname='com.vlessclient.ui.view.DashboardViewController' start='1053' end='1053' sourcepath='com/vlessclient/ui/view/DashboardViewController.java' sourcefile='DashboardViewController.java' startBytecode='2' primary='true'/>
   </BugInstance>
-  <BugInstance instanceOccurrenceNum='0' instanceHash='acc91270863d6433211c8abcdfb98aad' cweid='595' rank='16' abbrev='ES' category='BAD_PRACTICE' priority='2' type='ES_COMPARING_PARAMETER_STRING_WITH_EQ' instanceOccurrenceMax='0'>
-    <Class classname='com.vlessclient.ui.view.LogsViewController' primary='true'/>
-    <Method isStatic='false' classname='com.vlessclient.ui.view.LogsViewController' signature='(Ljava/lang/String;)I' name='indexOfIdentity' primary='true'/>
-    <Type role='TYPE_FOUND' descriptor='Ljava/lang/String;'/>
-    <LocalVariable role='LOCAL_VARIABLE_VALUE_OF' pc='27' name='item' register='1'/>
-    <Method isStatic='false' role='METHOD_RETURN_VALUE_OF' classname='javafx.collections.transformation.FilteredList' signature='(I)Ljava/lang/Object;' name='get'/>
-    <SourceLine endBytecode='28' classname='com.vlessclient.ui.view.LogsViewController' start='321' end='321' sourcepath='com/vlessclient/ui/view/LogsViewController.java' sourcefile='LogsViewController.java' startBytecode='28' primary='true'/>
-    <Property name='edu.umd.cs.findbugs.detect.RefComparisonWarningProperty.STATIC_AND_PARAMETER' value='true'/>
-  </BugInstance>
   <BugInstance instanceOccurrenceNum='0' instanceHash='4bd7b5152961352771719b448f23785b' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
     <Class classname='com.vlessclient.ui.view.MirroredSparkline' primary='true'/>
     <Method isStatic='false' classname='com.vlessclient.ui.view.MirroredSparkline' signature='()Ljavafx/beans/property/ObjectProperty;' name='downFillColorProperty' primary='true'/>
@@ -580,36 +571,6 @@
     <Field isStatic='false' classname='com.vlessclient.ui.view.SingBoxInstallerDialog' signature='Lcom/vlessclient/service/SingBoxInstaller;' name='installer' primary='true'/>
     <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='6' name='installer' register='1'/>
     <SourceLine endBytecode='6' classname='com.vlessclient.ui.view.SingBoxInstallerDialog' start='54' end='54' sourcepath='com/vlessclient/ui/view/SingBoxInstallerDialog.java' sourcefile='SingBoxInstallerDialog.java' startBytecode='6' primary='true'/>
-  </BugInstance>
-  <BugInstance instanceOccurrenceNum='0' instanceHash='d06988910d472138b5fefc76ef770041' cweid='413' rank='14' abbrev='AT' category='MT_CORRECTNESS' priority='2' type='AT_NONATOMIC_OPERATIONS_ON_SHARED_VARIABLE' instanceOccurrenceMax='0'>
-    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' primary='true'/>
-    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='()V' name='cancelHealthLoop' primary='true'/>
-    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='I' name='healthGeneration' primary='true'/>
-    <SourceLine endBytecode='35' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' start='399' end='399' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='35' primary='true'/>
-  </BugInstance>
-  <BugInstance instanceOccurrenceNum='0' instanceHash='e138adfb89e581042dc4f4761f1394ac' cweid='413' rank='14' abbrev='AT' category='MT_CORRECTNESS' priority='2' type='AT_NONATOMIC_OPERATIONS_ON_SHARED_VARIABLE' instanceOccurrenceMax='0'>
-    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' primary='true'/>
-    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='()V' name='restartReachabilityCheck' primary='true'/>
-    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='I' name='healthGeneration' primary='true'/>
-    <SourceLine endBytecode='31' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' start='542' end='542' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='31' primary='true'/>
-  </BugInstance>
-  <BugInstance instanceOccurrenceNum='0' instanceHash='4047e7e16d5daed6f48b3800da4d6eaf' cweid='413' rank='14' abbrev='AT' category='MT_CORRECTNESS' priority='2' type='AT_STALE_THREAD_WRITE_OF_PRIMITIVE' instanceOccurrenceMax='0'>
-    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' primary='true'/>
-    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='()V' name='cancelHealthLoop' primary='true'/>
-    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='Z' name='hasVerdict' primary='true'/>
-    <SourceLine endBytecode='45' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' start='401' end='401' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='45' primary='true'/>
-  </BugInstance>
-  <BugInstance instanceOccurrenceNum='0' instanceHash='931688a6da859953d48a8ae1c5551539' cweid='413' rank='14' abbrev='AT' category='MT_CORRECTNESS' priority='2' type='AT_STALE_THREAD_WRITE_OF_PRIMITIVE' instanceOccurrenceMax='0'>
-    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' primary='true'/>
-    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='(Lcom/vlessclient/model/ConnectionState;)V' name='onConnectionStateChanged' primary='true'/>
-    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='Z' name='hasVerdict' primary='true'/>
-    <SourceLine endBytecode='22' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' start='144' end='144' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='22' primary='true'/>
-  </BugInstance>
-  <BugInstance instanceOccurrenceNum='0' instanceHash='aee9d07cb399deb02f87b09cb7c3b839' cweid='413' rank='14' abbrev='AT' category='MT_CORRECTNESS' priority='2' type='AT_STALE_THREAD_WRITE_OF_PRIMITIVE' instanceOccurrenceMax='0'>
-    <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' primary='true'/>
-    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='()V' name='runReachabilityCheck' primary='true'/>
-    <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='I' name='healthGeneration' primary='true'/>
-    <SourceLine endBytecode='184' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' start='234' end='234' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='184' primary='true'/>
   </BugInstance>
   <BugInstance instanceOccurrenceNum='0' instanceHash='77891cdd1bcdcc7d4515352b43debf89' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
     <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' primary='true'/>

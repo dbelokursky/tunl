@@ -93,6 +93,27 @@ class HealthCheckCoordinatorTest {
         }
     }
 
+    /** Supplies independently controlled probe futures in invocation order. */
+    private static final class SequencedChecker extends ServiceReachabilityChecker {
+        private final List<CompletableFuture<List<ProbeResult>>> pending = List.of(
+                new CompletableFuture<>(), new CompletableFuture<>(), new CompletableFuture<>());
+        private int calls;
+
+        @Override
+        public CompletableFuture<List<ProbeResult>> checkAll(
+                List<HealthCheckTarget> targets, int httpProxyPort) {
+            return pending.get(calls++);
+        }
+
+        void complete(int index, List<ProbeResult> results) {
+            pending.get(index).complete(results);
+        }
+
+        int calls() {
+            return calls;
+        }
+    }
+
     @BeforeAll
     static void initJfx() {
         try {
@@ -342,6 +363,33 @@ class HealthCheckCoordinatorTest {
         checker.complete(List.of(probe("a", true)));
         flushFxEvents();
         assertThat(healthState.get()).isEqualTo(TunnelHealth.HEALTHY);
+    }
+
+    @Test
+    void staleProbeCompletionDoesNotClearTheCurrentInFlightProbe() throws Exception {
+        healthSettings(false, new HealthCheckTarget("a", "https://a"));
+        SequencedChecker checker = new SequencedChecker();
+        HealthCheckCoordinator coordinator = coordinatorWith(checker);
+
+        engine.state.set(ConnectionState.CONNECTED);
+        onFxAndWait(() -> coordinator.onConnectionStateChanged(ConnectionState.CONNECTED));
+
+        engine.state.set(ConnectionState.DISCONNECTED);
+        onFxAndWait(() -> coordinator.onConnectionStateChanged(ConnectionState.DISCONNECTED));
+        engine.state.set(ConnectionState.CONNECTED);
+        onFxAndWait(() -> coordinator.onConnectionStateChanged(ConnectionState.CONNECTED));
+        assertThat(checker.calls()).isEqualTo(2);
+
+        checker.complete(0, List.of(probe("stale", true)));
+        flushFxEvents();
+        onFxAndWait(coordinator::recheck);
+
+        assertThat(checker.calls())
+                .as("the stale callback must not make a newer probe look idle")
+                .isEqualTo(2);
+
+        checker.complete(1, List.of(probe("current", true)));
+        flushFxEvents();
     }
 
     @Test

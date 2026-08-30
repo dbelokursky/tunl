@@ -178,7 +178,7 @@ public class GeoIpDatabase {
             // Only becomes the real database once it parses.
             try (Reader probe = new Reader(staging.toFile())) {
                 log.info("Downloaded geo-IP database ({})",
-                        probe.getMetadata().getDatabaseType());
+                        probe.getMetadata().databaseType());
             }
             Files.move(staging, databasePath, StandardCopyOption.REPLACE_EXISTING);
             return true;

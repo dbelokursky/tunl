@@ -2,6 +2,8 @@ name: Release
 on:
   push:
     tags: ['v*']
+permissions:
+  contents: read
 jobs:
   # Derive the release's title and body from the pushed annotated tag's message
   # (subject line -> title, message body -> notes) so a release is fully written

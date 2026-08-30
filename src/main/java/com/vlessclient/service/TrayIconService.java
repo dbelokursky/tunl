@@ -352,8 +352,9 @@ public class TrayIconService {
                     log.warn("Tray connect clicked but no active server selected");
                     showMainWindow();
                 }
-                case NO_ENGINE ->
+                case NO_ENGINE -> {
                     log.warn("Tray connect clicked but SingBoxEngine is not available");
+                }
                 case ALREADY_RUNNING -> log.debug("sing-box already running");
                 default -> log.info("Connected from tray to {}", attempt.server().getName());
             }
