@@ -36,7 +36,7 @@ public class LambdaTool implements McpTool {
         this.name = name;
         this.description = description;
         this.mutating = mutating;
-        this.inputSchema = inputSchema;
+        this.inputSchema = inputSchema.deepCopy();
         this.handler = handler;
     }
 
@@ -57,7 +57,7 @@ public class LambdaTool implements McpTool {
 
     @Override
     public ObjectNode inputSchema() {
-        return inputSchema;
+        return inputSchema.deepCopy();
     }
 
     @Override

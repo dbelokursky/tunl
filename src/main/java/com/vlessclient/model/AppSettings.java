@@ -332,7 +332,8 @@ public class AppSettings {
     }
 
     public void setHealthCheckTargets(List<HealthCheckTarget> healthCheckTargets) {
-        this.healthCheckTargets = healthCheckTargets;
+        this.healthCheckTargets = healthCheckTargets == null
+                ? new ArrayList<>() : new ArrayList<>(healthCheckTargets);
     }
 
     public boolean isMcpEnabled() {

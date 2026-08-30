@@ -24,13 +24,6 @@
     <Field isStatic='false' classname='com.vlessclient.model.AppSettings' signature='Ljava/util/List;' name='healthCheckTargets' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
     <SourceLine endBytecode='4' classname='com.vlessclient.model.AppSettings' start='331' end='331' sourcepath='com/vlessclient/model/AppSettings.java' sourcefile='AppSettings.java' startBytecode='4' primary='true'/>
   </BugInstance>
-  <BugInstance instanceOccurrenceNum='0' instanceHash='35048f004992b93ffddf87a1edb7e329' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
-    <Class classname='com.vlessclient.model.AppSettings' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
-    <Method isStatic='false' classname='com.vlessclient.model.AppSettings' signature='(Ljava/util/List;)V' name='setHealthCheckTargets' primary='true'/>
-    <Field isStatic='false' classname='com.vlessclient.model.AppSettings' signature='Ljava/util/List;' name='healthCheckTargets' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
-    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='2' name='healthCheckTargets' register='1'/>
-    <SourceLine endBytecode='2' classname='com.vlessclient.model.AppSettings' start='335' end='335' sourcepath='com/vlessclient/model/AppSettings.java' sourcefile='AppSettings.java' startBytecode='2' primary='true'/>
-  </BugInstance>
   <BugInstance instanceOccurrenceNum='0' instanceHash='a26c6f88c59f5e33f5088f81273a843f' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
     <Class classname='com.vlessclient.model.RoutingConfig' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
     <Method isStatic='false' classname='com.vlessclient.model.RoutingConfig' signature='()Ljava/util/List;' name='getBypassCountries' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
@@ -49,13 +42,6 @@
     <Field isStatic='false' classname='com.vlessclient.model.RoutingConfig' signature='Ljava/util/List;' name='rules' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
     <SourceLine endBytecode='4' classname='com.vlessclient.model.RoutingConfig' start='153' end='153' sourcepath='com/vlessclient/model/RoutingConfig.java' sourcefile='RoutingConfig.java' startBytecode='4' primary='true'/>
   </BugInstance>
-  <BugInstance instanceOccurrenceNum='0' instanceHash='110f455ecb188abde3aef56943e6738b' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
-    <Class classname='com.vlessclient.model.RoutingConfig' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
-    <Method isStatic='false' classname='com.vlessclient.model.RoutingConfig' signature='(Ljava/util/List;)V' name='setRules' primary='true'/>
-    <Field isStatic='false' classname='com.vlessclient.model.RoutingConfig' signature='Ljava/util/List;' name='rules' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
-    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='2' name='rules' register='1'/>
-    <SourceLine endBytecode='2' classname='com.vlessclient.model.RoutingConfig' start='157' end='157' sourcepath='com/vlessclient/model/RoutingConfig.java' sourcefile='RoutingConfig.java' startBytecode='2' primary='true'/>
-  </BugInstance>
   <BugInstance instanceOccurrenceNum='0' instanceHash='beef2634357c35610b0f12d3c5ce8f9b' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
     <Class classname='com.vlessclient.model.ServerConfig' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
     <Method isStatic='false' classname='com.vlessclient.model.ServerConfig' signature='()Lcom/vlessclient/model/TlsConfig;' name='getTls' primary='true'/>
@@ -68,45 +54,17 @@
     <Field isStatic='false' classname='com.vlessclient.model.ServerConfig' signature='Lcom/vlessclient/model/TransportConfig;' name='transport' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
     <SourceLine endBytecode='4' classname='com.vlessclient.model.ServerConfig' start='121' end='121' sourcepath='com/vlessclient/model/ServerConfig.java' sourcefile='ServerConfig.java' startBytecode='4' primary='true'/>
   </BugInstance>
-  <BugInstance instanceOccurrenceNum='0' instanceHash='bec86282dc4049cec6d21acdef19f4d5' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
-    <Class classname='com.vlessclient.model.ServerConfig' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
-    <Method isStatic='false' classname='com.vlessclient.model.ServerConfig' signature='(Lcom/vlessclient/model/TlsConfig;)V' name='setTls' primary='true'/>
-    <Field isStatic='false' classname='com.vlessclient.model.ServerConfig' signature='Lcom/vlessclient/model/TlsConfig;' name='tls' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
-    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='2' name='tls' register='1'/>
-    <SourceLine endBytecode='2' classname='com.vlessclient.model.ServerConfig' start='133' end='133' sourcepath='com/vlessclient/model/ServerConfig.java' sourcefile='ServerConfig.java' startBytecode='2' primary='true'/>
-  </BugInstance>
-  <BugInstance instanceOccurrenceNum='0' instanceHash='96c629f7db4ab06c08068ccf7fcb003e' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
-    <Class classname='com.vlessclient.model.ServerConfig' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
-    <Method isStatic='false' classname='com.vlessclient.model.ServerConfig' signature='(Lcom/vlessclient/model/TransportConfig;)V' name='setTransport' primary='true'/>
-    <Field isStatic='false' classname='com.vlessclient.model.ServerConfig' signature='Lcom/vlessclient/model/TransportConfig;' name='transport' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
-    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='2' name='transport' register='1'/>
-    <SourceLine endBytecode='2' classname='com.vlessclient.model.ServerConfig' start='125' end='125' sourcepath='com/vlessclient/model/ServerConfig.java' sourcefile='ServerConfig.java' startBytecode='2' primary='true'/>
-  </BugInstance>
   <BugInstance instanceOccurrenceNum='0' instanceHash='c095ad8f3e9182c2c9383d3a77a31807' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
     <Class classname='com.vlessclient.model.Subscription' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
     <Method isStatic='false' classname='com.vlessclient.model.Subscription' signature='()Ljava/util/List;' name='getServerIds' primary='true'/>
     <Field isStatic='false' classname='com.vlessclient.model.Subscription' signature='Ljava/util/List;' name='serverIds' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
     <SourceLine endBytecode='4' classname='com.vlessclient.model.Subscription' start='88' end='88' sourcepath='com/vlessclient/model/Subscription.java' sourcefile='Subscription.java' startBytecode='4' primary='true'/>
   </BugInstance>
-  <BugInstance instanceOccurrenceNum='0' instanceHash='ac9bd8894b999c61f236a7cd433ee6d8' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
-    <Class classname='com.vlessclient.model.Subscription' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
-    <Method isStatic='false' classname='com.vlessclient.model.Subscription' signature='(Ljava/util/List;)V' name='setServerIds' primary='true'/>
-    <Field isStatic='false' classname='com.vlessclient.model.Subscription' signature='Ljava/util/List;' name='serverIds' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
-    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='2' name='serverIds' register='1'/>
-    <SourceLine endBytecode='2' classname='com.vlessclient.model.Subscription' start='92' end='92' sourcepath='com/vlessclient/model/Subscription.java' sourcefile='Subscription.java' startBytecode='2' primary='true'/>
-  </BugInstance>
   <BugInstance instanceOccurrenceNum='0' instanceHash='4f481905990e403702ab0c8f772ad8a6' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
     <Class classname='com.vlessclient.model.TransportConfig' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
     <Method isStatic='false' classname='com.vlessclient.model.TransportConfig' signature='()Ljava/util/Map;' name='getHeaders' primary='true'/>
     <Field isStatic='false' classname='com.vlessclient.model.TransportConfig' signature='Ljava/util/Map;' name='headers' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
     <SourceLine endBytecode='4' classname='com.vlessclient.model.TransportConfig' start='66' end='66' sourcepath='com/vlessclient/model/TransportConfig.java' sourcefile='TransportConfig.java' startBytecode='4' primary='true'/>
-  </BugInstance>
-  <BugInstance instanceOccurrenceNum='0' instanceHash='538d5ff002467c09674aa3c55eb479ca' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
-    <Class classname='com.vlessclient.model.TransportConfig' classAnnotationNames='com.fasterxml.jackson.annotation.JsonIgnoreProperties' primary='true'/>
-    <Method isStatic='false' classname='com.vlessclient.model.TransportConfig' signature='(Ljava/util/Map;)V' name='setHeaders' primary='true'/>
-    <Field isStatic='false' classname='com.vlessclient.model.TransportConfig' signature='Ljava/util/Map;' name='headers' classAnnotationNames='com.fasterxml.jackson.annotation.JsonProperty' primary='true'/>
-    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='2' name='headers' register='1'/>
-    <SourceLine endBytecode='2' classname='com.vlessclient.model.TransportConfig' start='70' end='70' sourcepath='com/vlessclient/model/TransportConfig.java' sourcefile='TransportConfig.java' startBytecode='2' primary='true'/>
   </BugInstance>
   <BugInstance instanceOccurrenceNum='0' instanceHash='91e3b97ac199a83ce0cc615a3197a0b7' cweid='440' rank='17' abbrev='DMI' category='STYLE' priority='2' type='DMI_HARDCODED_ABSOLUTE_FILENAME' instanceOccurrenceMax='0'>
     <Class classname='com.vlessclient.platform.PrivilegeHelper' primary='true'/>
@@ -426,32 +384,6 @@
     <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='15' name='engine' register='1'/>
     <SourceLine endBytecode='15' classname='com.vlessclient.service.mcp.McpServerService' start='70' end='70' sourcepath='com/vlessclient/service/mcp/McpServerService.java' sourcefile='McpServerService.java' startBytecode='15' primary='true'/>
   </BugInstance>
-  <BugInstance instanceOccurrenceNum='0' instanceHash='1c38af0bd631df653efe57ccc4f1401a' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
-    <Class classname='com.vlessclient.service.mcp.RoutingInfo' primary='true'/>
-    <Method isStatic='false' classname='com.vlessclient.service.mcp.RoutingInfo' signature='()Ljava/util/List;' name='bypassList' primary='true'/>
-    <Field isStatic='false' classname='com.vlessclient.service.mcp.RoutingInfo' signature='Ljava/util/List;' name='bypassList' primary='true'/>
-    <SourceLine endBytecode='4' classname='com.vlessclient.service.mcp.RoutingInfo' start='12' end='12' sourcepath='com/vlessclient/service/mcp/RoutingInfo.java' sourcefile='RoutingInfo.java' startBytecode='4' primary='true'/>
-  </BugInstance>
-  <BugInstance instanceOccurrenceNum='0' instanceHash='d10e7cc900dbbfeeed9e3a53a4d5c16f' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
-    <Class classname='com.vlessclient.service.mcp.RoutingInfo' primary='true'/>
-    <Method isStatic='false' classname='com.vlessclient.service.mcp.RoutingInfo' signature='()Ljava/util/List;' name='rules' primary='true'/>
-    <Field isStatic='false' classname='com.vlessclient.service.mcp.RoutingInfo' signature='Ljava/util/List;' name='rules' primary='true'/>
-    <SourceLine endBytecode='4' classname='com.vlessclient.service.mcp.RoutingInfo' start='12' end='12' sourcepath='com/vlessclient/service/mcp/RoutingInfo.java' sourcefile='RoutingInfo.java' startBytecode='4' primary='true'/>
-  </BugInstance>
-  <BugInstance instanceOccurrenceNum='0' instanceHash='13c69d2784949f2f6a2ff68850e1d32f' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
-    <Class classname='com.vlessclient.service.mcp.RoutingInfo' primary='true'/>
-    <Method isStatic='false' classname='com.vlessclient.service.mcp.RoutingInfo' signature='(Ljava/lang/String;Ljava/util/List;Ljava/util/List;)V' name='&lt;init&gt;' primary='true'/>
-    <Field isStatic='false' classname='com.vlessclient.service.mcp.RoutingInfo' signature='Ljava/util/List;' name='bypassList' primary='true'/>
-    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='11' name='bypassList' register='2'/>
-    <SourceLine endBytecode='11' classname='com.vlessclient.service.mcp.RoutingInfo' start='12' end='12' sourcepath='com/vlessclient/service/mcp/RoutingInfo.java' sourcefile='RoutingInfo.java' startBytecode='11' primary='true'/>
-  </BugInstance>
-  <BugInstance instanceOccurrenceNum='0' instanceHash='a83ea0320a9c1068bcff3fb5804441bd' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
-    <Class classname='com.vlessclient.service.mcp.RoutingInfo' primary='true'/>
-    <Method isStatic='false' classname='com.vlessclient.service.mcp.RoutingInfo' signature='(Ljava/lang/String;Ljava/util/List;Ljava/util/List;)V' name='&lt;init&gt;' primary='true'/>
-    <Field isStatic='false' classname='com.vlessclient.service.mcp.RoutingInfo' signature='Ljava/util/List;' name='rules' primary='true'/>
-    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='16' name='rules' register='3'/>
-    <SourceLine endBytecode='16' classname='com.vlessclient.service.mcp.RoutingInfo' start='12' end='12' sourcepath='com/vlessclient/service/mcp/RoutingInfo.java' sourcefile='RoutingInfo.java' startBytecode='16' primary='true'/>
-  </BugInstance>
   <BugInstance instanceOccurrenceNum='0' instanceHash='43d0bafb14cc40fa528809f3b07fa4c4' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
     <Class classname='com.vlessclient.service.mcp.tools.ConnectTool' primary='true'/>
     <Method isStatic='false' classname='com.vlessclient.service.mcp.tools.ConnectTool' signature='(Lcom/vlessclient/service/mcp/AppControlService;)V' name='&lt;init&gt;' primary='true'/>
@@ -479,19 +411,6 @@
     <Field isStatic='false' classname='com.vlessclient.service.mcp.tools.GetStatusTool' signature='Lcom/vlessclient/service/mcp/AppControlService;' name='control' primary='true'/>
     <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='6' name='control' register='1'/>
     <SourceLine endBytecode='6' classname='com.vlessclient.service.mcp.tools.GetStatusTool' start='20' end='20' sourcepath='com/vlessclient/service/mcp/tools/GetStatusTool.java' sourcefile='GetStatusTool.java' startBytecode='6' primary='true'/>
-  </BugInstance>
-  <BugInstance instanceOccurrenceNum='0' instanceHash='78503b362f4f8b4ba369c6f920f39f2c' cweid='374' rank='18' abbrev='EI' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP' instanceOccurrenceMax='0'>
-    <Class classname='com.vlessclient.service.mcp.tools.LambdaTool' primary='true'/>
-    <Method isStatic='false' classname='com.vlessclient.service.mcp.tools.LambdaTool' signature='()Ltools/jackson/databind/node/ObjectNode;' name='inputSchema' primary='true'/>
-    <Field isStatic='false' classname='com.vlessclient.service.mcp.tools.LambdaTool' signature='Ltools/jackson/databind/node/ObjectNode;' name='inputSchema' primary='true'/>
-    <SourceLine endBytecode='4' classname='com.vlessclient.service.mcp.tools.LambdaTool' start='60' end='60' sourcepath='com/vlessclient/service/mcp/tools/LambdaTool.java' sourcefile='LambdaTool.java' startBytecode='4' primary='true'/>
-  </BugInstance>
-  <BugInstance instanceOccurrenceNum='0' instanceHash='c572e0d667ace9e3a09b3cc9d8e3f300' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
-    <Class classname='com.vlessclient.service.mcp.tools.LambdaTool' primary='true'/>
-    <Method isStatic='false' classname='com.vlessclient.service.mcp.tools.LambdaTool' signature='(Ljava/lang/String;Ljava/lang/String;ZLtools/jackson/databind/node/ObjectNode;Lcom/vlessclient/service/mcp/tools/LambdaTool$Handler;)V' name='&lt;init&gt;' primary='true'/>
-    <Field isStatic='false' classname='com.vlessclient.service.mcp.tools.LambdaTool' signature='Ltools/jackson/databind/node/ObjectNode;' name='inputSchema' primary='true'/>
-    <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='22' name='inputSchema' register='4'/>
-    <SourceLine endBytecode='22' classname='com.vlessclient.service.mcp.tools.LambdaTool' start='39' end='39' sourcepath='com/vlessclient/service/mcp/tools/LambdaTool.java' sourcefile='LambdaTool.java' startBytecode='22' primary='true'/>
   </BugInstance>
   <BugInstance instanceOccurrenceNum='0' instanceHash='74c54ab852a0183aed797fc6a5126011' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
     <Class classname='com.vlessclient.service.mcp.tools.MeasureLatencyTool' primary='true'/>
