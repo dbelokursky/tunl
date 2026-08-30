@@ -10,6 +10,8 @@ on:
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+permissions:
+  contents: read
 jobs:
   # ============ Tests: run on every PR and push, one job per OS ============
   # -Psmoke additionally runs the real-binary smoke suites against the

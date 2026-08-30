@@ -465,7 +465,7 @@ public class ServersViewController {
         try {
             FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/ServerFormView.fxml"));
             VBox formRoot = loader.load();
-            ServerFormController controller = loader.getController();
+            final ServerFormController controller = loader.getController();
 
             Stage dialog = new Stage();
             dialog.initModality(Modality.APPLICATION_MODAL);

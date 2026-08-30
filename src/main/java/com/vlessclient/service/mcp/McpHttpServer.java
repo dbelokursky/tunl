@@ -200,7 +200,7 @@ public class McpHttpServer {
         }
         // Subscribe before headers go out so a frame pushed immediately after the
         // client connects is not missed.
-        McpNotifier.Subscriber subscriber = notifier.subscribe();
+        final McpNotifier.Subscriber subscriber = notifier.subscribe();
         exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
         exchange.getResponseHeaders().set("Cache-Control", "no-cache");
         exchange.getResponseHeaders().set("Connection", "keep-alive");

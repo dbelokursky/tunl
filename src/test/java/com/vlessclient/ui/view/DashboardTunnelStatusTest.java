@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.app.UiTestServices;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.TunnelHealth;
@@ -59,11 +60,7 @@ public class DashboardTunnelStatusTest extends ApplicationTest {
         System.setProperty("prism.order", "sw");
         System.setProperty("prism.text", "t2k");
         System.setProperty("java.awt.headless", "true");
-        try {
-            ServiceLocator.initialize();
-        } catch (Exception e) {
-            // Tolerate service initialization failures in headless CI
-        }
+        UiTestServices.initialize();
         priorEngine = tryGet(SingBoxEngine.class);
         priorHealth = tryGet(TunnelHealthState.class);
         priorSettings = tryGet(AppSettings.class);

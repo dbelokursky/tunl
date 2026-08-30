@@ -11,6 +11,8 @@ import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TunnelHealthState;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import javafx.animation.PauseTransition;
 import javafx.application.Platform;
@@ -77,8 +79,8 @@ public final class HealthCheckCoordinator {
     private PauseTransition reconnectDelay;
     // Schedules the next periodic reachability probe while the tunnel is up.
     private PauseTransition periodicCheckDelay;
-    private volatile boolean healthCheckInFlight;
-    private int healthGeneration;
+    private final AtomicBoolean healthCheckInFlight = new AtomicBoolean();
+    private final AtomicInteger healthGeneration = new AtomicInteger();
     private int reconnectAttempt;
     // True while we are tearing down and restarting the tunnel ourselves, so
     // the self-inflicted DISCONNECTED/ERROR transition is not mistaken for a
@@ -88,7 +90,7 @@ public final class HealthCheckCoordinator {
     // signal: with a 5s default interval, publishing it on every periodic
     // re-probe would flicker the tray icon and the hero card twelve times a
     // minute. Only the unproven window after a connect is worth showing.
-    private boolean hasVerdict;
+    private final AtomicBoolean hasVerdict = new AtomicBoolean();
 
     /**
      * Creates the coordinator over the given controls. The engine is read
@@ -141,7 +143,7 @@ public final class HealthCheckCoordinator {
         // the loop below is deliberately left standing. Drop it either way, so
         // the next connect is judged on its own probe rather than inheriting
         // the previous one's answer.
-        hasVerdict = false;
+        hasVerdict.set(false);
         publishHealth(TunnelHealth.UNMONITORED);
         if (state == ConnectionState.DISCONNECTED || state == ConnectionState.ERROR) {
             if (suppressDisconnectHandling) {
@@ -219,27 +221,26 @@ public final class HealthCheckCoordinator {
             publishHealth(TunnelHealth.UNMONITORED);
             return;
         }
-        if (healthCheckInFlight) {
+        if (!healthCheckInFlight.compareAndSet(false, true)) {
             return;
         }
 
         setHealthCardVisible(true);
         renderPendingRows(targets);
         healthSummaryLabel.setText(I18n.get("dashboard.health.checking"));
-        if (!hasVerdict) {
+        if (!hasVerdict.get()) {
             publishHealth(TunnelHealth.CHECKING);
         }
 
-        healthCheckInFlight = true;
-        final int gen = ++healthGeneration;
+        final int gen = healthGeneration.incrementAndGet();
         final int httpPort = settings.getHttpPort();
 
         reachabilityChecker.checkAll(targets, httpPort).whenComplete((results, err) ->
                 Platform.runLater(() -> {
-                    healthCheckInFlight = false;
-                    if (gen != healthGeneration) {
+                    if (gen != healthGeneration.get()) {
                         return;   // superseded by a newer check or cancelled
                     }
+                    healthCheckInFlight.set(false);
                     if (engine().connectionStateProperty().get()
                             != ConnectionState.CONNECTED) {
                         return;   // no longer connected
@@ -250,7 +251,7 @@ public final class HealthCheckCoordinator {
                         // A failed batch is not a healthy tunnel and not a
                         // broken one — say so rather than leaving the last
                         // answer standing.
-                        hasVerdict = true;
+                        hasVerdict.set(true);
                         publishHealth(TunnelHealth.UNKNOWN);
                         return;
                     }
@@ -272,7 +273,7 @@ public final class HealthCheckCoordinator {
             publishHealth(TunnelHealth.UNMONITORED);
             return;
         }
-        hasVerdict = true;
+        hasVerdict.set(true);
         long reachable = results.stream()
                 .filter(ServiceReachabilityChecker.ProbeResult::reachable)
                 .count();
@@ -396,9 +397,9 @@ public final class HealthCheckCoordinator {
         }
         cancelPeriodicCheck();
         reconnectAttempt = 0;
-        healthGeneration++;            // invalidate any in-flight probe result
-        healthCheckInFlight = false;
-        hasVerdict = false;
+        healthGeneration.incrementAndGet(); // invalidate any in-flight probe result
+        healthCheckInFlight.set(false);
+        hasVerdict.set(false);
         publishHealth(TunnelHealth.UNMONITORED);
         hideReconnectBanner();
         if (serviceStatusList != null) {
@@ -539,8 +540,8 @@ public final class HealthCheckCoordinator {
                 || engine().connectionStateProperty().get() != ConnectionState.CONNECTED) {
             return;
         }
-        healthGeneration++;
-        healthCheckInFlight = false;
+        healthGeneration.incrementAndGet();
+        healthCheckInFlight.set(false);
         runReachabilityCheck();
     }
 

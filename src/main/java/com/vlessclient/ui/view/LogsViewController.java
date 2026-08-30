@@ -318,11 +318,15 @@ public class LogsViewController {
             return -1;
         }
         for (int i = 0; i < filteredLogLines.size(); i++) {
-            if (filteredLogLines.get(i) == item) {
+            if (sameReference(filteredLogLines.get(i), item)) {
                 return i;
             }
         }
         return -1;
+    }
+
+    private static boolean sameReference(Object left, Object right) {
+        return left == right;
     }
 
     private static double offsetFromFlow(
@@ -432,7 +436,7 @@ public class LogsViewController {
 
         ViewportAnchor visible = autoScrollCheckBox.isSelected()
                 ? null : firstVisibleAnchor();
-        int sourceIndex = sourceIndexOf(visible);
+        final int sourceIndex = sourceIndexOf(visible);
         discardPendingViewportRestore();
 
         filterChangeInProgress = true;
