@@ -183,6 +183,51 @@ class ConnectionServiceTest {
                 .isEqualTo(ProxyMode.SYSTEM_PROXY);
     }
 
+    @Test
+    void connectFallsBackToDefaultRoutingWhenServiceIsUnavailable() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        List<RoutingConfig> captured = new ArrayList<>();
+        SingBoxConfigGenerator capturing = new SingBoxConfigGenerator() {
+            @Override
+            public String generate(List<ServerConfig> candidates, ServerConfig active,
+                                   AppSettings settings, RoutingConfig routing) {
+                captured.add(routing);
+                return "{}";
+            }
+        };
+        ConnectionService service = new ConnectionService(store, capturing, null, engine());
+
+        assertThat(service.connect().started()).isTrue();
+
+        assertThat(captured).containsExactly((RoutingConfig) null);
+    }
+
+    @Test
+    void connectFallsBackToDefaultRoutingWhenRulesCannotBeRead() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        List<RoutingConfig> captured = new ArrayList<>();
+        SingBoxConfigGenerator capturing = new SingBoxConfigGenerator() {
+            @Override
+            public String generate(List<ServerConfig> candidates, ServerConfig active,
+                                   AppSettings settings, RoutingConfig routing) {
+                captured.add(routing);
+                return "{}";
+            }
+        };
+        RoutingService failingRouting = new RoutingService() {
+            @Override
+            public RoutingConfig getConfig() {
+                throw new IllegalStateException("unreadable routing file");
+            }
+        };
+        ConnectionService service =
+                new ConnectionService(store, capturing, failingRouting, engine());
+
+        assertThat(service.connect().started()).isTrue();
+
+        assertThat(captured).containsExactly((RoutingConfig) null);
+    }
+
     // ===== outcomes callers map to their own UX =====
 
     @Test
@@ -283,6 +328,7 @@ class ConnectionServiceTest {
         RecordingEngine installed = engine();
         service.setEngine(installed);
 
+        assertThat(service.getEngine()).isSameAs(installed);
         assertThat(service.connect().started()).isTrue();
         assertThat(installed.calls).contains("start");
     }
