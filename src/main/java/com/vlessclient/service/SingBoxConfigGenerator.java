@@ -34,7 +34,7 @@ import tools.jackson.databind.node.ObjectNode;
  * Builds the JSON configuration handed to the sing-box core from a
  * {@link ServerConfig}, {@link AppSettings} and optional {@link RoutingConfig}.
  *
- * <p>Emits the sing-box 1.13 schema: log, DNS, inbounds (TUN/SOCKS/HTTP),
+ * <p>Emits the sing-box 1.14 schema: log, DNS, inbounds (TUN/SOCKS/HTTP),
  * outbounds or a WireGuard endpoint, routing rules with remote rule-sets, and
  * the experimental Clash API / cache-file blocks.</p>
  *
@@ -469,6 +469,11 @@ public class SingBoxConfigGenerator {
             ArrayNode address = mapper.createArrayNode();
             address.add(settings.getTunIpv4Address());
             tun.set("address", address);
+            // 1.14 defaults to hijack, but keep this explicit: Tunl relies on
+            // native interface DNS plus port-53 interception to prevent DNS
+            // leaks. With dns_address omitted, sing-box derives the next TUN
+            // address and redirects it into the configured DNS module.
+            tun.put("dns_mode", "hijack");
             tun.put("auto_route", true);
             // Deliberately NOT setting strict_route: true. Combined with
             // route_exclude_address it caused widespread direct-outbound
