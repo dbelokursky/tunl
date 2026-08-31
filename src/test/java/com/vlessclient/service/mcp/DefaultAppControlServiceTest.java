@@ -8,11 +8,16 @@ import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ShareLinkParser;
 import com.vlessclient.service.SingBoxConfigGenerator;
 import com.vlessclient.service.SingBoxEngine;
+import javafx.application.Platform;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -30,6 +35,15 @@ class DefaultAppControlServiceTest {
     private ConfigStore store;
     private DefaultAppControlService service;
 
+    @BeforeAll
+    static void initJfx() {
+        try {
+            Platform.startup(() -> { });
+        } catch (IllegalStateException ignored) {
+            // Already started by another test class.
+        }
+    }
+
     @BeforeEach
     void setUp() {
         store = new ConfigStore(tempDir);
@@ -46,6 +60,39 @@ class DefaultAppControlServiceTest {
         s.setAddress("example.com");
         s.setPort(443);
         return s;
+    }
+
+    private static final class RecordingConnectionService extends ConnectionService {
+
+        private final List<ProxyMode> modes = new ArrayList<>();
+        private ConnectAttempt attempt;
+        private IOException failure;
+        private int disconnects;
+
+        RecordingConnectionService(ServerConfig server) {
+            super(null, null, null, null);
+            attempt = new ConnectAttempt(Outcome.STARTED, server);
+        }
+
+        @Override
+        public ConnectAttempt connect(ProxyMode modeOverride) throws IOException {
+            modes.add(modeOverride);
+            if (failure != null) {
+                throw failure;
+            }
+            return attempt;
+        }
+
+        @Override
+        public void disconnect() {
+            disconnects++;
+        }
+    }
+
+    private DefaultAppControlService serviceWith(RecordingConnectionService connectionService,
+                                                  SingBoxEngine engine) {
+        return new DefaultAppControlService(store, null, null, null, connectionService,
+                null, null, engine);
     }
 
     @Test
@@ -68,6 +115,64 @@ class DefaultAppControlServiceTest {
         assertThatThrownBy(() -> service.connect(null, "bogus", false))
                 .isInstanceOf(McpToolException.class)
                 .hasMessageContaining("Unknown mode");
+    }
+
+    @Test
+    void connect_selectsServerPersistsModeAndDelegatesToConnectionOwner() throws Exception {
+        ServerConfig osaka = server("srv-2", "Osaka");
+        store.addServer(osaka);
+        RecordingConnectionService connection = new RecordingConnectionService(osaka);
+        SingBoxEngine engine = new SingBoxEngine(tempDir.resolve("sing-box"));
+        DefaultAppControlService svc = serviceWith(connection, engine);
+
+        StatusInfo status = svc.connect("srv-2", "tun", true);
+
+        assertThat(connection.modes).containsExactly(ProxyMode.TUN);
+        assertThat(status.activeServerId()).isEqualTo("srv-2");
+        assertThat(status.proxyMode()).isEqualTo("tun");
+        assertThat(store.getServerById("srv-2").orElseThrow().isActive()).isTrue();
+        assertThat(new ConfigStore(tempDir).getSettings().getProxyMode()).isEqualTo(ProxyMode.TUN);
+    }
+
+    @Test
+    void connect_mapsRefusedStartToAToolError() {
+        ServerConfig active = store.getServerById("srv-1").orElseThrow();
+        RecordingConnectionService connection = new RecordingConnectionService(active);
+        connection.attempt =
+                new ConnectionService.ConnectAttempt(ConnectionService.Outcome.ALREADY_RUNNING,
+                        active);
+        DefaultAppControlService svc = serviceWith(connection,
+                new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        assertThatThrownBy(() -> svc.connect(null, null, false))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining("already running");
+    }
+
+    @Test
+    void connect_mapsStartFailureToAToolError() {
+        ServerConfig active = store.getServerById("srv-1").orElseThrow();
+        RecordingConnectionService connection = new RecordingConnectionService(active);
+        connection.failure = new IOException("permission denied");
+        DefaultAppControlService svc = serviceWith(connection,
+                new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        assertThatThrownBy(() -> svc.connect(null, null, false))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining("permission denied");
+    }
+
+    @Test
+    void disconnect_delegatesToConnectionOwner() {
+        ServerConfig active = store.getServerById("srv-1").orElseThrow();
+        RecordingConnectionService connection = new RecordingConnectionService(active);
+        DefaultAppControlService svc = serviceWith(connection,
+                new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        StatusInfo status = svc.disconnect();
+
+        assertThat(connection.disconnects).isEqualTo(1);
+        assertThat(status.activeServerId()).isEqualTo("srv-1");
     }
 
     /**
