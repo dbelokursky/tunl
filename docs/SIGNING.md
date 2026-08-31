@@ -69,9 +69,10 @@ as today.
 | `WINDOWS_CERTIFICATE_PFX_BASE64` | base64 of your code-signing certificate (`.pfx`) |
 | `WINDOWS_CERTIFICATE_PASSWORD` | the `.pfx` password |
 
-The workflow decodes the `.pfx` and runs `signtool sign` on the MSI produced by
-`package-windows.ps1`, with an RFC-3161 timestamp so the signature outlives the
-cert's validity:
+The workflow requires each OS-signing secret bundle to be complete or absent.
+When configured, it decodes the `.pfx`, runs `signtool sign` on the MSI produced
+by `package-windows.ps1`, and verifies the result before upload. The RFC-3161
+timestamp keeps the signature valid after the certificate expires:
 
 ```powershell
 signtool sign /f cert.pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD `
@@ -97,6 +98,11 @@ Windows:
 ```powershell
 signtool verify /pa dist\tunl_*.msi
 ```
+
+Release jobs upload only to a GitHub draft. The workflow makes that draft
+public after the four installers, their updater `.sig` files, and the package
+manager metadata match the expected manifest. A signing or upload failure
+therefore cannot expose a partial release to users.
 
 ## Release signing key (for the in-app updater)
 
