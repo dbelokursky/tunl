@@ -5,6 +5,9 @@ import com.vlessclient.app.UiTestServices;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Group;
 import javafx.scene.Node;
@@ -14,6 +17,7 @@ import javafx.scene.control.Labeled;
 import javafx.scene.layout.Region;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
 
@@ -68,6 +72,25 @@ public class ControlSizingTest extends ApplicationTest {
 
     private double width;
     private double height;
+    private final List<String> cssWarnings = new ArrayList<>();
+    private final Logger cssLogger = Logger.getLogger("");
+    private final Handler cssWarningCollector = new Handler() {
+        @Override
+        public void publish(LogRecord record) {
+            if (record.getLevel().intValue() >= java.util.logging.Level.WARNING.intValue()
+                    && "javafx.scene.CssStyleHelper".equals(record.getSourceClassName())) {
+                cssWarnings.add(record.getMessage());
+            }
+        }
+
+        @Override
+        public void flush() {
+        }
+
+        @Override
+        public void close() {
+        }
+    };
 
     @BeforeAll
     static void setupHeadless() {
@@ -79,9 +102,24 @@ public class ControlSizingTest extends ApplicationTest {
         UiTestServices.initialize();
     }
 
+    @BeforeEach
+    void collectCssWarnings() {
+        cssWarnings.clear();
+        cssLogger.addHandler(cssWarningCollector);
+    }
+
     @AfterEach
     void resetLocale() {
         interact(() -> I18n.setLocale(Locale.ENGLISH));
+        // Button width re-measurement is deliberately deferred until the
+        // current CSS attachment pass completes. Drain that work while the
+        // warning collector is still installed.
+        interact(() -> { });
+        cssLogger.removeHandler(cssWarningCollector);
+        assertThat(cssWarnings)
+                .withFailMessage("JavaFX emitted CSS warnings:%n  %s",
+                        String.join("\n  ", cssWarnings))
+                .isEmpty();
     }
 
 

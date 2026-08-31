@@ -746,6 +746,10 @@
     -fx-border-color: -c-border;
     -fx-border-radius: 6;
     -fx-background-radius: 6;
+    /* Modena's internal button cell resolves this before our list-cell rule
+       wins the cascade. Define it on the control so that early skin pass is
+       valid even while the ComboBox is being attached. */
+    -fx-text-base-color: #1f2328;
 }
 
 .combo-box:focused {
@@ -754,12 +758,16 @@
 
 .combo-box .list-cell {
     -fx-font-size: 13px;
-    -fx-text-fill: -c-text;
+    /* ComboBox popup cells live in a separate Scene and cannot inherit the
+       application's .root tokens through the control. Keep popup-reachable
+       colours concrete in each theme. */
+    -fx-text-fill: #1f2328;
+    -fx-text-base-color: #1f2328;
 }
 
 .combo-box-popup .list-view {
-    -fx-background-color: -c-surface;
-    -fx-border-color: -c-border;
+    -fx-background-color: #ffffff;
+    -fx-border-color: #e6e8ec;
     -fx-border-radius: 6;
     -fx-background-radius: 6;
     -fx-effect: dropshadow(gaussian, rgba(16,24,40,0.10), 8, 0, 0, 2);
@@ -767,10 +775,11 @@
 
 .combo-box-popup .list-cell {
     -fx-padding: 6 12;
+    -fx-text-fill: #1f2328;
 }
 
 .combo-box-popup .list-cell:filled:hover {
-    -fx-background-color: -c-accent-tint;
+    -fx-background-color: #e8f5e9;
 }
 
 /* ===== Separator =====
