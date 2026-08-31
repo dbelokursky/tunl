@@ -72,6 +72,10 @@ class SingBoxConfigGeneratorTunTest {
                 assertThat(addr).isNotNull();
                 assertThat(addr.isArray()).isTrue();
                 assertThat(addr.get(0).asString()).isEqualTo("172.19.0.1/30");
+                assertThat(inbound.get("dns_mode").asString()).isEqualTo("hijack");
+                // Let sing-box derive 172.19.0.2 from the TUN prefix so it
+                // can keep the DNS endpoint and interception rule aligned.
+                assertThat(inbound.has("dns_address")).isFalse();
                 break;
             }
         }
