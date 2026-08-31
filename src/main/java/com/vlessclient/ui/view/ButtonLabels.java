@@ -4,7 +4,10 @@ import com.vlessclient.app.I18n;
 import java.util.ArrayList;
 import java.util.List;
 import javafx.animation.PauseTransition;
+import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.WeakChangeListener;
 import javafx.scene.control.Button;
 import javafx.scene.control.Labeled;
 import javafx.scene.layout.Region;
@@ -53,6 +56,7 @@ final class ButtonLabels {
      */
     private static final Object IDLE_KEY = new Object();
     private static final Object PENDING_FLASH = new Object();
+    private static final Object LOCALE_LISTENER_KEY = new Object();
 
     private ButtonLabels() {
     }
@@ -95,11 +99,16 @@ final class ButtonLabels {
         // cannot run here: initialize() is called while the view is still
         // detached. Wait for a scene, then re-measure on every locale change.
         whenInScene(button, () -> pinToWidest(button, keys));
-        I18n.localeProperty().addListener((obs, old, current) -> {
-            if (button.getScene() != null) {
+        ChangeListener<java.util.Locale> localeListener = (obs, old, current) -> {
+            if (button.getScene() != null && button.getScene().getWindow() != null) {
                 pinToWidest(button, keys);
             }
-        });
+        };
+        // The global locale property must not keep every discarded view and
+        // its scene graph alive. The button owns the delegate; the property
+        // holds only a weak wrapper around it.
+        button.getProperties().put(LOCALE_LISTENER_KEY, localeListener);
+        I18n.localeProperty().addListener(new WeakChangeListener<>(localeListener));
     }
 
     /**
@@ -197,10 +206,28 @@ final class ButtonLabels {
      */
     private static void whenInScene(Button button, Runnable action) {
         if (button.getScene() != null) {
-            action.run();
+            runAfterSceneSetup(button, action);
         }
         button.sceneProperty().addListener((obs, old, scene) -> {
             if (scene != null) {
+                runAfterSceneSetup(button, action);
+            }
+        });
+    }
+
+    /**
+     * Waits until the caller has finished attaching the application stylesheet.
+     *
+     * <p>A scene propagates to its descendants synchronously from the
+     * {@code Scene} constructor and from {@code setRoot}. The application adds
+     * its saved theme immediately afterwards, so measuring from the scene
+     * listener itself races that setup: looked-up colours are unresolved and
+     * the button is measured with Modena instead of the active Tunl theme.</p>
+     */
+    private static void runAfterSceneSetup(Button button, Runnable action) {
+        Platform.runLater(() -> {
+            if (button.getScene() != null) {
+                button.getScene().getRoot().applyCss();
                 action.run();
             }
         });

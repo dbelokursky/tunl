@@ -17,6 +17,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Predicate;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
 import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
 import javafx.collections.transformation.SortedList;
@@ -147,7 +148,9 @@ public class ServersViewController {
         searchField.promptTextProperty().bind(I18n.binding("servers.search.prompt"));
         searchField.textProperty().addListener(
                 (obs, old, text) -> filtered.setPredicate(matching(text)));
-        serverListView.setPlaceholder(new Label(I18n.get("servers.no.matches")));
+        Label noMatches = new Label();
+        noMatches.textProperty().bind(I18n.binding("servers.no.matches"));
+        serverListView.setPlaceholder(noMatches);
     }
 
     /**
@@ -183,21 +186,26 @@ public class ServersViewController {
     private void setUpSort() {
         sortCombo.getItems().setAll(ServerSort.values());
         sortCombo.setValue(ServerSort.CONFIGURED);
-        sortCombo.setCellFactory(list -> new ListCell<>() {
+        sortCombo.setCellFactory(list -> sortCell());
+        sortCombo.setButtonCell(sortCell());
+        sortCombo.valueProperty().addListener((obs, old, sort) -> applySort(sort));
+    }
+
+    /** A sort label that follows the locale without replacing the cell. */
+    private ListCell<ServerSort> sortCell() {
+        return new ListCell<>() {
             @Override
             protected void updateItem(ServerSort sort, boolean empty) {
                 super.updateItem(sort, empty);
-                setText(empty || sort == null ? null : sort.label());
+                textProperty().unbind();
+                if (empty || sort == null) {
+                    setText(null);
+                } else {
+                    textProperty().bind(Bindings.createStringBinding(
+                            sort::label, I18n.localeProperty()));
+                }
             }
-        });
-        sortCombo.setButtonCell(sortCombo.getCellFactory().call(null));
-        sortCombo.valueProperty().addListener((obs, old, sort) -> applySort(sort));
-        // Re-render the labels when the language changes; a ComboBox caches
-        // rendered cells and would otherwise keep the old locale's text.
-        I18n.localeProperty().addListener((obs, old, locale) -> {
-            sortCombo.setButtonCell(sortCombo.getCellFactory().call(null));
-            serverListView.setPlaceholder(new Label(I18n.get("servers.no.matches")));
-        });
+        };
     }
 
     private void applySort(ServerSort sort) {
