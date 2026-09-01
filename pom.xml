@@ -318,28 +318,19 @@
                             <rules>
                                 <rule>
                                     <!-- Floor, not target. Coverage differs by
-                                         OS (some TestFX/UI tests are skipped
-                                         off-macOS), so the floor must clear
-                                         the lowest platform with ~5pp margin.
-                                         History: 2026-07 introduction, macOS
-                                         54.6% / Windows 46%; after the parser,
-                                         dashboard and i18n test additions
-                                         macOS measures 59.3%. Windows was the
-                                         binding constraint until the engine
-                                         lifecycle suite stopped being Unix-only
-                                         (its fixtures, not the code, were the
-                                         limit) — that leg now runs 568 tests
-                                         instead of ~524, so the floor moves off
-                                         0.45, where it sat ~14pp below the
-                                         measured value and could not have
-                                         caught a real regression. Raise this as
+                                         OS because platform-specific tests are
+                                         skipped. The 2026-09 main baseline is
+                                         64.2% on macOS; the cross-platform CI
+                                         runs 859 tests but skips 55 on Windows
+                                         versus 6 on macOS. Keep enough headroom
+                                         for that spread and raise this floor as
                                          coverage grows. -->
                                     <element>BUNDLE</element>
                                     <limits>
                                         <limit>
                                             <counter>LINE</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.52</minimum>
+                                            <minimum>0.55</minimum>
                                         </limit>
                                     </limits>
                                 </rule>
