@@ -31,7 +31,8 @@ $tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
 $installLog = Join-Path $tempRoot 'tunl-msi-install.log'
 $uninstallLog = Join-Path $tempRoot 'tunl-msi-uninstall.log'
 $shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Tunl\Tunl.lnk'
-$installedExe = $null
+$appRoot = Join-Path $env:LOCALAPPDATA 'Tunl'
+$installedExe = Join-Path $appRoot 'Tunl.exe'
 $installed = $false
 
 function Invoke-MsiExec {
@@ -56,17 +57,10 @@ try {
     Invoke-MsiExec -Action install -LogPath $installLog
     $installed = $true
 
-    $programs = Join-Path $env:LOCALAPPDATA 'Programs'
-    $executables = @(Get-ChildItem $programs -Filter 'Tunl.exe' -File -Recurse)
-    if ($executables.Count -ne 1) {
-        throw "[windows-msi-smoke] expected one installed Tunl.exe, found $($executables.Count)"
-    }
-    $installedExe = $executables[0]
-    $appRoot = $installedExe.Directory.FullName
     $runtime = Join-Path $appRoot 'runtime\bin\java.exe'
     $config = Join-Path $appRoot 'app\Tunl.cfg'
 
-    foreach ($required in @($runtime, $config, $shortcut)) {
+    foreach ($required in @($installedExe, $runtime, $config, $shortcut)) {
         if (-not (Test-Path $required)) {
             throw "[windows-msi-smoke] installed payload is missing: $required"
         }
@@ -99,8 +93,8 @@ try {
     if ($installed) {
         Write-Host "[windows-msi-smoke] uninstalling $msi"
         Invoke-MsiExec -Action uninstall -LogPath $uninstallLog
-        if ($installedExe -and (Test-Path $installedExe.FullName)) {
-            throw "[windows-msi-smoke] Tunl.exe remains after uninstall: $($installedExe.FullName)"
+        if (Test-Path $installedExe) {
+            throw "[windows-msi-smoke] Tunl.exe remains after uninstall: $installedExe"
         }
         if (Test-Path $shortcut) {
             throw "[windows-msi-smoke] Start Menu shortcut remains after uninstall: $shortcut"
