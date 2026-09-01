@@ -6,8 +6,13 @@ desktop** — no CI job, no VM. This checklist is the pragmatic substitute:
 walk the Windows items by hand on a Windows 10/11 machine before tagging, plus
 a few quick cross-platform confirmations.
 
-Tag only after the `v*`-tagged `release.yml` run is green and all installers
-are attached to the release.
+The workflow keeps a tagged release as a draft until every job is green, all
+four installers and updater signatures are attached, and the exact asset
+manifest has been verified. A failed job therefore leaves a draft to diagnose,
+not a partial public release.
+
+GitHub exposes the uploaded AUR `.SRCINFO` as `default.SRCINFO`; the final
+manifest check deliberately uses that release-asset name.
 
 ## Cutting the release (tagging)
 
@@ -35,17 +40,17 @@ Verify what the workflow will actually read, before or after pushing:
 gh api "repos/dbelokursky/tunl/git/tags/$(gh api repos/dbelokursky/tunl/git/ref/tags/vX.Y.Z -q .object.sha)" -q .message
 ```
 
-`notes.txt` layout (see the v1.4.0 release for the house style — Russian, these
-sections). The first line is the title, then a blank line, then the body:
+`notes.txt` layout (repository release notes are written in English). The first
+line is the title, then a blank line, then the body:
 
 ```text
-vX.Y.Z — короткий заголовок
+vX.Y.Z — concise release title
                                   <- blank line
-## Что нового
+## What's new
 - ...
-## Исправления
+## Fixes
 - ...
-## Установка
+## Installation
 - macOS (Apple Silicon): `tunl_X.Y.Z.dmg`
 - Windows 10/11 x64: `tunl_X.Y.Z.msi`
 - Debian/Ubuntu amd64: `tunl_X.Y.Z_amd64.deb`
@@ -113,5 +118,5 @@ Run on a real Windows 10/11 x64 box, ideally a clean user profile.
 - [ ] **In-app updater** — with the new release published, "Check for updates"
       sees it (compares `latest` from the GitHub Releases API to the running
       version).
-- [ ] **Downloads** — all three installers (DMG / MSI / DEB) download from the
-      Releases page and open.
+- [ ] **Downloads** — all four installers (DMG / MSI / amd64 DEB / arm64 DEB)
+      and their `.sig` files download from the Releases page.

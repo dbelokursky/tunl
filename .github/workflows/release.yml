@@ -10,6 +10,8 @@ jobs:
   # the moment the tag lands. softprops/action-gh-release does not read the tag
   # itself, so we extract it once here and every release job below passes these
   # outputs as name/body — idempotent, since each job sets the same values.
+  # Platform jobs upload into a draft. Only publish-release makes it public,
+  # after signatures and the complete asset manifest have been verified.
   # Extraction goes through the GitHub API; see the step comment for why git
   # cannot be trusted for this.
   prepare-release:
@@ -27,8 +29,8 @@ jobs:
         # always returns the real tag object, and needs no checkout at all.
         #
         # A lightweight tag has ref.object.type == "commit" and carries no
-        # annotation; leave both outputs empty then, so action-gh-release falls
-        # back to its own defaults instead of pasting in a commit message.
+        # annotation. Fail closed: release notes are part of the release, not an
+        # optional decoration that may silently disappear.
         #
         # IMPORTANT when tagging: `git tag -a --cleanup=verbatim -F notes`.
         # The default cleanup drops lines starting with '#', which would strip
@@ -42,16 +44,23 @@ jobs:
           obj_type="$(printf '%s' "$ref_json" | jq -r '.object.type')"
           obj_sha="$(printf '%s' "$ref_json" | jq -r '.object.sha')"
 
-          message=""
-          if [ "$obj_type" = "tag" ]; then
-            message="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${obj_sha}" -q '.message')"
-          else
-            echo "::warning::${GITHUB_REF_NAME} is a lightweight tag — release notes left empty"
+          if ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tag must match vMAJOR.MINOR.PATCH: $GITHUB_REF_NAME"
+            exit 1
           fi
+          if [ "$obj_type" != "tag" ]; then
+            echo "::error::${GITHUB_REF_NAME} is a lightweight tag. Releases require an annotated tag."
+            exit 1
+          fi
+          message="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${obj_sha}" -q '.message')"
 
           # First line is the title; everything after the blank line is the body.
           title="$(printf '%s\n' "$message" | head -n 1)"
           notes="$(printf '%s\n' "$message" | tail -n +2 | sed '1{/^$/d;}')"
+          if [ -z "$title" ] || [ -z "$notes" ]; then
+            echo "::error::Annotated tag must contain a title, a blank line, and release notes."
+            exit 1
+          fi
 
           {
             printf 'title=%s\n' "$title"
@@ -96,6 +105,21 @@ jobs:
         # real-binary smoke suite (version match, `sing-box check` on every
         # config shape, live run with clash_api + http-inbound probes).
         run: mvn test -Psmoke -Dtest=SingBoxRealBinarySmokeTest
+      - name: Validate macOS signing configuration
+        run: |
+          set -euo pipefail
+          vars=(
+            MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD MACOS_SIGN_IDENTITY
+            MACOS_NOTARY_KEY_BASE64 MACOS_NOTARY_KEY_ID MACOS_NOTARY_ISSUER_ID
+          )
+          present=0
+          for var in "${vars[@]}"; do
+            [[ -n "${!var}" ]] && present=$((present + 1))
+          done
+          if (( present != 0 && present != ${#vars[@]} )); then
+            echo "::error::macOS signing is partially configured. Set all six secrets or none."
+            exit 1
+          fi
       # --- Optional code signing (dormant until the secrets exist). ---
       - name: Import Developer ID certificate
         if: ${{ env.MACOS_CERTIFICATE_P12_BASE64 != '' }}
@@ -110,6 +134,8 @@ jobs:
             -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$KPW" "$KEYCHAIN" >/dev/null
+          security find-identity -v -p codesigning "$KEYCHAIN" \
+            | grep -F "$MACOS_SIGN_IDENTITY" >/dev/null
           # Add the signing keychain to the user search list (word-split of the
           # existing list is intentional).
           # shellcheck disable=SC2046
@@ -130,10 +156,13 @@ jobs:
             --key "$RUNNER_TEMP/notary.p8" --key-id "$MACOS_NOTARY_KEY_ID" \
             --issuer "$MACOS_NOTARY_ISSUER_ID" --wait
           xcrun stapler staple dist/*.dmg
+          xcrun stapler validate dist/*.dmg
+          spctl -a -t open --context context:primary-signature dist/*.dmg
       - uses: softprops/action-gh-release@v2
         with:
           name: ${{ needs.prepare-release.outputs.title }}
           body: ${{ needs.prepare-release.outputs.notes }}
+          draft: true
           files: dist/*.dmg
 
   # Windows twin of the job above: same gates (fat JAR, real-binary smoke),
@@ -170,6 +199,16 @@ jobs:
         # The MSI must never ship a core the generator can't drive: the same
         # real-binary smoke suite as macOS, running the bundled sing-box.exe.
         run: mvn -B test -Psmoke "-Dtest=SingBoxRealBinarySmokeTest"
+      - name: Validate Windows signing configuration
+        shell: pwsh
+        run: |
+          $configured = @(
+            $env:WINDOWS_CERTIFICATE_PFX_BASE64,
+            $env:WINDOWS_SIGN_PASSWORD
+          ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+          if ($configured.Count -ne 0 -and $configured.Count -ne 2) {
+            throw 'Windows signing is partially configured. Set both secrets or neither.'
+          }
       # Optional: materialize the signing cert from a secret; package-windows.ps1
       # signs the MSI only when WINDOWS_SIGN_PFX is set. No-op otherwise.
       - name: Prepare code-signing certificate
@@ -181,10 +220,19 @@ jobs:
           "WINDOWS_SIGN_PFX=$pfx" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Create MSI with jpackage
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1 -Version "$($env:GITHUB_REF_NAME -replace '^v', '')"
+      - name: Verify Windows signature
+        if: ${{ env.WINDOWS_CERTIFICATE_PFX_BASE64 != '' }}
+        shell: pwsh
+        run: |
+          & signtool verify /pa /v (Get-ChildItem dist -Filter '*.msi').FullName
+          if ($LASTEXITCODE -ne 0) {
+            throw "signtool verification failed with exit code $LASTEXITCODE"
+          }
       - uses: softprops/action-gh-release@v2
         with:
           name: ${{ needs.prepare-release.outputs.title }}
           body: ${{ needs.prepare-release.outputs.notes }}
+          draft: true
           files: dist/*.msi
 
   # Linux twin: same gates (fat JAR, real-binary smoke), same shared
@@ -221,6 +269,7 @@ jobs:
         with:
           name: ${{ needs.prepare-release.outputs.title }}
           body: ${{ needs.prepare-release.outputs.notes }}
+          draft: true
           files: dist/*.deb
 
   # arm64 twin of release-linux on GitHub's free arm runners: same gates
@@ -256,6 +305,7 @@ jobs:
         with:
           name: ${{ needs.prepare-release.outputs.title }}
           body: ${{ needs.prepare-release.outputs.notes }}
+          draft: true
           files: dist/*.deb
 
   # Sign every installer with the project release key, so the in-app updater
@@ -296,9 +346,16 @@ jobs:
           chmod 600 "$KEY"
           trap 'rm -f "$KEY"' EXIT
 
-          gh release view "$GITHUB_REF_NAME" --json assets \
-            --jq '.assets[].name | select(test("\\.(dmg|msi|deb)$"))' \
-          | while read -r asset; do
+          V="${GITHUB_REF_NAME#v}"
+          assets=(
+            "tunl_${V}.dmg"
+            "tunl_${V}.msi"
+            "tunl_${V}_amd64.deb"
+            "tunl_${V}_arm64.deb"
+          )
+          PUB="$RUNNER_TEMP/release.pub.pem"
+          openssl pkey -in "$KEY" -pubout -out "$PUB"
+          for asset in "${assets[@]}"; do
               gh release download "$GITHUB_REF_NAME" -p "$asset" \
                 -O "$RUNNER_TEMP/$asset" --clobber
               hex=$(sha256sum "$RUNNER_TEMP/$asset" | awk '{print $1}')
@@ -308,9 +365,12 @@ jobs:
               openssl pkeyutl -sign -rawin -inkey "$KEY" \
                 -in "$RUNNER_TEMP/message" -out "$RUNNER_TEMP/signature"
               base64 -w0 "$RUNNER_TEMP/signature" > "$RUNNER_TEMP/$asset.sig"
+              base64 -d "$RUNNER_TEMP/$asset.sig" > "$RUNNER_TEMP/signature.verify"
+              openssl pkeyutl -verify -rawin -pubin -inkey "$PUB" \
+                -in "$RUNNER_TEMP/message" -sigfile "$RUNNER_TEMP/signature.verify"
               gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/$asset.sig" --clobber
               echo "signed $asset"
-            done
+          done
 
   # Fill the Homebrew cask and AUR PKGBUILD templates with this release's
   # version and asset checksums, and attach the ready-to-use files to the
@@ -343,20 +403,57 @@ jobs:
         with:
           name: ${{ needs.prepare-release.outputs.title }}
           body: ${{ needs.prepare-release.outputs.notes }}
+          draft: true
           files: |
             packaging/homebrew/tunl.rb
             packaging/aur/PKGBUILD
             packaging/aur/.SRCINFO
 
-  # Keep the Releases page tidy: once all three installers are attached, delete
+  # A release is invisible to users until every installer, updater signature,
+  # and package-manager file exists. This avoids a public partial release while
+  # parallel upload/signing jobs are still running or after one has failed.
+  publish-release:
+    needs: [prepare-release, sign-release, update-packaging]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Verify the asset manifest and publish the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          V="${GITHUB_REF_NAME#v}"
+          expected=$(printf '%s\n' \
+            "default.SRCINFO" \
+            "PKGBUILD" \
+            "tunl.rb" \
+            "tunl_${V}.dmg" \
+            "tunl_${V}.dmg.sig" \
+            "tunl_${V}.msi" \
+            "tunl_${V}.msi.sig" \
+            "tunl_${V}_amd64.deb" \
+            "tunl_${V}_amd64.deb.sig" \
+            "tunl_${V}_arm64.deb" \
+            "tunl_${V}_arm64.deb.sig" | sort)
+          actual=$(gh release view "$GITHUB_REF_NAME" --json assets \
+            --jq '.assets[].name' | sort)
+          if ! diff -u <(printf '%s\n' "$expected") <(printf '%s\n' "$actual"); then
+            echo "::error::Release asset manifest is incomplete or contains unexpected files."
+            exit 1
+          fi
+          gh release edit "$GITHUB_REF_NAME" --draft=false
+          echo "Published verified release $GITHUB_REF_NAME"
+
+  # Keep the Releases page tidy: once all four installers are attached, delete
   # every real release older than the 5 newest. The rolling dev-latest
   # prerelease and any draft are never counted or touched. Git tags are kept
   # (no --cleanup-tag), so version history stays intact and any pruned build
   # can be rebuilt from its tag — only the Releases-page entry and its uploaded
-  # installers go. Runs after the three release jobs so it never races the
-  # upload of the release it's pruning around.
+  # installers go. Runs only after the verified draft is made public.
   prune-old-releases:
-    needs: [release-macos, release-windows, release-linux, release-linux-arm64]
+    needs: publish-release
     runs-on: ubuntu-latest
     permissions:
       contents: write
