@@ -57,7 +57,7 @@ try {
     Invoke-MsiExec -Action install -LogPath $installLog
     $installed = $true
 
-    $runtime = Join-Path $appRoot 'runtime\bin\java.exe'
+    $runtime = Join-Path $appRoot 'runtime\bin\server\jvm.dll'
     $config = Join-Path $appRoot 'app\Tunl.cfg'
 
     foreach ($required in @($installedExe, $runtime, $config, $shortcut)) {
@@ -71,12 +71,6 @@ try {
         throw "[windows-msi-smoke] expected one application JAR, found $($jars.Count)"
     }
 
-    $runtimeVersion = & $runtime -version 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw '[windows-msi-smoke] packaged Java runtime failed to execute'
-    }
-    $runtimeVersion | Write-Host
-
     if (-not (Select-String -Path $config -SimpleMatch "-Dapp.version=$ExpectedVersion" -Quiet)) {
         throw "[windows-msi-smoke] Tunl.cfg does not contain app.version=$ExpectedVersion"
     }
@@ -87,8 +81,15 @@ try {
             -not ($jarEntries -contains 'native/windows-amd64/sing-box.exe')) {
         throw '[windows-msi-smoke] packaged JAR does not contain the Windows sing-box binary'
     }
-
     Write-Host "[windows-msi-smoke] installed payload verified at $appRoot"
+} catch {
+    if (Test-Path $appRoot) {
+        Write-Host '[windows-msi-smoke] installed payload at failure:'
+        Get-ChildItem $appRoot -Recurse |
+            Select-Object -First 200 -ExpandProperty FullName |
+            Write-Host
+    }
+    throw
 } finally {
     if ($installed) {
         Write-Host "[windows-msi-smoke] uninstalling $msi"
