@@ -2,8 +2,8 @@
 .SYNOPSIS
     Builds the Windows MSI from the shaded JAR via jpackage. Windows
     counterpart to package-dmg.sh, shared by the two CI paths so they can
-    never drift: build.yml packages merges to main (workflow artifact),
-    release.yml packages tagged releases.
+    never drift: build.yml packages pull requests and merges (workflow
+    artifact), release.yml packages tagged releases.
 
 .PARAMETER Version
     Human-readable version passed to the app via -Dapp.version

@@ -228,6 +228,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "signtool verification failed with exit code $LASTEXITCODE"
           }
+      - name: Smoke-test MSI install and uninstall
+        shell: pwsh
+        run: ./scripts/windows-msi-smoke.ps1 -MsiPath 'dist\*.msi' -ExpectedVersion ($env:GITHUB_REF_NAME -replace '^v', '')
       - uses: softprops/action-gh-release@v2
         with:
           name: ${{ needs.prepare-release.outputs.title }}
