@@ -1,10 +1,11 @@
 # Manual pre-release checklist
 
 CI (`build.yml`, the `-Psmoke` real-binary suite) and the Linux VM QA
-(`scripts/linux-vm-qa.sh`) cover a lot, but **nothing exercises a real Windows
-desktop** — no CI job, no VM. This checklist is the pragmatic substitute:
-walk the Windows items by hand on a Windows 10/11 machine before tagging, plus
-a few quick cross-platform confirmations.
+(`scripts/linux-vm-qa.sh`) cover a lot. Windows CI also installs and uninstalls
+the built MSI and checks its runtime, embedded core, version, and shortcut.
+However, it does **not** exercise an interactive Windows desktop, UAC, TUN, or
+the live system proxy. Walk those items by hand on Windows 10/11 before tagging,
+plus the cross-platform confirmations below.
 
 The workflow keeps a tagged release as a draft until every job is green, all
 four installers and updater signatures are attached, and the exact asset
@@ -61,7 +62,7 @@ The version comes wholly from the tag (`pom.xml` stays `-SNAPSHOT`). To fix note
 after the fact: `gh release edit vX.Y.Z --notes-file notes.txt` — immune to the
 `#` stripping, since it doesn't go through Git.
 
-## Windows (manual — no CI/VM covers this)
+## Windows (manual desktop/network coverage)
 
 Run on a real Windows 10/11 x64 box, ideally a clean user profile.
 

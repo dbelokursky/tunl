@@ -97,10 +97,12 @@ jobs:
           key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
       - run: mvn -B clean verify -Psmoke
 
-  # ========= Packaging: merges to main only, after that OS's tests =========
+  # ========= Packaging: after that OS's tests ==============================
   # Each produces an installable artifact (14 days) so any main commit can be
-  # tried without cutting a release. Tagged releases build their installers
-  # in release.yml through the same scripts.
+  # tried without cutting a release. Windows also packages on PRs because its
+  # MSI install/uninstall smoke test is the only automated installer check.
+  # Tagged releases build their installers in release.yml through the same
+  # scripts.
 
   package-macos:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -132,7 +134,6 @@ jobs:
           if-no-files-found: error
 
   package-windows:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test-windows
     runs-on: windows-latest
     steps:
@@ -153,6 +154,8 @@ jobs:
       - run: mvn -B package -DskipTests
       - name: Package MSI
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1 -Version "1.0.0-dev-$($env:GITHUB_SHA.Substring(0,7))" -MsiVersion "1.0.${{ github.run_number }}"
+      - name: Smoke-test MSI install and uninstall
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-msi-smoke.ps1 -MsiPath "dist\*.msi" -ExpectedVersion "1.0.0-dev-$($env:GITHUB_SHA.Substring(0,7))"
       - uses: actions/upload-artifact@v7
         with:
           name: vless-client-windows-${{ github.sha }}
