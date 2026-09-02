@@ -67,6 +67,49 @@ jobs:
             printf 'notes<<NOTES_EOF_28f1\n%s\nNOTES_EOF_28f1\n' "$notes"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Require the tag to point at a green commit on main
+        # The release jobs build with -DskipTests: they run the real-binary
+        # smoke suite and nothing else, so nothing in this workflow would notice
+        # a failing unit test, a SpotBugs finding or a coverage regression.
+        # Re-running the full verify four times here would cost four platform
+        # matrices per release for a result that already exists — the merge
+        # commit on main was gated on exactly those checks. So verify the
+        # provenance instead: the tag must be on main, and that commit's
+        # required checks must have passed.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_REF_NAME}" -q '.sha')"
+
+          # compare/main...<sha> reports how <sha> relates to main. "identical"
+          # is the tip; "behind" means it is an ancestor. "ahead" or "diverged"
+          # means the tag was cut from something that never landed.
+          status="$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${sha}" -q '.status')"
+          case "$status" in
+            identical|behind) ;;
+            *)
+              echo "::error::${GITHUB_REF_NAME} (${sha}) is not on main (compare says '${status}'). Release only from merged commits."
+              exit 1
+              ;;
+          esac
+
+          runs="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${sha}/check-runs?per_page=100")"
+          failed=0
+          for check in test-macos test-linux test-linux-arm test-windows; do
+            concl="$(printf '%s' "$runs" | jq -r --arg n "$check" \
+              '[.check_runs[] | select(.name == $n)] | sort_by(.completed_at) | last | .conclusion // "missing"')"
+            if [ "$concl" != "success" ]; then
+              echo "::error::Required check '${check}' on ${sha} is '${concl}', not success."
+              failed=1
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::Refusing to release. If the checks are simply too old to still exist, re-run them on ${sha} first."
+            exit 1
+          fi
+          echo "Tag ${GITHUB_REF_NAME} is ${sha}, on main, with all four required checks green."
+
   release-macos:
     needs: prepare-release
     runs-on: macos-latest
