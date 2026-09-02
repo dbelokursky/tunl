@@ -452,16 +452,20 @@ public class UpdateManager {
                 return null;
             }
 
-            if (ReleaseSignature.enforced() && !signatureIsValid(url, actualDigest)) {
-                // Same rule as a digest mismatch: an installer that fails a
-                // check must not be left where it could still be run.
-                Files.deleteIfExists(target);
-                return null;
+            String signature = "";
+            if (ReleaseSignature.enforced()) {
+                signature = fetchValidSignature(url, actualDigest);
+                if (signature == null) {
+                    // Same rule as a digest mismatch: an installer that fails a
+                    // check must not be left where it could still be run.
+                    Files.deleteIfExists(target);
+                    return null;
+                }
             }
 
             try {
                 staging.stage(new com.vlessclient.platform.PendingUpdate(
-                        versionFromReleaseUrl(url), target, expectedDigest));
+                        versionFromReleaseUrl(url), target, expectedDigest), signature);
             } catch (IOException | IllegalArgumentException e) {
                 // An installer nothing records is an installer nothing will
                 // ever apply; don't leave it on disk pretending otherwise.
@@ -503,7 +507,7 @@ public class UpdateManager {
      * @param digest the {@code sha256:<hex>} of the downloaded bytes
      * @return true when a valid signature was found
      */
-    private boolean signatureIsValid(String url, String digest) {
+    private String fetchValidSignature(String url, String digest) {
         String signatureUrl = url + ReleaseSignature.SIGNATURE_SUFFIX;
         try {
             HttpResponse<String> response = httpClient.send(
@@ -517,19 +521,22 @@ public class UpdateManager {
             if (response.statusCode() != 200) {
                 log.error("Update rejected: no signature at {} (status {})",
                         signatureUrl, response.statusCode());
-                return false;
+                return null;
             }
             if (!ReleaseSignature.verifyDigest(digest, response.body())) {
                 log.error("Update rejected: signature does not match {}", url);
-                return false;
+                return null;
             }
-            return true;
+            // Returned rather than discarded: it is stored with the staged
+            // installer so the check can be repeated before the file is run,
+            // against something the staging directory cannot forge.
+            return response.body();
         } catch (IOException | InterruptedException e) {
             log.error("Update rejected: cannot fetch signature: {}", e.getMessage());
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
-            return false;
+            return null;
         }
     }
 
