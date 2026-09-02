@@ -1,8 +1,5 @@
 package com.vlessclient.platform;
 
-import java.io.IOException;
-import java.util.List;
-
 /**
  * Whether sing-box's {@code set_system_proxy} can actually work on this host.
  *
@@ -39,14 +36,6 @@ public interface SystemProxySupport {
      * is there. A missing binary or schema reports false.
      */
     static SystemProxySupport gnomeProxySchemaPresent(CommandRunner runner) {
-        return () -> {
-            try {
-                return runner.run(List.of(
-                        "gsettings", "get", "org.gnome.system.proxy", "mode"))
-                        .exitCode() == 0;
-            } catch (IOException e) {
-                return false;
-            }
-        };
+        return new GnomeProxySchemaProbe(runner);
     }
 }
