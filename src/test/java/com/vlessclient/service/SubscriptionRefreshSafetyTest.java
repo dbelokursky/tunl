@@ -137,6 +137,48 @@ class SubscriptionRefreshSafetyTest {
     }
 
     @Nested
+    @DisplayName("a body it can only partly parse")
+    class PartiallyParseableBody {
+
+        @Test
+        @DisplayName("keeps every server and removes none")
+        void oneUnreadableLineDoesNotDeleteItsServer() {
+            Subscription sub = withTwoServersImported();
+
+            // The provider still lists both servers, but one line is in a shape
+            // the parser cannot read - a format change, a new field, a
+            // truncated response. To diffAndApply that line is indistinguishable
+            // from a server that was withdrawn.
+            service.serve("vless://uuid1@server1.example:443?security=tls&type=tcp#One\n"
+                    + "vless://uuid2@server2.example:443?security=tls&type=zzz-unknown\n");
+            service.refreshSubscription(sub.getId());
+
+            assertThat(configStore.getServers())
+                    .as("a line we could not read is not evidence the server is gone")
+                    .hasSize(2);
+            assertThat(sub.getServerIds())
+                    .as("and the kept server must stay owned by this subscription, "
+                            + "or no later refresh or delete could ever reach it")
+                    .hasSize(2);
+        }
+
+        @Test
+        @DisplayName("does not report the refresh as clean")
+        void aPartialParseIsRecorded() {
+            Subscription sub = withTwoServersImported();
+
+            service.serve("vless://uuid1@server1.example:443?security=tls&type=tcp#One\n"
+                    + "not a share link at all\n");
+            service.refreshSubscription(sub.getId());
+
+            assertThat(sub.getLastError())
+                    .as("silently succeeding is how this used to lose servers")
+                    .isNotBlank()
+                    .contains("no servers were removed");
+        }
+    }
+
+    @Nested
     @DisplayName("what a refresh costs")
     class RefreshCost {
 
