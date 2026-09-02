@@ -332,6 +332,20 @@
                                             <value>COVEREDRATIO</value>
                                             <minimum>0.55</minimum>
                                         </limit>
+                                        <!-- Branches were ungated, so an error
+                                             path could lose all its coverage
+                                             without failing the build - the
+                                             lines around it stay covered. The
+                                             2026-09 main baseline is 52.99%
+                                             (2092/3948) on macOS; this floor
+                                             keeps the same ~11pp headroom the
+                                             LINE floor above leaves for the
+                                             Windows/Linux spread. -->
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.42</minimum>
+                                        </limit>
                                     </limits>
                                 </rule>
                             </rules>
