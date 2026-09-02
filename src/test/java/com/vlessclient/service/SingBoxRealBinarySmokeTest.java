@@ -359,12 +359,33 @@ class SingBoxRealBinarySmokeTest {
      * inbound (including the TUN adapter) started, so reaching it proves the
      * adapter came up.</p>
      */
+    /**
+     * Gives one test its own wintun adapter, so it cannot collide with another.
+     *
+     * <p>Both Windows TUN cases used the production name and address, and a
+     * killed sing-box does not get to remove its adapter — {@code destroy()} on
+     * Windows is a hard kill, and the teardown here has no adapter sweep. So
+     * whether the second case could create its adapter depended on how fast
+     * the OS tore down the first one: "set ipv4 address: The object already
+     * exists", intermittently, on a required check. Distinct identities remove
+     * the ordering dependency instead of relying on cleanup being timely.</p>
+     *
+     * <p>Addresses are in 172.31/16 — well away from the GitHub runner's own
+     * 10.x network, and {@code auto_route} is off in both cases anyway.</p>
+     */
+    private static void withOwnTunIdentity(AppSettings settings, String name, String cidr) {
+        settings.setTunInterfaceName(name);
+        settings.setTunIpv4Address(cidr);
+    }
+
     @Test
     @EnabledOnOs(OS.WINDOWS)
     void tunAdapterComesUpOnWindows() throws Exception {
         int clashPort = freePort();
         AppSettings settings = new AppSettings();
         settings.setProxyMode(ProxyMode.TUN);
+        // Its own adapter identity — see withOwnTunIdentity.
+        withOwnTunIdentity(settings, "TunlSmokeAdapter", "172.31.240.1/30");
         settings.setSocksPort(freePort());
         settings.setHttpPort(freePort());
         settings.setClashApiPort(clashPort);
@@ -419,6 +440,7 @@ class SingBoxRealBinarySmokeTest {
     void windowsTunLauncherFullCycle() throws Exception {
         AppSettings settings = new AppSettings();
         settings.setProxyMode(ProxyMode.TUN);
+        withOwnTunIdentity(settings, "TunlSmokeLauncher", "172.31.241.1/30");
         settings.setSocksPort(freePort());
         settings.setHttpPort(freePort());
         settings.setClashApiPort(freePort());
