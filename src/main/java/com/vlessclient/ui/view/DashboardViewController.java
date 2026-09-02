@@ -717,6 +717,17 @@ public class DashboardViewController {
                 statusLabel.setText(I18n.get("error.connection.failed", e.getMessage()));
                 showError(I18n.get("dashboard.error.start.title"), e.getMessage());
             });
+        } catch (RuntimeException e) {
+            // An unexpected internal failure. It used to escape this virtual
+            // thread entirely: the finally below still re-enabled the button,
+            // so the user was left clicking a live Connect while the status
+            // pill sat on CONNECTING and nothing reached tunl.log. No modal
+            // here on purpose — a raw exception string is not actionable, and
+            // showAndWait deadlocks a headless run.
+            log.error("Unexpected failure while starting sing-box", e);
+            String detail = e.getMessage() != null ? e.getMessage() : e.toString();
+            Platform.runLater(() ->
+                    statusLabel.setText(I18n.get("error.connection.failed", detail)));
         } finally {
             Platform.runLater(this::refreshConnectButtonAvailability);
         }
