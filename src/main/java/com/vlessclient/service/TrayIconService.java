@@ -59,6 +59,18 @@ public class TrayIconService {
     private static final long UNINSTALL_TIMEOUT_MS = 1_000L;
 
     private final SingBoxEngine singBoxEngine;
+
+    /**
+     * The server list as AWT sees it.
+     *
+     * <p>{@code configStore.getServers()} is a JavaFX-owned {@code
+     * ObservableList}; copying it from the AWT event thread races every
+     * FX-side mutation. Blocking AWT on the FX thread to copy it safely would
+     * be worse — {@link #uninstall()} blocks the other way, waiting for AWT —
+     * so the copy is taken on the FX thread, where the listener below already
+     * runs, and AWT only ever reads this field.</p>
+     */
+    private volatile List<ServerConfig> serverSnapshot = List.of();
     private final ConfigStore configStore;
     private final ConnectionService connectionService;
     private final TunnelHealthState healthState;
@@ -145,10 +157,17 @@ public class TrayIconService {
 
         // Listen for server list changes.
         if (configStore != null) {
-            serversListener = change -> refreshTrayState();
+            // Fires on the FX thread, which is the only place the list may be
+            // read; snapshot there and hand AWT the copy.
+            serversListener = change -> {
+                serverSnapshot = List.copyOf(configStore.getServers());
+                refreshTrayState();
+            };
             configStore.getServers().addListener(serversListener);
+            serverSnapshot = FxExecutor.get(() -> List.copyOf(configStore.getServers()));
         }
     }
+
 
     /**
      * Removes the tray icon from the system tray and detaches listeners.
@@ -301,7 +320,7 @@ public class TrayIconService {
             return;
         }
 
-        List<ServerConfig> snapshot = List.copyOf(configStore.getServers());
+        List<ServerConfig> snapshot = serverSnapshot;
         if (snapshot.isEmpty()) {
             MenuItem none = new MenuItem(I18n.get("tray.servers.none"));
             none.setEnabled(false);
