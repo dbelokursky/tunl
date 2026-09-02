@@ -108,6 +108,14 @@ public class TrafficMonitor {
         }
     }
 
+    /** Puts the live readouts back to zero on the FX thread. */
+    private void zeroSpeeds() {
+        Platform.runLater(() -> {
+            uploadSpeed.set(0);
+            downloadSpeed.set(0);
+        });
+    }
+
     /**
      * Stops the monitor and resets the live speed properties to zero. Blocks
      * until the streaming thread has finished so callers can treat it as
@@ -117,7 +125,12 @@ public class TrafficMonitor {
         Thread thread;
         synchronized (lifecycleLock) {
             if (!running.getAndSet(false)) {
-                // Not running; nothing to do.
+                // Already stopped - but not necessarily by us. The SSE thread
+                // clears the flag itself when the stream ends, so a dropped
+                // connection lands here and the early return used to leave the
+                // last speeds frozen on the dashboard, reading as live traffic
+                // over a tunnel that is gone.
+                zeroSpeeds();
                 return;
             }
             thread = sseThread;
@@ -133,10 +146,7 @@ public class TrafficMonitor {
                 Thread.currentThread().interrupt();
             }
         }
-        Platform.runLater(() -> {
-            uploadSpeed.set(0);
-            downloadSpeed.set(0);
-        });
+        zeroSpeeds();
         log.info("TrafficMonitor stop requested");
     }
 
