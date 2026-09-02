@@ -1,5 +1,7 @@
 package com.vlessclient.service;
 
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ProxyMode;
@@ -148,5 +150,33 @@ class SystemProxyAutoConfigTest {
     void engineToleratesMalformedConfig() {
         assertThat(SingBoxEngine.extractSystemProxyTarget("not json at all")).isNull();
         assertThat(SingBoxEngine.extractSystemProxyTarget("{}")).isNull();
+    }
+
+    @Test
+    void hostWithoutProxyStore_saysSoInTheLog() throws Exception {
+        // Omitting the flag is correct; doing it silently is what turned a
+        // Linux box with no GNOME schema into "connected, healthy, and not
+        // proxying anything" with nothing in the log to diagnose.
+        ch.qos.logback.classic.Logger generatorLog =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory
+                        .getLogger(SingBoxConfigGenerator.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        generatorLog.addAppender(appender);
+        try {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(ProxyMode.SYSTEM_PROXY);
+            settings.setSystemProxyAutoConfig(true);
+
+            new SingBoxConfigGenerator(() -> false).generate(server(), settings);
+
+            assertThat(appender.list)
+                    .extracting(ILoggingEvent::getFormattedMessage)
+                    .anySatisfy(m -> assertThat(m)
+                            .contains("no usable OS proxy store")
+                            .contains(String.valueOf(settings.getHttpPort())));
+        } finally {
+            generatorLog.detachAppender(appender);
+        }
     }
 }
