@@ -239,10 +239,10 @@ public class SubscriptionService {
         }
 
         String content;
-        List<ServerConfig> fetchedServers;
+        ParsedContent parsed;
         try {
             content = fetchContent(sub.getUrl());
-            fetchedServers = parseContent(content);
+            parsed = parseContent(content);
         } catch (Exception e) {
             // Scrub before both sinks: the throw sites we control are already
             // redacted, but a message from the JDK (URI parse failures quote
@@ -267,6 +267,7 @@ public class SubscriptionService {
         //
         // A genuinely empty body is left alone: a provider really can shut all
         // its servers down, and that case has no ambiguity to protect against.
+        List<ServerConfig> fetchedServers = parsed.servers();
         if (fetchedServers.isEmpty() && content != null && !content.isBlank()) {
             log.warn("Subscription '{}' returned {} bytes with no recognizable "
                     + "server links; keeping the {} server(s) already stored",
@@ -292,10 +293,26 @@ public class SubscriptionService {
                         + "discarding the fetched result", sub.getName());
                 return;
             }
+            // A line the parser could not read looks exactly like a server the
+            // provider withdrew, and diffAndApply would delete it. That is the
+            // same "silently loses servers and reports success" shape the empty
+            // body is already guarded against, only partial - so on any skipped
+            // line, keep everything and say so instead of clearing lastError.
+            boolean partial = parsed.skipped() > 0;
             applyNamePrefix(fetchedServers, sub.getName());
-            diffAndApply(sub, fetchedServers);
+            diffAndApply(sub, fetchedServers, !partial);
 
-            sub.setLastError(null);
+            if (partial) {
+                log.warn("Subscription '{}': {} line(s) could not be parsed; "
+                        + "keeping every stored server and removing none",
+                        sub.getName(), parsed.skipped());
+                sub.setLastError(parsed.skipped() + " line(s) in the response could "
+                        + "not be read, so no servers were removed. The provider "
+                        + "may have changed format, or the response may be "
+                        + "truncated.");
+            } else {
+                sub.setLastError(null);
+            }
             sub.setLastRefreshedAt(System.currentTimeMillis());
             saveSubscriptions();
             log.info("Refreshed subscription '{}': {} servers",
@@ -409,9 +426,9 @@ public class SubscriptionService {
         return response.body();
     }
 
-    List<ServerConfig> parseContent(String content) {
+    ParsedContent parseContent(String content) {
         if (content == null || content.isBlank()) {
-            return List.of();
+            return new ParsedContent(List.of(), 0);
         }
         String trimmed = content.trim();
 
@@ -419,9 +436,9 @@ public class SubscriptionService {
         if (looksLikeBase64(trimmed)) {
             try {
                 String decoded = decodeBase64(trimmed);
-                List<ServerConfig> servers = parseLines(decoded);
-                if (!servers.isEmpty()) {
-                    return servers;
+                ParsedContent parsed = parseLines(decoded);
+                if (!parsed.servers().isEmpty()) {
+                    return parsed;
                 }
             } catch (Exception e) {
                 log.debug("Base64 decode failed, trying other formats: {}", e.getMessage());
@@ -429,13 +446,13 @@ public class SubscriptionService {
         }
 
         // Try plain text lines (share links)
-        List<ServerConfig> servers = parseLines(trimmed);
-        if (!servers.isEmpty()) {
-            return servers;
+        ParsedContent parsed = parseLines(trimmed);
+        if (!parsed.servers().isEmpty()) {
+            return parsed;
         }
 
         log.warn("Could not parse subscription content (length={})", trimmed.length());
-        return List.of();
+        return parsed;
     }
 
     private boolean looksLikeBase64(String text) {
@@ -469,8 +486,18 @@ public class SubscriptionService {
         }
     }
 
-    private List<ServerConfig> parseLines(String text) {
+    /**
+     * What a fetched body yielded: the servers, and how many non-blank lines
+     * were rejected. The count is the whole point — a line the parser cannot
+     * read is indistinguishable, to {@code diffAndApply}, from a server the
+     * provider withdrew.
+     */
+    record ParsedContent(List<ServerConfig> servers, int skipped) {
+    }
+
+    private ParsedContent parseLines(String text) {
         List<ServerConfig> servers = new ArrayList<>();
+        int skipped = 0;
         String[] lines = text.split("\\r?\\n");
         for (String line : lines) {
             String trimmedLine = line.trim();
@@ -481,10 +508,11 @@ public class SubscriptionService {
                 ServerConfig server = shareLinkParser.parse(trimmedLine);
                 servers.add(server);
             } catch (Exception e) {
+                skipped++;
                 log.debug("Skipping unparseable line: {}", e.getMessage());
             }
         }
-        return servers;
+        return new ParsedContent(servers, skipped);
     }
 
     private void applyNamePrefix(List<ServerConfig> servers, String subscriptionName) {
@@ -494,7 +522,16 @@ public class SubscriptionService {
         }
     }
 
-    private void diffAndApply(Subscription sub, List<ServerConfig> fetchedServers) {
+    /**
+     * Reconciles the stored servers of one subscription with what the fetch
+     * returned, in a single batched save.
+     *
+     * @param allowRemovals false when the fetch was only partly understood, in
+     *                      which case a server missing from the fetched set is
+     *                      kept and stays tracked by this subscription
+     */
+    private void diffAndApply(Subscription sub, List<ServerConfig> fetchedServers,
+            boolean allowRemovals) {
         // Build map of existing servers by matching key (address+port+protocol)
         Map<String, ServerConfig> existingByKey = sub.getServerIds().stream()
                 .map(configStore::getServerById)
@@ -531,7 +568,14 @@ public class SubscriptionService {
         // Remove servers that are no longer in the subscription
         for (Map.Entry<String, ServerConfig> entry : existingByKey.entrySet()) {
             if (!fetchedByKey.containsKey(entry.getKey())) {
-                removals.add(entry.getValue().getId());
+                if (allowRemovals) {
+                    removals.add(entry.getValue().getId());
+                } else {
+                    // Keeping the server is only half of it: dropping its id
+                    // here would leave it in the store with no subscription
+                    // owning it, which no later refresh or delete could reach.
+                    newServerIds.add(entry.getValue().getId());
+                }
             }
         }
 
