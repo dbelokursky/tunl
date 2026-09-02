@@ -74,6 +74,7 @@ public final class HealthCheckCoordinator {
     private final Supplier<SingBoxEngine> engineSupplier;
     private final Runnable connectAction;
     private final Runnable disconnectAction;
+    private final Runnable reconnectAction;
 
     // Health-check / auto-reconnect state. All mutated only on the FX thread.
     private PauseTransition reconnectDelay;
@@ -106,7 +107,8 @@ public final class HealthCheckCoordinator {
             TunnelHealthState healthState,
             Supplier<SingBoxEngine> engineSupplier,
             Runnable connectAction,
-            Runnable disconnectAction) {
+            Runnable disconnectAction,
+            Runnable reconnectAction) {
         this.healthCard = controls.healthCard();
         this.healthSummaryLabel = controls.healthSummaryLabel();
         this.serviceStatusList = controls.serviceStatusList();
@@ -117,6 +119,7 @@ public final class HealthCheckCoordinator {
         this.engineSupplier = engineSupplier;
         this.connectAction = connectAction;
         this.disconnectAction = disconnectAction;
+        this.reconnectAction = reconnectAction;
     }
 
     private SingBoxEngine engine() {
@@ -360,11 +363,11 @@ public final class HealthCheckCoordinator {
     }
 
     /**
-     * Tears down and re-establishes the tunnel. The DISCONNECTED that our own
-     * stop() produces is suppressed so it is not treated as a user disconnect;
-     * a short gap lets the old process fully exit before reconnecting. The
-     * subsequent CONNECTED drives the next reachability check, continuing the
-     * loop.
+     * Restarts the tunnel through {@code ConnectionService.reconnect}, which
+     * waits for the old core to exit before starting the new one. The
+     * DISCONNECTED that our own stop produces is suppressed for the whole
+     * restart so it is not mistaken for a user disconnect. The subsequent
+     * CONNECTED drives the next reachability check, continuing the loop.
      */
     private void performReconnect() {
         reconnectDelay = null;
@@ -376,13 +379,24 @@ public final class HealthCheckCoordinator {
                 reconnectAttempt);
         hideReconnectBanner();
         suppressDisconnectHandling = true;
-        disconnectAction.run();
-        PauseTransition gap = new PauseTransition(Duration.millis(700));
-        gap.setOnFinished(e -> {
-            suppressDisconnectHandling = false;
-            connectAction.run();
+        // One restart, not disconnect-then-hope. The old 700 ms gap was shorter
+        // than a stop can take — SingBoxEngine waits out a SIGTERM grace period
+        // and can force-kill after it — so the suppress flag was already back
+        // to false when DISCONNECTED finally arrived. onConnectionStateChanged
+        // then treated the app's own restart as a user disconnect: attempt
+        // counter reset, card hidden, health published as UNMONITORED, in the
+        // middle of a reconnect this class had started. ConnectionService
+        // .reconnect waits for the old core itself, and its javadoc names this
+        // caller as the reason it exists.
+        Thread.startVirtualThread(() -> {
+            try {
+                reconnectAction.run();
+            } finally {
+                // Held for the whole restart, and cleared on the FX thread
+                // because that is where every other read of it happens.
+                Platform.runLater(() -> suppressDisconnectHandling = false);
+            }
         });
-        gap.play();
     }
 
     /**

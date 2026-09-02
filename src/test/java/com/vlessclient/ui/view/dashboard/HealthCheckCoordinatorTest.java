@@ -152,6 +152,9 @@ class HealthCheckCoordinatorTest {
         healthState = new TunnelHealthState();
     }
 
+    /** Replaced by the reconnect tests; a no-op everywhere else. */
+    private Runnable reconnectAction = () -> { };
+
     private HealthCheckCoordinator coordinatorWith(ServiceReachabilityChecker checker) {
         return new HealthCheckCoordinator(
                 new HealthCheckCoordinator.Controls(
@@ -160,7 +163,8 @@ class HealthCheckCoordinatorTest {
                 healthState,
                 () -> engine,
                 () -> { },
-                () -> { });
+                () -> { },
+                reconnectAction);
     }
 
     private static AppSettings healthSettings(boolean autoReconnect, HealthCheckTarget... targets) {
@@ -271,6 +275,47 @@ class HealthCheckCoordinatorTest {
         assertThat(healthCard.isVisible()).isTrue();
         assertThat(statusList.getChildren()).isEmpty();
         assertThat(summaryLabel.getText()).isEqualTo(I18n.get("health.no.targets"));
+    }
+
+    @Test
+    void aRestartInProgressIsNotTreatedAsAUserDisconnect() throws Exception {
+        AppSettings settings = healthSettings(true, new HealthCheckTarget("a", "https://a"));
+        settings.setHealthCheckDelaySeconds(1);
+        FakeChecker checker = new FakeChecker();
+        checker.results = List.of(probe("a", false));
+
+        // Stands in for a slow stop: SingBoxEngine waits out a SIGTERM grace
+        // period and can force-kill after it, so DISCONNECTED can arrive
+        // seconds into the restart. The old 700 ms gap had already cleared the
+        // guard by then, and the coordinator tore its own reconnect down.
+        CountDownLatch restartStarted = new CountDownLatch(1);
+        CountDownLatch releaseRestart = new CountDownLatch(1);
+        reconnectAction = () -> {
+            restartStarted.countDown();
+            try {
+                releaseRestart.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        };
+        HealthCheckCoordinator coordinator = coordinatorWith(checker);
+
+        connectAndCheck(coordinator);
+        assertThat(banner.isVisible()).isTrue();
+        assertThat(restartStarted.await(5, TimeUnit.SECONDS))
+                .as("the countdown must reach the restart")
+                .isTrue();
+
+        // The engine reports the stop while the restart is still in flight.
+        engine.state.set(ConnectionState.DISCONNECTED);
+        onFxAndWait(() ->
+                coordinator.onConnectionStateChanged(ConnectionState.DISCONNECTED));
+
+        assertThat(healthCard.isVisible())
+                .as("this DISCONNECTED is the app's own restart, not the user's")
+                .isTrue();
+
+        releaseRestart.countDown();
     }
 
     @Test

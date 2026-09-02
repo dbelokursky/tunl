@@ -491,9 +491,9 @@
     <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='6' name='installer' register='1'/>
     <SourceLine endBytecode='6' classname='com.vlessclient.ui.view.SingBoxInstallerDialog' start='54' end='54' sourcepath='com/vlessclient/ui/view/SingBoxInstallerDialog.java' sourcefile='SingBoxInstallerDialog.java' startBytecode='6' primary='true'/>
   </BugInstance>
-  <BugInstance instanceOccurrenceNum='0' instanceHash='77891cdd1bcdcc7d4515352b43debf89' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='1266c9cfe7b4e33e99024af3de2ee5c9' cweid='374' rank='18' abbrev='EI2' category='MALICIOUS_CODE' priority='2' type='EI_EXPOSE_REP2' instanceOccurrenceMax='0'>
     <Class classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' primary='true'/>
-    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='(Lcom/vlessclient/ui/view/dashboard/HealthCheckCoordinator$Controls;Lcom/vlessclient/service/ServiceReachabilityChecker;Lcom/vlessclient/service/TunnelHealthState;Ljava/util/function/Supplier;Ljava/lang/Runnable;Ljava/lang/Runnable;)V' name='&lt;init&gt;' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='(Lcom/vlessclient/ui/view/dashboard/HealthCheckCoordinator$Controls;Lcom/vlessclient/service/ServiceReachabilityChecker;Lcom/vlessclient/service/TunnelHealthState;Ljava/util/function/Supplier;Ljava/lang/Runnable;Ljava/lang/Runnable;Ljava/lang/Runnable;)V' name='&lt;init&gt;' primary='true'/>
     <Field isStatic='false' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' signature='Lcom/vlessclient/service/TunnelHealthState;' name='healthState' primary='true'/>
     <LocalVariable role='LOCAL_VARIABLE_NAMED' pc='51' name='healthState' register='3'/>
     <SourceLine endBytecode='51' classname='com.vlessclient.ui.view.dashboard.HealthCheckCoordinator' start='114' end='114' sourcepath='com/vlessclient/ui/view/dashboard/HealthCheckCoordinator.java' sourcefile='HealthCheckCoordinator.java' startBytecode='51' primary='true'/>
