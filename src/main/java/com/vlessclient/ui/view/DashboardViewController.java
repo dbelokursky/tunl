@@ -49,7 +49,7 @@ import org.slf4j.LoggerFactory;
  * Controller for the Dashboard view.
  * Displays connection status, real-time traffic stats, and latency testing.
  */
-public class DashboardViewController {
+public class DashboardViewController implements ViewShownAware {
 
     private static final Logger log = LoggerFactory.getLogger(DashboardViewController.class);
 
@@ -93,6 +93,14 @@ public class DashboardViewController {
 
     private final ObjectProperty<ConnectionState> connectionState =
             new SimpleObjectProperty<>(ConnectionState.DISCONNECTED);
+
+    /**
+     * Set only while {@link #onViewShown()} copies persisted settings into the
+     * combos. Both value listeners persist, and the server-selection one also
+     * restarts a live tunnel — neither may fire for a change the user did not
+     * make.
+     */
+    private boolean syncingFromSettings;
 
     private ServerConfig activeServer;
     private SingBoxEngine singBoxEngine;
@@ -475,6 +483,9 @@ public class DashboardViewController {
 
         proxyModeCombo.valueProperty().addListener((obs, oldVal, newVal) -> {
             updateProxyModeWarning(newVal);
+            if (syncingFromSettings) {
+                return;
+            }
             try {
                 ConfigStore configStore = ServiceLocator.get(ConfigStore.class);
                 AppSettings settings = configStore.getSettings();
@@ -525,7 +536,7 @@ public class DashboardViewController {
         }
 
         serverSelectionCombo.valueProperty().addListener((obs, oldVal, newVal) -> {
-            if (newVal == null || newVal == oldVal) {
+            if (newVal == null || newVal == oldVal || syncingFromSettings) {
                 return;
             }
             try {
@@ -570,6 +581,43 @@ public class DashboardViewController {
             proxyModeWarning.setVisible(false);
             proxyModeWarning.setManaged(false);
         }
+    }
+
+    /**
+     * Re-reads the two persisted selectors every time the dashboard is shown.
+     *
+     * <p>{@code initialize()} runs once per app run, but the proxy mode and the
+     * server-selection policy have three other writers: Settings, and the MCP
+     * tools {@code set_proxy_mode} and {@code connect}. Without this the combo
+     * kept the value it was born with — and because the TUN warning is only
+     * refreshed from the change listener, a mode switched to TUN elsewhere was
+     * displayed as System proxy with no warning, while the next Connect raised
+     * an admin prompt and built a TUN device. Routing itself was always right:
+     * {@code ConnectionService.connect} reads the mode live.</p>
+     *
+     * <p>It also removes a trap. Re-picking the displayed-but-stale value fired
+     * no change event, so the click that looked like it fixed the mode wrote
+     * nothing at all.</p>
+     */
+    @Override
+    public void onViewShown() {
+        AppSettings settings;
+        try {
+            settings = ServiceLocator.get(AppSettings.class);
+        } catch (IllegalArgumentException e) {
+            log.warn("Could not re-read settings on view show");
+            return;
+        }
+        syncingFromSettings = true;
+        try {
+            proxyModeCombo.setValue(settings.getProxyMode());
+            serverSelectionCombo.setValue(settings.getServerSelection());
+        } finally {
+            syncingFromSettings = false;
+        }
+        // setValue is a no-op when the value already matches, so the listener
+        // that normally maintains this may not have run.
+        updateProxyModeWarning(proxyModeCombo.getValue());
     }
 
     /**
