@@ -11,6 +11,7 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
 
@@ -42,6 +43,20 @@ public class DashboardProxyModeSyncTest extends ApplicationTest {
         } catch (Exception e) {
             // Tolerate service initialization failures in headless CI.
         }
+    }
+
+    /**
+     * Pins the host verdict so these cases test mode syncing and nothing else.
+     *
+     * <p>Without it the result depends on the machine: on macOS/Windows
+     * {@code SystemProxySupport.current()} is always true, but on a Linux CI
+     * runner there is no GNOME schema, so SYSTEM_PROXY legitimately shows the
+     * "no OS proxy store" line and the assertion below flipped. Runs after
+     * TestFX's own setup, which is where {@code controller} is assigned.</p>
+     */
+    @BeforeEach
+    void pinHostProxyCapability() {
+        interact(() -> controller.setSystemProxySupport(() -> true));
     }
 
     @Override
