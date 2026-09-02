@@ -9,6 +9,7 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.ServerSelection;
 import com.vlessclient.model.TunnelHealth;
 import com.vlessclient.model.TunnelStatus;
+import com.vlessclient.platform.SystemProxySupport;
 import com.vlessclient.platform.UpdateApplier;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
@@ -101,6 +102,17 @@ public class DashboardViewController implements ViewShownAware {
      * make.
      */
     private boolean syncingFromSettings;
+
+    /**
+     * Host capability behind the SYSTEM_PROXY warning. A field so a test can
+     * force either verdict; on macOS/Windows the real one is always true, so
+     * the warning is Linux-only in practice.
+     */
+    private SystemProxySupport systemProxySupport = SystemProxySupport.current();
+
+    /** Cached: probing shells out to {@code gsettings}, and a host cannot
+     * grow a proxy store while the app runs. */
+    private Boolean systemProxyCapable;
 
     private ServerConfig activeServer;
     private SingBoxEngine singBoxEngine;
@@ -572,8 +584,9 @@ public class DashboardViewController implements ViewShownAware {
     }
 
     private void updateProxyModeWarning(ProxyMode mode) {
-        if (mode == ProxyMode.TUN) {
-            proxyModeWarning.setText(I18n.get("settings.tun.warning"));
+        String warning = warningFor(mode);
+        if (warning != null) {
+            proxyModeWarning.setText(warning);
             proxyModeWarning.setVisible(true);
             proxyModeWarning.setManaged(true);
         } else {
@@ -581,6 +594,48 @@ public class DashboardViewController implements ViewShownAware {
             proxyModeWarning.setVisible(false);
             proxyModeWarning.setManaged(false);
         }
+    }
+
+    /**
+     * The line to show under the mode selector, or null when there is nothing
+     * to say.
+     *
+     * <p>SYSTEM_PROXY is the default mode, and on a Linux box with no GNOME
+     * proxy schema the generator drops {@code set_system_proxy} — the tunnel
+     * comes up, the health card is green, and nothing is proxied OS-wide.
+     * That silence is the failure this app exists to prevent, so it gets a
+     * line telling the user where to point their apps instead.</p>
+     */
+    private String warningFor(ProxyMode mode) {
+        if (mode == ProxyMode.TUN) {
+            return I18n.get("settings.tun.warning");
+        }
+        if (mode == ProxyMode.SYSTEM_PROXY && !systemProxyCapable()) {
+            try {
+                AppSettings settings = ServiceLocator.get(AppSettings.class);
+                // As a String: MessageFormat would render an int through
+                // NumberFormat and turn port 8080 into "8,080".
+                return I18n.get("settings.proxy.system.unsupported",
+                        String.valueOf(settings.getHttpPort()));
+            } catch (IllegalArgumentException e) {
+                log.warn("Could not read the HTTP port for the proxy warning");
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private boolean systemProxyCapable() {
+        if (systemProxyCapable == null) {
+            systemProxyCapable = systemProxySupport.canAutoConfigure();
+        }
+        return systemProxyCapable;
+    }
+
+    /** Test seam: force the host verdict and drop the cached answer. */
+    void setSystemProxySupport(SystemProxySupport support) {
+        this.systemProxySupport = support;
+        this.systemProxyCapable = null;
     }
 
     /**
