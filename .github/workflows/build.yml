@@ -22,8 +22,8 @@ jobs:
   test-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
           java-version: '25'
           distribution: 'temurin'
@@ -32,7 +32,7 @@ jobs:
       # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
       # pins both the version and the SHA-256s, so a bump misses the cache and
       # re-downloads; bundle-singbox.sh verifies the checksum either way.
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.cache/vless-client-build
           key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
@@ -41,8 +41,8 @@ jobs:
   test-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
           java-version: '25'
           distribution: 'temurin'
@@ -51,7 +51,7 @@ jobs:
       # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
       # pins both the version and the SHA-256s, so a bump misses the cache and
       # re-downloads; bundle-singbox.sh verifies the checksum either way.
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.cache/vless-client-build
           key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
@@ -60,8 +60,8 @@ jobs:
   test-linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
           java-version: '25'
           distribution: 'temurin'
@@ -70,7 +70,7 @@ jobs:
       # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
       # pins both the version and the SHA-256s, so a bump misses the cache and
       # re-downloads; bundle-singbox.sh verifies the checksum either way.
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.cache/vless-client-build
           key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
@@ -81,8 +81,8 @@ jobs:
   test-linux-arm:
     runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
           java-version: '25'
           distribution: 'temurin'
@@ -91,7 +91,7 @@ jobs:
       # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
       # pins both the version and the SHA-256s, so a bump misses the cache and
       # re-downloads; bundle-singbox.sh verifies the checksum either way.
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.cache/vless-client-build
           key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
@@ -109,8 +109,8 @@ jobs:
     needs: test-macos
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
           java-version: '25'
           distribution: 'temurin'
@@ -119,14 +119,14 @@ jobs:
       # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
       # pins both the version and the SHA-256s, so a bump misses the cache and
       # re-downloads; bundle-singbox.sh verifies the checksum either way.
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.cache/vless-client-build
           key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
       - run: mvn -B package -DskipTests
       - name: Package DMG
         run: scripts/package-dmg.sh "1.0.0-dev-${GITHUB_SHA:0:7}" "1.0.${{ github.run_number }}"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vless-client-${{ github.sha }}
           path: dist/*.dmg
@@ -137,8 +137,8 @@ jobs:
     needs: test-windows
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
           java-version: '25'
           distribution: 'temurin'
@@ -147,7 +147,7 @@ jobs:
       # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
       # pins both the version and the SHA-256s, so a bump misses the cache and
       # re-downloads; bundle-singbox.sh verifies the checksum either way.
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.cache/vless-client-build
           key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
@@ -156,7 +156,7 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1 -Version "1.0.0-dev-$($env:GITHUB_SHA.Substring(0,7))" -MsiVersion "1.0.${{ github.run_number }}"
       - name: Smoke-test MSI install and uninstall
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-msi-smoke.ps1 -MsiPath "dist\*.msi" -ExpectedVersion "1.0.0-dev-$($env:GITHUB_SHA.Substring(0,7))"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vless-client-windows-${{ github.sha }}
           path: dist/*.msi
@@ -168,8 +168,8 @@ jobs:
     needs: test-linux
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
           java-version: '25'
           distribution: 'temurin'
@@ -178,14 +178,14 @@ jobs:
       # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
       # pins both the version and the SHA-256s, so a bump misses the cache and
       # re-downloads; bundle-singbox.sh verifies the checksum either way.
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.cache/vless-client-build
           key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
       - run: mvn -B package -DskipTests
       - name: Package DEB
         run: scripts/package-linux.sh "1.0.0-dev-${GITHUB_SHA:0:7}" "1.0.0+dev${{ github.run_number }}"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vless-client-linux-${{ github.sha }}
           path: dist/*.deb
@@ -197,8 +197,8 @@ jobs:
     needs: test-linux-arm
     runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
           java-version: '25'
           distribution: 'temurin'
@@ -207,14 +207,14 @@ jobs:
       # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
       # pins both the version and the SHA-256s, so a bump misses the cache and
       # re-downloads; bundle-singbox.sh verifies the checksum either way.
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.cache/vless-client-build
           key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
       - run: mvn -B package -DskipTests
       - name: Package DEB (arm64)
         run: scripts/package-linux.sh "1.0.0-dev-${GITHUB_SHA:0:7}" "1.0.0+dev${{ github.run_number }}"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vless-client-linux-arm-${{ github.sha }}
           path: dist/*.deb
@@ -235,8 +235,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: vless-client-*
           merge-multiple: true
