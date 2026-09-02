@@ -5,6 +5,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -195,9 +198,13 @@ class UpdateStagingTest {
         Path elsewhere = tempDir.resolve("elsewhere.dmg");
         Files.writeString(elsewhere, "something else entirely");
         Path marker = tempDir.resolve("staging").resolve("pending.json");
-        Files.writeString(marker, Files.readString(marker).replace(
-                update.installer().toAbsolutePath().toString(),
-                elsewhere.toAbsolutePath().toString()));
+        // Edited as JSON, not as text: a Windows path is backslash-escaped
+        // inside the file, so a string replace of the plain path silently
+        // matches nothing and the test passes without testing anything.
+        ObjectMapper mapper = JsonMapper.builder().build();
+        ObjectNode root = (ObjectNode) mapper.readTree(Files.readString(marker));
+        root.put("installer", elsewhere.toAbsolutePath().toString());
+        Files.writeString(marker, mapper.writeValueAsString(root));
 
         assertThat(staging.pending())
                 .as("the marker names the file we are about to run; it has to "
