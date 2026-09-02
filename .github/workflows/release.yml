@@ -72,17 +72,15 @@ jobs:
     runs-on: macos-latest
     permissions:
       contents: write
-    # Secrets are surfaced as job env because the `secrets` context is not
-    # allowed in step `if:` conditions — the steps gate on env instead. Each
-    # is empty until the secret exists (docs/SIGNING.md), so an unsigned
-    # release builds byte-for-byte as before.
+    # The `secrets` context is not allowed in step `if:`, so the steps gate on
+    # env — but only on these booleans. The secret values themselves stay out
+    # of the job environment and are handed to the individual steps that use
+    # them, so the third-party action at the end of this job never inherits a
+    # signing key. Both are false until the secrets exist (docs/SIGNING.md),
+    # so an unsigned release builds byte-for-byte as before.
     env:
-      MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
-      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
-      MACOS_NOTARY_KEY_BASE64: ${{ secrets.MACOS_NOTARY_KEY_BASE64 }}
-      MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
-      MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+      MACOS_SIGNING_CONFIGURED: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 != '' }}
+      MACOS_NOTARY_CONFIGURED: ${{ secrets.MACOS_NOTARY_KEY_BASE64 != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
@@ -106,6 +104,13 @@ jobs:
         # config shape, live run with clash_api + http-inbound probes).
         run: mvn test -Psmoke -Dtest=SingBoxRealBinarySmokeTest
       - name: Validate macOS signing configuration
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          MACOS_NOTARY_KEY_BASE64: ${{ secrets.MACOS_NOTARY_KEY_BASE64 }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
         run: |
           set -euo pipefail
           vars=(
@@ -122,7 +127,11 @@ jobs:
           fi
       # --- Optional code signing (dormant until the secrets exist). ---
       - name: Import Developer ID certificate
-        if: ${{ env.MACOS_CERTIFICATE_P12_BASE64 != '' }}
+        if: ${{ env.MACOS_SIGNING_CONFIGURED == 'true' }}
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
         run: |
           KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
           KPW="$(openssl rand -hex 20)"
@@ -146,10 +155,17 @@ jobs:
         # Staging + jpackage live in scripts/package-dmg.sh, shared with the
         # per-merge build in build.yml. sing-box is already baked into the
         # shaded JAR by scripts/bundle-singbox.sh during `mvn package`.
-        # MACOS_SIGN_IDENTITY (job env) is empty without the secret → unsigned.
+        # MACOS_SIGN_IDENTITY is empty without the secret → unsigned. The
+        # keychain path comes from GITHUB_ENV, set by the import step above.
+        env:
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
         run: scripts/package-dmg.sh "${GITHUB_REF_NAME#v}"
       - name: Notarize and staple the DMG
-        if: ${{ env.MACOS_NOTARY_KEY_BASE64 != '' }}
+        if: ${{ env.MACOS_NOTARY_CONFIGURED == 'true' }}
+        env:
+          MACOS_NOTARY_KEY_BASE64: ${{ secrets.MACOS_NOTARY_KEY_BASE64 }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
         run: |
           echo "$MACOS_NOTARY_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/notary.p8"
           xcrun notarytool submit dist/*.dmg \
@@ -173,11 +189,12 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
-    # Secrets via job env — the `secrets` context can't be used in step `if:`.
-    # Empty until the secret exists; the MSI is then unsigned as before.
+    # Only the gate lives in job env — the `secrets` context can't be used in
+    # step `if:`. The certificate and its password go to the individual steps
+    # that need them, so the third-party release action never inherits them.
+    # False until the secret exists; the MSI is then unsigned as before.
     env:
-      WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
-      WINDOWS_SIGN_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      WINDOWS_SIGNING_CONFIGURED: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
@@ -201,6 +218,9 @@ jobs:
         run: mvn -B test -Psmoke "-Dtest=SingBoxRealBinarySmokeTest"
       - name: Validate Windows signing configuration
         shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          WINDOWS_SIGN_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
           $configured = @(
             $env:WINDOWS_CERTIFICATE_PFX_BASE64,
@@ -212,16 +232,23 @@ jobs:
       # Optional: materialize the signing cert from a secret; package-windows.ps1
       # signs the MSI only when WINDOWS_SIGN_PFX is set. No-op otherwise.
       - name: Prepare code-signing certificate
-        if: ${{ env.WINDOWS_CERTIFICATE_PFX_BASE64 != '' }}
+        if: ${{ env.WINDOWS_SIGNING_CONFIGURED == 'true' }}
         shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
         run: |
           $pfx = Join-Path $env:RUNNER_TEMP 'sign.pfx'
           [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX_BASE64))
           "WINDOWS_SIGN_PFX=$pfx" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Create MSI with jpackage
+        # package-windows.ps1 signs only when WINDOWS_SIGN_PFX is set, which the
+        # step above writes to GITHUB_ENV; the password comes straight from the
+        # secret.
+        env:
+          WINDOWS_SIGN_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1 -Version "$($env:GITHUB_REF_NAME -replace '^v', '')"
       - name: Verify Windows signature
-        if: ${{ env.WINDOWS_CERTIFICATE_PFX_BASE64 != '' }}
+        if: ${{ env.WINDOWS_SIGNING_CONFIGURED == 'true' }}
         shell: pwsh
         run: |
           & signtool verify /pa /v (Get-ChildItem dist -Filter '*.msi').FullName
@@ -327,12 +354,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    # Secrets via job env — the `secrets` context can't be used in step `if:`.
-    env:
-      RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
     steps:
       - name: Sign installer assets
+        # This job has exactly one step and no third-party action, but the key
+        # still belongs to the step that uses it rather than the whole job.
         env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
