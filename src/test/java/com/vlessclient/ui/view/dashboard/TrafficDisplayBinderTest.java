@@ -72,7 +72,11 @@ class TrafficDisplayBinderTest {
         ServiceLocator.register(AppSettings.class, settings);
 
         RecordingMonitor monitor = new RecordingMonitor();
-        binderOver(monitor).onConnectionStateChanged(ConnectionState.CONNECTED);
+        TrafficDisplayBinder binder = binderOver(monitor);
+        binder.onConnectionStateChanged(ConnectionState.CONNECTED);
+        assertThat(binder.awaitIdle(10_000))
+                .as("the lifecycle call is queued off the caller now")
+                .isTrue();
 
         assertThat(monitor.startedPort).isEqualTo(19999);
         assertThat(monitor.startedSecret).isEqualTo("tok-xyz");
@@ -82,7 +86,11 @@ class TrafficDisplayBinderTest {
     @Test
     void disconnectedStopsMonitor() {
         RecordingMonitor monitor = new RecordingMonitor();
-        binderOver(monitor).onConnectionStateChanged(ConnectionState.DISCONNECTED);
+        TrafficDisplayBinder binder = binderOver(monitor);
+        binder.onConnectionStateChanged(ConnectionState.DISCONNECTED);
+        assertThat(binder.awaitIdle(10_000))
+                .as("the lifecycle call is queued off the caller now")
+                .isTrue();
 
         assertThat(monitor.stopped).isTrue();
         assertThat(monitor.startedPort).isEqualTo(-1);
@@ -91,7 +99,11 @@ class TrafficDisplayBinderTest {
     @Test
     void errorStopsMonitor() {
         RecordingMonitor monitor = new RecordingMonitor();
-        binderOver(monitor).onConnectionStateChanged(ConnectionState.ERROR);
+        TrafficDisplayBinder binder = binderOver(monitor);
+        binder.onConnectionStateChanged(ConnectionState.ERROR);
+        assertThat(binder.awaitIdle(10_000))
+                .as("the lifecycle call is queued off the caller now")
+                .isTrue();
 
         assertThat(monitor.stopped).isTrue();
     }
@@ -99,7 +111,11 @@ class TrafficDisplayBinderTest {
     @Test
     void connectingChangesNothing() {
         RecordingMonitor monitor = new RecordingMonitor();
-        binderOver(monitor).onConnectionStateChanged(ConnectionState.CONNECTING);
+        TrafficDisplayBinder binder = binderOver(monitor);
+        binder.onConnectionStateChanged(ConnectionState.CONNECTING);
+        assertThat(binder.awaitIdle(10_000))
+                .as("the lifecycle call is queued off the caller now")
+                .isTrue();
 
         assertThat(monitor.startedPort).isEqualTo(-1);
         assertThat(monitor.stopped).isFalse();

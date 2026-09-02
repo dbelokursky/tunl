@@ -528,8 +528,11 @@ public class VlessClientApp extends Application {
                         + "tray icon will report process state only");
             }
 
+            // Supplied, not captured: registerSingBoxEngine swaps the engine
+            // after an in-app core install.
             trayIconService = new TrayIconService(
-                    engine, configStore, connectionService, healthState, stage);
+                    () -> ServiceLocator.get(SingBoxEngine.class),
+                    configStore, connectionService, healthState, stage);
             ServiceLocator.register(TrayIconService.class, trayIconService);
             trayIconService.install();
         } catch (Throwable e) {
