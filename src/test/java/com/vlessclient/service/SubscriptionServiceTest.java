@@ -36,7 +36,7 @@ class SubscriptionServiceTest {
                 + "vless://uuid2@server2.com:443?security=tls&type=tcp#Server2\n";
         String base64 = Base64.getEncoder().encodeToString(links.getBytes(StandardCharsets.UTF_8));
 
-        List<ServerConfig> servers = service.parseContent(base64);
+        List<ServerConfig> servers = service.parseContent(base64).servers();
 
         assertThat(servers).hasSize(2);
         assertThat(servers.get(0).getAddress()).isEqualTo("server1.com");
@@ -49,7 +49,7 @@ class SubscriptionServiceTest {
         String content = "vless://uuid1@server1.com:443?security=tls&type=tcp#Server1\n"
                 + "vless://uuid2@server2.com:8443?security=tls&type=tcp#Server2\n";
 
-        List<ServerConfig> servers = service.parseContent(content);
+        List<ServerConfig> servers = service.parseContent(content).servers();
 
         assertThat(servers).hasSize(2);
         assertThat(servers.get(0).getName()).isEqualTo("Server1");
@@ -64,18 +64,22 @@ class SubscriptionServiceTest {
                 + "this is not a valid link\n"
                 + "vless://uuid2@server2.com:443?security=tls&type=tcp#AlsoGood\n";
 
-        List<ServerConfig> servers = service.parseContent(content);
+        SubscriptionService.ParsedContent parsed = service.parseContent(content);
 
-        assertThat(servers).hasSize(2);
-        assertThat(servers.get(0).getName()).isEqualTo("Good");
-        assertThat(servers.get(1).getName()).isEqualTo("AlsoGood");
+        assertThat(parsed.servers()).hasSize(2);
+        assertThat(parsed.servers().get(0).getName()).isEqualTo("Good");
+        assertThat(parsed.servers().get(1).getName()).isEqualTo("AlsoGood");
+        assertThat(parsed.skipped())
+                .as("the count is what stops a refresh from deleting the servers "
+                        + "those unread lines stood for")
+                .isEqualTo(1);
     }
 
     @Test
     void parseContent_emptyContent() {
-        assertThat(service.parseContent("")).isEmpty();
-        assertThat(service.parseContent(null)).isEmpty();
-        assertThat(service.parseContent("   ")).isEmpty();
+        assertThat(service.parseContent("").servers()).isEmpty();
+        assertThat(service.parseContent(null).servers()).isEmpty();
+        assertThat(service.parseContent("   ").servers()).isEmpty();
     }
 
     @Test
@@ -191,7 +195,7 @@ class SubscriptionServiceTest {
         String content = "vless://uuid1@vless.com:443?security=tls&type=tcp#VlessServer\n"
                 + "trojan://pass@trojan.com:443?security=tls&type=tcp#TrojanServer\n";
 
-        List<ServerConfig> servers = service.parseContent(content);
+        List<ServerConfig> servers = service.parseContent(content).servers();
 
         assertThat(servers).hasSize(2);
         assertThat(servers.get(0).getProtocol()).isEqualTo(Protocol.VLESS);
