@@ -576,7 +576,20 @@ public class VlessClientApp extends Application {
         }
     }
 
+    /**
+     * Routes anything that escapes a thread into {@code tunl.log}. The packaged
+     * app has no console — logback writes to CONSOLE and FILE, and jpackage
+     * discards stderr — so without this the default handler prints an uncaught
+     * failure to a stream nobody can read, and the report says "it just did
+     * nothing". Installed before {@code launch} so it also covers startup.
+     */
+    static void installUncaughtExceptionLogger() {
+        Thread.setDefaultUncaughtExceptionHandler((thread, error) ->
+                log.error("Uncaught exception on thread {}", thread.getName(), error));
+    }
+
     public static void main(String[] args) {
+        installUncaughtExceptionLogger();
         launch(args);
     }
 }
