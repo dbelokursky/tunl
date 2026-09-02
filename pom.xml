@@ -27,7 +27,11 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.minimum.version>3.9.0</maven.minimum.version>
         <maven.compiler.release>25</maven.compiler.release>
-        <javafx.version>28-ea+6</javafx.version>
+        <!-- Must stay on a GA line. 28-ea was an early-access build in a
+             product handed to users: EA artifacts are unsupported, can be
+             withdrawn from Central, and change under a fixed coordinate. 26.0.2
+             is the newest GA - the 27 line exists only as -ea. -->
+        <javafx.version>26.0.2</javafx.version>
         <junit.version>6.1.3</junit.version>
         <jackson.version>3.2.2</jackson.version>
         <logback.version>1.6.3</logback.version>

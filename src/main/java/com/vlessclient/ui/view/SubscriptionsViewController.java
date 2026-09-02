@@ -106,10 +106,28 @@ public class SubscriptionsViewController {
         urlField.setPromptText("https://example.com/subscribe/...");
         urlField.setPrefWidth(350);
 
+        // Non-blocking warning: a plaintext http subscription is
+        // MITM-injectable, but some providers only offer http, so this shows
+        // the risk while the URL is http and never stops the user.
+        Label httpWarning = new Label(I18n.get("subscriptions.http.warning"));
+        httpWarning.setWrapText(true);
+        httpWarning.setMaxWidth(350);
+        // Literal amber: the dialog is not inside the themed scene graph, so a
+        // looked-up -c-warn colour could fail to resolve.
+        httpWarning.setStyle("-fx-text-fill: #ef6c00; -fx-font-size: 11px;");
+        httpWarning.setVisible(false);
+        httpWarning.setManaged(false);
+        urlField.textProperty().addListener((obs, oldVal, newVal) -> {
+            boolean insecure = SubscriptionService.isInsecureHttpUrl(newVal);
+            httpWarning.setVisible(insecure);
+            httpWarning.setManaged(insecure);
+        });
+
         grid.add(new Label(I18n.get("subscriptions.name.label")), 0, 0);
         grid.add(nameField, 1, 0);
         grid.add(new Label(I18n.get("subscriptions.url.label")), 0, 1);
         grid.add(urlField, 1, 1);
+        grid.add(httpWarning, 1, 2);
 
         dialog.getDialogPane().setContent(grid);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
