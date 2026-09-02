@@ -235,4 +235,24 @@ class SubscriptionServiceTest {
             return fetchedContent;
         }
     }
+
+    @Test
+    void parseContent_urlSafeBase64() {
+        // A non-ASCII server name is what puts a byte pattern into the payload
+        // that encodes to '+' in the standard alphabet and '-' in the URL-safe
+        // one. Providers do ship names like this, and the standard decoder
+        // rejects the result outright - so without the fallback the whole
+        // subscription reads as unparseable and imports nothing.
+        String content = "vless://uuid1@server1.example:443?security=tls&type=tcp#\u0422\u043e\u043a\u0438\u043e\n";
+        String encoded = Base64.getUrlEncoder()
+                .encodeToString(content.getBytes(StandardCharsets.UTF_8));
+        assertThat(encoded)
+                .as("the fixture must actually exercise the URL-safe alphabet")
+                .containsAnyOf("-", "_");
+
+        List<ServerConfig> servers = service.parseContent(encoded).servers();
+
+        assertThat(servers).hasSize(1);
+        assertThat(servers.get(0).getName()).isEqualTo("\u0422\u043e\u043a\u0438\u043e");
+    }
 }
