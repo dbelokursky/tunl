@@ -5,6 +5,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -29,8 +33,13 @@ class UpdateStagingTest {
         return new PendingUpdate("1.6.0", installer, UpdateStaging.sha256(installer));
     }
 
+    /**
+     * Signature check stubbed to accept: these cases are about the marker and
+     * the bytes. The real check has its own tests below - a forged signature
+     * must be rejected, and that one needs no private key.
+     */
     private UpdateStaging staging() {
-        return new UpdateStaging(tempDir.resolve("staging"));
+        return new UpdateStaging(tempDir.resolve("staging"), (digest, sig) -> true);
     }
 
     @Test
@@ -38,7 +47,7 @@ class UpdateStagingTest {
         UpdateStaging staging = staging();
         PendingUpdate update = installerOf("installer bytes");
 
-        staging.stage(update);
+        staging.stage(update, "test-signature");
 
         assertThat(staging.pending()).hasValueSatisfying(read -> {
             assertThat(read.version()).isEqualTo("1.6.0");
@@ -56,7 +65,7 @@ class UpdateStagingTest {
     void markerPointingAtAMissingFileIsDiscarded() throws Exception {
         UpdateStaging staging = staging();
         PendingUpdate update = installerOf("installer bytes");
-        staging.stage(update);
+        staging.stage(update, "test-signature");
 
         Files.delete(update.installer());
 
@@ -69,7 +78,7 @@ class UpdateStagingTest {
     void verifyRejectsAnInstallerChangedAfterItWasStaged() throws Exception {
         UpdateStaging staging = staging();
         PendingUpdate update = installerOf("installer bytes");
-        staging.stage(update);
+        staging.stage(update, "test-signature");
         assertThat(staging.verify(update)).isTrue();
 
         // The window this closes: the file waits in a user-writable directory
@@ -96,7 +105,7 @@ class UpdateStagingTest {
     @Test
     void attemptsAreCountedAcrossReads() throws Exception {
         UpdateStaging staging = staging();
-        staging.stage(installerOf("installer bytes"));
+        staging.stage(installerOf("installer bytes"), "test-signature");
         assertThat(staging.attempts()).isZero();
 
         staging.recordAttempt();
@@ -109,7 +118,7 @@ class UpdateStagingTest {
     void clearRemovesInstallerMarkerAndApplierLeftovers() throws Exception {
         UpdateStaging staging = staging();
         PendingUpdate update = installerOf("installer bytes");
-        staging.stage(update);
+        staging.stage(update, "test-signature");
         Files.writeString(staging.dir().resolve("apply-update.log"), "relay output");
 
         staging.clear();
@@ -131,5 +140,75 @@ class UpdateStagingTest {
         assertThat(staging.attempts()).isZero();
         staging.recordAttempt();
         assertThat(staging.pending()).isEmpty();
+    }
+
+    // --- The staged update must not be able to certify itself ---
+
+    /** The production wiring: the real Ed25519 check against the compiled-in key. */
+    private UpdateStaging realCheckStaging() {
+        return new UpdateStaging(tempDir.resolve("staging"));
+    }
+
+    @Test
+    @DisplayName("a marker that rewrites the digest cannot re-sign it")
+    void aRewrittenDigestIsRejected() throws Exception {
+        UpdateStaging staging = realCheckStaging();
+        PendingUpdate original = installerOf("the genuine installer");
+        staging.stage(original, "not-a-real-signature");
+
+        // The whole attack in three lines: whoever can replace the installer in
+        // this directory can also rewrite the digest in the marker beside it,
+        // so a digest-only check passes. What they cannot do is produce a
+        // signature over the new digest without the release private key.
+        Path installer = original.installer();
+        Files.writeString(installer, "a hostile installer");
+        Path marker = tempDir.resolve("staging").resolve("pending.json");
+        String rewritten = Files.readString(marker)
+                .replace(original.digest(), UpdateStaging.sha256(installer));
+        Files.writeString(marker, rewritten);
+
+        PendingUpdate staged = staging.pending().orElseThrow();
+        assertThat(UpdateStaging.sha256(staged.installer()))
+                .as("the file and the marker agree, which used to be enough")
+                .isEqualTo(staged.digest());
+        assertThat(staging.verify(staged))
+                .as("but the release never signed this digest")
+                .isFalse();
+    }
+
+    @Test
+    @DisplayName("an unsigned marker is refused rather than trusted")
+    void aMarkerWithNoSignatureIsRejected() throws Exception {
+        UpdateStaging staging = realCheckStaging();
+        PendingUpdate update = installerOf("installer bytes");
+        staging.stage(update, "");
+
+        assertThat(staging.verify(staging.pending().orElseThrow())).isFalse();
+    }
+
+    @Test
+    @DisplayName("an installer outside the staging directory is refused")
+    void anInstallerOutsideTheDirectoryIsRefused() throws Exception {
+        UpdateStaging staging = staging();
+        PendingUpdate update = installerOf("installer bytes");
+        staging.stage(update, "test-signature");
+
+        // A rewritten marker pointing anywhere on the machine — the file it
+        // names is what this app executes at the next start.
+        Path elsewhere = tempDir.resolve("elsewhere.dmg");
+        Files.writeString(elsewhere, "something else entirely");
+        Path marker = tempDir.resolve("staging").resolve("pending.json");
+        // Edited as JSON, not as text: a Windows path is backslash-escaped
+        // inside the file, so a string replace of the plain path silently
+        // matches nothing and the test passes without testing anything.
+        ObjectMapper mapper = JsonMapper.builder().build();
+        ObjectNode root = (ObjectNode) mapper.readTree(Files.readString(marker));
+        root.put("installer", elsewhere.toAbsolutePath().toString());
+        Files.writeString(marker, mapper.writeValueAsString(root));
+
+        assertThat(staging.pending())
+                .as("the marker names the file we are about to run; it has to "
+                        + "stay inside the directory this app owns")
+                .isEmpty();
     }
 }

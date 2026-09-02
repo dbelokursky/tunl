@@ -11,6 +11,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Optional;
+import java.util.function.BiPredicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.core.JacksonException;
@@ -37,6 +38,7 @@ public final class UpdateStaging {
     private static final String MARKER_NAME = "pending.json";
 
     private final Path dir;
+    private final BiPredicate<String, String> signatureCheck;
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
     /** Stages updates under the per-user data directory. */
@@ -45,7 +47,18 @@ public final class UpdateStaging {
     }
 
     UpdateStaging(Path dir) {
+        this(dir, ReleaseSignature::verifyDigest);
+    }
+
+    /**
+     * Test seam: how a staged digest's signature is checked. Tests cannot
+     * produce a real one — the private key is the release maintainer's — so
+     * they inject the verdict. The case that matters most needs no key and
+     * uses the real check: a forged signature must be rejected.
+     */
+    UpdateStaging(Path dir, BiPredicate<String, String> signatureCheck) {
         this.dir = dir;
+        this.signatureCheck = signatureCheck;
     }
 
     /**
@@ -65,12 +78,17 @@ public final class UpdateStaging {
      * @param update the downloaded and verified update
      * @throws IOException if the marker cannot be written
      */
-    public void stage(PendingUpdate update) throws IOException {
+    public void stage(PendingUpdate update, String signatureBase64) throws IOException {
         Files.createDirectories(dir);
         ObjectNode marker = objectMapper.createObjectNode();
         marker.put("version", update.version());
         marker.put("installer", update.installer().toAbsolutePath().toString());
         marker.put("digest", update.digest());
+        // The release signature over that digest. Without it the marker
+        // certifies itself: whoever can rewrite the installer can rewrite the
+        // digest beside it, and the check before execution passes. The
+        // signature cannot be produced without the release private key.
+        marker.put("signature", signatureBase64 == null ? "" : signatureBase64);
         marker.put("attempts", 0);
         marker.put("stagedAt", System.currentTimeMillis());
         Files.writeString(dir.resolve(MARKER_NAME), objectMapper.writeValueAsString(marker));
@@ -152,6 +170,15 @@ public final class UpdateStaging {
         try {
             JsonNode root = objectMapper.readTree(Files.readString(marker));
             Path installer = Path.of(root.path("installer").asString(""));
+            // The marker names the file this app will execute, so the name has
+            // to stay inside the directory this app owns. Without this a
+            // rewritten marker can point anywhere on the machine.
+            if (!installer.toAbsolutePath().normalize()
+                    .startsWith(dir.toAbsolutePath().normalize())) {
+                log.error("Staged installer {} is outside {}, refusing it", installer, dir);
+                clear();
+                return Optional.empty();
+            }
             if (!Files.isRegularFile(installer)) {
                 log.warn("Staged installer {} is gone, clearing the marker", installer);
                 clear();
@@ -180,6 +207,15 @@ public final class UpdateStaging {
      * @return true when the file still hashes to the recorded digest
      */
     public boolean verify(PendingUpdate update) {
+        // First: is this digest one the release publisher actually signed? The
+        // hash comparison below only proves the file matches the marker, and
+        // the marker is as writable as the installer next to it.
+        if (ReleaseSignature.enforced()
+                && !signatureCheck.test(update.digest(), stagedSignature())) {
+            log.error("Staged update {} has no valid release signature for its "
+                    + "digest; refusing to run it", update.version());
+            return false;
+        }
         try {
             String actual = sha256(update.installer());
             if (actual.equalsIgnoreCase(update.digest())) {
@@ -191,6 +227,20 @@ public final class UpdateStaging {
         } catch (IOException | NoSuchAlgorithmException e) {
             log.error("Cannot verify staged installer: {}", e.getMessage());
             return false;
+        }
+    }
+
+    /** The release signature recorded beside the staged digest, or "". */
+    private String stagedSignature() {
+        Path marker = dir.resolve(MARKER_NAME);
+        if (!Files.isRegularFile(marker)) {
+            return "";
+        }
+        try {
+            return objectMapper.readTree(Files.readString(marker))
+                    .path("signature").asString("");
+        } catch (IOException | JacksonException e) {
+            return "";
         }
     }
 

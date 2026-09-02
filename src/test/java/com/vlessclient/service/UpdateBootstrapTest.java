@@ -44,8 +44,9 @@ class UpdateBootstrapTest {
         }
     }
 
+    /** Signature check stubbed to accept; UpdateStagingTest covers the real one. */
     private UpdateStaging staging() {
-        return new UpdateStaging(tempDir.resolve("staging"));
+        return new UpdateStaging(tempDir.resolve("staging"), (digest, sig) -> true);
     }
 
     private PendingUpdate stage(UpdateStaging staging, String version) throws Exception {
@@ -53,7 +54,7 @@ class UpdateBootstrapTest {
         Files.writeString(installer, "installer for " + version);
         PendingUpdate update =
                 new PendingUpdate(version, installer, UpdateStaging.sha256(installer));
-        staging.stage(update);
+        staging.stage(update, "test-signature");
         return update;
     }
 
