@@ -191,4 +191,30 @@ class TrafficMonitorTest {
         assertThat(monitor.uploadSpeedProperty().get()).isEqualTo(999);
         assertThat(monitor.downloadSpeedProperty().get()).isEqualTo(0);
     }
+
+    @Test
+    void stop_zeroesTheReadoutsEvenWhenTheStreamAlreadyEnded() throws InterruptedException {
+        TrafficMonitor monitor = new TrafficMonitor();
+        monitor.processTrafficLine("{\"up\":1234,\"down\":5678}");
+        awaitFx();
+        assertThat(monitor.uploadSpeedProperty().get()).isEqualTo(1234);
+
+        // stop() on a monitor whose running flag is already false — which is
+        // what a dropped SSE stream leaves behind, since the streaming thread
+        // clears the flag itself. The early return used to skip the reset, so
+        // the dashboard kept showing the last speeds as if traffic were still
+        // flowing over a tunnel that is gone.
+        monitor.stop();
+        awaitFx();
+
+        assertThat(monitor.uploadSpeedProperty().get()).isZero();
+        assertThat(monitor.downloadSpeedProperty().get()).isZero();
+    }
+
+    /** Lets the pending Platform.runLater work land. */
+    private static void awaitFx() throws InterruptedException {
+        CountDownLatch latch = new CountDownLatch(1);
+        Platform.runLater(latch::countDown);
+        latch.await(2, TimeUnit.SECONDS);
+    }
 }
