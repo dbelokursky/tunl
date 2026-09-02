@@ -534,6 +534,32 @@ public class ConfigStore {
             log.info("Loaded {} servers from {}", servers.size(), file);
         } catch (JacksonException e) {
             log.error("Failed to load servers from {}", file, e);
+            quarantineCorrupt(file);
+        }
+    }
+
+    /**
+     * Moves a file we could not read aside, as {@code <name>.corrupt-<epoch>}.
+     *
+     * <p>Writes here are atomic ({@link com.vlessclient.platform.SecureFiles}
+     * writes a temp file and {@code ATOMIC_MOVE}s it), so a file that will not
+     * parse was damaged from outside the app — a full disk, a half-restored
+     * backup, a sync client. Falling back to an empty list is the right thing
+     * to keep the app usable, but the next save then overwrote the only copy of
+     * data that was very likely still recoverable by hand. Moving it aside
+     * costs nothing and keeps that possibility open.</p>
+     *
+     * <p>Package-private: {@link RoutingService} quarantines the same way.</p>
+     */
+    static void quarantineCorrupt(Path file) {
+        Path quarantined = file.resolveSibling(
+                file.getFileName() + ".corrupt-" + System.currentTimeMillis());
+        try {
+            Files.move(file, quarantined);
+            log.error("Moved unreadable {} aside to {}; starting from defaults",
+                    file, quarantined);
+        } catch (IOException e) {
+            log.error("Could not move unreadable {} aside: {}", file, e.getMessage());
         }
     }
 
@@ -597,6 +623,7 @@ public class ConfigStore {
             log.info("Loaded settings from {}", file);
         } catch (JacksonException e) {
             log.error("Failed to load settings from {}", file, e);
+            quarantineCorrupt(file);
         }
     }
 }

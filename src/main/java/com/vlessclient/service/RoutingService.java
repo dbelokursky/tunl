@@ -181,6 +181,9 @@ public class RoutingService {
             migrateLegacyPreset(file);
         } catch (JacksonException e) {
             log.error("Failed to load routing config from {}", file, e);
+            // Aside, not overwritten: the next rule edit would otherwise erase
+            // the only copy of a file that a person could likely still repair.
+            ConfigStore.quarantineCorrupt(file);
             this.config = new RoutingConfig();
         }
     }
