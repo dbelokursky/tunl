@@ -7,6 +7,7 @@ import com.vlessclient.platform.SecretSealer;
 import com.vlessclient.platform.SecretSealers;
 import com.vlessclient.platform.SecureFiles;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -59,6 +60,13 @@ public class SubscriptionService {
      * never complete under either quit path anyway.
      */
     private static final int SHUTDOWN_GRACE_SECONDS = 2;
+
+    /**
+     * Ceiling on a subscription response. Real lists are a few KB of share
+     * links; 4 MiB is far above any legitimate one and far below anything
+     * that threatens the heap.
+     */
+    private static final int MAX_BODY_BYTES = 4 * 1024 * 1024;
 
     private final Path dataDir;
     private final ObjectMapper objectMapper;
@@ -405,25 +413,74 @@ public class SubscriptionService {
         log.info("Stopped subscription auto-refresh");
     }
 
+    /**
+     * Whether {@code url} is fetched over plaintext {@code http}. Such a
+     * subscription is MITM-injectable: a network attacker can rewrite the
+     * returned server list to route the user through their own proxy, and any
+     * token in the URL travels in the clear. The app warns but does not block
+     * — some providers only offer http.
+     */
+    public static boolean isInsecureHttpUrl(String url) {
+        if (url == null || url.isBlank()) {
+            return false;
+        }
+        try {
+            String scheme = URI.create(url.trim()).getScheme();
+            return scheme != null && scheme.equalsIgnoreCase("http");
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
     String fetchContent(String url) throws IOException, InterruptedException {
+        if (isInsecureHttpUrl(url)) {
+            // Host only — the path and query can carry an account token.
+            String host;
+            try {
+                host = URI.create(url.trim()).getHost();
+            } catch (IllegalArgumentException e) {
+                host = "?";
+            }
+            log.warn("Subscription fetched over plaintext http (MITM/injection "
+                    + "risk; prefer https): host={}", host);
+        }
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .GET()
                 .timeout(Duration.ofSeconds(30))
                 .header("User-Agent", "VlessClient/1.0")
                 .build();
-        HttpResponse<String> response =
-                httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() != 200) {
-            // Redacted: this message is both logged and persisted into
-            // subscriptions.json as lastError, right next to the url field
-            // that serializableSubscriptions() deliberately seals. An expired
-            // token answering 401 is the ordinary case, so the plain URL here
-            // leaked the token into two files on the most common failure.
-            throw new IOException("HTTP " + response.statusCode()
-                    + " for URL: " + Redact.url(url));
+        HttpResponse<InputStream> response =
+                httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        try (InputStream body = response.body()) {
+            if (response.statusCode() != 200) {
+                // Redacted: this message is both logged and persisted into
+                // subscriptions.json as lastError, right next to the url field
+                // that serializableSubscriptions() deliberately seals. An expired
+                // token answering 401 is the ordinary case, so the plain URL here
+                // leaked the token into two files on the most common failure.
+                throw new IOException("HTTP " + response.statusCode()
+                        + " for URL: " + Redact.url(url));
+            }
+            return readBounded(body, url);
         }
-        return response.body();
+    }
+
+    /**
+     * Reads at most {@link #MAX_BODY_BYTES}, then gives up.
+     *
+     * <p>The body used to be buffered whole by {@code BodyHandlers.ofString()}.
+     * Auto-refresh runs this on a timer, unattended, against a URL the user
+     * pasted from a provider — so a hostile or simply broken endpoint could
+     * grow the heap until the app died, once an hour, with no one watching.</p>
+     */
+    private static String readBounded(InputStream in, String url) throws IOException {
+        byte[] bytes = in.readNBytes(MAX_BODY_BYTES + 1);
+        if (bytes.length > MAX_BODY_BYTES) {
+            throw new IOException("Subscription body exceeds " + MAX_BODY_BYTES
+                    + " bytes for URL: " + Redact.url(url));
+        }
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 
     ParsedContent parseContent(String content) {
