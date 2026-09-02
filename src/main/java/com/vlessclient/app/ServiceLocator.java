@@ -17,6 +17,7 @@ import com.vlessclient.service.SingBoxInstaller;
 import com.vlessclient.service.SubscriptionService;
 import com.vlessclient.service.ThemeManager;
 import com.vlessclient.service.TrafficMonitor;
+import com.vlessclient.service.TrayIconService;
 import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.service.UpdateManager;
 import com.vlessclient.service.mcp.AppControlService;
@@ -346,6 +347,13 @@ public class ServiceLocator {
         Object mcp = services.get(McpServerService.class);
         if (mcp instanceof McpServerService mcpServerService) {
             mcpServerService.attachLogSource(engine);
+        }
+        // The tray resolves the engine through a supplier, so its icon follows
+        // the new one already — but a property listener is bound to one
+        // instance, so it has to be moved across explicitly.
+        Object tray = services.get(TrayIconService.class);
+        if (tray instanceof TrayIconService trayIconService) {
+            trayIconService.rebindEngineListener();
         }
         log.info("SingBoxEngine registered with binary: {}", singBoxPath);
     }

@@ -5,6 +5,11 @@ import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.ui.view.MirroredSparkline;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import javafx.scene.control.Label;
 import javafx.scene.paint.Color;
 import org.slf4j.Logger;
@@ -29,6 +34,26 @@ public final class TrafficDisplayBinder {
     private final MirroredSparkline trafficSparkline;
 
     /**
+     * Serialises start and stop off the FX thread.
+     *
+     * <p>{@code TrafficMonitor.stop()} joins its streaming thread for up to two
+     * seconds, and this class is driven from connection-state changes on the FX
+     * thread — so a disconnect froze the window for as long as the core took to
+     * let go. Handing the call to another thread alone would be worse: on a
+     * reconnect the pending stop can overtake the following start and kill the
+     * monitor that just came up. One ordered queue removes both problems.</p>
+     *
+     * <p>Daemon and never shut down on purpose: it owns no resource beyond its
+     * thread, the JVM does not wait for it, and {@code ServiceLocator.shutdown}
+     * stops the monitor synchronously on the way out.</p>
+     */
+    private final ExecutorService lifecycle = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "traffic-display-lifecycle");
+        t.setDaemon(true);
+        return t;
+    });
+
+    /**
      * Creates the binder over the controller's traffic readouts.
      * {@code trafficMonitor} may be null when the service is unavailable;
      * {@link #onConnectionStateChanged} is then a no-op and
@@ -45,6 +70,26 @@ public final class TrafficDisplayBinder {
         this.totalUploadLabel = totalUploadLabel;
         this.totalDownloadLabel = totalDownloadLabel;
         this.trafficSparkline = trafficSparkline;
+    }
+
+    /**
+     * Test seam: waits until the queued lifecycle work has run.
+     *
+     * <p>The queue is single-threaded and FIFO, so an empty task completing
+     * means everything submitted before it has finished.</p>
+     *
+     * @return false if it did not settle within the timeout
+     */
+    boolean awaitIdle(long millis) {
+        try {
+            lifecycle.submit(() -> { }).get(millis, TimeUnit.MILLISECONDS);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (ExecutionException | TimeoutException e) {
+            return false;
+        }
     }
 
     /** Applies the download/upload accent colours to the mirrored chart. */
@@ -93,14 +138,21 @@ public final class TrafficDisplayBinder {
             return;
         }
         if (state == ConnectionState.CONNECTED) {
+            int port;
+            String secret;
             try {
+                // Read on the FX thread: AppSettings is the shared instance the
+                // UI mutates, and the queue below runs elsewhere.
                 AppSettings settings = ServiceLocator.get(AppSettings.class);
-                trafficMonitor.start(settings.getClashApiPort(), settings.getClashApiSecret());
+                port = settings.getClashApiPort();
+                secret = settings.getClashApiSecret();
             } catch (IllegalArgumentException e) {
                 log.warn("Could not get AppSettings for TrafficMonitor");
+                return;
             }
+            lifecycle.execute(() -> trafficMonitor.start(port, secret));
         } else if (state == ConnectionState.DISCONNECTED || state == ConnectionState.ERROR) {
-            trafficMonitor.stop();
+            lifecycle.execute(trafficMonitor::stop);
             if (trafficSparkline != null) {
                 trafficSparkline.clear();
             }
