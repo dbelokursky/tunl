@@ -528,9 +528,17 @@ public class SingBoxConfigGenerator {
         // on such hosts the flag is omitted and the local listeners still
         // serve manually-configured clients.
         if (settings.getProxyMode() == ProxyMode.SYSTEM_PROXY
-                && settings.isSystemProxyAutoConfig()
-                && systemProxySupport.canAutoConfigure()) {
-            http.put("set_system_proxy", true);
+                && settings.isSystemProxyAutoConfig()) {
+            if (systemProxySupport.canAutoConfigure()) {
+                http.put("set_system_proxy", true);
+            } else {
+                // The user asked for the OS proxy and is not getting it. Saying
+                // so here is the difference between a diagnosable report and
+                // "it says connected but nothing is proxied".
+                log.warn("Host has no usable OS proxy store: traffic is not "
+                        + "proxied system-wide. Point clients at the HTTP proxy "
+                        + "on 127.0.0.1:{}", settings.getHttpPort());
+            }
         }
         inbounds.add(http);
 
