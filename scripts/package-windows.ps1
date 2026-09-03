@@ -49,6 +49,21 @@ if (-not (Test-Path "target/$jarName")) {
     throw "[package-windows] missing target/$jarName -- run 'mvn package' first"
 }
 
+# The module list is shared with package-dmg.sh / package-linux.sh through
+# scripts/runtime-modules.txt: one module per line, '#' starts a comment.
+$runtimeModules = (Get-Content 'scripts/runtime-modules.txt' |
+    ForEach-Object { ($_ -replace '#.*', '').Trim() } |
+    Where-Object { $_ }) -join ','
+if (-not $runtimeModules) {
+    throw '[package-windows] scripts/runtime-modules.txt lists no modules'
+}
+
+# Without --add-modules jpackage links every module that exports an API, so
+# the installer carries a ~290 MB runtime for an app that uses a dozen of
+# them. --jlink-options REPLACES jpackage's defaults rather than adding to
+# them, so the four it would have passed are repeated here, plus compression.
+$jlinkOptions = '--strip-native-commands --strip-debug --no-man-pages --no-header-files --compress=zip-6'
+
 # Stage just the shaded jar (not the original-*.jar the shade plugin
 # leaves alongside it).
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -Path staging, dist
@@ -72,7 +87,9 @@ Copy-Item "target/$jarName" staging/
     --win-shortcut `
     --win-per-user-install `
     --java-options "-Dapp.version=$Version" `
-    --java-options "--enable-native-access=ALL-UNNAMED"
+    --java-options "--enable-native-access=ALL-UNNAMED" `
+    --add-modules $runtimeModules `
+    --jlink-options $jlinkOptions
 if ($LASTEXITCODE -ne 0) {
     throw "[package-windows] jpackage failed with exit code $LASTEXITCODE"
 }
