@@ -1,11 +1,16 @@
 package com.vlessclient.ui.view;
 
+import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.app.ThemeCss;
 import com.vlessclient.app.UiTestServices;
+import com.vlessclient.model.CoreLogLevel;
+import com.vlessclient.platform.PlatformPaths;
+import com.vlessclient.service.ConfigStore;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.CheckBox;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.stage.Stage;
@@ -48,6 +53,38 @@ public class SettingsViewTest extends ApplicationTest {
         scene.getStylesheets().setAll(ThemeCss.light());
         stage.setScene(scene);
         stage.show();
+    }
+
+    @Test
+    void coreLogLevelComboShowsTheConfiguredLevel() {
+        ComboBox<CoreLogLevel> combo = lookup("#coreLogLevelCombo").query();
+
+        assertThat(combo.getItems()).containsExactly(CoreLogLevel.values());
+        assertThat(combo.getValue())
+                .isEqualTo(ServiceLocator.get(ConfigStore.class).getSettings().getCoreLogLevel());
+        assertThat(lookup("#coreLogLevelHint").tryQuery()).isPresent();
+    }
+
+    /**
+     * The combo has to reach settings.json, not just the in-memory instance:
+     * the core reads its level from the config generated at the next connect,
+     * which is built from what was written to disk.
+     */
+    @Test
+    void coreLogLevelComboPersistsAChange() {
+        ComboBox<CoreLogLevel> combo = lookup("#coreLogLevelCombo").query();
+        ConfigStore store = ServiceLocator.get(ConfigStore.class);
+        CoreLogLevel initial = store.getSettings().getCoreLogLevel();
+        CoreLogLevel target = initial == CoreLogLevel.DEBUG
+                ? CoreLogLevel.ERROR : CoreLogLevel.DEBUG;
+
+        interact(() -> combo.setValue(target));
+        try {
+            ConfigStore reloaded = new ConfigStore(PlatformPaths.current().dataDir());
+            assertThat(reloaded.getSettings().getCoreLogLevel()).isEqualTo(target);
+        } finally {
+            interact(() -> combo.setValue(initial));
+        }
     }
 
     @Test

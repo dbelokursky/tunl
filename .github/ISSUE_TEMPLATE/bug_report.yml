@@ -1,0 +1,80 @@
+name: Bug report
+description: Something does not work the way it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Before attaching anything, strip server
+        addresses, UUIDs, passwords and subscription URLs from logs and
+        screenshots; the log file may contain them.
+  - type: input
+    id: version
+    attributes:
+      label: Tunl version
+      description: Settings → About. Say `dev-latest` and the commit if you run the prerelease.
+      placeholder: 1.13.22
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple Silicon)
+        - Windows 10/11
+        - Debian / Ubuntu (amd64)
+        - Debian / Ubuntu (arm64)
+        - Other Linux
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version and desktop
+      placeholder: macOS 15.6 / Windows 11 24H2 / Ubuntu 24.04 GNOME
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - System Proxy
+        - TUN
+        - Not connection related
+    validations:
+      required: true
+  - type: input
+    id: protocol
+    attributes:
+      label: Protocol and transport of the server involved
+      placeholder: VLESS + Reality, Trojan + WebSocket, WireGuard …
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Logs tab → the download button saves the core log; `tunl.log` in the
+        data directory holds the app log. Paste the relevant part, with
+        credentials removed.
+      render: text
+  - type: checkboxes
+    id: redacted
+    attributes:
+      label: Checklist
+      options:
+        - label: I removed addresses, UUIDs, passwords and subscription URLs from what I attached.
+          required: true

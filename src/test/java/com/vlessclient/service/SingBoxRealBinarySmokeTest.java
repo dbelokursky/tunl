@@ -2,6 +2,7 @@ package com.vlessclient.service;
 
 import com.sun.net.httpserver.HttpServer;
 import com.vlessclient.model.AppSettings;
+import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
@@ -90,6 +91,24 @@ class SingBoxRealBinarySmokeTest {
 
                 assertCheckPasses(config, protocol + "/" + mode);
             }
+        }
+    }
+
+    /**
+     * Every log level the Settings screen offers has to be a string the real
+     * core accepts — a rejected one is not a wrong log, it is a core that
+     * refuses to start at all, on the very connect the user was trying to
+     * diagnose.
+     */
+    @Test
+    void checkAcceptsEveryCoreLogLevel() throws Exception {
+        for (CoreLogLevel level : CoreLogLevel.values()) {
+            AppSettings settings = new AppSettings();
+            settings.setCoreLogLevel(level);
+            String config = generator.generate(serverFor(Protocol.VLESS), settings);
+
+            assertThat(config).contains("\"level\" : \"" + level.getValue() + "\"");
+            assertCheckPasses(config, "log-level/" + level.getValue());
         }
     }
 

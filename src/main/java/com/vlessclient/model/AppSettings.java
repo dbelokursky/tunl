@@ -68,6 +68,14 @@ public class AppSettings {
     private ServerSelection serverSelection = ServerSelection.SINGLE;
 
     /**
+     * Verbosity the sing-box core runs at. Defaults to INFO, which is the
+     * level the generated config hardcoded before this was configurable, so a
+     * settings file written by an older build produces byte-identical output.
+     */
+    @JsonProperty("core_log_level")
+    private CoreLogLevel coreLogLevel = CoreLogLevel.INFO;
+
+    /**
      * In SYSTEM_PROXY mode, have sing-box register itself as the OS proxy on
      * connect (and restore the previous state on disconnect) instead of only
      * listening on the local ports.
@@ -237,6 +245,14 @@ public class AppSettings {
 
     public void setServerSelection(ServerSelection serverSelection) {
         this.serverSelection = serverSelection != null ? serverSelection : ServerSelection.SINGLE;
+    }
+
+    public CoreLogLevel getCoreLogLevel() {
+        return coreLogLevel;
+    }
+
+    public void setCoreLogLevel(CoreLogLevel coreLogLevel) {
+        this.coreLogLevel = coreLogLevel != null ? coreLogLevel : CoreLogLevel.INFO;
     }
 
     public boolean isSystemProxyAutoConfig() {

@@ -1,5 +1,6 @@
 package com.vlessclient.service.mcp;
 
+import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConfigStore;
@@ -18,6 +19,8 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -255,5 +258,37 @@ class DefaultAppControlServiceTest {
                 null, null, new ShareLinkParser(), new SingBoxEngine(tempDir.resolve("sing-box")));
         svc.deleteServer("srv-1", true);
         assertThat(store.getServerById("srv-1")).isEmpty();
+    }
+
+    /** A bare JSON string node, without depending on its concrete class. */
+    private static JsonNode stringNode(String value) {
+        return JsonMapper.builder().build().createObjectNode().put("v", value).get("v");
+    }
+
+    @Test
+    void setSetting_coreLogLevel_persistsAndIsReportedBack() throws Exception {
+        SettingsInfo info = service.setSetting("core_log_level", stringNode("debug"));
+
+        assertThat(info.coreLogLevel()).isEqualTo("debug");
+        assertThat(store.getSettings().getCoreLogLevel()).isEqualTo(CoreLogLevel.DEBUG);
+    }
+
+    @Test
+    void setSetting_unknownCoreLogLevel_isRejected() {
+        // The enum forgives an unknown value when loading a settings file; an
+        // agent asking for one has to be told, or it would read a log that
+        // does not hold what it asked the core to write.
+        assertThatThrownBy(() -> service.setSetting("core_log_level",
+                stringNode("verbose")))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining("debug, info, warn, error");
+        assertThat(store.getSettings().getCoreLogLevel()).isEqualTo(CoreLogLevel.INFO);
+    }
+
+    @Test
+    void getSettings_reportsTheCoreLogLevel() {
+        store.getSettings().setCoreLogLevel(CoreLogLevel.ERROR);
+
+        assertThat(service.getSettings().coreLogLevel()).isEqualTo("error");
     }
 }

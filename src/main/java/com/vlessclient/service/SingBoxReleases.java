@@ -44,7 +44,7 @@ public final class SingBoxReleases {
     private volatile Optional<String> cached;
 
     public SingBoxReleases() {
-        this(HttpClient.newBuilder().connectTimeout(HTTP_TIMEOUT).build());
+        this(AppHttpClients.newBuilder().connectTimeout(HTTP_TIMEOUT).build());
     }
 
     SingBoxReleases(HttpClient httpClient) {

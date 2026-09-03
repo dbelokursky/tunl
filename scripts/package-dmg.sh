@@ -17,6 +17,12 @@
 #
 # Expects `mvn package` to have produced the shaded JAR already.
 #
+# --enable-native-access=ALL-UNNAMED (here and in the .deb/.msi scripts):
+# JavaFX loads its native libraries from the classpath's unnamed module, which
+# JDK 24+ reports as a "restricted method" warning on every launch (JEP 472)
+# and a later release will refuse outright. Granting it up front keeps the
+# packaged app one JDK bump away from a startup failure.
+#
 # Code signing (optional, off by default): when MACOS_SIGN_IDENTITY is set,
 # jpackage signs the .app with that Developer ID Application identity (which
 # must already be in an unlocked keychain — the release workflow imports it).
@@ -42,6 +48,21 @@ if [[ ! -f "target/${JAR_NAME}" ]]; then
     echo "[package-dmg] missing target/${JAR_NAME} — run 'mvn package' first" >&2
     exit 1
 fi
+
+# The module list is shared with the other packaging scripts through
+# scripts/runtime-modules.txt: one module per line, '#' starts a comment.
+RUNTIME_MODULES="$(awk '{ sub(/#.*/, ""); if ($1 != "") { printf "%s%s", sep, $1; sep = "," } }' \
+    "${REPO_ROOT}/scripts/runtime-modules.txt")"
+if [[ -z "${RUNTIME_MODULES}" ]]; then
+    echo "[package-dmg] scripts/runtime-modules.txt lists no modules" >&2
+    exit 1
+fi
+
+# Without --add-modules jpackage links every module that exports an API, so
+# the installer carries a ~290 MB runtime for an app that uses a dozen of
+# them. --jlink-options REPLACES jpackage's defaults rather than adding to
+# them, so the four it would have passed are repeated here, plus compression.
+JLINK_OPTIONS="--strip-native-commands --strip-debug --no-man-pages --no-header-files --compress=zip-6"
 
 # Stage just the shaded jar (not the original-*.jar the shade plugin
 # leaves alongside it).
@@ -70,6 +91,9 @@ jpackage \
     --dest dist \
     --mac-package-name "Tunl" \
     --java-options "-Dapp.version=${VERSION}" \
+    --java-options "--enable-native-access=ALL-UNNAMED" \
+    --add-modules "${RUNTIME_MODULES}" \
+    --jlink-options "${JLINK_OPTIONS}" \
     "${SIGN_ARGS[@]+"${SIGN_ARGS[@]}"}" \
     --verbose
 
