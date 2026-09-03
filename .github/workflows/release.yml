@@ -16,6 +16,7 @@ jobs:
   # cannot be trusted for this.
   prepare-release:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       title: ${{ steps.tag.outputs.title }}
       notes: ${{ steps.tag.outputs.notes }}
@@ -113,6 +114,8 @@ jobs:
   release-macos:
     needs: prepare-release
     runs-on: macos-latest
+    # notarytool --wait normally returns within minutes but Apple has taken half an hour.
+    timeout-minutes: 45
     permissions:
       contents: write
     # The `secrets` context is not allowed in step `if:`, so the steps gate on
@@ -230,6 +233,7 @@ jobs:
   release-windows:
     needs: prepare-release
     runs-on: windows-latest
+    timeout-minutes: 30
     permissions:
       contents: write
     # Only the gate lives in job env — the `secrets` context can't be used in
@@ -313,6 +317,7 @@ jobs:
   release-linux:
     needs: prepare-release
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
@@ -351,6 +356,7 @@ jobs:
   release-linux-arm64:
     needs: prepare-release
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
@@ -395,6 +401,7 @@ jobs:
   sign-release:
     needs: [prepare-release, release-macos, release-windows, release-linux, release-linux-arm64]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
@@ -452,6 +459,7 @@ jobs:
   update-packaging:
     needs: [prepare-release, release-macos, release-windows, release-linux, release-linux-arm64]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
@@ -488,6 +496,7 @@ jobs:
   publish-release:
     needs: [prepare-release, sign-release, update-packaging]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
@@ -528,6 +537,7 @@ jobs:
   prune-old-releases:
     needs: publish-release
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
