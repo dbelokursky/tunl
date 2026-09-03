@@ -391,10 +391,12 @@ mvn clean javafx:run
 ```
 
 On the first build Maven automatically downloads `sing-box` (the version is
-pinned in [singbox.properties](src/main/resources/singbox.properties)) for
-both architectures (arm64 + amd64) into `target/classes/native/darwin-{arch}/`
-with SHA-256 verification. The binaries are bundled into the jar and extracted
-on first launch.
+pinned in [singbox.properties](src/main/resources/singbox.properties)) for the
+build host's OS and architecture into `target/classes/native/{os}-{arch}/`
+with SHA-256 verification. The binary is bundled into the jar and extracted on
+first launch. Only the host's architecture is bundled: jpackage produces a
+single-architecture app, so a DMG built on Apple Silicon could never run an
+Intel core anyway.
 
 ### If the bundle is unavailable
 
@@ -416,7 +418,7 @@ Homebrew paths (`/opt/homebrew/bin`, `/usr/local/bin`) or `$PATH`.
 
 ### Requirements
 
-- JDK 25 (the project uses preview features)
+- JDK 25
 - Maven 3.9+
 - bash + curl + tar (standard on macOS) — needed by `generate-resources`
   to download sing-box
@@ -424,9 +426,10 @@ Homebrew paths (`/opt/homebrew/bin`, `/usr/local/bin`) or `$PATH`.
 ### Commands
 
 ```bash
+mvn clean verify            # the gate: checkstyle, tests, coverage, SpotBugs
 mvn clean javafx:run        # run in dev mode
 mvn clean package           # build the shaded jar (with the sing-box bundle)
-mvn test                    # all tests
+mvn test                    # tests only
 mvn test -Dtest=SingBoxInstallerTest   # a single test class
 mvn validate                # checkstyle
 

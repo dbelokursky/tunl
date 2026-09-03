@@ -242,7 +242,14 @@
                     <!-- @{argLine} lets the JaCoCo agent attach (prepare-agent
                          sets the argLine property); a bare literal here
                          silently disables coverage collection. -->
-                    <argLine>@{argLine}</argLine>
+                    <!-- The native-access grant below: JavaFX loads its
+                         glass/prism natives through System.load from the
+                         classpath's unnamed module. Since JDK 24 (JEP 472)
+                         that prints a "restricted method" warning at startup,
+                         and a later release turns it into an error. Granted
+                         here for the forked test JVM; the packaging scripts
+                         and the dev argfile grant it for the app itself. -->
+                    <argLine>@{argLine} --enable-native-access=ALL-UNNAMED</argLine>
                     <excludedGroups>${surefire.excludedGroups}</excludedGroups>
                     <systemPropertyVariables>
                         <!--

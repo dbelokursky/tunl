@@ -347,9 +347,12 @@ mvn clean javafx:run
 ```
 
 При первой сборке Maven автоматически скачает `sing-box` (версия пиннится в
-[singbox.properties](src/main/resources/singbox.properties)) для обеих
-архитектур (arm64 + amd64) в `target/classes/native/darwin-{arch}/` с проверкой
-SHA-256. Эти бинари бандлятся в jar и извлекаются при первом запуске.
+[singbox.properties](src/main/resources/singbox.properties)) под ОС и
+архитектуру машины сборки в `target/classes/native/{os}-{arch}/` с проверкой
+SHA-256. Бинарь бандлится в jar и извлекается при первом запуске. Бандлится
+только архитектура хоста: jpackage собирает приложение под одну архитектуру,
+так что DMG, собранный на Apple Silicon, всё равно не смог бы запустить
+Intel-ядро.
 
 ### Если бандл недоступен
 
@@ -371,7 +374,7 @@ Homebrew-путей (`/opt/homebrew/bin`, `/usr/local/bin`) или из `$PATH`.
 
 ### Требования
 
-- JDK 25 (проект использует preview features)
+- JDK 25
 - Maven 3.9+
 - bash + curl + tar (стандартно для macOS) — нужны для `generate-resources`
   чтобы скачать sing-box
@@ -379,9 +382,10 @@ Homebrew-путей (`/opt/homebrew/bin`, `/usr/local/bin`) или из `$PATH`.
 ### Команды
 
 ```bash
+mvn clean verify            # полная проверка: checkstyle, тесты, покрытие, SpotBugs
 mvn clean javafx:run        # запуск в dev-режиме
 mvn clean package           # сборка shade-jar (с бандлом sing-box)
-mvn test                    # все тесты
+mvn test                    # только тесты
 mvn test -Dtest=SingBoxInstallerTest   # один тест-класс
 mvn validate                # checkstyle
 ```

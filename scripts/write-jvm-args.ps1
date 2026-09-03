@@ -23,5 +23,10 @@ $dir = Split-Path -Parent $OutFile
 if ($dir) {
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
 }
-Set-Content -LiteralPath $OutFile -Value '-Dvless.log.level=DEBUG'
+# --enable-native-access mirrors write-jvm-args.sh: JavaFX loads its natives
+# from the unnamed module, which JDK 24+ warns about and will later refuse.
+Set-Content -LiteralPath $OutFile -Value @(
+    '-Dvless.log.level=DEBUG',
+    '--enable-native-access=ALL-UNNAMED'
+)
 Write-Host "[write-jvm-args] wrote $OutFile"

@@ -30,6 +30,8 @@ permissions:
 jobs:
   bump:
     runs-on: ubuntu-latest
+    # bump-singbox.sh downloads and hashes five core archives; minutes, not hours.
+    timeout-minutes: 20
     # Via job env, not the secrets context: `secrets` is not available in a
     # step's `if:`, which is the same trap release.yml notes for its signing
     # and certificate steps.
