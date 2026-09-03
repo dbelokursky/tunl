@@ -144,7 +144,7 @@ public class SingBoxInstaller {
         this.installDir = installDir;
         this.downloadUrlTemplate = downloadUrlTemplate;
         this.expectedSha256 = Map.copyOf(expectedSha256);
-        this.httpClient = HttpClient.newBuilder()
+        this.httpClient = AppHttpClients.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .followRedirects(HttpClient.Redirect.ALWAYS)
                 .build();

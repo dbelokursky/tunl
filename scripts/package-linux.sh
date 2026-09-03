@@ -78,6 +78,7 @@ jpackage \
     --vendor "Tunl" \
     --java-options "-Dapp.version=${VERSION}" \
     --java-options "-Djava.awt.headless=false" \
+    --java-options "--enable-native-access=ALL-UNNAMED" \
     --add-modules "${RUNTIME_MODULES}" \
     --jlink-options "${JLINK_OPTIONS}" \
     --verbose

@@ -17,6 +17,12 @@
 #
 # Expects `mvn package` to have produced the shaded JAR already.
 #
+# --enable-native-access=ALL-UNNAMED (here and in the .deb/.msi scripts):
+# JavaFX loads its native libraries from the classpath's unnamed module, which
+# JDK 24+ reports as a "restricted method" warning on every launch (JEP 472)
+# and a later release will refuse outright. Granting it up front keeps the
+# packaged app one JDK bump away from a startup failure.
+#
 # Code signing (optional, off by default): when MACOS_SIGN_IDENTITY is set,
 # jpackage signs the .app with that Developer ID Application identity (which
 # must already be in an unlocked keychain — the release workflow imports it).
@@ -85,6 +91,7 @@ jpackage \
     --dest dist \
     --mac-package-name "Tunl" \
     --java-options "-Dapp.version=${VERSION}" \
+    --java-options "--enable-native-access=ALL-UNNAMED" \
     --add-modules "${RUNTIME_MODULES}" \
     --jlink-options "${JLINK_OPTIONS}" \
     "${SIGN_ARGS[@]+"${SIGN_ARGS[@]}"}" \

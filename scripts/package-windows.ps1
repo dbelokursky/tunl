@@ -87,6 +87,7 @@ Copy-Item "target/$jarName" staging/
     --win-shortcut `
     --win-per-user-install `
     --java-options "-Dapp.version=$Version" `
+    --java-options "--enable-native-access=ALL-UNNAMED" `
     --add-modules $runtimeModules `
     --jlink-options $jlinkOptions
 if ($LASTEXITCODE -ne 0) {
