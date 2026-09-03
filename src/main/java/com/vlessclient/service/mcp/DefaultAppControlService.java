@@ -2,6 +2,7 @@ package com.vlessclient.service.mcp;
 
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
+import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.RoutingRule;
@@ -196,7 +197,8 @@ public class DefaultAppControlService implements AppControlService {
                 s.getProxyMode().getValue(),
                 s.getSocksPort(), s.getHttpPort(), s.getClashApiPort(),
                 s.getProxyDns(), s.getDirectDns(), s.getDnsStrategy(),
-                s.getTunInterfaceName(), s.isHealthCheckEnabled(),
+                s.getTunInterfaceName(), s.getCoreLogLevel().getValue(),
+                s.isHealthCheckEnabled(),
                 s.isMcpEnabled(), s.getMcpPort(), s.isMcpAllowMutations());
     }
 
@@ -381,6 +383,8 @@ public class DefaultAppControlService implements AppControlService {
             case "dns_strategy", "dnsstrategy" -> s.setDnsStrategy(asText(value, key));
             case "tun_interface_name", "tuninterfacename" ->
                     s.setTunInterfaceName(asText(value, key));
+            case "core_log_level", "coreloglevel" ->
+                    s.setCoreLogLevel(asCoreLogLevel(value, key));
             case "health_check_enabled", "healthcheckenabled" ->
                     s.setHealthCheckEnabled(value.asBoolean());
             case "mcp_allow_mutations", "mcpallowmutations" ->
@@ -388,7 +392,7 @@ public class DefaultAppControlService implements AppControlService {
             default -> throw new McpToolException("Setting '" + key + "' is not settable via MCP. "
                     + "Allowed: theme, language, auto_connect, socks_port, http_port, "
                     + "clash_api_port, proxy_dns, direct_dns, dns_strategy, tun_interface_name, "
-                    + "health_check_enabled, mcp_allow_mutations. "
+                    + "core_log_level, health_check_enabled, mcp_allow_mutations. "
                     + "(mcp_enabled/mcp_port require the Settings screen — they restart "
                     + "the server.)");
         }
@@ -453,6 +457,23 @@ public class DefaultAppControlService implements AppControlService {
             throw new McpToolException("Setting '" + key + "' expects a port (1-65535).");
         }
         return value.asInt();
+    }
+
+    /**
+     * Unlike {@link CoreLogLevel#fromValue(String)}, which forgives an unknown
+     * value so a settings file can never block start-up, this rejects one: an
+     * agent that asked for {@code verbose} and was silently given {@code info}
+     * would go on to read a log that does not hold what it went looking for.
+     */
+    private CoreLogLevel asCoreLogLevel(JsonNode value, String key) throws McpToolException {
+        String raw = asText(value, key);
+        for (CoreLogLevel level : CoreLogLevel.values()) {
+            if (level.getValue().equalsIgnoreCase(raw.trim())) {
+                return level;
+            }
+        }
+        throw new McpToolException("Setting '" + key
+                + "' expects one of: debug, info, warn, error.");
     }
 
     private RoutingRule.RuleType parseRuleType(String type) throws McpToolException {

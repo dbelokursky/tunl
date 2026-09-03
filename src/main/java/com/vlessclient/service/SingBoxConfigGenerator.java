@@ -121,7 +121,7 @@ public class SingBoxConfigGenerator {
                            AppSettings settings, RoutingConfig routingConfig) {
         ObjectNode root = mapper.createObjectNode();
 
-        root.set("log", buildLog());
+        root.set("log", buildLog(settings));
 
         if (settings.getProxyMode() == ProxyMode.TUN) {
             root.set("dns", buildDns(settings));
@@ -183,9 +183,14 @@ public class SingBoxConfigGenerator {
         }
     }
 
-    private ObjectNode buildLog() {
+    /**
+     * The core's own verbosity, from {@link AppSettings#getCoreLogLevel()}.
+     * It was pinned to {@code info} here, which made the Logs tab's debug
+     * filter permanently empty: no debug line ever reached it.
+     */
+    private ObjectNode buildLog(AppSettings settings) {
         ObjectNode log = mapper.createObjectNode();
-        log.put("level", "info");
+        log.put("level", settings.getCoreLogLevel().getValue());
         log.put("timestamp", true);
         return log;
     }

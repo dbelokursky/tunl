@@ -4,6 +4,7 @@ import com.vlessclient.app.AppVersion;
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.AppSettings;
+import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.platform.Autostart;
 import com.vlessclient.service.ConfigStore;
@@ -45,6 +46,8 @@ public class SettingsViewController implements ViewShownAware {
     @FXML private Label proxyPortsLabel;
     @FXML private Label socksPortLabel;
     @FXML private Label httpPortLabel;
+    @FXML private Label coreLogLevelLabel;
+    @FXML private Label coreLogLevelHint;
     @FXML private Label proxyModeLabel;
     @FXML private Label aboutLabel;
     @FXML private Label geoAttributionLabel;
@@ -71,6 +74,7 @@ public class SettingsViewController implements ViewShownAware {
     @FXML private CheckBox healthCheckAutoReconnectCheck;
     @FXML private TextField healthCheckIntervalField;
     @FXML private TextField healthCheckReconnectDelayField;
+    @FXML private ComboBox<CoreLogLevel> coreLogLevelCombo;
     @FXML private ComboBox<ProxyMode> proxyModeCombo;
     @FXML private CheckBox systemProxyAutoConfigCheck;
     @FXML private CheckBox storeSecretsCheck;
@@ -137,6 +141,7 @@ public class SettingsViewController implements ViewShownAware {
         initLanguageCombo(settings);
         initConnectionSettings(settings);
         initHealthCheckSettings(settings);
+        initCoreLogLevelCombo(settings);
         initProxyModeCombo(settings);
         initSystemProxyAutoConfig(settings);
         initAdvancedSettings(settings);
@@ -349,6 +354,38 @@ public class SettingsViewController implements ViewShownAware {
         });
     }
 
+    /**
+     * Wires the core log level combo. The core reads its verbosity from the
+     * config generated at connect time, so a change here reaches sing-box on
+     * the next connect rather than the running process — which is what the
+     * hint under the combo says out loud.
+     */
+    private void initCoreLogLevelCombo(AppSettings settings) {
+        coreLogLevelCombo.getItems().addAll(CoreLogLevel.values());
+        coreLogLevelCombo.setCellFactory(cb -> new ListCell<>() {
+            @Override
+            protected void updateItem(CoreLogLevel item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : formatCoreLogLevel(item));
+            }
+        });
+        coreLogLevelCombo.setButtonCell(new ListCell<>() {
+            @Override
+            protected void updateItem(CoreLogLevel item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : formatCoreLogLevel(item));
+            }
+        });
+        coreLogLevelCombo.setValue(settings.getCoreLogLevel());
+
+        coreLogLevelCombo.valueProperty().addListener((obs, oldVal, newVal) -> {
+            if (newVal != null && newVal != oldVal) {
+                settings.setCoreLogLevel(newVal);
+                saveSettings(settings);
+            }
+        });
+    }
+
     private void initProxyModeCombo(AppSettings settings) {
         proxyModeCombo.getItems().addAll(ProxyMode.values());
         proxyModeCombo.setCellFactory(cb -> new ListCell<>() {
@@ -409,6 +446,8 @@ public class SettingsViewController implements ViewShownAware {
         proxyPortsLabel.textProperty().bind(I18n.binding("settings.proxy.ports"));
         socksPortLabel.textProperty().bind(I18n.binding("settings.socks.port"));
         httpPortLabel.textProperty().bind(I18n.binding("settings.http.port"));
+        coreLogLevelLabel.textProperty().bind(I18n.binding("settings.core.log.level"));
+        coreLogLevelHint.textProperty().bind(I18n.binding("settings.core.log.level.hint"));
         proxyModeLabel.textProperty().bind(I18n.binding("settings.proxy.mode"));
         systemProxyAutoConfigCheck.textProperty()
                 .bind(I18n.binding("settings.proxy.autoconfig"));
@@ -451,6 +490,20 @@ public class SettingsViewController implements ViewShownAware {
         ProxyMode currentMode = proxyModeCombo.getValue();
         proxyModeCombo.setValue(null);
         proxyModeCombo.setValue(currentMode);
+
+        // ...and the core log level combo
+        CoreLogLevel currentLevel = coreLogLevelCombo.getValue();
+        coreLogLevelCombo.setValue(null);
+        coreLogLevelCombo.setValue(currentLevel);
+    }
+
+    private String formatCoreLogLevel(CoreLogLevel level) {
+        return switch (level) {
+            case DEBUG -> I18n.get("settings.core.log.level.debug");
+            case INFO -> I18n.get("settings.core.log.level.info");
+            case WARN -> I18n.get("settings.core.log.level.warn");
+            case ERROR -> I18n.get("settings.core.log.level.error");
+        };
     }
 
     private String formatProxyMode(ProxyMode mode) {

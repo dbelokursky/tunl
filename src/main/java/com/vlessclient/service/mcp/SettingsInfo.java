@@ -15,6 +15,8 @@ package com.vlessclient.service.mcp;
  * @param directDns        DNS used for direct traffic
  * @param dnsStrategy      DNS resolution strategy
  * @param tunInterfaceName TUN interface name
+ * @param coreLogLevel     sing-box log level ({@code debug}/{@code info}/{@code warn}/{@code
+ *                         error})
  * @param healthCheck      whether periodic reachability checks are enabled
  * @param mcpEnabled       whether the MCP server is enabled
  * @param mcpPort          MCP server port
@@ -32,6 +34,7 @@ public record SettingsInfo(
         String directDns,
         String dnsStrategy,
         String tunInterfaceName,
+        String coreLogLevel,
         boolean healthCheck,
         boolean mcpEnabled,
         int mcpPort,

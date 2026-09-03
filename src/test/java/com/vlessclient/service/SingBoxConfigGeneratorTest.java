@@ -1,6 +1,7 @@
 package com.vlessclient.service;
 
 import com.vlessclient.model.AppSettings;
+import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
@@ -282,6 +283,19 @@ class SingBoxConfigGeneratorTest {
         assertThat(log).isNotNull();
         assertThat(log.get("level").asString()).isEqualTo("info");
         assertThat(log.get("timestamp").asBoolean()).isTrue();
+    }
+
+    @Test
+    void logSection_carriesTheConfiguredLevel() throws Exception {
+        for (CoreLogLevel level : CoreLogLevel.values()) {
+            AppSettings settings = new AppSettings();
+            settings.setCoreLogLevel(level);
+
+            String json = generator.generate(createVlessServer(), settings);
+
+            assertThat(parse(json).get("log").get("level").asString())
+                    .isEqualTo(level.getValue());
+        }
     }
 
     // -- TLS fingerprint / utls test --
