@@ -1,0 +1,20 @@
+name: Feature request
+description: Something Tunl should do and does not yet.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do and where the app gets in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like instead
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Which OS and mode you use, and whether another client does this already.

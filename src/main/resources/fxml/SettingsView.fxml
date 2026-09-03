@@ -68,6 +68,17 @@
             <Separator styleClass="sidebar-separator"/>
 
             <HBox spacing="12" alignment="CENTER_LEFT">
+                <Label fx:id="coreLogLevelLabel" text="Core log level" styleClass="form-label"
+                       prefWidth="210"/>
+                <ComboBox fx:id="coreLogLevelCombo" styleClass="form-field" prefWidth="300"/>
+            </HBox>
+
+            <Label fx:id="coreLogLevelHint" styleClass="hint-label" wrapText="true"
+                   maxWidth="Infinity"/>
+
+            <Separator styleClass="sidebar-separator"/>
+
+            <HBox spacing="12" alignment="CENTER_LEFT">
                 <Label fx:id="proxyModeLabel" text="Proxy Mode" styleClass="form-label" prefWidth="210"/>
                 <ComboBox fx:id="proxyModeCombo" styleClass="form-field" prefWidth="300"/>
             </HBox>

@@ -297,7 +297,8 @@ public class McpServerService {
 
         server.addTool(new LambdaTool("set_setting",
                 "Set one setting by 'key' and 'value' (e.g. theme, language, socks_port, "
-                        + "proxy_dns, health_check_enabled).",
+                        + "proxy_dns, health_check_enabled, core_log_level "
+                        + "[debug|info|warn|error], which applies from the next connect).",
                 true, schema(prop("key", "string"), prop("value", null), req("key", "value")),
                 args -> control.setSetting(str(args, "key"), args.get("value"))));
 

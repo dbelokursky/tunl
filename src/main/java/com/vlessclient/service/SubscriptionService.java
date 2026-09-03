@@ -95,7 +95,7 @@ public class SubscriptionService {
     public SubscriptionService(ConfigStore configStore, ShareLinkParser shareLinkParser) {
         this(configStore, shareLinkParser,
                 resolveDataDir(),
-                HttpClient.newBuilder()
+                AppHttpClients.newBuilder()
                         .connectTimeout(Duration.ofSeconds(15))
                         .followRedirects(HttpClient.Redirect.NORMAL)
                         .build(),
