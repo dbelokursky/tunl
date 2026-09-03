@@ -1,6 +1,7 @@
 package com.vlessclient.service;
 
 import com.vlessclient.model.AppSettings;
+import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.model.ServerConfig;
 import java.net.http.HttpClient;
 import java.nio.file.Files;
@@ -96,6 +97,42 @@ class ConfigVersioningTest {
         assertThat(store.getSettings().getTheme()).isEqualTo("dark");
         assertThat(store.getSettings().getConfigVersion())
                 .isEqualTo(AppSettings.CURRENT_CONFIG_VERSION);
+        // core_log_level arrived after v1 without bumping the version, so a
+        // file written before it existed has to load at the level the core
+        // used to be hardcoded to.
+        assertThat(store.getSettings().getCoreLogLevel()).isEqualTo(CoreLogLevel.INFO);
+    }
+
+    @Test
+    void coreLogLevelRoundTripsThroughTheSettingsFile() {
+        ConfigStore store = store();
+        AppSettings settings = store.getSettings();
+        settings.setCoreLogLevel(CoreLogLevel.DEBUG);
+        store.saveSettings(settings);
+
+        assertThat(store().getSettings().getCoreLogLevel()).isEqualTo(CoreLogLevel.DEBUG);
+    }
+
+    @Test
+    void coreLogLevelIsPersistedAsItsSingBoxString() throws Exception {
+        ConfigStore store = store();
+        AppSettings settings = store.getSettings();
+        settings.setCoreLogLevel(CoreLogLevel.WARN);
+        store.saveSettings(settings);
+
+        assertThat(Files.readString(tempDir.resolve("settings.json")))
+                .contains("\"core_log_level\" : \"warn\"");
+    }
+
+    @Test
+    void unknownCoreLogLevelFallsBackToInfo() throws Exception {
+        // A level this build does not know — a hand-edited file, or one
+        // written by a newer build — must not fail the load or leave the core
+        // with a level sing-box would reject at start-up.
+        Files.writeString(tempDir.resolve("settings.json"),
+                "{ \"config_version\": 1, \"core_log_level\": \"verbose\" }");
+
+        assertThat(store().getSettings().getCoreLogLevel()).isEqualTo(CoreLogLevel.INFO);
     }
 
     @Test

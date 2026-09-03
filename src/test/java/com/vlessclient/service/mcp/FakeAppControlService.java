@@ -25,7 +25,7 @@ class FakeAppControlService implements AppControlService {
             List.of(new RoutingInfo.RuleInfo("r1", "domain", "example.com", "proxy")));
     SettingsInfo settings = new SettingsInfo("system", "en", false, "tun",
             1080, 1081, 9090, "https://1.1.1.1/dns-query", "https://223.5.5.5/dns-query",
-            "prefer_ipv4", "utun99", true, true, 55555, true);
+            "prefer_ipv4", "utun99", "info", true, true, 55555, true);
 
     @Override
     public StatusInfo getStatus() {
