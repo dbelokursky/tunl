@@ -63,6 +63,7 @@ jpackage \
     --vendor "Tunl" \
     --java-options "-Dapp.version=${VERSION}" \
     --java-options "-Djava.awt.headless=false" \
+    --java-options "--enable-native-access=ALL-UNNAMED" \
     --verbose
 
 echo "[package-linux] built: $(ls dist/*.deb) (app-version=${VERSION}, deb Version=${DEB_VERSION})"
