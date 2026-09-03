@@ -51,8 +51,14 @@ fi
 # Without --add-modules jpackage links every module that exports an API, so
 # the installer carries a ~290 MB runtime for an app that uses a dozen of
 # them. --jlink-options REPLACES jpackage's defaults rather than adding to
-# them, so the four it would have passed are repeated here, plus compression.
-JLINK_OPTIONS="--strip-native-commands --strip-debug --no-man-pages --no-header-files --compress=zip-6"
+# them, so the four it would have passed are repeated here.
+#
+# Deliberately WITHOUT --compress: every installer is itself a compressed
+# archive, and a pre-compressed lib/modules is one the DMG's zlib, the MSI's
+# cabinet and the .deb's zstd can no longer squeeze. Measured on the same jar:
+# the DMG went 86.6 MB -> 91.8 MB with --compress=zip-6, and the amd64 .deb
+# 78.8 MB -> 86.9 MB. Compression only helps a runtime that ships loose.
+JLINK_OPTIONS="--strip-native-commands --strip-debug --no-man-pages --no-header-files"
 
 # Stage just the shaded jar (not the original-*.jar the shade plugin
 # leaves alongside it).

@@ -27,7 +27,7 @@ rm -rf "${OUT_DIR}"
 # Deliberately WITHOUT --strip-native-commands, unlike the packaged runtime:
 # the probe needs this image's own bin/java to run on.
 jlink --add-modules "${MODULES}" \
-    --strip-debug --no-man-pages --no-header-files --compress=zip-6 \
+    --strip-debug --no-man-pages --no-header-files \
     --output "${OUT_DIR}/image"
 
 mkdir -p "${OUT_DIR}/classes"
