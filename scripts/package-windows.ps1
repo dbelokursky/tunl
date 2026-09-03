@@ -71,7 +71,8 @@ Copy-Item "target/$jarName" staging/
     --win-menu-group 'Tunl' `
     --win-shortcut `
     --win-per-user-install `
-    --java-options "-Dapp.version=$Version"
+    --java-options "-Dapp.version=$Version" `
+    --java-options "--enable-native-access=ALL-UNNAMED"
 if ($LASTEXITCODE -ne 0) {
     throw "[package-windows] jpackage failed with exit code $LASTEXITCODE"
 }
