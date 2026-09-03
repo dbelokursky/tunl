@@ -387,10 +387,12 @@ mvn clean javafx:run
 ```
 
 On the first build Maven automatically downloads `sing-box` (the version is
-pinned in [singbox.properties](src/main/resources/singbox.properties)) for
-both architectures (arm64 + amd64) into `target/classes/native/darwin-{arch}/`
-with SHA-256 verification. The binaries are bundled into the jar and extracted
-on first launch.
+pinned in [singbox.properties](src/main/resources/singbox.properties)) for the
+build host's OS and architecture into `target/classes/native/{os}-{arch}/`
+with SHA-256 verification. The binary is bundled into the jar and extracted on
+first launch. Only the host's architecture is bundled: jpackage produces a
+single-architecture app, so a DMG built on Apple Silicon could never run an
+Intel core anyway.
 
 ### If the bundle is unavailable
 
