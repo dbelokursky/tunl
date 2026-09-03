@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Downloads and bundles the sing-box binary for both macOS architectures into
-# the Maven build output directory. Invoked by the exec-maven-plugin during
-# the generate-resources phase.
+# Downloads and bundles the sing-box binary for the build host's OS and
+# architecture into the Maven build output directory. Invoked by the
+# exec-maven-plugin during the generate-resources phase.
 #
 # Arguments:
 #   $1 — output directory (e.g. target/classes/native)
@@ -49,25 +49,31 @@ fi
 CACHE_DIR="${HOME}/.cache/vless-client-build/sing-box-${VERSION}"
 mkdir -p "${CACHE_DIR}" "${OUT_DIR}"
 
-# The build host decides which platform's binaries get bundled: a macOS host
-# bundles both darwin archs (universal DMG), a Linux host bundles its own
-# architecture (amd64 or arm64). Windows hosts use bundle-singbox.ps1 instead.
+# The build host decides which binary gets bundled: its own OS and its own
+# architecture, nothing else. jpackage links a runtime for the host's
+# architecture only, so the DMG built on an arm64 runner cannot start on an
+# Intel Mac at all — a darwin-amd64 core inside it was 29 MB of the download
+# that no machine ever executed. An Intel DMG needs an Intel build host, which
+# bundles darwin-amd64 by the same rule. Windows hosts use bundle-singbox.ps1.
 case "$(uname -s)" in
-    Darwin) targets="darwin:arm64 darwin:amd64" ;;
-    Linux)
-        case "$(uname -m)" in
-            aarch64|arm64) targets="linux:arm64" ;;
-            x86_64|amd64)  targets="linux:amd64" ;;
-            *)
-                echo "[bundle-singbox] unsupported Linux arch: $(uname -m)" >&2
-                exit 1
-                ;;
-        esac ;;
+    Darwin) os="darwin" ;;
+    Linux)  os="linux" ;;
     *)
         echo "[bundle-singbox] unsupported build host: $(uname -s)" >&2
         exit 1
         ;;
 esac
+case "$(uname -m)" in
+    aarch64|arm64) arch="arm64" ;;
+    x86_64|amd64)  arch="amd64" ;;
+    *)
+        echo "[bundle-singbox] unsupported ${os} arch: $(uname -m)" >&2
+        exit 1
+        ;;
+esac
+# Kept as a list so a host that must ship more than one binary can be added
+# back with one line; today it is always exactly one entry.
+targets="${os}:${arch}"
 
 # shasum on macOS, sha256sum on most Linux distros.
 sha256_of() {

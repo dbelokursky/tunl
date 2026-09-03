@@ -55,8 +55,9 @@
             <Label fx:id="updateBannerHint" styleClass="banner-subtitle"
                    wrapText="true" maxWidth="Infinity"/>
         </VBox>
-        <Button fx:id="updateBannerButton" styleClass="secondary-button"
-                onAction="#onUpdateBannerClicked"/>
+        <!-- The action is wired in UpdateBannerSection, which owns when this
+             button is shown at all. -->
+        <Button fx:id="updateBannerButton" styleClass="secondary-button"/>
     </HBox>
 
     <!-- Status hero: two rows so nothing is clipped at a narrow window.

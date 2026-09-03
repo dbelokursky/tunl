@@ -1,6 +1,7 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
+import com.vlessclient.app.ThemeCss;
 import java.util.Locale;
 import javafx.scene.Group;
 import javafx.scene.Scene;
@@ -44,7 +45,7 @@ public class ButtonLabelsTest extends ApplicationTest {
     public void start(Stage stage) {
         root = new Group();
         scene = new Scene(root, 600, 200);
-        scene.getStylesheets().add(getClass().getResource("/css/light.css").toExternalForm());
+        scene.getStylesheets().addAll(ThemeCss.light());
         stage.setScene(scene);
         stage.show();
     }

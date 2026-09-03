@@ -7,24 +7,43 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ThemeManagerTest {
 
     /**
-     * Dialogs need the stylesheet without handing their scene to the manager:
+     * Dialogs need the stylesheets without handing their scene to the manager:
      * applyTheme() adopts whatever scene it is given as the tracked one, so
      * using it for a transient dialog would leave the main window unwatched
      * after the dialog closed and "auto" would stop following the OS there.
      */
     @Test
-    void currentStylesheet_reflectsTheThemeWithoutCapturingAScene() {
+    void currentStylesheets_reflectTheThemeWithoutCapturingAScene() {
         ThemeManager manager = new ThemeManager();
 
         manager.setTheme("dark");
-        assertThat(manager.currentStylesheet()).endsWith("dark.css");
+        assertThat(manager.currentStylesheets()).satisfiesExactly(
+                base -> assertThat(base).endsWith("base.css"),
+                theme -> assertThat(theme).endsWith("dark.css"));
 
         manager.setTheme("light");
-        assertThat(manager.currentStylesheet()).endsWith("light.css");
+        assertThat(manager.currentStylesheets()).satisfiesExactly(
+                base -> assertThat(base).endsWith("base.css"),
+                theme -> assertThat(theme).endsWith("light.css"));
 
-        // Resolvable URL, not a bare path — callers pass it straight to
+        // Resolvable URLs, not bare paths — callers pass them straight to
         // Scene.getStylesheets().
-        assertThat(manager.currentStylesheet()).startsWith("file:");
+        assertThat(manager.currentStylesheets()).allSatisfy(
+                url -> assertThat(url).startsWith("file:"));
+    }
+
+    /**
+     * Order is not cosmetic: light.css and dark.css hold only {@code -c-*}
+     * token definitions, so a dialog given the theme file without base.css
+     * before it renders in stock Modena.
+     */
+    @Test
+    void currentStylesheets_putBaseBeforeTheTheme() {
+        ThemeManager manager = new ThemeManager();
+        manager.setTheme("dark");
+
+        assertThat(manager.currentStylesheets()).hasSize(2);
+        assertThat(manager.currentStylesheets().get(0)).endsWith("base.css");
     }
 
     @Test

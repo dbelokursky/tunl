@@ -2,6 +2,7 @@ package com.vlessclient.app;
 
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.platform.Autostart;
+import com.vlessclient.service.AppHttpClients;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.CountryResolver;
@@ -168,6 +169,7 @@ public class ServiceLocator {
         }
 
         runStartupTasks(mode,
+                () -> routeAppTrafficThroughTunnel(configStore),
                 countryResolver::warmUp,
                 subscriptionService::startAutoRefresh,
                 updateManager::startPeriodicCheck,
@@ -188,6 +190,32 @@ public class ServiceLocator {
         for (Runnable task : tasks) {
             Objects.requireNonNull(task, "task").run();
         }
+    }
+
+    /**
+     * Sends the application's own HTTP requests through the tunnel whenever one
+     * is carrying traffic.
+     *
+     * <p>Without this the updater, the subscription refresh, the country
+     * database and the core release check all leave the machine directly, even
+     * in SYSTEM_PROXY mode where sing-box has registered itself as the OS
+     * proxy: {@code HttpClient} asks the JVM's default proxy selector, which
+     * answers DIRECT for everything. On a network that blocks GitHub or the
+     * subscription host — the reason this application exists — that made
+     * "connected" and "the update check can succeed" two different moments.
+     * TUN mode captured the JVM's traffic anyway, which is why the gap was
+     * only ever visible in one of the two modes.</p>
+     *
+     * <p>The port is read per request, so the engine registered later by the
+     * installer flow and a port changed in Settings are both picked up.</p>
+     */
+    private static void routeAppTrafficThroughTunnel(ConfigStore configStore) {
+        AppHttpClients.followTunnel(
+                () -> services.get(SingBoxEngine.class) instanceof SingBoxEngine engine
+                        ? engine
+                        : null,
+                configStore::getSettings,
+                get(TunnelHealthState.class));
     }
 
     private static void attachUpdateCheckListener(
@@ -243,6 +271,10 @@ public class ServiceLocator {
      */
     public static void shutdown() {
         log.info("ServiceLocator shutting down");
+
+        // Before anything else: a request started after this point must not be
+        // handed the port of an engine that is about to stop.
+        AppHttpClients.routeDirect();
 
         stopMcpServer();
 

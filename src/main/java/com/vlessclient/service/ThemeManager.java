@@ -2,6 +2,7 @@ package com.vlessclient.service;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -32,6 +33,11 @@ public class ThemeManager {
 
     private static final Logger log = LoggerFactory.getLogger(ThemeManager.class);
 
+    /**
+     * Structure for every theme: applied first so the per-theme token file can
+     * only ever change colour, never layout.
+     */
+    private static final String BASE_CSS = "/css/base.css";
     private static final String LIGHT_CSS = "/css/light.css";
     private static final String DARK_CSS = "/css/dark.css";
 
@@ -92,7 +98,7 @@ public class ThemeManager {
     }
 
     /**
-     * The stylesheet in effect right now, for scenes this manager does not own
+     * The stylesheets in effect right now, for scenes this manager does not own
      * — dialogs, mostly.
      *
      * <p>Deliberately not {@link #applyTheme}: that adopts the scene it is
@@ -102,14 +108,12 @@ public class ThemeManager {
      * the current theme instead; they do not outlive a theme change in any way
      * that matters.</p>
      *
-     * @return an external-form stylesheet URL, ready for {@code getStylesheets}
+     * @return base then theme, in the order they must be applied — the theme
+     *     file carries only {@code -c-*} tokens, so a dialog handed the theme
+     *     alone would have no rules at all
      */
-    public String currentStylesheet() {
-        String cssPath = resolveDark(isSystemDarkMode()) ? DARK_CSS : LIGHT_CSS;
-        return Objects.requireNonNull(
-                getClass().getResource(cssPath),
-                "Theme CSS not found: " + cssPath
-        ).toExternalForm();
+    public List<String> currentStylesheets() {
+        return stylesheetsFor(resolveDark(isSystemDarkMode()));
     }
 
     private boolean isAutoMode() {
@@ -132,13 +136,24 @@ public class ThemeManager {
         if (scene == null) {
             return;
         }
-        String cssPath = dark ? DARK_CSS : LIGHT_CSS;
-        String cssUrl = Objects.requireNonNull(
+        scene.getStylesheets().setAll(stylesheetsFor(dark));
+        log.debug("Applied theme CSS: {} + {}", BASE_CSS, dark ? DARK_CSS : LIGHT_CSS);
+    }
+
+    /**
+     * Base first, theme second: the theme file only defines {@code -c-*}
+     * tokens, and base.css resolves them, so the order is what makes the app
+     * look like anything at all.
+     */
+    private List<String> stylesheetsFor(boolean dark) {
+        return List.of(externalForm(BASE_CSS), externalForm(dark ? DARK_CSS : LIGHT_CSS));
+    }
+
+    private String externalForm(String cssPath) {
+        return Objects.requireNonNull(
                 getClass().getResource(cssPath),
                 "Theme CSS not found: " + cssPath
         ).toExternalForm();
-        scene.getStylesheets().setAll(cssUrl);
-        log.debug("Applied theme CSS: {}", cssPath);
     }
 
     /**

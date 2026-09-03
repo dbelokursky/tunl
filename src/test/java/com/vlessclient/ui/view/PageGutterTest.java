@@ -1,5 +1,6 @@
 package com.vlessclient.ui.view;
 
+import com.vlessclient.app.ThemeCss;
 import com.vlessclient.app.UiTestServices;
 import java.util.ArrayList;
 import java.util.List;
@@ -81,8 +82,7 @@ public class PageGutterTest extends ApplicationTest {
                 // Never shown: a scene only needs a root and its stylesheets to
                 // apply CSS, and a stage ties the test to the runner's screen.
                 Scene scene = new Scene(new Group(), 888, 740);
-                scene.getStylesheets().setAll(
-                        getClass().getResource("/css/light.css").toExternalForm());
+                scene.getStylesheets().setAll(ThemeCss.light());
                 scene.setRoot(root);
                 root.applyCss();
                 root.layout();

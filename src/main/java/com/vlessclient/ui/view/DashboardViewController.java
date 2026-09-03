@@ -10,7 +10,6 @@ import com.vlessclient.model.ServerSelection;
 import com.vlessclient.model.TunnelHealth;
 import com.vlessclient.model.TunnelStatus;
 import com.vlessclient.platform.SystemProxySupport;
-import com.vlessclient.platform.UpdateApplier;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.CountryResolver;
@@ -20,10 +19,11 @@ import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.SingBoxInstaller;
 import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.service.TunnelHealthState;
-import com.vlessclient.service.UpdateManager;
 import com.vlessclient.ui.view.dashboard.AddHealthTargetDialog;
 import com.vlessclient.ui.view.dashboard.HealthCheckCoordinator;
+import com.vlessclient.ui.view.dashboard.StatusPresenter;
 import com.vlessclient.ui.view.dashboard.TrafficDisplayBinder;
+import com.vlessclient.ui.view.dashboard.UpdateBannerSection;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
@@ -122,7 +122,8 @@ public class DashboardViewController implements ViewShownAware {
     private TrafficDisplayBinder trafficDisplay;
     private HealthCheckCoordinator healthChecks;
     private TunnelHealthState healthState;
-    private UpdateManager updateManager;
+    private UpdateBannerSection updateBannerSection;
+    private StatusPresenter statusPresenter;
 
     /**
      * Wires up services, the connection-state listener, traffic/latency
@@ -145,7 +146,10 @@ public class DashboardViewController implements ViewShownAware {
         uploadCardTitle.textProperty().bind(I18n.binding("dashboard.upload.speed"));
         downloadCardTitle.textProperty().bind(I18n.binding("dashboard.download.speed"));
         bindInstallBannerLabels();
-        initUpdateBanner();
+        ButtonLabels.bind(updateBannerButton, "settings.update.restart");
+        updateBannerSection = new UpdateBannerSection(new UpdateBannerSection.Controls(
+                updateBanner, updateBannerTitle, updateBannerHint, updateBannerButton));
+        updateBannerSection.init();
 
         try {
             singBoxEngine = ServiceLocator.get(SingBoxEngine.class);
@@ -197,6 +201,14 @@ public class DashboardViewController implements ViewShownAware {
                 }
             });
         }
+        statusPresenter = new StatusPresenter(
+                new StatusPresenter.Controls(statusCircle, statusHalo, statusFlag,
+                        statusTitle, statusLabel, serverNameLabel, connectButton),
+                () -> activeServer,
+                this::currentHealth,
+                () -> singBoxEngine,
+                this::refreshConnectButtonAvailability);
+
         try {
             healthState = ServiceLocator.get(TunnelHealthState.class);
         } catch (IllegalArgumentException e) {
@@ -251,7 +263,7 @@ public class DashboardViewController implements ViewShownAware {
             singBoxEngine.errorMessageProperty().addListener(
                     (obs, oldMsg, newMsg) -> {
                         if (newMsg != null && !newMsg.isEmpty()) {
-                            statusLabel.setText(newMsg);
+                            statusPresenter.showEngineError(newMsg);
                         }
                     });
 
@@ -282,132 +294,6 @@ public class DashboardViewController implements ViewShownAware {
         singBoxMissingHint.textProperty().bind(I18n.binding("dashboard.singbox.missing.hint"));
         ButtonLabels.bind(copyBrewButton, "dashboard.copy", "dashboard.copied");
         ButtonLabels.bind(retryInstallButton, "dashboard.singbox.retry");
-    }
-
-    /** What the dashboard should say about an update, if anything. */
-    enum UpdateBannerState {
-
-        /** Nothing newer exists, or there is no updater to ask. */
-        HIDDEN,
-
-        /** A newer release exists but this install updates through apt/AUR. */
-        PACKAGE_MANAGER,
-
-        /** Newer release seen, and its installer is being fetched right now. */
-        DOWNLOADING,
-
-        /** Seen, but nothing is fetching it at this moment. */
-        AVAILABLE,
-
-        /** Verified and staged — one restart away. */
-        READY
-    }
-
-    /**
-     * Chooses the banner's state. Kept as a pure function of the facts it
-     * depends on, so the combinations can be checked without a scene.
-     *
-     * <p>{@code downloading} is asked rather than inferred. The banner used to
-     * treat "found but not staged" as proof a download was running and say so;
-     * on a network where the fetch times out — the network this client exists
-     * for — it then announced a background download that had already failed,
-     * and went on announcing it until the next check hours later.</p>
-     *
-     * @param updateAvailable whether a newer release was found
-     * @param staged          whether its installer is already verified on disk
-     * @param downloading     whether that installer is being fetched right now
-     * @param selfUpdates     whether this platform installs updates in-app
-     * @return the state to render
-     */
-    static UpdateBannerState bannerState(boolean updateAvailable, boolean staged,
-                                         boolean downloading, boolean selfUpdates) {
-        if (!updateAvailable) {
-            return UpdateBannerState.HIDDEN;
-        }
-        if (!selfUpdates) {
-            return UpdateBannerState.PACKAGE_MANAGER;
-        }
-        if (staged) {
-            return UpdateBannerState.READY;
-        }
-        return downloading ? UpdateBannerState.DOWNLOADING : UpdateBannerState.AVAILABLE;
-    }
-
-    /**
-     * Wires the update banner to the updater's own properties, so a release
-     * found by the background check surfaces here without the user going
-     * looking for it in Settings.
-     */
-    private void initUpdateBanner() {
-        try {
-            updateManager = ServiceLocator.get(UpdateManager.class);
-        } catch (IllegalArgumentException e) {
-            updateManager = null;
-            refreshUpdateBanner();
-            return;
-        }
-        ButtonLabels.bind(updateBannerButton, "settings.update.restart");
-        updateManager.updateAvailableProperty()
-                .addListener((o, was, is) -> refreshUpdateBanner());
-        updateManager.latestVersionProperty()
-                .addListener((o, was, is) -> refreshUpdateBanner());
-        // The one that turns "downloading" into an offer to restart. Without
-        // it the banner never hears that the download finished: by then the
-        // two properties above are already at their final values and fire
-        // nothing more.
-        updateManager.stagedProperty()
-                .addListener((o, was, is) -> refreshUpdateBanner());
-        // The fetch starting and stopping is now a fact the banner reads rather
-        // than one it guesses, so it has to hear about both edges.
-        updateManager.downloadingProperty()
-                .addListener((o, was, is) -> refreshUpdateBanner());
-        // The title carries a version number, so it cannot be a plain binding;
-        // re-render instead when the language changes under it.
-        I18n.localeProperty().addListener((o, was, is) -> refreshUpdateBanner());
-        refreshUpdateBanner();
-    }
-
-    private void refreshUpdateBanner() {
-        if (updateBanner == null) {
-            return;
-        }
-        UpdateBannerState state = updateManager == null
-                ? UpdateBannerState.HIDDEN
-                : bannerState(updateManager.updateAvailableProperty().get(),
-                        updateManager.hasStagedUpdate(),
-                        updateManager.downloadingProperty().get(),
-                        UpdateApplier.current().selfUpdates());
-
-        updateBanner.setVisible(state != UpdateBannerState.HIDDEN);
-        updateBanner.setManaged(state != UpdateBannerState.HIDDEN);
-        if (state == UpdateBannerState.HIDDEN) {
-            return;
-        }
-
-        String version = updateManager.latestVersionProperty().get();
-        updateBannerTitle.setText(state == UpdateBannerState.READY
-                ? I18n.get("dashboard.update.ready", version)
-                : I18n.get("dashboard.update.available", version));
-        String hintKey = switch (state) {
-            case READY -> "dashboard.update.hint.staged";
-            case PACKAGE_MANAGER -> "dashboard.update.hint.packagemanager";
-            case AVAILABLE -> "dashboard.update.hint.pending";
-            default -> "dashboard.update.hint.downloading";
-        };
-        updateBannerHint.setText(I18n.get(hintKey));
-
-        // Only the staged state has anything to press: the download runs on
-        // its own, and a package-managed install is not ours to touch.
-        boolean actionable = state == UpdateBannerState.READY;
-        updateBannerButton.setVisible(actionable);
-        updateBannerButton.setManaged(actionable);
-    }
-
-    @FXML
-    private void onUpdateBannerClicked() {
-        if (RestartToUpdate.start() == RestartToUpdate.Outcome.FAILED) {
-            updateBannerHint.setText(I18n.get("settings.update.restart.failed"));
-        }
     }
 
     private void refreshSingBoxMissingBanner() {
@@ -455,7 +341,7 @@ public class DashboardViewController implements ViewShownAware {
                 singBoxEngine.errorMessageProperty().addListener(
                         (obs, oldMsg, newMsg) -> {
                             if (newMsg != null && !newMsg.isEmpty()) {
-                                statusLabel.setText(newMsg);
+                                statusPresenter.showEngineError(newMsg);
                             }
                         });
                 updateUi(singBoxEngine.connectionStateProperty().get());
@@ -978,208 +864,13 @@ public class DashboardViewController implements ViewShownAware {
         }
     }
 
-    /**
-     * Shows the exit country beside the status while connected.
-     *
-     * <p>Hidden — and unmanaged, so it takes no space — whenever the country
-     * is unknown or the tunnel is down. An empty slot next to "Connected"
-     * would read as a missing flag rather than as missing information.</p>
-     */
-    private void showStatusFlag(ServerConfig server) {
-        if (statusFlag == null) {
-            return;
-        }
-        hideStatusFlag();
-        if (server == null) {
-            return;
-        }
-        CountryResolver resolver;
-        try {
-            resolver = ServiceLocator.get(CountryResolver.class);
-        } catch (IllegalArgumentException e) {
-            return;
-        }
-        resolver.countryOf(server).ifPresent(this::paintStatusFlag);
-        resolver.resolveAsync(server, code -> Platform.runLater(() -> {
-            // Only paint if this is still the server we are connected to.
-            if (activeServer == server
-                    && singBoxEngine != null
-                    && singBoxEngine.connectionStateProperty().get() == ConnectionState.CONNECTED) {
-                paintStatusFlag(code);
-            }
-        }));
-    }
-
-    private void paintStatusFlag(String isoCode) {
-        statusFlag.getChildren().setAll(Flags.of(isoCode, 18));
-        statusFlag.setVisible(true);
-        statusFlag.setManaged(true);
-    }
-
-    private void hideStatusFlag() {
-        statusFlag.getChildren().clear();
-        statusFlag.setVisible(false);
-        statusFlag.setManaged(false);
-    }
-
-    /**
-     * Repaints the hero card. Deliberately split in two: what the dot and the
-     * wording say is a question about the <em>tunnel</em> — the process state
-     * refined by the reachability verdict, via {@link TunnelStatus#of} — while
-     * what the button offers is a question about the <em>process</em>. A
-     * tunnel that is up but carries nothing reads as a failure and still
-     * offers Disconnect, not Retry.
-     */
-    private void updateUi(ConnectionState state) {
-        TunnelStatus status = TunnelStatus.of(state, currentHealth());
-
-        paintStatusIndicator(status, state);
-        paintStatusSubtitle(status);
-        paintConnectButton(state);
-
-        // serverNameLabel is no longer rendered in the hero card (state
-        // subtitle conveys that information), but update it for anyone
-        // still observing the field.
-        if (activeServer != null) {
-            serverNameLabel.setText(activeServer.getName());
-        } else {
-            serverNameLabel.setText("");
-        }
-
-        if (state != ConnectionState.CONNECTED && state != ConnectionState.CONNECTING) {
-            refreshConnectButtonAvailability();
-        }
-    }
-
     private TunnelHealth currentHealth() {
         return healthState != null ? healthState.get() : TunnelHealth.UNMONITORED;
     }
 
-    /**
-     * The style-class suffix and fill shared by the dot, its halo and the
-     * title. Several statuses map onto one look on purpose — "verifying",
-     * "partly reachable" and "unverified" are all the same amber "do not trust
-     * this yet" — so the existing four style classes still cover the range.
-     */
-    private static String toneSuffix(TunnelStatus.Tone tone) {
-        return switch (tone) {
-            case OK -> "connected";
-            case PENDING -> "connecting";
-            case BAD -> "error";
-            case IDLE -> "disconnected";
-        };
-    }
-
-    private static Color toneFill(TunnelStatus.Tone tone) {
-        return switch (tone) {
-            case OK -> Color.web("#2e7d32");
-            case PENDING -> Color.web("#ef6c00");
-            case BAD -> Color.web("#c62828");
-            case IDLE -> Color.web("#9e9e9e");
-        };
-    }
-
-    private void paintStatusIndicator(TunnelStatus status, ConnectionState state) {
-        String suffix = toneSuffix(status.tone());
-
-        statusCircle.setFill(toneFill(status.tone()));
-        statusCircle.getStyleClass().setAll("status-circle-" + suffix);
-
-        if (statusHalo != null) {
-            statusHalo.getStyleClass().removeAll(
-                    "status-halo-connected", "status-halo-connecting",
-                    "status-halo-error", "status-halo-disconnected");
-            statusHalo.getStyleClass().add("status-halo-" + suffix);
-        }
-
-        if (statusTitle != null) {
-            statusTitle.setText(titleFor(status));
-            statusTitle.getStyleClass().setAll("status-title", "status-title-" + suffix);
-        }
-
-        // The exit-country flag belongs to a running core, whatever the probes
-        // then make of it.
-        if (state == ConnectionState.CONNECTED) {
-            showStatusFlag(activeServer);
-        } else {
-            hideStatusFlag();
-        }
-    }
-
-    private static String titleFor(TunnelStatus status) {
-        String key = switch (status) {
-            case CONNECTED -> "state.connected";
-            case CONNECTING -> "state.connecting";
-            case VERIFYING -> "state.verifying";
-            case DEGRADED -> "state.degraded";
-            case NO_TRAFFIC -> "state.no.traffic";
-            case UNVERIFIED -> "state.unverified";
-            case ERROR -> "state.error";
-            case DISCONNECTED -> "state.disconnected";
-        };
-        return I18n.get(key);
-    }
-
-    private void paintStatusSubtitle(TunnelStatus status) {
-        if (status == TunnelStatus.ERROR) {
-            // The engine's own message ("Process exited ...") says more than a
-            // generic line, so a repaint must not wipe it.
-            if (!statusLabel.getText().startsWith("Process exited")) {
-                statusLabel.setText(I18n.get("dashboard.status.check.logs"));
-            }
-        } else {
-            statusLabel.setText(subtitleFor(status));
-        }
-
-        if (status.tone() == TunnelStatus.Tone.BAD) {
-            statusLabel.getStyleClass().setAll("status-subtitle", "status-subtitle-error");
-        } else {
-            statusLabel.getStyleClass().setAll("status-subtitle");
-        }
-    }
-
-    private String subtitleFor(TunnelStatus status) {
-        return switch (status) {
-            case CONNECTED -> activeServer != null
-                    ? I18n.get("dashboard.status.routing.through", activeServer.getName())
-                    : I18n.get("dashboard.status.routing");
-            case CONNECTING -> I18n.get("dashboard.status.establishing");
-            case VERIFYING -> I18n.get("dashboard.status.verifying");
-            case DEGRADED -> I18n.get("dashboard.status.degraded");
-            case NO_TRAFFIC -> I18n.get("dashboard.status.no.traffic");
-            case UNVERIFIED -> I18n.get("dashboard.status.unverified");
-            case ERROR -> I18n.get("dashboard.status.check.logs");
-            case DISCONNECTED -> activeServer != null
-                    ? I18n.get("dashboard.status.ready", activeServer.getName())
-                    : I18n.get("dashboard.status.add.server");
-        };
-    }
-
-    private void paintConnectButton(ConnectionState state) {
-        switch (state) {
-            case CONNECTED -> {
-                connectButton.setText(I18n.get("button.disconnect"));
-                connectButton.setDisable(false);
-                connectButton.getStyleClass().removeAll("connect-button");
-                connectButton.getStyleClass().add("disconnect-button");
-            }
-            case CONNECTING -> {
-                connectButton.setText(I18n.get("button.cancel"));
-                connectButton.setDisable(false);
-            }
-            case ERROR -> {
-                connectButton.setText(I18n.get("button.retry"));
-                connectButton.setDisable(false);
-                connectButton.getStyleClass().removeAll("disconnect-button");
-                connectButton.getStyleClass().add("connect-button");
-            }
-            default -> {
-                connectButton.setText(I18n.get("button.connect"));
-                connectButton.setDisable(false);
-                connectButton.getStyleClass().removeAll("disconnect-button");
-                connectButton.getStyleClass().add("connect-button");
-            }
-        }
+    /** Repaints the hero card for a process state. */
+    private void updateUi(ConnectionState state) {
+        statusPresenter.update(state);
     }
 
     /**
@@ -1187,11 +878,7 @@ public class DashboardViewController implements ViewShownAware {
      */
     public void setActiveServer(ServerConfig server) {
         this.activeServer = server;
-        if (server != null) {
-            serverNameLabel.setText(server.getName());
-        } else {
-            serverNameLabel.setText(I18n.get("dashboard.no.server"));
-        }
+        statusPresenter.showActiveServerName(server);
     }
 
     public ObjectProperty<ConnectionState> connectionStateProperty() {

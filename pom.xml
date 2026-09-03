@@ -40,6 +40,7 @@
         <assertj.version>3.27.7</assertj.version>
         <exec-maven-plugin.version>3.6.3</exec-maven-plugin.version>
         <spotbugs.baselineFile>${project.basedir}/config/spotbugs-baseline.xml</spotbugs.baselineFile>
+        <spotbugs.excludeFilterFile>${project.basedir}/config/spotbugs-exclude.xml</spotbugs.excludeFilterFile>
         <main.class>com.vlessclient.app.Launcher</main.class>
         <!-- singbox.version is read from src/main/resources/singbox.properties
              by the properties-maven-plugin (initialize phase) — the single
@@ -241,7 +242,14 @@
                     <!-- @{argLine} lets the JaCoCo agent attach (prepare-agent
                          sets the argLine property); a bare literal here
                          silently disables coverage collection. -->
-                    <argLine>@{argLine}</argLine>
+                    <!-- The native-access grant below: JavaFX loads its
+                         glass/prism natives through System.load from the
+                         classpath's unnamed module. Since JDK 24 (JEP 472)
+                         that prints a "restricted method" warning at startup,
+                         and a later release turns it into an error. Granted
+                         here for the forked test JVM; the packaging scripts
+                         and the dev argfile grant it for the app itself. -->
+                    <argLine>@{argLine} --enable-native-access=ALL-UNNAMED</argLine>
                     <excludedGroups>${surefire.excludedGroups}</excludedGroups>
                     <systemPropertyVariables>
                         <!--
@@ -397,6 +405,12 @@
                     <effort>Max</effort>
                     <threshold>Medium</threshold>
                     <failOnError>true</failOnError>
+                    <!-- Two layers: the exclude filter drops whole bug patterns
+                         that are noise for a JavaFX app (see the file), the
+                         baseline pins the handful of intentional findings by
+                         signature hash. Keep the baseline small - a hash entry
+                         breaks the build whenever its method signature moves. -->
+                    <excludeFilterFile>${spotbugs.excludeFilterFile}</excludeFilterFile>
                     <excludeBugsFile>${spotbugs.baselineFile}</excludeBugsFile>
                     <xmlOutput>true</xmlOutput>
                 </configuration>
