@@ -19,67 +19,25 @@ jobs:
   # generated config shape, live runs (clash_api/http inbound; TUN probes
   # where the runner allows). Catches generator/core schema drift per OS.
 
-  test-macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
-        with:
-          java-version: '25'
-          distribution: 'temurin'
-          cache: 'maven'
-      # The sing-box tarballs are fetched at generate-resources on every build
-      # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
-      # pins both the version and the SHA-256s, so a bump misses the cache and
-      # re-downloads; bundle-singbox.sh verifies the checksum either way.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.cache/vless-client-build
-          key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
-      - run: mvn -B clean verify -Psmoke
-
-  test-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
-        with:
-          java-version: '25'
-          distribution: 'temurin'
-          cache: 'maven'
-      # The sing-box tarballs are fetched at generate-resources on every build
-      # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
-      # pins both the version and the SHA-256s, so a bump misses the cache and
-      # re-downloads; bundle-singbox.sh verifies the checksum either way.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.cache/vless-client-build
-          key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
-      - run: mvn -B clean verify -Psmoke
-
-  test-linux:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
-        with:
-          java-version: '25'
-          distribution: 'temurin'
-          cache: 'maven'
-      # The sing-box tarballs are fetched at generate-resources on every build
-      # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
-      # pins both the version and the SHA-256s, so a bump misses the cache and
-      # re-downloads; bundle-singbox.sh verifies the checksum either way.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.cache/vless-client-build
-          key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
-      - run: mvn -B clean verify -Psmoke
-
-  # arm64 twin: GitHub's free arm runners for public repos. Exercises the
-  # arch-aware bundling (linux-arm64 sing-box) with the same smoke gates.
-  test-linux-arm:
-    runs-on: ubuntu-24.04-arm
+  test:
+    name: test-${{ matrix.name }}
+    strategy:
+      # Every leg reports on its own: a Windows-only failure must not cancel
+      # the macOS run that would tell whether the change is cross-platform.
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos, os: macos-latest }
+          - { name: windows, os: windows-latest }
+          - { name: linux, os: ubuntu-latest }
+          # arm64 twin: GitHub's free arm runners for public repos. Exercises
+          # the arch-aware bundling (linux-arm64 sing-box) with the same gates.
+          - { name: linux-arm, os: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.os }}
+    # A leg takes 2-4 minutes. The smoke suite runs the real core, including
+    # TUN probes where the runner allows; a hang there would otherwise sit on
+    # the 6-hour default, on every leg, until someone noticed.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
@@ -106,8 +64,9 @@ jobs:
 
   package-macos:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: test-macos
+    needs: test
     runs-on: macos-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
@@ -134,8 +93,10 @@ jobs:
           if-no-files-found: error
 
   package-windows:
-    needs: test-windows
+    needs: test
     runs-on: windows-latest
+    # jpackage plus the MSI install/uninstall smoke; both are quick, WiX is not.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
@@ -165,8 +126,9 @@ jobs:
 
   package-linux:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: test-linux
+    needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
@@ -194,8 +156,9 @@ jobs:
 
   package-linux-arm:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: test-linux-arm
+    needs: test
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
@@ -232,6 +195,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [package-macos, package-windows, package-linux, package-linux-arm]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:

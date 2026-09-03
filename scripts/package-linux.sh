@@ -39,6 +39,21 @@ if [[ ! -f "target/${JAR_NAME}" ]]; then
     exit 1
 fi
 
+# The module list is shared with the other packaging scripts through
+# scripts/runtime-modules.txt: one module per line, '#' starts a comment.
+RUNTIME_MODULES="$(awk '{ sub(/#.*/, ""); if ($1 != "") { printf "%s%s", sep, $1; sep = "," } }' \
+    "${REPO_ROOT}/scripts/runtime-modules.txt")"
+if [[ -z "${RUNTIME_MODULES}" ]]; then
+    echo "[package-linux] scripts/runtime-modules.txt lists no modules" >&2
+    exit 1
+fi
+
+# Without --add-modules jpackage links every module that exports an API, so
+# the installer carries a ~290 MB runtime for an app that uses a dozen of
+# them. --jlink-options REPLACES jpackage's defaults rather than adding to
+# them, so the four it would have passed are repeated here, plus compression.
+JLINK_OPTIONS="--strip-native-commands --strip-debug --no-man-pages --no-header-files --compress=zip-6"
+
 # Stage just the shaded jar (not the original-*.jar the shade plugin
 # leaves alongside it).
 rm -rf staging dist
@@ -63,6 +78,9 @@ jpackage \
     --vendor "Tunl" \
     --java-options "-Dapp.version=${VERSION}" \
     --java-options "-Djava.awt.headless=false" \
+    --java-options "--enable-native-access=ALL-UNNAMED" \
+    --add-modules "${RUNTIME_MODULES}" \
+    --jlink-options "${JLINK_OPTIONS}" \
     --verbose
 
 echo "[package-linux] built: $(ls dist/*.deb) (app-version=${VERSION}, deb Version=${DEB_VERSION})"

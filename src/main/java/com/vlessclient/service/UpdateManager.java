@@ -125,7 +125,7 @@ public class UpdateManager {
      * redirects and uses the standard connect timeout.
      */
     public UpdateManager() {
-        this(HttpClient.newBuilder()
+        this(AppHttpClients.newBuilder()
                 .connectTimeout(HTTP_TIMEOUT)
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .build());
