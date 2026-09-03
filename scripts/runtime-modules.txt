@@ -1,0 +1,31 @@
+# JDK modules linked into the packaged runtime, read by the three packaging
+# scripts so macOS, Windows and Linux can never ship different sets.
+#
+# Without --add-modules, jpackage hands jlink the JDK's default root set,
+# which is every module that exports an API: ~290 MB of runtime for an app
+# that touches a dozen modules.
+#
+# Adding a module is cheap; missing one is a crash the test suite cannot see,
+# because the tests run on a full JDK. So the list is verified two ways
+# before it changes: the whole test suite runs against an image built from
+# exactly these modules, and scripts/verify-runtime-modules.sh probes the
+# capabilities that no test exercises (Russian locale data, EC/TLS, the
+# Windows charsets).
+#
+# One module per line; everything after a '#' is a comment.
+
+java.base           # everything
+java.desktop        # AWT tray icon, Dock icon, and all of JavaFX
+java.logging        # slf4j/logback plumbing
+java.management     # JMX beans logback and the JVM itself register
+java.naming         # logback pulls it in; also the JdkLDAP security provider
+java.net.http       # every HTTP client in the app
+java.scripting      # ScriptEngine lookups inside Jackson/logback
+java.sql            # logback's DBAppender references it even when unused
+java.xml            # logback parses logback.xml with it
+jdk.charsets        # windows-1251 and friends, needed on Windows consoles
+jdk.httpserver      # com.sun.net.httpserver: the local MCP server
+jdk.jfr             # referenced by logback and the JDK's own event plumbing
+jdk.localedata      # Russian: without it the ru UI falls back to English data
+jdk.unsupported     # sun.misc.Unsafe, still reached by some dependencies
+jdk.zipfs           # jar:/zip: filesystems, used when reading the shaded jar
