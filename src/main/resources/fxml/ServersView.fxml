@@ -5,6 +5,7 @@
 <?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.ListView?>
+<?import javafx.scene.control.MenuButton?>
 <?import javafx.scene.control.TextField?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.VBox?>
@@ -20,6 +21,11 @@
     <HBox alignment="CENTER_LEFT" spacing="12">
         <Label text="Servers" styleClass="view-title"/>
         <Region HBox.hgrow="ALWAYS"/>
+        <!-- Export/import of the whole list. A menu rather than two more
+             buttons: the header already carries two, and a third and fourth
+             overflow the 500px viewport in Russian. Its items are built by
+             the controller so their labels follow the locale. -->
+        <MenuButton fx:id="backupMenuButton" text="Backup" styleClass="secondary-button"/>
         <Button fx:id="importLinkButton" text="Import Link" styleClass="secondary-button"
                 onAction="#onImportLinkClicked"/>
         <Button fx:id="addServerButton" text="+ Add Server" styleClass="primary-button"

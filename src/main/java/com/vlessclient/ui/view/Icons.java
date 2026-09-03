@@ -93,6 +93,15 @@ public final class Icons {
     private static final String CHEVRON_DOUBLE_DOWN =
             "M16.59,5.59L18,7L12,13L6,7L7.41,5.59L12,10.17L16.59,5.59M16.59,"
                     + "11.59L18,13L12,19L6,13L7.41,11.59L12,16.17L16.59,11.59Z";
+    // mdi-bug: the diagnostics bundle a bug report is attached to.
+    private static final String BUG =
+            "M14,12H10V10H14M14,16H10V14H14M20,8H17.19C16.74,7.22 16.12,6.55 15.37,"
+                    + "6.04L17,4.41L15.59,3L13.42,5.17C12.96,5.06 12.5,5 12,5C11.5,5 11.04,"
+                    + "5.06 10.59,5.17L8.41,3L7,4.41L8.62,6.04C7.88,6.55 7.26,7.22 6.81,8H4"
+                    + "V10H6.09C6.04,10.33 6,10.66 6,11V12H4V14H6V15C6,15.34 6.04,15.67 6.09"
+                    + ",16H4V18H6.81C7.85,19.79 9.78,21 12,21C14.22,21 16.15,19.79 17.19,18H"
+                    + "20V16H17.91C17.96,15.67 18,15.34 18,15V14H20V12H18V11C18,10.66 17.96,"
+                    + "10.33 17.91,10H20V8Z";
     private static final String TRASH =
             "M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,"
                     + "19V7H6V19Z";
@@ -130,6 +139,16 @@ public final class Icons {
 
     public static Node clear(double size) {
         return make(TRASH, size);
+    }
+
+    /**
+     * A bug glyph, for the action that saves a diagnostics bundle.
+     *
+     * @param size the icon's edge length in points
+     * @return a fresh node carrying the glyph
+     */
+    public static Node diagnostics(double size) {
+        return make(BUG, size);
     }
 
     public static Node chevronDoubleUp(double size) {

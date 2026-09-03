@@ -2,6 +2,7 @@ package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.service.DiagnosticsBundle;
 import com.vlessclient.service.LogLineFormatter;
 import com.vlessclient.service.SingBoxEngine;
 import java.io.File;
@@ -63,6 +64,7 @@ public class LogsViewController {
     @FXML private TextField searchField;
     @FXML private CheckBox autoScrollCheckBox;
     @FXML private Button downloadButton;
+    @FXML private Button diagnosticsButton;
     @FXML private Button clearButton;
     @FXML private ListView<String> logListView;
 
@@ -115,6 +117,8 @@ public class LogsViewController {
         // window; tooltips preserve discoverability without the text labels.
         downloadButton.setGraphic(Icons.download(16));
         downloadButton.setTooltip(new Tooltip(I18n.get("logs.download.tooltip")));
+        diagnosticsButton.setGraphic(Icons.diagnostics(16));
+        diagnosticsButton.setTooltip(new Tooltip(I18n.get("logs.diagnostics.tooltip")));
         clearButton.setGraphic(Icons.clear(16));
         clearButton.setTooltip(new Tooltip(I18n.get("logs.clear.tooltip")));
 
@@ -425,6 +429,60 @@ public class LogsViewController {
             alert.initOwner(owner);
             alert.showAndWait();
         }
+    }
+
+    /**
+     * Saves a diagnostics bundle: the log tail, the versions, and the
+     * configuration this build would generate, with credentials removed.
+     *
+     * <p>Downloading the raw log has never been enough for a bug report — it
+     * says nothing about which app or core version produced it, which proxy
+     * mode was active, or what the config looked like — and assembling the
+     * rest by hand is what most reports skipped.</p>
+     */
+    @FXML
+    private void onSaveDiagnosticsClicked() {
+        DiagnosticsBundle bundle;
+        try {
+            bundle = ServiceLocator.get(DiagnosticsBundle.class);
+        } catch (IllegalArgumentException e) {
+            log.warn("DiagnosticsBundle not available; cannot save diagnostics");
+            return;
+        }
+
+        final Window owner = logListView.getScene() == null
+                ? null : logListView.getScene().getWindow();
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle(I18n.get("logs.diagnostics.title"));
+        String stamp = LocalDateTime.now()
+                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmm"));
+        chooser.setInitialFileName("tunl-diagnostics-" + stamp + ".zip");
+        chooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter(I18n.get("logs.diagnostics.filter"), "*.zip"),
+                new FileChooser.ExtensionFilter(I18n.get("logs.diagnostics.filter.all"), "*.*"));
+        File file = chooser.showSaveDialog(owner);
+        if (file == null) {
+            return;
+        }
+
+        try {
+            bundle.writeTo(file.toPath());
+        } catch (IOException | RuntimeException e) {
+            log.error("Failed to write the diagnostics bundle to {}", file, e);
+            Alert alert = new Alert(Alert.AlertType.ERROR);
+            alert.setTitle(I18n.get("dialog.error"));
+            alert.setHeaderText(I18n.get("logs.diagnostics.failed"));
+            alert.setContentText(e.getMessage());
+            alert.initOwner(owner);
+            alert.showAndWait();
+            return;
+        }
+        Alert done = new Alert(Alert.AlertType.INFORMATION);
+        done.setTitle(I18n.get("logs.diagnostics.done.title"));
+        done.setHeaderText(I18n.get("logs.diagnostics.done.header"));
+        done.setContentText(I18n.get("logs.diagnostics.done.content", file.getName()));
+        done.initOwner(owner);
+        done.showAndWait();
     }
 
     private void applyFilter() {

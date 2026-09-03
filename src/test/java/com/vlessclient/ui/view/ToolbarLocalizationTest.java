@@ -28,6 +28,7 @@ public class ToolbarLocalizationTest extends ApplicationTest {
     private record Action(String view, String id, String key, boolean added) { }
 
     private static final List<Action> ACTIONS = List.of(
+            new Action("ServersView", "backupMenuButton", "servers.backup", false),
             new Action("ServersView", "importLinkButton", "button.import.link", false),
             new Action("ServersView", "addServerButton", "button.add.server", true),
             new Action("RoutingView", "addRuleButton", "button.add.rule", true),
