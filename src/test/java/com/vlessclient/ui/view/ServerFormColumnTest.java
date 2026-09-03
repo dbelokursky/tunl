@@ -1,5 +1,6 @@
 package com.vlessclient.ui.view;
 
+import com.vlessclient.app.ThemeCss;
 import com.vlessclient.app.UiTestServices;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Bounds;
@@ -103,8 +104,7 @@ public class ServerFormColumnTest extends ApplicationTest {
                 // to apply CSS and lay out, and a stage ties the test to the
                 // screen it runs on.
                 Scene scene = new Scene(new Group(), DIALOG_WIDTH, height);
-                scene.getStylesheets().setAll(
-                        getClass().getResource("/css/light.css").toExternalForm());
+                scene.getStylesheets().setAll(ThemeCss.light());
                 scene.setRoot(root);
                 holder[0] = scene;
             } catch (Exception e) {

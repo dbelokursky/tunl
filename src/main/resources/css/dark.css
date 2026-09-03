@@ -1,1081 +1,142 @@
 /*
  * Tunl - Dark Theme
+ *
+ * Values only. Every structural rule lives in base.css, which is applied
+ * before this file and refers to colour exclusively through the -c-* tokens
+ * below. light.css defines the same token names with different values, so the
+ * two themes cannot drift apart in layout — there is only one copy of it.
  */
 
-/* ===== Root & Global ===== */
-.root-pane {
-    -fx-background-color: #1e1e1e;
-    -fx-font-family: "System", "SF Pro Text", "Helvetica Neue", "Segoe UI";
-    -fx-font-size: 13px;
-}
-
 .root {
-    -fx-background-color: #1e1e1e;
-
-    /* ===== Design tokens (dark) =====
-       Same token names as light.css so every flattened rule is identical in
-       structure across themes; only these values differ. */
+    /* ----- Surfaces ----- */
+    -c-window-bg:       #1e1e1e;  /* window/page chrome behind everything */
     -c-page:            #181819;
     -c-surface:         #26262a;
     -c-surface-sunken:  #202024;
     -c-border:          #323236;
     -c-border-strong:   #40404a;
 
+    /* ----- Text ----- */
     -c-text:            #e8e8ea;
     -c-text-secondary:  #a0a4aa;
     -c-text-muted:      #7b8087;
+    -c-text-title:      #e0e0e0;  /* .form-title */
+    -c-text-heading:    #cfd2d6;  /* .section-title */
+    -c-text-subheading: #b0b0b0;  /* .form-section-title */
+    -c-text-strong:     #e0e0e0;  /* server name, combo editor */
+    -c-text-body:       #cccccc;  /* checkbox + log body text */
+    -c-text-label:      #9aa0a6;  /* .field-label */
+    -c-text-form-label: #999999;  /* .form-label */
+    -c-text-meta:       #777777;  /* .server-address */
+    -c-text-faint:      #9e9e9e;  /* .hint-label, legacy .status-label-* */
+    -c-text-disabled:   #757575;  /* inert dot / timestamp / idle server name */
+    -c-text-placeholder:#666666;  /* combo editor prompt */
 
+    /* ----- Accent (green) ----- */
     -c-accent:          #2e7d32;  /* button fill */
     -c-accent-hover:    #43a047;
     -c-accent-press:    #1b5e20;
     -c-accent-fg:       #81c784;  /* green text / icon on a surface */
+    -c-accent-mid:      #66bb6a;  /* green that reads on a tint and on a field */
     -c-accent-strong-fg:#a5d6a7;  /* stronger green text (connected title) */
     -c-accent-tint:     #1b3a1e;
     -c-on-accent:       #ffffff;
 
+    /* ----- Danger (red) ----- */
     -c-danger:          #c62828;  /* button fill */
     -c-danger-hover:    #d32f2f;
+    -c-danger-press:    #b71c1c;
     -c-danger-fg:       #ef5350;  /* red text / icon on a surface */
+    -c-danger-soft:     #e57373;  /* chip remove-cross on hover */
+    -c-danger-text-soft:#d9a4a4;  /* error subtitle, quieter than -c-danger-fg */
+    -c-danger-chip-fg:  #ef9a9a;  /* .latency-chip-fail text */
     -c-danger-tint:     #3e1a1a;
+    -c-danger-tint-soft:#3a1b1b;  /* .latency-chip-fail background */
+    -c-danger-tint-strong: #4e2222;  /* .danger-button:hover */
 
+    /* ----- Warn (orange) ----- */
     -c-warn:            #ffb74d;
+    -c-warn-mid:        #ffa726;  /* connecting dot, warn log line */
+    -c-warn-text:       #ffb74d;  /* .reconnect-banner-label */
     -c-warn-tint:       #3a2c1a;
+    -c-warn-border:     #6d4c2f;  /* .reconnect-banner */
 
+    /* ----- Info (blue) ----- */
     -c-info:            #64b5f6;
     -c-info-tint:       #1a3350;
+
+    /* ----- Rows, fields and chips ----- */
+    -c-row-bg:          #2a2a2a;  /* .server-list-item */
+    -c-row-border:      #3a3a3a;
+    -c-row-border-hover:#555555;
+    -c-field-bg:        #2a2a2a;  /* .form-field */
+    -c-field-border:    #3a3a3a;
+    -c-field-text:      #e0e0e0;
+    -c-field-prompt:    #666666;
+    -c-input-focus-bg:  #2d2d2d;  /* focused text area / form field */
+    -c-actions-bg:      #252525;  /* .form-actions strip */
+    -c-code-bg:         #202022;  /* .code-area */
+    -c-code-focus-bg:   #232327;
+    -c-chip-bg:         #2f3033;  /* country chip + count badge */
+    -c-chip-text:       #d6d9de;
+    -c-chip-muted:      #8b9099;
+    -c-button-secondary-fg: #e8e8ea;
+    -c-empty-icon:      #555555;
+    -c-empty-title:     #777777;
+    -c-empty-hint:      #666666;
+    -c-scroll-thumb:    #555555;
+    -c-scroll-thumb-hover: #777777;
+
+    /* ----- Tooltip (its own popup window, but the tokens reach it) ----- */
+    -c-tooltip-bg:      #3a3a3a;
+    -c-tooltip-text:    #e0e0e0;
+
+    /* ----- Logs ----- */
+    -c-log-bg:          #1e1e1e;
+    -c-log-selection:   #333333;
+    -c-log-debug:       #888888;
+    -c-log-level-debug: #90a4ae;
+    -c-log-level-info:  #64b5f6;
+    -c-log-level-error: #ef5350;
+    -c-log-context:     #ba68c8;
+    -c-log-module:      #4db6ac;
+    -c-log-msg:         #e0e0e0;
+    -c-log-msg-warn:    #ffcc80;
+    -c-log-msg-error:   #ff8a80;
+    -c-log-plain:       #bdbdbd;
+
+    /* ----- Banners ----- */
+    -c-banner-warn-bg:       #3e2723;
+    -c-banner-warn-border:   #ff8a65;
+    -c-banner-warn-icon:     #ffab91;
+    -c-banner-warn-title:    #ffccbc;
+    -c-banner-warn-subtitle: #bcaaa4;
+    -c-banner-code-bg:       #5d4037;
+    -c-banner-code-text:     #ffffff;
+    -c-banner-info-bg:       #1b2b3a;
+    -c-banner-info-border:   #4a7fb5;
+    -c-banner-info-icon:     #82b1ff;
+    -c-banner-info-title:    #bbdefb;
+    -c-banner-info-subtitle: #b0bec5;
+
+    /* ----- Shadows (resolve inside dropshadow(), verified by test) ----- */
+    -c-shadow-card:         rgba(0, 0, 0, 0.28);
+    -c-shadow-elevated:     rgba(0, 0, 0, 0.32);
+    -c-shadow-row:          rgba(0, 0, 0, 0.15);
+    -c-shadow-connect:      rgba(0, 0, 0, 0.30);
+    -c-shadow-disconnect:   rgba(0, 0, 0, 0.30);
+    -c-shadow-popup:        rgba(0, 0, 0, 0.40);
+    -c-shadow-focus:        rgba(102, 187, 106, 0.15);
+    -c-shadow-focus-error:  rgba(239, 83, 80, 0.15);
 }
 
-/* ===== Sidebar ===== */
-.sidebar {
-    -fx-background-color: -c-surface-sunken;
-    -fx-border-color: -c-border;
-    -fx-border-width: 0 1 0 0;
-}
+/* ===== Non-colour overrides =====
+   JavaFX looked-up values are colours only, so a per-theme number cannot be a
+   token and has to be stated here. Keep this section empty if you can: every
+   rule in it is a second copy of a base.css rule and can drift from it.
 
-.sidebar-separator {
-    -fx-background-color: transparent;
-}
-
-.sidebar-separator .line {
-    -fx-border-color: -c-border;
-    -fx-border-width: 0 0 1 0;
-}
-
-/* ===== Navigation Buttons ===== */
-.nav-button {
-    -fx-background-color: transparent;
-    -fx-text-fill: -c-text-secondary;
-    -fx-font-size: 13px;
-    -fx-padding: 12 16 12 20;
-    -fx-cursor: hand;
-    -fx-background-radius: 10;
-    -fx-alignment: CENTER-LEFT;
-    -fx-graphic-text-gap: 14;
-    -fx-border-color: transparent;
-    -fx-border-width: 0 0 0 3;
-    -fx-border-radius: 10;
-}
-
-.nav-button:hover {
-    -fx-background-color: -c-accent-tint;
-    -fx-text-fill: -c-accent-strong-fg;
-}
-
-.nav-button:pressed {
-    -fx-background-color: -c-accent-tint;
-}
-
-.nav-button-active {
-    -fx-background-color: -c-accent-tint;
-    -fx-text-fill: -c-accent-strong-fg;
-    -fx-font-weight: bold;
-    -fx-border-color: -c-accent-fg transparent transparent transparent;
-    -fx-border-width: 0 0 0 3;
-}
-
-.nav-button-active:hover {
-    -fx-background-color: -c-accent-tint;
-    -fx-text-fill: -c-accent-strong-fg;
-}
-
-/* SVG icon glyph inside nav buttons — inherits the button's colour. */
-.nav-button .nav-icon-glyph {
-    -fx-fill: -c-text-secondary;
-}
-
-.nav-button:hover .nav-icon-glyph {
-    -fx-fill: -c-accent-strong-fg;
-}
-
-.nav-button-active .nav-icon-glyph {
-    -fx-fill: -c-accent-fg;
-}
-
+   The disabled fade differs on purpose — 0.45 (light) barely dims a glyph on
+   this sidebar, so the dark theme fades harder. */
 .nav-button:disabled {
     -fx-opacity: 0.35;
-    -fx-cursor: default;
-}
-
-.nav-icon {
-    -fx-font-size: 16px;
-}
-
-/* ===== Content Area ===== */
-.content-area {
-    -fx-background-color: -c-page;
-}
-
-/* ===== Cards =====
-   One flat surface, one soft shadow level. Depth comes from the hairline
-   border, not from gradients or heavy drop shadows. */
-.card {
-    -fx-background-color: -c-surface;
-    -fx-background-radius: 12;
-    -fx-border-color: -c-border;
-    -fx-border-radius: 12;
-    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.28), 4, 0, 0, 1);
-    /* Stated here so every card in the app agrees. Written into each card's
-       FXML instead, they drifted into three recipes on the dashboard alone —
-       left 18 on one card and 20 on the next, against a right of 18 on both,
-       so the column their contents formed was ragged on the left while the
-       right lined up. */
-    -fx-padding: 16 18;
-}
-
-.hero-card {
-    -fx-background-color: -c-surface;
-    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.32), 6, 0, 0, 2);
-}
-
-.status-bar {
-    -fx-min-height: 70;
-}
-
-.status-halo-sm {
-    -fx-background-radius: 22;
-    -fx-background-color: -c-surface-sunken;
-}
-
-.section-header {
-    -fx-font-size: 11px;
-    -fx-font-weight: bold;
-    -fx-text-fill: -c-text-muted;
-    -fx-text-transform: uppercase;
-    -fx-letter-spacing: 0.6;
-    /* Top only. The 2 on the left used to push the header off the column it
-       heads — inside the health card it sat 2px right of the status dots
-       under it, and in Settings 2px right of every other label. */
-    -fx-padding: 2 0 0 0;
-}
-
-.traffic-card {
-    -fx-min-height: 100;
-}
-
-
-.mode-combo {
-    -fx-pref-height: 30;
-}
-
-.stats-card {
-    -fx-min-height: 96;
-}
-
-/* ===== Dashboard Status =====
-   Solid tint discs instead of radial gradients — the colour reads the same
-   but stays flat against the card. */
-.status-halo {
-    -fx-background-radius: 36;
-    -fx-background-color: -c-surface-sunken;
-}
-
-.status-halo-disconnected {
-    -fx-background-color: -c-surface-sunken;
-}
-
-.status-halo-connected {
-    -fx-background-color: -c-accent-tint;
-}
-
-.status-halo-connecting {
-    -fx-background-color: -c-warn-tint;
-}
-
-.status-halo-error {
-    -fx-background-color: -c-danger-tint;
-}
-
-.status-title {
-    -fx-font-size: 20px;
-    -fx-font-weight: bold;
-    -fx-text-fill: -c-text;
-}
-
-.status-title-connected   { -fx-text-fill: -c-accent-strong-fg; }
-.status-title-connecting  { -fx-text-fill: -c-warn; }
-.status-title-error       { -fx-text-fill: -c-danger-fg; }
-.status-title-disconnected { -fx-text-fill: -c-text-secondary; }
-
-.status-subtitle {
-    -fx-font-size: 13px;
-    -fx-text-fill: -c-text-secondary;
-}
-
-.status-subtitle-error {
-    -fx-text-fill: #d9a4a4;
-}
-
-.server-name-label {
-    -fx-font-size: 14px;
-    -fx-text-fill: #757575;
-}
-
-.status-label-disconnected,
-.status-label-connected,
-.status-label-connecting,
-.status-label-error {
-    -fx-font-size: 13px;
-    -fx-text-fill: #9e9e9e;
-}
-
-/* ===== Connect/Disconnect Button =====
-   Flat solid fill (no gradient), one subtle shadow. The width is pinned by
-   the controller, measured from the four labels this button can show, so it
-   holds still as the label toggles and fits them in any language. */
-.connect-button {
-    -fx-background-color: -c-accent;
-    -fx-text-fill: -c-on-accent;
-    -fx-font-size: 15px;
-    -fx-font-weight: bold;
-    -fx-background-radius: 12;
-    -fx-cursor: hand;
-    -fx-padding: 12 32;
-    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.30), 6, 0, 0, 1);
-}
-
-.connect-button:hover {
-    -fx-background-color: -c-accent-hover;
-}
-
-.connect-button:pressed {
-    -fx-background-color: -c-accent-press;
-}
-
-.disconnect-button {
-    -fx-background-color: -c-danger;
-    -fx-text-fill: -c-on-accent;
-    -fx-font-size: 15px;
-    -fx-font-weight: bold;
-    -fx-background-radius: 12;
-    -fx-cursor: hand;
-    -fx-padding: 12 32;
-    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.30), 6, 0, 0, 1);
-}
-
-.disconnect-button:hover {
-    -fx-background-color: -c-danger-hover;
-}
-
-.disconnect-button:pressed {
-    -fx-background-color: #b71c1c;
-}
-
-/* ===== Stats ===== */
-.stats-icon {
-    -fx-font-size: 18px;
-    -fx-text-fill: -c-text-secondary;
-}
-
-.stats-title {
-    -fx-font-size: 11px;
-    -fx-text-fill: -c-text-muted;
-    -fx-font-weight: bold;
-    -fx-text-transform: uppercase;
-    -fx-letter-spacing: 0.5;
-}
-
-.stats-value {
-    -fx-font-size: 18px;
-    -fx-font-weight: bold;
-    -fx-text-fill: -c-text;
-}
-
-/* ===== View Title ===== */
-.view-title {
-    -fx-font-size: 22px;
-    -fx-font-weight: bold;
-    -fx-text-fill: -c-text;
-}
-
-/* ===== Primary & Secondary Buttons =====
-   Secondary is a bordered surface button in the flat scheme. */
-.primary-button {
-    -fx-background-color: -c-accent;
-    -fx-text-fill: -c-on-accent;
-    -fx-font-size: 13px;
-    -fx-font-weight: bold;
-    -fx-background-radius: 8;
-    -fx-padding: 8 20;
-    -fx-cursor: hand;
-    /* The same pin .secondary-button takes, for the same reason: the two sit
-       side by side in three views — Save beside Cancel, Add beside Import —
-       and padding alone left the primary 2px shorter than the secondary. */
-    -fx-min-height: 34;
-    -fx-pref-height: 34;
-}
-
-.primary-button:hover {
-    -fx-background-color: -c-accent-hover;
-}
-
-.primary-button:pressed {
-    -fx-background-color: -c-accent-press;
-}
-
-.secondary-button {
-    -fx-background-color: -c-surface;
-    -fx-text-fill: -c-text;
-    -fx-font-size: 13px;
-    -fx-background-radius: 8;
-    -fx-border-color: -c-border-strong;
-    -fx-border-radius: 8;
-    -fx-padding: 6 20;
-    -fx-cursor: hand;
-    /* One control height across the app, so buttons sitting in the same row
-       line up regardless of whether they hold a word or a single glyph.
-       Pinned rather than left to padding: .secondary-button draws a border and
-       .icon-button does not, so equal padding would still give them different
-       heights. Padding is kept under the pin so it never fights it. */
-    -fx-min-height: 34;
-    -fx-pref-height: 34;
-}
-
-.secondary-button:hover {
-    -fx-background-color: -c-surface-sunken;
-    -fx-border-color: -c-text-muted;
-}
-
-.secondary-button:pressed {
-    -fx-background-color: -c-surface-sunken;
-}
-
-.small-button {
-    -fx-background-color: -c-surface-sunken;
-    -fx-text-fill: -c-text-secondary;
-    -fx-font-size: 11px;
-    -fx-background-radius: 6;
-    -fx-padding: 4 12;
-    -fx-cursor: hand;
-}
-
-.small-button:hover {
-    -fx-background-color: -c-border;
-}
-
-/* Compact square button holding a single icon (toolbar actions). */
-.icon-button {
-    -fx-background-color: -c-surface-sunken;
-    -fx-background-radius: 6;
-    -fx-padding: 4 8;
-    -fx-cursor: hand;
-    -fx-min-height: 34;
-    -fx-pref-height: 34;
-    -fx-min-width: 34;
-    /* Matches the .nav-icon-glyph fill below: some icon buttons carry a text
-       glyph instead of an SVG, and without this they fall back to the modena
-       default (black) rather than the theme. */
-    -fx-text-fill: -c-text-secondary;
-}
-
-.icon-button:hover {
-    -fx-background-color: -c-border;
-    -fx-text-fill: -c-text;
-}
-
-/* Icon buttons that delete something: neutral at rest so a list of them stays
-   calm, red only under the pointer, where the click is about to happen. */
-.icon-button.destructive:hover {
-    -fx-background-color: -c-danger-tint;
-    -fx-text-fill: -c-danger-fg;
-}
-
-.icon-button .nav-icon-glyph {
-    -fx-fill: -c-text-secondary;
-}
-
-.icon-button:hover .nav-icon-glyph {
-    -fx-fill: -c-text;
-}
-
-.danger-button {
-    -fx-background-color: -c-danger-tint;
-    -fx-text-fill: -c-danger-fg;
-    -fx-border-color: transparent;
-}
-
-.danger-button:hover {
-    -fx-background-color: #4e2222;
-}
-
-/* ===== Server List ===== */
-.server-list {
-    -fx-background-color: transparent;
-    -fx-border-color: transparent;
-    -fx-background-insets: 0;
-    -fx-padding: 0;
-}
-
-.server-list .list-cell {
-    -fx-background-color: transparent;
-    -fx-padding: 4 0;
-}
-
-.server-list .list-cell:filled {
-    -fx-background-color: transparent;
-}
-
-.server-list .list-cell:filled:selected {
-    -fx-background-color: transparent;
-}
-
-.server-list-item {
-    -fx-background-color: #2a2a2a;
-    -fx-background-radius: 10;
-    -fx-border-color: #3a3a3a;
-    -fx-border-radius: 10;
-    -fx-padding: 12 16;
-    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.15), 4, 0, 0, 1);
-}
-
-.server-list-item:hover {
-    -fx-border-color: #555555;
-}
-
-.server-name {
-    -fx-font-size: 14px;
-    -fx-font-weight: bold;
-    -fx-text-fill: #e0e0e0;
-}
-
-.server-address {
-    -fx-font-size: 12px;
-    -fx-text-fill: #777777;
-}
-
-.protocol-badge {
-    -fx-background-color: #1a3350;
-    -fx-text-fill: #64b5f6;
-    -fx-font-size: 10px;
-    -fx-font-weight: bold;
-    -fx-background-radius: 4;
-    -fx-padding: 3 8;
-}
-
-.active-badge {
-    -fx-background-color: #1b3a1e;
-    -fx-text-fill: #66bb6a;
-    -fx-font-size: 10px;
-    -fx-font-weight: bold;
-    -fx-background-radius: 4;
-    -fx-padding: 3 8;
-}
-
-/* ===== Empty State ===== */
-.empty-state {
-    -fx-padding: 40 20;
-}
-
-.empty-state-icon {
-    -fx-font-size: 48px;
-    -fx-text-fill: #555555;
-}
-
-.empty-state-title {
-    -fx-font-size: 18px;
-    -fx-font-weight: bold;
-    -fx-text-fill: #777777;
-}
-
-.empty-state-hint {
-    -fx-font-size: 13px;
-    -fx-text-fill: #666666;
-}
-
-/* ===== Text inputs (TextField / TextArea + editable ComboBox editor) ===== */
-.text-field,
-.text-area {
-    -fx-text-fill: -c-text;
-    -fx-prompt-text-fill: -c-text-muted;
-    -fx-highlight-fill: -c-accent-tint;
-    -fx-highlight-text-fill: -c-accent-strong-fg;
-    -fx-background-color: -c-surface-sunken;
-    -fx-background-radius: 6;
-    -fx-border-color: -c-border;
-    -fx-border-radius: 6;
-}
-
-.text-area {
-    -fx-padding: 0;
-}
-
-.text-area .content {
-    -fx-background-color: -c-surface-sunken;
-    -fx-background-radius: 6;
-    -fx-padding: 8 10;
-}
-
-.text-field:focused,
-.text-area:focused {
-    -fx-border-color: -c-accent-fg;
-    -fx-background-color: -c-surface;
-}
-
-.text-area:focused .content {
-    -fx-background-color: #2d2d2d;
-}
-
-/* Editable ComboBox editor lives inside the already-dark .combo-box, so keep
-   it transparent + border-less instead of the default white field. */
-.combo-box-base:editable > .text-field,
-.combo-box .text-field {
-    -fx-background-color: transparent;
-    -fx-background-radius: 0;
-    -fx-border-width: 0;
-    -fx-text-fill: #e0e0e0;
-    -fx-prompt-text-fill: #666666;
-    -fx-padding: 6 8;
-}
-
-/* ===== Section / field labels & badges ===== */
-.section-title {
-    -fx-font-size: 14px;
-    -fx-font-weight: bold;
-    -fx-text-fill: #cfd2d6;
-}
-
-/* Inline label in an aligned label column. */
-.field-label {
-    -fx-font-size: 13px;
-    -fx-text-fill: #9aa0a6;
-}
-
-/* Removable bypass-country chips on the Routing page. */
-.country-chip {
-    -fx-background-color: #2f3033;
-    -fx-background-radius: 12;
-    -fx-padding: 3 10 3 12;
-}
-
-.country-chip-label {
-    -fx-font-size: 12px;
-    -fx-text-fill: #d6d9de;
-}
-
-.country-chip-remove {
-    -fx-font-size: 11px;
-    -fx-text-fill: #8b9099;
-    -fx-cursor: hand;
-}
-
-.country-chip-remove:hover {
-    -fx-text-fill: #e57373;
-}
-
-/* Small pill showing a live count (e.g. bypass-list entries). */
-.count-badge {
-    -fx-font-size: 11px;
-    -fx-font-weight: bold;
-    -fx-text-fill: #8b9099;
-    -fx-background-color: #2f3033;
-    -fx-background-radius: 10;
-    -fx-padding: 2 9;
-}
-
-/* Monospace, terminal-like textarea for editing host/CIDR lists. */
-.code-area {
-    -fx-font-family: "Menlo", "Monaco", "Courier New", monospace;
-    -fx-font-size: 12.5px;
-}
-
-.code-area .content {
-    -fx-background-color: #202022;
-}
-
-.code-area:focused .content {
-    -fx-background-color: #232327;
-}
-
-/* ===== Form Styles ===== */
-.form-root {
-    -fx-background-color: #1e1e1e;
-}
-
-.form-scroll {
-    -fx-background-color: #1e1e1e;
-    -fx-border-color: transparent;
-    /* Settings is the only page inside a scroll pane of its own, and modena
-       gives one a border and a padding: a transparent colour still reserves
-       1px a side, and the padding another. Both zeroed, or this page's content
-       sits further in than every other view's. */
-    -fx-border-width: 0;
-    -fx-padding: 0;
-}
-
-.form-scroll .viewport {
-    -fx-background-color: #1e1e1e;
-}
-
-.form-content {
-    -fx-background-color: #1e1e1e;
-}
-
-.form-title {
-    -fx-font-size: 18px;
-    -fx-font-weight: bold;
-    -fx-text-fill: #e0e0e0;
-    -fx-padding: 0 0 8 0;
-}
-
-.form-section-title {
-    -fx-font-size: 14px;
-    -fx-font-weight: bold;
-    -fx-text-fill: #b0b0b0;
-}
-
-.form-label {
-    -fx-font-size: 12px;
-    -fx-text-fill: #999999;
-    -fx-font-weight: bold;
-}
-
-.form-field {
-    -fx-background-color: #2a2a2a;
-    -fx-border-color: #3a3a3a;
-    -fx-border-radius: 6;
-    -fx-background-radius: 6;
-    -fx-padding: 8 12;
-    -fx-font-size: 13px;
-    -fx-text-fill: #e0e0e0;
-    -fx-prompt-text-fill: #666666;
-    /* One height for every field in a form. A ComboBox wearing this class
-       came out 42 against a TextField's 34, because the combo pads its own
-       list-cell inside this padding — so the same form showed two field
-       heights in one column. */
-    -fx-min-height: 34;
-    -fx-pref-height: 34;
-}
-
-/* A ComboBox wearing .form-field pads its own list-cell inside .form-field's
-   padding, so the 8 that gives a text field its 34 made a combo 42 — two
-   field heights in one column. The height above is the one that counts; these
-   two hand the vertical room back to the cell so the value is not cropped. */
-.combo-box.form-field {
-    -fx-padding: 0 6 0 0;
-}
-
-.combo-box.form-field > .list-cell {
-    -fx-padding: 0 0 0 12;
-}
-
-/* A multi-line field cannot wear the single-line height. .form-field pins
-   34px so every field in a form matches, which is right for a TextField and
-   crops a TextArea to a sliver of its first line — the MCP command came out
-   as a horizontal slice through the middle of its glyphs. -1 is
-   USE_COMPUTED_SIZE: let prefRowCount decide instead. */
-.text-area.form-field {
-    -fx-min-height: -1;
-    -fx-pref-height: -1;
-}
-
-.form-field:focused {
-    -fx-border-color: #66bb6a;
-    -fx-background-color: #2d2d2d;
-    -fx-effect: dropshadow(gaussian, rgba(102,187,106,0.15), 6, 0, 0, 0);
-}
-
-.field-error {
-    -fx-border-color: #ef5350;
-}
-
-.field-error:focused {
-    -fx-border-color: #ef5350;
-    -fx-effect: dropshadow(gaussian, rgba(239,83,80,0.15), 6, 0, 0, 0);
-}
-
-.form-checkbox {
-    -fx-font-size: 13px;
-    -fx-text-fill: #cccccc;
-    -fx-padding: 4 0;
-}
-
-.form-actions {
-    -fx-background-color: #252525;
-    -fx-border-color: #3a3a3a;
-    -fx-border-width: 1 0 0 0;
-}
-
-/* ===== Scrollbar Styling ===== */
-.scroll-bar {
-    -fx-background-color: transparent;
-}
-
-.scroll-bar .thumb {
-    -fx-background-color: #555555;
-    -fx-background-radius: 4;
-}
-
-.scroll-bar .thumb:hover {
-    -fx-background-color: #777777;
-}
-
-.scroll-bar .increment-button,
-.scroll-bar .decrement-button {
-    -fx-background-color: transparent;
-    -fx-padding: 0;
-}
-
-.scroll-bar .increment-arrow,
-.scroll-bar .decrement-arrow {
-    -fx-shape: " ";
-    -fx-padding: 0;
-}
-
-/* ===== ComboBox Styling ===== */
-.combo-box {
-    -fx-background-color: -c-surface-sunken;
-    -fx-border-color: -c-border;
-    -fx-border-radius: 6;
-    -fx-background-radius: 6;
-    /* Modena's internal button cell resolves this before our list-cell rule
-       wins the cascade. Define it on the control so that early skin pass is
-       valid even while the ComboBox is being attached. */
-    -fx-text-base-color: #e8e8ea;
-}
-
-.combo-box:focused {
-    -fx-border-color: -c-accent-fg;
-}
-
-.combo-box .list-cell {
-    -fx-font-size: 13px;
-    /* ComboBox popup cells live in a separate Scene and cannot inherit the
-       application's .root tokens through the control. Keep popup-reachable
-       colours concrete in each theme. */
-    -fx-text-fill: #e8e8ea;
-    -fx-text-base-color: #e8e8ea;
-    -fx-background-color: transparent;
-}
-
-.combo-box-popup .list-view {
-    -fx-background-color: #26262a;
-    -fx-border-color: #323236;
-    -fx-border-radius: 6;
-    -fx-background-radius: 6;
-    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.4), 8, 0, 0, 2);
-}
-
-.combo-box-popup .list-cell {
-    -fx-padding: 6 12;
-    -fx-background-color: #26262a;
-    -fx-text-fill: #e8e8ea;
-}
-
-.combo-box-popup .list-cell:filled:hover {
-    -fx-background-color: #1b3a1e;
-}
-
-/* ===== Separator =====
-   Stated in both themes rather than left to modena in one of them: the bare
-   colour override dark used to carry made a separator 2px high there against
-   3 in light, and the server form stacks three of them, so everything below
-   sat a few pixels apart between the themes. Same shape as
-   .sidebar-separator: one hairline along the top edge. */
-.separator .line {
-    -fx-border-color: -c-border transparent transparent transparent;
-    -fx-border-width: 1 0 0 0;
-}
-
-/* ===== Status Circle ===== */
-.status-circle-disconnected {
-    -fx-fill: #757575;
-}
-
-.status-circle-connected {
-    -fx-fill: -c-accent-fg;
-}
-
-.status-circle-connecting {
-    -fx-fill: #ffa726;
-}
-
-.status-circle-error {
-    -fx-fill: -c-danger-fg;
-}
-
-/* ===== Speed Value (large) ===== */
-.speed-value {
-    -fx-font-size: 20px;
-    -fx-font-weight: bold;
-    -fx-text-fill: -c-text;
-    -fx-font-family: "SF Pro Display", "Helvetica Neue", "System";
-}
-
-/* ===== Stats Card Small ===== */
-.stats-card-small {
-    -fx-min-height: 70;
-}
-
-/* ===== Upload/Download Icons ===== */
-/* The chevron SVGs come from Icons.chevronDouble*; the parent label's class
-   picks the direction color, same contextual pattern as .nav-button icons. */
-.stats-icon-upload .nav-icon-glyph {
-    -fx-fill: -c-warn;
-}
-
-.stats-icon-download .nav-icon-glyph {
-    -fx-fill: -c-info;
-}
-
-/* ===== Latency Result ===== */
-.latency-result {
-    -fx-font-size: 12px;
-    -fx-text-fill: -c-text-secondary;
-}
-
-/* ===== Service availability ===== */
-.service-name {
-    -fx-font-size: 13px;
-    -fx-text-fill: -c-text;
-}
-
-.service-ok {
-    -fx-font-size: 12px;
-    -fx-font-weight: bold;
-    -fx-text-fill: -c-accent-fg;
-}
-
-.service-fail {
-    -fx-font-size: 12px;
-    -fx-font-weight: bold;
-    -fx-text-fill: -c-danger-fg;
-}
-
-.service-pending {
-    -fx-font-size: 12px;
-    -fx-text-fill: -c-text-secondary;
-}
-
-.reconnect-banner {
-    -fx-background-color: -c-warn-tint;
-    -fx-border-color: #6d4c2f;
-    -fx-border-width: 1;
-    -fx-background-radius: 8;
-    -fx-border-radius: 8;
-}
-
-.reconnect-banner-label {
-    -fx-font-size: 12px;
-    -fx-text-fill: -c-warn;
-}
-
-/* ===== Logs View ===== */
-.logs-toolbar {
-    -fx-padding: 4 0;
-}
-
-.log-list-view {
-    -fx-background-color: #1e1e1e;
-    -fx-border-color: #3a3a3a;
-    -fx-border-radius: 8;
-    -fx-background-radius: 8;
-}
-
-.log-list-view .list-cell {
-    -fx-background-color: transparent;
-    -fx-font-family: "Menlo", "Monaco", "Courier New", monospace;
-    -fx-font-size: 12px;
-    -fx-text-fill: #cccccc;
-    -fx-padding: 2 8;
-}
-
-.log-list-view .list-cell:filled:selected {
-    -fx-background-color: #333333;
-}
-
-.log-line-error {
-    -fx-text-fill: #ef5350;
-}
-
-.log-line-warn {
-    -fx-text-fill: #ffa726;
-}
-
-.log-line-info {
-    -fx-text-fill: #cccccc;
-}
-
-.log-line-debug {
-    -fx-text-fill: #888888;
-}
-
-/* ===== Syntax-highlighted log segments (TextFlow) ===== */
-.log-line-flow {
-    -fx-line-spacing: 1;
-}
-
-.log-line-flow .text {
-    -fx-font-family: "Menlo", "Monaco", "Courier New", monospace;
-    -fx-font-size: 12px;
-}
-
-.log-ts         { -fx-fill: #757575; }
-.log-level-debug { -fx-fill: #90a4ae; -fx-font-weight: bold; }
-.log-level-info  { -fx-fill: #64b5f6; -fx-font-weight: bold; }
-.log-level-warn  { -fx-fill: #ffb74d; -fx-font-weight: bold; }
-.log-level-error { -fx-fill: #ef5350; -fx-font-weight: bold; }
-.log-context    { -fx-fill: #ba68c8; }
-.log-module     { -fx-fill: #4db6ac; }
-.log-msg        { -fx-fill: #e0e0e0; }
-.log-msg-warn   { -fx-fill: #ffcc80; }
-.log-msg-error  { -fx-fill: #ff8a80; }
-.log-plain      { -fx-fill: #bdbdbd; }
-
-/* ===== Tooltip ===== */
-.tooltip {
-    -fx-background-color: #3a3a3a;
-    -fx-text-fill: #e0e0e0;
-    -fx-font-size: 12px;
-    -fx-background-radius: 4;
-}
-
-/* ===== sing-box missing banner ===== */
-.singbox-missing-banner {
-    -fx-background-color: #3e2723;
-    -fx-border-color: #ff8a65;
-    -fx-border-width: 1;
-    -fx-background-radius: 8;
-    -fx-border-radius: 8;
-}
-
-.singbox-missing-banner .banner-icon {
-    -fx-font-size: 22px;
-    -fx-text-fill: #ffab91;
-}
-
-.singbox-missing-banner .banner-title {
-    -fx-font-size: 13px;
-    -fx-font-weight: bold;
-    -fx-text-fill: #ffccbc;
-}
-
-.singbox-missing-banner .banner-subtitle {
-    -fx-font-size: 11px;
-    -fx-text-fill: #bcaaa4;
-}
-
-.singbox-missing-banner .banner-command {
-    -fx-font-family: 'Menlo', 'Monaco', monospace;
-    -fx-font-size: 12px;
-    -fx-text-fill: #ffffff;
-    -fx-background-color: #5d4037;
-    -fx-padding: 3 8 3 8;
-    -fx-background-radius: 4;
-}
-
-.update-banner {
-    -fx-background-color: #1b2b3a;
-    -fx-border-color: #4a7fb5;
-    -fx-border-width: 1;
-    -fx-background-radius: 8;
-    -fx-border-radius: 8;
-}
-
-.update-banner .banner-icon {
-    -fx-font-size: 22px;
-    -fx-text-fill: #82b1ff;
-}
-
-.update-banner .banner-title {
-    -fx-font-size: 13px;
-    -fx-font-weight: bold;
-    -fx-text-fill: #bbdefb;
-}
-
-.update-banner .banner-subtitle {
-    -fx-font-size: 11px;
-    -fx-text-fill: #b0bec5;
-}
-
-/* Session total under its speed readout in the traffic card. Muted and small:
-   it is the cumulative figure, and the live speed above it is what the eye
-   should land on first. */
-.session-total {
-    -fx-font-size: 12px;
-    -fx-text-fill: -c-text-muted;
-}
-
-/* ===== Content scroll wrapper ===== */
-.content-scroll {
-    -fx-background-color: transparent;
-    -fx-background: transparent;
-    -fx-border-color: transparent;
-}
-
-.content-scroll > .viewport {
-    -fx-background-color: transparent;
-}
-
-/* Neutral hint label — used for informational notes. */
-.hint-label {
-    -fx-font-size: 12px;
-    -fx-text-fill: #9e9e9e;
-}
-
-/* ===== Core-update status line (Settings > About) =====
-   Colour-coded verdict on its own row. */
-
-
-
-/* Subscription row: why the last refresh failed. Uses the on-surface red
-   (-c-danger-fg), not the button-fill red. */
-.subscription-error {
-    -fx-font-size: 11px;
-    -fx-text-fill: -c-danger-fg;
-}
-
-/* Country flags: a hairline keeps light bands from bleeding into the row. */
-.flag-border {
-    -fx-stroke: -c-border-strong;
-    -fx-stroke-width: 0.5;
-}
-
-.flag-chip {
-    -fx-fill: -c-surface-sunken;
-    -fx-stroke: -c-border-strong;
-    -fx-stroke-width: 0.5;
-}
-
-.flag-chip-text {
-    -fx-fill: -c-text-secondary;
-    -fx-font-weight: bold;
-}
-
-
-/* Latency chip on a server row. Deliberately quieter than the protocol badge:
-   it is a measurement that may be minutes old, not an attribute of the server. */
-.latency-chip {
-    -fx-font-size: 10px;
-    -fx-font-weight: bold;
-    -fx-background-radius: 4;
-    -fx-padding: 3 8;
-}
-
-.latency-chip-ok {
-    -fx-background-color: #1b3a1e;
-    -fx-text-fill: #81c784;
-}
-
-.latency-chip-fail {
-    -fx-background-color: #3a1b1b;
-    -fx-text-fill: #ef9a9a;
 }

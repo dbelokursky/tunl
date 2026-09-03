@@ -463,7 +463,7 @@ public class ServersViewController {
     private void applyTheme(Dialog<?> dialog) {
         try {
             dialog.getDialogPane().getStylesheets()
-                    .add(ServiceLocator.get(ThemeManager.class).currentStylesheet());
+                    .addAll(ServiceLocator.get(ThemeManager.class).currentStylesheets());
         } catch (IllegalArgumentException e) {
             log.debug("ThemeManager unavailable; import dialog uses default styling");
         }
@@ -487,8 +487,8 @@ public class ServersViewController {
             // Follow the app's theme instead of forcing light: a dark-mode user
             // got a white flash on every add/edit.
             try {
-                scene.getStylesheets().add(
-                        ServiceLocator.get(ThemeManager.class).currentStylesheet());
+                scene.getStylesheets().addAll(
+                        ServiceLocator.get(ThemeManager.class).currentStylesheets());
             } catch (IllegalArgumentException e) {
                 log.debug("ThemeManager unavailable; server form uses default styling");
             }

@@ -1,5 +1,6 @@
 package com.vlessclient.ui.view;
 
+import com.vlessclient.app.ThemeCss;
 import com.vlessclient.app.UiTestServices;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Bounds;
@@ -86,8 +87,7 @@ public class DashboardLayoutTest extends ApplicationTest {
         Scene scene = new Scene(wrapper, WINDOW_WIDTH, SHORT_WINDOW_HEIGHT);
         // The min-heights that allow the squash live in the stylesheet, so the
         // page has to be styled for this test to exercise the real layout.
-        scene.getStylesheets().add(
-                getClass().getResource("/css/dark.css").toExternalForm());
+        scene.getStylesheets().addAll(ThemeCss.of("dark"));
         stage.setScene(scene);
         stage.show();
         this.stage = stage;

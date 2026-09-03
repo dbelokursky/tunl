@@ -1,8 +1,12 @@
 package com.vlessclient.ui;
 
+import com.vlessclient.app.ThemeCss;
 import javafx.css.PseudoClass;
+import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.effect.DropShadow;
+import javafx.scene.effect.Effect;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
@@ -16,8 +20,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Guards the -c-* design-token system: verifies the tokens resolve at
  * runtime in both themes. A looked-up-color typo renders as a silent
  * fallback that JavaFX does not otherwise surface as a test failure, so
- * this asserts a token-driven property (the .card background) actually
- * resolves to the expected value in light and dark.
+ * this asserts token-driven properties (the .card background and shadow)
+ * actually resolve to the expected values in light and dark.
+ *
+ * <p>Both stylesheets are applied, in the order the app applies them:
+ * base.css carries the rules, the theme file carries only the token values,
+ * and neither renders anything on its own.</p>
  */
 public class ThemeTokenResolutionTest extends ApplicationTest {
 
@@ -46,38 +54,67 @@ public class ThemeTokenResolutionTest extends ApplicationTest {
 
     @Test
     void cardBackgroundResolvesInBothThemes() {
-        assertCardBg("/css/light.css", Color.web("#ffffff"));
-        assertCardBg("/css/dark.css", Color.web("#26262a"));
+        assertCardBg("light", Color.web("#ffffff"));
+        assertCardBg("dark", Color.web("#26262a"));
+    }
+
+    /**
+     * A token inside an effect function, not just as a whole property value.
+     * JavaFX resolves looked-up colours in {@code dropshadow(...)} arguments —
+     * verified here rather than assumed, because if it did not, every card and
+     * button shadow would have to stay duplicated per theme.
+     */
+    @Test
+    void shadowTokenResolvesInsideDropshadowInBothThemes() {
+        assertCardShadow("light", Color.rgb(16, 24, 40, 0.05));
+        assertCardShadow("dark", Color.rgb(0, 0, 0, 0.28));
     }
 
     @Test
     void textLabelledIconButtonIsReadableInBothThemes() {
-        assertIconButtonTextFill("/css/light.css", Color.web("#5b6570"));
-        assertIconButtonTextFill("/css/dark.css", Color.web("#a0a4aa"));
+        assertIconButtonTextFill("light", Color.web("#5b6570"));
+        assertIconButtonTextFill("dark", Color.web("#a0a4aa"));
     }
 
     @Test
     void destructiveIconButtonTurnsRedOnHoverInBothThemes() {
-        assertDestructiveHoverFill("/css/light.css", Color.web("#d32f2f"));
-        assertDestructiveHoverFill("/css/dark.css", Color.web("#ef5350"));
+        assertDestructiveHoverFill("light", Color.web("#d32f2f"));
+        assertDestructiveHoverFill("dark", Color.web("#ef5350"));
     }
 
-    private void assertCardBg(String stylesheet, Color expected) {
-        applyStylesheet(stylesheet, card);
+    private void assertCardBg(String theme, Color expected) {
+        applyStylesheets(theme, card);
         Color actual = (Color) card.getBackground().getFills().get(0).getFill();
         assertThat(actual)
                 .withFailMessage("%s: -c-surface did not resolve (got %s, want %s)",
-                        stylesheet, actual, expected)
+                        theme, actual, expected)
                 .isEqualTo(expected);
     }
 
-    private void assertIconButtonTextFill(String stylesheet, Color expected) {
-        applyStylesheet(stylesheet, iconButton);
+    private void assertCardShadow(String theme, Color expected) {
+        applyStylesheets(theme, card);
+        Effect effect = card.getEffect();
+        assertThat(effect)
+                .withFailMessage("%s: .card has no drop shadow — the -c-shadow-card token "
+                        + "inside dropshadow() did not parse", theme)
+                .isInstanceOf(DropShadow.class);
+        Color actual = (Color) ((DropShadow) effect).getColor();
+        assertThat(actual)
+                .withFailMessage("%s: -c-shadow-card did not resolve inside dropshadow() "
+                        + "(got %s, want %s). If this ever fails, JavaFX has stopped "
+                        + "resolving looked-up colours in effect arguments and the shadow "
+                        + "rules have to move back into the per-theme files.",
+                        theme, actual, expected)
+                .isEqualTo(expected);
+    }
+
+    private void assertIconButtonTextFill(String theme, Color expected) {
+        applyStylesheets(theme, iconButton);
         Color actual = (Color) iconButton.getTextFill();
         assertThat(actual)
                 .withFailMessage("%s: .icon-button text is %s, not the -c-text-secondary"
                         + " token %s -- a glyph-less icon button is unreadable",
-                        stylesheet, actual, expected)
+                        theme, actual, expected)
                 .isEqualTo(expected);
     }
 
@@ -86,20 +123,19 @@ public class ThemeTokenResolutionTest extends ApplicationTest {
      * unreliable headless; the point under test is that the rule resolves and
      * out-specifies the plain .icon-button:hover fill, not pointer plumbing.
      */
-    private void assertDestructiveHoverFill(String stylesheet, Color expected) {
+    private void assertDestructiveHoverFill(String theme, Color expected) {
         interact(() -> destructiveIconButton.pseudoClassStateChanged(HOVER, true));
-        applyStylesheet(stylesheet, destructiveIconButton);
+        applyStylesheets(theme, destructiveIconButton);
         Color actual = (Color) destructiveIconButton.getTextFill();
         assertThat(actual)
                 .withFailMessage("%s: hovered .destructive icon button is %s, not the"
-                        + " -c-danger-fg token %s", stylesheet, actual, expected)
+                        + " -c-danger-fg token %s", theme, actual, expected)
                 .isEqualTo(expected);
     }
 
-    private void applyStylesheet(String stylesheet, javafx.scene.Node styled) {
+    private void applyStylesheets(String theme, Node styled) {
         interact(() -> {
-            scene.getStylesheets().setAll(
-                    getClass().getResource(stylesheet).toExternalForm());
+            scene.getStylesheets().setAll(ThemeCss.of(theme));
             styled.applyCss();
         });
     }

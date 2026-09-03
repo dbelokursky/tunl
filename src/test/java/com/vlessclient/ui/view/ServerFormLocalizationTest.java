@@ -1,6 +1,7 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
+import com.vlessclient.app.ThemeCss;
 import com.vlessclient.model.Protocol;
 import java.util.Locale;
 import java.util.Map;
@@ -67,7 +68,7 @@ public class ServerFormLocalizationTest extends ApplicationTest {
         FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/ServerFormView.fxml"));
         Parent root = loader.load();
         scene = new Scene(root, 520, 700);
-        scene.getStylesheets().add(getClass().getResource("/css/light.css").toExternalForm());
+        scene.getStylesheets().addAll(ThemeCss.light());
         stage.setScene(scene);
         stage.show();
     }

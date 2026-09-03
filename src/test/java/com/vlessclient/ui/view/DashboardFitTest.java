@@ -1,5 +1,6 @@
 package com.vlessclient.ui.view;
 
+import com.vlessclient.app.ThemeCss;
 import com.vlessclient.app.UiTestServices;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Bounds;
@@ -45,7 +46,7 @@ public class DashboardFitTest extends ApplicationTest {
         FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/DashboardView.fxml"));
         Parent root = loader.load();
         scene = new Scene(root, MIN_CONTENT_WIDTH, 520);
-        scene.getStylesheets().add(getClass().getResource("/css/light.css").toExternalForm());
+        scene.getStylesheets().addAll(ThemeCss.light());
         stage.setScene(scene);
         stage.show();
     }
