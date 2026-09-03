@@ -414,7 +414,7 @@ Homebrew paths (`/opt/homebrew/bin`, `/usr/local/bin`) or `$PATH`.
 
 ### Requirements
 
-- JDK 25 (the project uses preview features)
+- JDK 25
 - Maven 3.9+
 - bash + curl + tar (standard on macOS) — needed by `generate-resources`
   to download sing-box
@@ -422,9 +422,10 @@ Homebrew paths (`/opt/homebrew/bin`, `/usr/local/bin`) or `$PATH`.
 ### Commands
 
 ```bash
+mvn clean verify            # the gate: checkstyle, tests, coverage, SpotBugs
 mvn clean javafx:run        # run in dev mode
 mvn clean package           # build the shaded jar (with the sing-box bundle)
-mvn test                    # all tests
+mvn test                    # tests only
 mvn test -Dtest=SingBoxInstallerTest   # a single test class
 mvn validate                # checkstyle
 

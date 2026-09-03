@@ -370,7 +370,7 @@ Homebrew-путей (`/opt/homebrew/bin`, `/usr/local/bin`) или из `$PATH`.
 
 ### Требования
 
-- JDK 25 (проект использует preview features)
+- JDK 25
 - Maven 3.9+
 - bash + curl + tar (стандартно для macOS) — нужны для `generate-resources`
   чтобы скачать sing-box
@@ -378,9 +378,10 @@ Homebrew-путей (`/opt/homebrew/bin`, `/usr/local/bin`) или из `$PATH`.
 ### Команды
 
 ```bash
+mvn clean verify            # полная проверка: checkstyle, тесты, покрытие, SpotBugs
 mvn clean javafx:run        # запуск в dev-режиме
 mvn clean package           # сборка shade-jar (с бандлом sing-box)
-mvn test                    # все тесты
+mvn test                    # только тесты
 mvn test -Dtest=SingBoxInstallerTest   # один тест-класс
 mvn validate                # checkstyle
 ```
