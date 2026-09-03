@@ -1,7 +1,8 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.UiTestServices;
-import com.vlessclient.ui.view.DashboardViewController.UpdateBannerState;
+import com.vlessclient.ui.view.dashboard.UpdateBannerSection;
+import com.vlessclient.ui.view.dashboard.UpdateBannerSection.State;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
@@ -55,21 +56,21 @@ public class DashboardUpdateBannerTest extends ApplicationTest {
 
     @Test
     void nothingIsAnnouncedWithoutANewerRelease() {
-        assertThat(DashboardViewController.bannerState(false, false, false, true))
-                .isEqualTo(UpdateBannerState.HIDDEN);
+        assertThat(UpdateBannerSection.stateFor(false, false, false, true))
+                .isEqualTo(State.HIDDEN);
         // Staged but not newer cannot happen, and must still stay quiet.
-        assertThat(DashboardViewController.bannerState(false, true, false, true))
-                .isEqualTo(UpdateBannerState.HIDDEN);
+        assertThat(UpdateBannerSection.stateFor(false, true, false, true))
+                .isEqualTo(State.HIDDEN);
     }
 
     @Test
     void aStagedUpdateIsTheOnlyStateWithSomethingToPress() {
-        assertThat(DashboardViewController.bannerState(true, true, false, true))
-                .isEqualTo(UpdateBannerState.READY);
+        assertThat(UpdateBannerSection.stateFor(true, true, false, true))
+                .isEqualTo(State.READY);
         // Still downloading: the banner reports it, but there is no action —
         // the download runs on its own.
-        assertThat(DashboardViewController.bannerState(true, false, true, true))
-                .isEqualTo(UpdateBannerState.DOWNLOADING);
+        assertThat(UpdateBannerSection.stateFor(true, false, true, true))
+                .isEqualTo(State.DOWNLOADING);
     }
 
     /**
@@ -83,8 +84,8 @@ public class DashboardUpdateBannerTest extends ApplicationTest {
      */
     @Test
     void aFetchThatIsNotRunningIsNotReportedAsDownloading() {
-        assertThat(DashboardViewController.bannerState(true, false, false, true))
-                .isEqualTo(UpdateBannerState.AVAILABLE);
+        assertThat(UpdateBannerSection.stateFor(true, false, false, true))
+                .isEqualTo(State.AVAILABLE);
     }
 
     @Test
@@ -94,9 +95,9 @@ public class DashboardUpdateBannerTest extends ApplicationTest {
         // earlier platform state claimed something was staged.
         for (boolean staged : new boolean[] {false, true}) {
             for (boolean downloading : new boolean[] {false, true}) {
-                assertThat(DashboardViewController.bannerState(true, staged, downloading, false))
+                assertThat(UpdateBannerSection.stateFor(true, staged, downloading, false))
                         .as("staged=%s downloading=%s", staged, downloading)
-                        .isEqualTo(UpdateBannerState.PACKAGE_MANAGER);
+                        .isEqualTo(State.PACKAGE_MANAGER);
             }
         }
     }

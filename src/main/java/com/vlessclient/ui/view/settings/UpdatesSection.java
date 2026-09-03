@@ -160,7 +160,7 @@ public final class UpdatesSection {
 
     /**
      * Chooses the row's state. Pure, and a copy of the shape
-     * {@code DashboardViewController.bannerState} already uses, so every
+     * {@code UpdateBannerSection.stateFor} already uses, so every
      * combination can be checked without standing up a scene.
      *
      * <p>{@link AppRowState#STAGED} is the only state with anything to press.
