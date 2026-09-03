@@ -73,7 +73,7 @@ public class GeoIpDatabase {
     /** Uses the app data directory and a redirect-following HTTP client. */
     public GeoIpDatabase() {
         this(PlatformPaths.current().dataDir().resolve("geoip").resolve(DB_FILE),
-                HttpClient.newBuilder()
+                AppHttpClients.newBuilder()
                         .connectTimeout(TIMEOUT)
                         .followRedirects(HttpClient.Redirect.NORMAL)
                         .build());

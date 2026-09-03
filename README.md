@@ -150,6 +150,10 @@ The **Mode** dropdown on the Dashboard:
 | Privileges | none needed | required (see below) |
 | When to pick | everyday browsing | messengers, games, system services |
 
+Either way, Tunl's own requests — subscription refreshes, update checks and
+downloads, the country database — go **through the tunnel** while it is up, so
+they work on a network that blocks the sites they talk to.
+
 What TUN asks for on each OS:
 
 | OS | TUN privileges |
