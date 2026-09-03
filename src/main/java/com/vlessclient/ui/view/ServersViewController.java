@@ -6,11 +6,15 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.CountryResolver;
 import com.vlessclient.service.LatencyTester;
+import com.vlessclient.service.ServerBackupService;
 import com.vlessclient.service.ShareLinkExporter;
 import com.vlessclient.service.ShareLinkParser;
 import com.vlessclient.service.ThemeManager;
 import com.vlessclient.service.WireguardConfigParser;
+import java.io.File;
 import java.io.IOException;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -33,6 +37,7 @@ import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
+import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.control.TextArea;
@@ -48,8 +53,10 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
+import javafx.stage.Window;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -65,6 +72,7 @@ public class ServersViewController {
     @FXML private ListView<ServerConfig> serverListView;
     @FXML private Button addServerButton;
     @FXML private Button importLinkButton;
+    @FXML private MenuButton backupMenuButton;
     @FXML private VBox emptyState;
     @FXML private Label emptyStateTitle;
     @FXML private Label emptyStateHint;
@@ -124,6 +132,7 @@ public class ServersViewController {
         setUpSearch();
         setUpSort();
         setUpMeasureButton();
+        setUpBackupMenu();
         ButtonLabels.bindStatic(importLinkButton, "button.import.link");
         ButtonLabels.bindAddAction(addServerButton, "button.add.server");
 
@@ -407,6 +416,130 @@ public class ServersViewController {
                 alert.showAndWait();
             }
         });
+    }
+
+    /**
+     * Builds the backup menu. The items are created here rather than in the
+     * FXML so their labels can be bound to the bundle — a {@code text="…"}
+     * written into the FXML never follows a language switch.
+     */
+    private void setUpBackupMenu() {
+        ButtonLabels.bindStatic(backupMenuButton, "servers.backup");
+        MenuItem exportItem = new MenuItem();
+        exportItem.setId("exportServersItem");
+        exportItem.textProperty().bind(I18n.binding("servers.backup.export"));
+        exportItem.setOnAction(event -> exportServers());
+        MenuItem importItem = new MenuItem();
+        importItem.setId("importServersItem");
+        importItem.textProperty().bind(I18n.binding("servers.backup.import"));
+        importItem.setOnAction(event -> importServers());
+        backupMenuButton.getItems().setAll(exportItem, importItem);
+    }
+
+    /**
+     * Writes the whole list to a file the user picks, after warning what the
+     * file will contain.
+     *
+     * <p>The warning is not boilerplate: the backup has to hold plaintext
+     * credentials to be restorable on another machine, so the file is exactly
+     * as sensitive as the servers themselves. Asking first is the only point
+     * at which the user can decide where it may land.</p>
+     */
+    private void exportServers() {
+        ServerBackupService backup = optionalService(ServerBackupService.class);
+        if (backup == null) {
+            return;
+        }
+        Alert warning = new Alert(Alert.AlertType.CONFIRMATION);
+        warning.setTitle(I18n.get("servers.backup.export.title"));
+        warning.setHeaderText(I18n.get("servers.backup.export.warning.header"));
+        warning.setContentText(I18n.get("servers.backup.export.warning.content"));
+        warning.initOwner(ownerWindow());
+        if (warning.showAndWait().filter(button -> button == ButtonType.OK).isEmpty()) {
+            return;
+        }
+
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle(I18n.get("servers.backup.export.title"));
+        chooser.setInitialFileName("tunl-servers-"
+                + LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE) + ".json");
+        chooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter(I18n.get("servers.backup.filter.json"), "*.json"),
+                new FileChooser.ExtensionFilter(I18n.get("servers.backup.filter.all"), "*.*"));
+        File file = chooser.showSaveDialog(ownerWindow());
+        if (file == null) {
+            return;
+        }
+        try {
+            log.info("Exported {} servers", backup.exportAll(file.toPath()));
+        } catch (IOException | RuntimeException e) {
+            log.error("Failed to export servers", e);
+            Alert alert = new Alert(Alert.AlertType.ERROR);
+            alert.setTitle(I18n.get("servers.export.error.title"));
+            alert.setHeaderText(I18n.get("servers.backup.export.failed"));
+            alert.setContentText(e.getMessage());
+            alert.initOwner(ownerWindow());
+            alert.showAndWait();
+        }
+    }
+
+    /** Restores servers from a backup file or a share-link list. */
+    private void importServers() {
+        ServerBackupService backup = optionalService(ServerBackupService.class);
+        if (backup == null) {
+            return;
+        }
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle(I18n.get("servers.backup.import.title"));
+        chooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter(I18n.get("servers.backup.filter.json"), "*.json"),
+                new FileChooser.ExtensionFilter(I18n.get("servers.backup.filter.links"), "*.txt"),
+                new FileChooser.ExtensionFilter(I18n.get("servers.backup.filter.all"), "*.*"));
+        File file = chooser.showOpenDialog(ownerWindow());
+        if (file == null) {
+            return;
+        }
+        try {
+            ServerBackupService.ImportResult result = backup.importFile(file.toPath());
+            Alert done = new Alert(Alert.AlertType.INFORMATION);
+            done.setTitle(I18n.get("servers.backup.import.done.title"));
+            done.setHeaderText(I18n.get("servers.backup.import.done.header",
+                    result.added(), result.updated(), result.skipped().size()));
+            done.setContentText(importSummary(file.getName(), result));
+            done.initOwner(ownerWindow());
+            done.showAndWait();
+        } catch (IOException | RuntimeException e) {
+            log.error("Failed to import servers", e);
+            Alert alert = new Alert(Alert.AlertType.ERROR);
+            alert.setTitle(I18n.get("servers.import.error.title"));
+            alert.setHeaderText(I18n.get("servers.backup.import.failed"));
+            alert.setContentText(e.getMessage());
+            alert.initOwner(ownerWindow());
+            alert.showAndWait();
+        }
+    }
+
+    /**
+     * The body of the import report: where it came from, and — when entries
+     * were dropped — which ones and why. Capped at five, because a stale
+     * thirty-line link list would otherwise fill the screen with a dialog the
+     * user cannot scroll.
+     */
+    private static String importSummary(String fileName, ServerBackupService.ImportResult result) {
+        StringBuilder text = new StringBuilder(
+                I18n.get("servers.backup.import.done.content", fileName));
+        if (!result.skipped().isEmpty()) {
+            text.append("\n\n").append(I18n.get("servers.backup.import.skipped.list"));
+            result.skipped().stream().limit(5).forEach(skip -> text.append('\n')
+                    .append(skip.entry()).append(" — ").append(skip.reason()));
+        }
+        return text.toString();
+    }
+
+    /** The window the dialogs belong to, or null before the view is shown. */
+    private Window ownerWindow() {
+        Scene scene = serverListView.getScene();
+        return scene == null ? null : scene.getWindow();
     }
 
     /**

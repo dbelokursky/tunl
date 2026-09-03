@@ -5,9 +5,11 @@ import com.vlessclient.platform.Autostart;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.CountryResolver;
+import com.vlessclient.service.DiagnosticsBundle;
 import com.vlessclient.service.GeoIpDatabase;
 import com.vlessclient.service.LatencyTester;
 import com.vlessclient.service.RoutingService;
+import com.vlessclient.service.ServerBackupService;
 import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.ShareLinkExporter;
 import com.vlessclient.service.ShareLinkParser;
@@ -126,6 +128,14 @@ public class ServiceLocator {
 
         RoutingService routingService = new RoutingService();
         register(RoutingService.class, routingService);
+
+        // Moving the server list off this machine, and assembling a bug
+        // report from it. Both read the same store the views do, so they see
+        // the list as the user last left it rather than as it was on disk.
+        register(ServerBackupService.class,
+                new ServerBackupService(configStore, shareLinkParser));
+        register(DiagnosticsBundle.class,
+                new DiagnosticsBundle(configStore, configGenerator, routingService));
 
         SubscriptionService subscriptionService =
                 new SubscriptionService(configStore, shareLinkParser);

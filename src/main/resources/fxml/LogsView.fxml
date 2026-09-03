@@ -40,6 +40,12 @@
         <Button fx:id="downloadButton" styleClass="icon-button" minWidth="-Infinity"
                 onAction="#onDownloadClicked"/>
 
+        <!-- Everything a bug report needs, zipped: log tail, versions and a
+             redacted config. Icon-only like its neighbours, because this row
+             is already at the width the 500px viewport allows. -->
+        <Button fx:id="diagnosticsButton" styleClass="icon-button" minWidth="-Infinity"
+                onAction="#onSaveDiagnosticsClicked"/>
+
         <Button fx:id="clearButton" styleClass="icon-button" minWidth="-Infinity"
                 onAction="#onClearClicked"/>
     </HBox>

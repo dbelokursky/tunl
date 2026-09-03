@@ -13,6 +13,7 @@ import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.MenuButton;
 import javafx.scene.control.TextField;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.AfterEach;
@@ -107,7 +108,8 @@ public class ViewFitTest extends ApplicationTest {
      */
     private static boolean isActionable(Node node) {
         return node instanceof Button || node instanceof ComboBox<?>
-                || node instanceof TextField || node instanceof CheckBox;
+                || node instanceof TextField || node instanceof CheckBox
+                || node instanceof MenuButton;
     }
 
     private static String describe(Node node) {
