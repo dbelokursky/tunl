@@ -1,6 +1,7 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
+import com.vlessclient.app.ThemeCss;
 import com.vlessclient.app.UiTestServices;
 import java.util.ArrayList;
 import java.util.List;
@@ -125,8 +126,7 @@ public class ViewFitTest extends ApplicationTest {
                         getClass().getResource("/fxml/" + view + ".fxml"));
                 Parent root = loader.load();
                 Scene scene = new Scene(root, MIN_CONTENT_WIDTH, 640);
-                scene.getStylesheets().add(
-                        getClass().getResource("/css/light.css").toExternalForm());
+                scene.getStylesheets().addAll(ThemeCss.light());
                 stage.setScene(scene);
                 stage.show();
                 root.applyCss();

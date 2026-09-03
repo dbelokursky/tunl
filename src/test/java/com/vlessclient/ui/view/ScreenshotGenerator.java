@@ -1,6 +1,7 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.app.ThemeCss;
 import com.vlessclient.app.UiTestServices;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.Protocol;
@@ -82,11 +83,11 @@ public class ScreenshotGenerator extends ApplicationTest {
         // The app dresses the scene at runtime through ThemeManager; without
         // this the screenshots come out in stock Modena, which is not a UI the
         // project ships.
-        scene.getStylesheets().setAll(
-                getClass().getResource("/css/dark.css").toExternalForm(),
-                // After the theme, so it wins: the headless text stack draws
-                // the system font's glyphs on top of each other, which is why
-                // the committed screenshots read "4.0 MƁ/s". See the file.
+        scene.getStylesheets().setAll(ThemeCss.of("dark"));
+        // After the theme, so it wins: the headless text stack draws the
+        // system font's glyphs on top of each other, which is why the
+        // committed screenshots read "4.0 MƁ/s". See the file.
+        scene.getStylesheets().add(
                 getClass().getResource("/css/screenshot-font.css").toExternalForm());
         stage.setScene(scene);
         stage.show();

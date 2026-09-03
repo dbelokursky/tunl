@@ -1,6 +1,7 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
+import com.vlessclient.app.ThemeCss;
 import com.vlessclient.app.UiTestServices;
 import java.util.List;
 import java.util.Locale;
@@ -214,8 +215,7 @@ public class SettingsUpdateButtonsTest extends ApplicationTest {
                         getClass().getResource("/fxml/SettingsView.fxml"));
                 Parent root = loader.load();
                 Scene scene = new Scene(root, 700, 720);
-                scene.getStylesheets().add(
-                        getClass().getResource("/css/" + theme + ".css").toExternalForm());
+                scene.getStylesheets().addAll(ThemeCss.of(theme));
                 stage.setScene(scene);
                 stage.show();
                 // Before anything is looked up: the view hangs off a

@@ -435,7 +435,7 @@ src/main/java/com/vlessclient/
 
 src/main/resources/
 ├── fxml/           # FXML-разметка
-├── css/            # light.css, dark.css
+├── css/            # base.css (rules) + light.css / dark.css (tokens)
 ├── i18n/           # messages_en.properties, messages_ru.properties
 └── icons/          # app-icon-{16..1024}.png
 

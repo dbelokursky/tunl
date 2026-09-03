@@ -1,6 +1,7 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
+import com.vlessclient.app.ThemeCss;
 import com.vlessclient.app.UiTestServices;
 import java.util.List;
 import java.util.Locale;
@@ -89,8 +90,7 @@ public class ToolbarLocalizationTest extends ApplicationTest {
                         getClass().getResource("/fxml/" + view + ".fxml"));
                 Parent root = loader.load();
                 Scene scene = new Scene(root, 900, 640);
-                scene.getStylesheets().add(
-                        getClass().getResource("/css/light.css").toExternalForm());
+                scene.getStylesheets().addAll(ThemeCss.light());
                 stage.setScene(scene);
                 stage.show();
                 found[0] = (Labeled) scene.lookup("#" + id);

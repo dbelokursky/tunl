@@ -1,6 +1,7 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.app.ThemeCss;
 import com.vlessclient.app.UiTestServices;
 import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.platform.PlatformPaths;
@@ -49,7 +50,7 @@ public class SettingsViewTest extends ApplicationTest {
         // every size rule lives in the CSS, so anything the styles get wrong
         // is invisible here. That is how a field pinned to one line of height
         // while asking for three rows passed unnoticed.
-        scene.getStylesheets().setAll(getClass().getResource("/css/light.css").toExternalForm());
+        scene.getStylesheets().setAll(ThemeCss.light());
         stage.setScene(scene);
         stage.show();
     }

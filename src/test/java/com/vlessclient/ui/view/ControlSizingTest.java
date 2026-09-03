@@ -1,6 +1,7 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
+import com.vlessclient.app.ThemeCss;
 import com.vlessclient.app.UiTestServices;
 import java.util.ArrayList;
 import java.util.List;
@@ -272,9 +273,7 @@ public class ControlSizingTest extends ApplicationTest {
      * about 480, where labels really are too narrow.</p>
      */
     private void dress(Scene scene, String theme) {
-        String css = ControlSizingTest.class.getResource("/css/" + theme + ".css")
-                .toExternalForm();
-        scene.getStylesheets().setAll(css);
+        scene.getStylesheets().setAll(ThemeCss.of(theme));
         scene.getRoot().resize(width, height);
         scene.getRoot().applyCss();
         scene.getRoot().layout();
