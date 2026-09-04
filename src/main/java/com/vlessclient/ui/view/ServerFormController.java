@@ -139,8 +139,11 @@ public class ServerFormController {
         flowCombo.setItems(FXCollections.observableArrayList("", "xtls-rprx-vision"));
         flowCombo.setValue("");
 
+        // QUIC was in the model and the README but not here; HTTP/2 takes
+        // the same path and host as WebSocket, which the form only offered
+        // for WebSocket.
         transportTypeCombo.setItems(
-                FXCollections.observableArrayList("TCP", "WebSocket", "gRPC", "HTTP2"));
+                FXCollections.observableArrayList("TCP", "WebSocket", "gRPC", "HTTP2", "QUIC"));
         transportTypeCombo.setValue("TCP");
 
         transportTypeCombo.valueProperty().addListener((obs, oldVal, newVal) -> {
@@ -187,11 +190,12 @@ public class ServerFormController {
                 case WEBSOCKET -> "WebSocket";
                 case GRPC -> "gRPC";
                 case HTTP2 -> "HTTP2";
+                case QUIC -> "QUIC";
                 default -> "TCP";
             };
             transportTypeCombo.setValue(transportLabel);
 
-            if (transport.getType() == TransportType.WEBSOCKET) {
+            if (usesPathAndHost(transport.getType())) {
                 wsPathField.setText(transport.getPath() != null ? transport.getPath() : "");
                 wsHostField.setText(transport.getHost() != null ? transport.getHost() : "");
             } else if (transport.getType() == TransportType.GRPC) {
@@ -252,7 +256,7 @@ public class ServerFormController {
         TransportConfig transport = new TransportConfig();
         if (isTransportVisible()) {
             transport.setType(mapTransportType(transportTypeCombo.getValue()));
-            if (transport.getType() == TransportType.WEBSOCKET) {
+            if (usesPathAndHost(transport.getType())) {
                 transport.setPath(wsPathField.getText().trim());
                 transport.setHost(wsHostField.getText().trim());
             } else if (transport.getType() == TransportType.GRPC) {
@@ -542,7 +546,7 @@ public class ServerFormController {
         grpcFields.setVisible(false);
         grpcFields.setManaged(false);
 
-        if ("WebSocket".equals(type)) {
+        if ("WebSocket".equals(type) || "HTTP2".equals(type)) {
             wsFields.setVisible(true);
             wsFields.setManaged(true);
         } else if ("gRPC".equals(type)) {
@@ -551,11 +555,17 @@ public class ServerFormController {
         }
     }
 
+    /** WebSocket and HTTP/2 both carry a path and a host header. */
+    private static boolean usesPathAndHost(TransportType type) {
+        return type == TransportType.WEBSOCKET || type == TransportType.HTTP2;
+    }
+
     private TransportType mapTransportType(String label) {
         return switch (label) {
             case "WebSocket" -> TransportType.WEBSOCKET;
             case "gRPC" -> TransportType.GRPC;
             case "HTTP2" -> TransportType.HTTP2;
+            case "QUIC" -> TransportType.QUIC;
             default -> TransportType.TCP;
         };
     }
