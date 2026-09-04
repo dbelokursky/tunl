@@ -75,6 +75,18 @@ public class DiagnosticsBundle {
     /** Any field whose name contains one of these is a secret too. */
     private static final List<String> SECRET_FRAGMENTS = List.of("token", "secret", "password");
 
+    /**
+     * Field names that identify the user's server without authenticating to
+     * it — the address, the SNI, the transport host and path. Not
+     * credentials, but the bundle is what gets attached to a public issue,
+     * and {@link #appInfo} keeps the address out for the same reason. Matched
+     * only inside {@code outbounds} and {@code endpoints}: the same key names
+     * elsewhere are DNS resolver tags and rule references, which the bundle
+     * is there to show.
+     */
+    private static final Set<String> IDENTIFYING_FIELDS = Set.of(
+            "server", "server_name", "host", "sni", "path");
+
     private final ConfigStore configStore;
     private final SingBoxConfigGenerator configGenerator;
     private final RoutingService routingService;
@@ -233,6 +245,12 @@ public class DiagnosticsBundle {
         try {
             JsonNode root = objectMapper.readTree(json);
             redactSecrets(root);
+            for (String section : List.of("outbounds", "endpoints")) {
+                JsonNode nodes = root.get(section);
+                if (nodes != null) {
+                    redactIdentifying(nodes);
+                }
+            }
             return objectMapper.writeValueAsString(root) + "\n";
         } catch (JacksonException e) {
             // Redaction is the only reason this file is safe to include, so a
@@ -271,6 +289,25 @@ public class DiagnosticsBundle {
         } else if (node instanceof ArrayNode array) {
             for (JsonNode child : array) {
                 redactSecrets(child);
+            }
+        }
+    }
+
+    /** Replaces the server-identifying values under an outbound or endpoint. */
+    private static void redactIdentifying(JsonNode node) {
+        if (node instanceof ObjectNode object) {
+            for (String name : List.copyOf(object.propertyNames())) {
+                JsonNode value = object.get(name);
+                if (IDENTIFYING_FIELDS.contains(name.toLowerCase(Locale.ROOT))
+                        && value != null && value.isValueNode()) {
+                    object.put(name, REDACTED);
+                } else {
+                    redactIdentifying(value);
+                }
+            }
+        } else if (node instanceof ArrayNode array) {
+            for (JsonNode child : array) {
+                redactIdentifying(child);
             }
         }
     }
