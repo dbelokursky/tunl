@@ -4,8 +4,10 @@ import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
+import com.vlessclient.model.RoutingRule;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
@@ -362,6 +364,70 @@ class SingBoxConfigGeneratorTunTest {
         }
         assertThat(tun).isNotNull();
         assertThat(tun.get("address").get(0).asString()).isEqualTo("10.10.0.1/24");
+    }
+
+    /**
+     * The direct resolver used to be declared and never referenced: every
+     * query fell through to {@code dns.final}, so a name the user routes
+     * around the tunnel was still resolved through the proxy — and the
+     * "Direct DNS" field in Settings changed nothing. Resolution now follows
+     * the same split as the traffic: the bypass list, custom direct rules and
+     * the country bypass resolve through {@code direct-dns}.
+     */
+    @Test
+    void tunMode_directRoutedNamesResolveThroughDirectDns() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setBypassList(List.of("*.example.org", "10.0.0.0/8"));
+        routingConfig.setBypassCountries(List.of("ru"));
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, ".direct.example",
+                        RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.GEOSITE, "cn",
+                        RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.IP_CIDR, "192.0.2.0/24",
+                        RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN, "proxied.example",
+                        RoutingRule.RuleAction.PROXY),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN, "blocked.example",
+                        RoutingRule.RuleAction.BLOCK)));
+
+        JsonNode root = parse(generator.generate(createVlessServer(), tunSettings(),
+                routingConfig));
+        JsonNode dnsRules = root.get("dns").get("rules");
+
+        // localhost/*.local stays first, and the default stays the proxy DNS.
+        assertThat(dnsRules.get(0).get("server").asString()).isEqualTo("local-dns");
+        assertThat(root.get("dns").get("final").asString()).isEqualTo("proxy-dns");
+
+        List<JsonNode> direct = new java.util.ArrayList<>();
+        dnsRules.forEach(rule -> {
+            if ("direct-dns".equals(rule.path("server").asString())) {
+                direct.add(rule);
+            }
+        });
+        String all = direct.toString();
+        assertThat(all).contains("example.org");          // bypass list, by suffix
+        assertThat(all).contains(".direct.example");      // custom direct rule
+        assertThat(all).contains("geosite-cn");           // custom geosite rule
+        assertThat(all).doesNotContain("10.0.0.0/8");     // a query carries a name
+        assertThat(all).doesNotContain("192.0.2.0/24");
+        assertThat(all).doesNotContain("proxied.example"); // proxy rules stay on proxy-dns
+        assertThat(all).doesNotContain("blocked.example");
+        assertThat(direct).noneMatch(rule -> rule.has("ip_cidr"));
+
+        // Every rule-set a DNS rule references is declared in the route.
+        java.util.Set<String> declared = new java.util.HashSet<>();
+        root.get("route").get("rule_set").forEach(set -> declared.add(set.get("tag").asString()));
+        for (JsonNode rule : direct) {
+            if (rule.has("rule_set")) {
+                for (JsonNode tag : rule.get("rule_set")) {
+                    assertThat(declared).contains(tag.asString());
+                }
+            }
+        }
+        // The country bypass contributes its geosite aggregate.
+        assertThat(direct).anyMatch(rule -> rule.has("rule_set")
+                && rule.get("rule_set").toString().contains("ru"));
     }
 
     @Test

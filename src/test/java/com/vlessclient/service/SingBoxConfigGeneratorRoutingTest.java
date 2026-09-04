@@ -343,17 +343,59 @@ class SingBoxConfigGeneratorRoutingTest {
         assertThat(ruleSet.get(0).get("tag").asString()).isEqualTo("geosite-cn");
         assertThat(ruleSet.get(1).get("tag").asString()).isEqualTo("geoip-cn");
 
-        // domain rule
+        // Block rules use the reject action: there is no "block" outbound in
+        // the config, and a rule naming one only dropped connections as the
+        // side effect of an unresolvable tag.
         assertThat(rules.get(6).get("domain").get(0).asString()).isEqualTo("example.com");
-        assertThat(rules.get(6).get("outbound").asString()).isEqualTo("block");
+        assertThat(rules.get(6).get("action").asString()).isEqualTo("reject");
+        assertThat(rules.get(6).has("outbound")).isFalse();
 
         // domain_keyword rule
         assertThat(rules.get(7).get("domain_keyword").get(0).asString()).isEqualTo("ads");
-        assertThat(rules.get(7).get("outbound").asString()).isEqualTo("block");
+        assertThat(rules.get(7).get("action").asString()).isEqualTo("reject");
 
         // domain_regex rule
         assertThat(rules.get(8).get("domain_regex").get(0).asString()).isEqualTo(".*\\.ads\\..*");
-        assertThat(rules.get(8).get("outbound").asString()).isEqualTo("block");
+        assertThat(rules.get(8).get("action").asString()).isEqualTo("reject");
+    }
+
+    /**
+     * Every outbound a rule names must be declared. A dangling tag does not
+     * stop the core from starting: the matching connection is just dropped,
+     * silently — which is exactly how {@code outbound: "block"} went unnoticed
+     * for as long as it did, since no outbound of that tag was ever emitted.
+     */
+    @Test
+    void everyRuleOutboundResolvesToADeclaredOutbound() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setBypassCountries(List.of("ru"));
+        routingConfig.setBypassList(List.of("*.example.org"));
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.DOMAIN, "blocked.example",
+                        RoutingRule.RuleAction.BLOCK),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, ".direct.example",
+                        RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.GEOIP, "cn",
+                        RoutingRule.RuleAction.PROXY)));
+
+        JsonNode root = parse(generator.generate(createVlessServer(), defaultSettings,
+                routingConfig));
+
+        java.util.Set<String> declared = new java.util.HashSet<>();
+        root.get("outbounds").forEach(outbound -> declared.add(outbound.get("tag").asString()));
+        if (root.has("endpoints")) {
+            root.get("endpoints").forEach(endpoint -> declared.add(endpoint.get("tag").asString()));
+        }
+        assertThat(declared).doesNotContain("block");
+
+        for (JsonNode rule : root.get("route").get("rules")) {
+            JsonNode outbound = rule.get("outbound");
+            if (outbound != null) {
+                assertThat(declared)
+                        .as("rule %s names an outbound that does not exist", rule)
+                        .contains(outbound.asString());
+            }
+        }
     }
 
     @Test
