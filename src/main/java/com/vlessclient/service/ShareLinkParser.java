@@ -348,8 +348,9 @@ public class ShareLinkParser {
             config.getTls().setAlpn(alpn);
         }
 
-        String allowInsecure = params.get("allowInsecure");
-        if ("1".equals(allowInsecure)) {
+        // Both spellings circulate: allowInsecure=1 (v2rayN, Xray) and
+        // insecure=1 (sing-box-flavoured links).
+        if ("1".equals(params.get("allowInsecure")) || "1".equals(params.get("insecure"))) {
             config.getTls().setAllowInsecure(true);
         }
 
@@ -589,8 +590,9 @@ public class ShareLinkParser {
             config.getTls().setRealityShortId(sid);
         }
 
-        String allowInsecure = params.get("allowInsecure");
-        if ("1".equals(allowInsecure)) {
+        // Both spellings circulate: allowInsecure=1 (v2rayN, Xray) and
+        // insecure=1 (sing-box-flavoured links).
+        if ("1".equals(params.get("allowInsecure")) || "1".equals(params.get("insecure"))) {
             config.getTls().setAllowInsecure(true);
         }
     }
