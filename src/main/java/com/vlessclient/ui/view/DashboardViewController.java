@@ -36,6 +36,7 @@ import javafx.fxml.FXML;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.Tooltip;
@@ -88,6 +89,7 @@ public class DashboardViewController implements ViewShownAware {
     @FXML private Label modeLabel;
     @FXML private Label trafficSectionTitle;
     @FXML private Label healthSectionTitle;
+    @FXML private Hyperlink addServerLink;
     @FXML private VBox serviceStatusList;
     @FXML private HBox reconnectBanner;
     @FXML private Label reconnectBannerLabel;
@@ -158,6 +160,7 @@ public class DashboardViewController implements ViewShownAware {
         healthSectionTitle.textProperty().bind(I18n.binding("dashboard.health.title"));
         ButtonLabels.bindStatic(recheckButton, "dashboard.health.recheck");
         ButtonLabels.bindStatic(cancelReconnectButton, "button.cancel");
+        addServerLink.textProperty().bind(I18n.binding("dashboard.cta.add.server"));
         bindInstallBannerLabels();
         ButtonLabels.bind(updateBannerButton, "settings.update.restart");
         updateBannerSection = new UpdateBannerSection(new UpdateBannerSection.Controls(
@@ -846,6 +849,11 @@ public class DashboardViewController implements ViewShownAware {
     }
 
     @FXML
+    private void onAddServerLinkClicked() {
+        ServiceLocator.find(MainViewController.class).ifPresent(MainViewController::showServers);
+    }
+
+    @FXML
     private void onCancelReconnectClicked() {
         healthChecks.cancelReconnectCountdown();
     }
@@ -869,6 +877,10 @@ public class DashboardViewController implements ViewShownAware {
             return;
         }
         List<ServerConfig> servers = configStore.getServers();
+        // A fresh install used to show a disabled Connect and a sentence,
+        // with the way forward two views away. The link is that way.
+        addServerLink.setVisible(servers.isEmpty());
+        addServerLink.setManaged(servers.isEmpty());
         if (servers.isEmpty()) {
             connectButton.setDisable(true);
             connectButton.setTooltip(new Tooltip(I18n.get("dashboard.no.servers")));

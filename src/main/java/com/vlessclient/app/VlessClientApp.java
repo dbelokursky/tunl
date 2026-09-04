@@ -308,6 +308,9 @@ public class VlessClientApp extends Application {
         // after the window is shown so any error dialog has a parent.
         MainViewController mainController = loader.getController();
         if (mainController != null) {
+            // Views that want to navigate (the dashboard's first-run link)
+            // find the sidebar's owner here rather than holding a reference.
+            ServiceLocator.register(MainViewController.class, mainController);
             mainController.triggerAutoConnect();
         }
 
