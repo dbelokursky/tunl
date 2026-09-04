@@ -45,8 +45,38 @@ public class ShareLinkParser {
             case "trojan" -> parseTrojan(uri);
             case "ss" -> parseShadowsocks(uri);
             case "hysteria2", "hy2" -> parseHysteria2(uri);
-            default -> throw new IllegalArgumentException("Unsupported protocol scheme: " + scheme);
+            default -> throw new UnsupportedSchemeException(scheme);
         };
+    }
+
+    /**
+     * A link that is well-formed but uses a protocol this client does not
+     * implement.
+     *
+     * <p>Kept distinct from the other {@link IllegalArgumentException}s so a
+     * caller reading a whole list — a subscription — can tell "this provider
+     * also hands out TUIC" from "this line is garbage". The first is not
+     * evidence that the list was truncated or corrupted, and must not be
+     * treated as one.</p>
+     */
+    public static final class UnsupportedSchemeException extends IllegalArgumentException {
+
+        private final String scheme;
+
+        /**
+         * Creates the exception for a scheme.
+         *
+         * @param scheme the lower-cased scheme of the rejected link
+         */
+        public UnsupportedSchemeException(String scheme) {
+            super("Unsupported protocol scheme: " + scheme);
+            this.scheme = scheme;
+        }
+
+        /** The scheme of the rejected link, e.g. {@code tuic}. */
+        public String scheme() {
+            return scheme;
+        }
     }
 
     /**

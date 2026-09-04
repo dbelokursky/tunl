@@ -141,6 +141,86 @@ class SubscriptionServiceTest {
     }
 
     @Test
+    void parseContent_unsupportedProtocolsAreNotUnreadableLines() {
+        String content = "vless://uuid1@server1.com:443?security=tls&type=tcp#Good\n"
+                + "tuic://uuid:pass@tuic.example:443?congestion_control=bbr#Tuic\n"
+                + "# a comment the provider left in the list\n"
+                + "anytls://pass@anytls.example:443#AnyTLS\n";
+
+        SubscriptionService.ParsedContent parsed = service.parseContent(content);
+
+        assertThat(parsed.servers()).hasSize(1);
+        assertThat(parsed.skipped())
+                .as("a protocol this client lacks is not a corrupted line")
+                .isZero();
+        assertThat(parsed.unsupportedSchemes()).containsExactly("tuic", "anytls");
+    }
+
+    /**
+     * A provider that also hands out TUIC used to leave the subscription
+     * permanently "failed": every unsupported link counted as an unreadable
+     * one, which set the error and disabled removals on each refresh, so dead
+     * servers were never pruned either.
+     */
+    @Test
+    void refreshSubscription_unsupportedLinksNeitherFailItNorPinWithdrawnServers() {
+        String initial = "vless://uuid1@server1.com:443?security=tls&type=tcp#Server1\n"
+                + "vless://uuid2@server2.com:443?security=tls&type=tcp#Server2\n";
+        service.setFetchedContent(initial);
+        service.addSubscription("Mixed", "https://example.com/sub");
+        Subscription sub = service.getSubscriptions().get(0);
+        assertThat(configStore.getServers()).hasSize(2);
+
+        service.setFetchedContent(
+                "vless://uuid2@server2.com:443?security=tls&type=tcp#Server2\n"
+                + "tuic://uuid:pass@tuic.example:443#Tuic\n");
+        service.refreshSubscription(sub.getId());
+
+        assertThat(sub.getLastError()).isNull();
+        assertThat(configStore.getServers())
+                .extracting(ServerConfig::getAddress)
+                .as("server1 was withdrawn by the provider and must go")
+                .containsExactly("server2.com");
+    }
+
+    @Test
+    void refreshSubscription_onlyUnsupportedLinksSaysSoInsteadOfHintingAtExpiry() {
+        service.setFetchedContent("vless://uuid1@server1.com:443?security=tls&type=tcp#Server1\n");
+        service.addSubscription("Sub", "https://example.com/sub");
+        Subscription sub = service.getSubscriptions().get(0);
+
+        service.setFetchedContent("tuic://uuid:pass@tuic.example:443#Tuic\n");
+        service.refreshSubscription(sub.getId());
+
+        assertThat(sub.getLastError()).contains("not support").contains("tuic");
+        assertThat(configStore.getServers())
+                .as("nothing usable came back, so nothing is removed")
+                .hasSize(1);
+    }
+
+    /**
+     * servers.json, settings.json and routing.json all move an unreadable
+     * file aside; subscriptions.json used to log and carry on, so the next
+     * save overwrote the only copy — including the sealed URLs the keychain
+     * entries are filed under.
+     */
+    @Test
+    void corruptSubscriptionsFileIsQuarantinedRatherThanOverwritten() throws Exception {
+        java.nio.file.Path file = tempDir.resolve("subscriptions.json");
+        java.nio.file.Files.writeString(file, "{ this is not json");
+
+        TestableSubscriptionService fresh =
+                new TestableSubscriptionService(configStore, shareLinkParser, tempDir);
+
+        assertThat(fresh.getSubscriptions()).isEmpty();
+        assertThat(java.nio.file.Files.exists(file)).isFalse();
+        try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.list(tempDir)) {
+            assertThat(files.map(p -> p.getFileName().toString()))
+                    .anyMatch(name -> name.startsWith("subscriptions.json.corrupt-"));
+        }
+    }
+
+    @Test
     void removeSubscription_removesAssociatedServers() {
         String content = "vless://uuid1@server1.com:443?security=tls&type=tcp#Server1\n"
                 + "vless://uuid2@server2.com:443?security=tls&type=tcp#Server2\n";

@@ -277,12 +277,19 @@ public class SubscriptionService {
         // its servers down, and that case has no ambiguity to protect against.
         List<ServerConfig> fetchedServers = parsed.servers();
         if (fetchedServers.isEmpty() && content != null && !content.isBlank()) {
-            log.warn("Subscription '{}' returned {} bytes with no recognizable "
+            log.warn("Subscription '{}' returned {} bytes with no usable "
                     + "server links; keeping the {} server(s) already stored",
                     sub.getName(), content.length(), sub.getServerIds().size());
-            sub.setLastError("The response contained no recognizable server links. "
-                    + "The subscription may have expired, or a captive portal "
-                    + "may have answered instead of the provider.");
+            if (parsed.unsupportedSchemes().isEmpty()) {
+                sub.setLastError("The response contained no recognizable server links. "
+                        + "The subscription may have expired, or a captive portal "
+                        + "may have answered instead of the provider.");
+            } else {
+                // The list was read fine; it just holds nothing this client
+                // can connect to. Say so rather than hinting at expiry.
+                sub.setLastError("Every link in the response uses a protocol this "
+                        + "app does not support (" + parsed.unsupportedSummary() + ").");
+            }
             saveSubscriptions();
             return;
         }
@@ -320,6 +327,13 @@ public class SubscriptionService {
                         + "truncated.");
             } else {
                 sub.setLastError(null);
+            }
+            if (!parsed.unsupportedSchemes().isEmpty()) {
+                // Not an error and not a reason to keep withdrawn servers: the
+                // provider also hands out protocols this client lacks.
+                log.info("Subscription '{}': {} link(s) left out, protocol not "
+                        + "supported ({})", sub.getName(),
+                        parsed.unsupportedSchemes().size(), parsed.unsupportedSummary());
             }
             sub.setLastRefreshedAt(System.currentTimeMillis());
             saveSubscriptions();
@@ -544,32 +558,53 @@ public class SubscriptionService {
     }
 
     /**
-     * What a fetched body yielded: the servers, and how many non-blank lines
-     * were rejected. The count is the whole point — a line the parser cannot
-     * read is indistinguishable, to {@code diffAndApply}, from a server the
-     * provider withdrew.
+     * What a fetched body yielded: the servers, how many non-blank lines were
+     * rejected as unreadable, and the schemes of the links this client does
+     * not implement. The distinction is the whole point — a line the parser
+     * cannot read is indistinguishable, to {@code diffAndApply}, from a
+     * server the provider withdrew, whereas a {@code tuic://} link is merely a
+     * server this client cannot use. Counting the second kind as the first
+     * left every mixed-protocol subscription permanently "failed", with
+     * removals disabled on every refresh.
      */
-    record ParsedContent(List<ServerConfig> servers, int skipped) {
+    record ParsedContent(List<ServerConfig> servers, int skipped,
+                         List<String> unsupportedSchemes) {
+
+        ParsedContent(List<ServerConfig> servers, int skipped) {
+            this(servers, skipped, List.of());
+        }
+
+        /** The distinct unsupported schemes, comma-separated, for messages. */
+        String unsupportedSummary() {
+            return String.join(", ", new java.util.TreeSet<>(unsupportedSchemes));
+        }
     }
 
     private ParsedContent parseLines(String text) {
         List<ServerConfig> servers = new ArrayList<>();
+        List<String> unsupported = new ArrayList<>();
         int skipped = 0;
         String[] lines = text.split("\\r?\\n");
         for (String line : lines) {
             String trimmedLine = line.trim();
-            if (trimmedLine.isEmpty()) {
+            if (trimmedLine.isEmpty()
+                    || trimmedLine.startsWith("#") || trimmedLine.startsWith("//")) {
+                // Blank, or a comment line some providers put in a plain-text
+                // list. Neither stands for a server, so neither is "skipped".
                 continue;
             }
             try {
                 ServerConfig server = shareLinkParser.parse(trimmedLine);
                 servers.add(server);
+            } catch (ShareLinkParser.UnsupportedSchemeException e) {
+                unsupported.add(e.scheme());
+                log.debug("Leaving out a {} link: protocol not supported", e.scheme());
             } catch (Exception e) {
                 skipped++;
                 log.debug("Skipping unparseable line: {}", e.getMessage());
             }
         }
-        return new ParsedContent(servers, skipped);
+        return new ParsedContent(servers, skipped, List.copyOf(unsupported));
     }
 
     private void applyNamePrefix(List<ServerConfig> servers, String subscriptionName) {
@@ -768,6 +803,11 @@ public class SubscriptionService {
             log.info("Loaded {} subscriptions from {}", subscriptions.size(), file);
         } catch (JacksonException e) {
             log.error("Failed to load subscriptions from {}", file, e);
+            // Same treatment as servers.json and settings.json: the next save
+            // would otherwise overwrite the only copy of a file that was very
+            // likely still recoverable by hand — and the sealed URLs in it
+            // are the keys the keychain entries are filed under.
+            ConfigStore.quarantineCorrupt(file);
         }
     }
 
