@@ -548,17 +548,29 @@ public class LogsViewController {
         if (level == null || "all".equals(level)) {
             return line -> true;
         }
-        return line -> {
-            String lower = line.toLowerCase();
-            return switch (level) {
-                case "error" -> lower.contains("error") || lower.contains("fatal");
-                case "warn" -> lower.contains("warn") || lower.contains("error")
-                        || lower.contains("fatal");
-                case "info" -> lower.contains("info") || lower.contains("warn")
-                        || lower.contains("error") || lower.contains("fatal");
-                case "debug" -> true;
-                default -> true;
-            };
+        return line -> matchesLevel(LogLineFormatter.levelOf(line), level);
+    }
+
+    /**
+     * Whether a line of the given level belongs under a filter.
+     *
+     * <p>The filter used to look for the level's name anywhere in the line, so
+     * an INFO line saying "no error" showed up under Error and a DEBUG line
+     * mentioning "info" under Info. The level is now the parsed one the
+     * formatter already colours. A line with no recognizable level (a panic
+     * trace, a continuation) passes every filter: hiding it would cut the
+     * lines that explain the error above them.</p>
+     */
+    static boolean matchesLevel(LogLineFormatter.Kind lineLevel, String filter) {
+        if (lineLevel == null || lineLevel == LogLineFormatter.Kind.PLAIN) {
+            return true;
+        }
+        return switch (filter) {
+            case "error" -> lineLevel == LogLineFormatter.Kind.LEVEL_ERROR;
+            case "warn" -> lineLevel == LogLineFormatter.Kind.LEVEL_ERROR
+                    || lineLevel == LogLineFormatter.Kind.LEVEL_WARN;
+            case "info" -> lineLevel != LogLineFormatter.Kind.LEVEL_DEBUG;
+            default -> true;
         };
     }
 

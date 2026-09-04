@@ -55,6 +55,44 @@ public final class LogLineFormatter {
     private LogLineFormatter() {
     }
 
+    /**
+     * The level a line carries — one of the {@code LEVEL_*} kinds — or
+     * {@link Kind#PLAIN} when the line has none, such as a continuation or a
+     * panic trace. Tokenized the same way {@link #format} colours it, so a
+     * filter and the rendering can never disagree about a line's level.
+     *
+     * @param line the raw log line
+     * @return the parsed level kind, never null
+     */
+    public static Kind levelOf(String line) {
+        if (line == null || line.isEmpty()) {
+            return Kind.PLAIN;
+        }
+        int pos = 0;
+        Matcher ts = TIMESTAMP.matcher(line);
+        if (ts.find() && ts.start() == 0) {
+            pos = ts.end();
+        }
+        while (pos < line.length() && line.charAt(pos) == ' ') {
+            pos++;
+        }
+        Matcher lv = LEVEL.matcher(line.substring(pos));
+        if (lv.find() && lv.start() == 0) {
+            return levelKind(lv.group(1));
+        }
+        return Kind.PLAIN;
+    }
+
+    private static Kind levelKind(String levelText) {
+        return switch (levelText.toUpperCase()) {
+            case "TRACE", "DEBUG" -> Kind.LEVEL_DEBUG;
+            case "INFO" -> Kind.LEVEL_INFO;
+            case "WARN", "WARNING" -> Kind.LEVEL_WARN;
+            case "ERROR", "FATAL", "PANIC" -> Kind.LEVEL_ERROR;
+            default -> Kind.PLAIN;
+        };
+    }
+
     /** Returns the styled segments of a single log line. */
     public static List<Segment> format(String line) {
         List<Segment> out = new ArrayList<>();
@@ -85,14 +123,7 @@ public final class LogLineFormatter {
         Kind lineKind = Kind.PLAIN;
         Matcher lv = LEVEL.matcher(line.substring(pos));
         if (lv.find() && lv.start() == 0) {
-            String levelText = lv.group(1).toUpperCase();
-            Kind kind = switch (levelText) {
-                case "TRACE", "DEBUG" -> Kind.LEVEL_DEBUG;
-                case "INFO" -> Kind.LEVEL_INFO;
-                case "WARN", "WARNING" -> Kind.LEVEL_WARN;
-                case "ERROR", "FATAL", "PANIC" -> Kind.LEVEL_ERROR;
-                default -> Kind.PLAIN;
-            };
+            Kind kind = levelKind(lv.group(1));
             lineKind = kind;
             out.add(new Segment(line.substring(pos, pos + lv.end()), kind));
             pos += lv.end();
