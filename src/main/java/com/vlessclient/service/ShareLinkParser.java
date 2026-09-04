@@ -49,6 +49,35 @@ public class ShareLinkParser {
         };
     }
 
+    /** Longest display name kept from a link; anything past it is noise. */
+    static final int MAX_NAME_LENGTH = 200;
+
+    /**
+     * A display name safe to store, render and log.
+     *
+     * <p>The name comes straight out of the link's fragment, URL-decoded, and
+     * went into {@code tunl.log} verbatim on every connect. A fragment holding
+     * {@code %0A} forged a line in the file people attach to bug reports, and
+     * an unbounded one could be as long as the provider liked. Control
+     * characters become spaces and the result is trimmed and capped.</p>
+     *
+     * @param raw the decoded fragment or JSON name, possibly null
+     * @return the cleaned name, empty when nothing usable remains
+     */
+    static String cleanName(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String cleaned = raw.replaceAll("[\\p{Cntrl}\\u2028\\u2029]", " ").trim();
+        return cleaned.length() > MAX_NAME_LENGTH ? cleaned.substring(0, MAX_NAME_LENGTH) : cleaned;
+    }
+
+    /** The fragment as the name, or {@code host:port} when it yields nothing. */
+    private static String displayName(String fragment, String host, int port) {
+        String cleaned = cleanName(fragment);
+        return cleaned.isEmpty() ? host + ":" + port : cleaned;
+    }
+
     /**
      * A link that is well-formed but uses a protocol this client does not
      * implement.
@@ -133,7 +162,7 @@ public class ShareLinkParser {
         config.setUuid(userInfo);
         config.setAddress(host);
         config.setPort(port);
-        config.setName(fragment != null ? fragment : host + ":" + port);
+        config.setName(displayName(fragment, host, port));
 
         // Encryption
         String encryption = params.get("encryption");
@@ -181,7 +210,7 @@ public class ShareLinkParser {
         ServerConfig config = new ServerConfig();
         config.setProtocol(Protocol.VMESS);
 
-        config.setName(getJsonString(node, "ps", ""));
+        config.setName(cleanName(getJsonString(node, "ps", "")));
         config.setAddress(getJsonString(node, "add", ""));
         config.setPort(getJsonInt(node, "port", 443));
         config.setUuid(getJsonString(node, "id", ""));
@@ -290,7 +319,7 @@ public class ShareLinkParser {
         config.setUuid(password);
         config.setAddress(host);
         config.setPort(port);
-        config.setName(fragment != null ? fragment : host + ":" + port);
+        config.setName(displayName(fragment, host, port));
 
         // Transport
         Map<String, String> params = parseQueryParams(parsed.getRawQuery());
@@ -418,7 +447,7 @@ public class ShareLinkParser {
         config.setUuid(password);
         config.setAddress(host);
         config.setPort(port);
-        config.setName(fragment != null ? fragment : host + ":" + port);
+        config.setName(displayName(fragment, host, port));
 
         return config;
     }
@@ -475,7 +504,7 @@ public class ShareLinkParser {
         config.setUuid(password);
         config.setAddress(host);
         config.setPort(port);
-        config.setName(fragment != null ? fragment : host + ":" + port);
+        config.setName(displayName(fragment, host, port));
 
         // TLS - hysteria2 defaults to TLS
         config.getTls().setEnabled(true);
