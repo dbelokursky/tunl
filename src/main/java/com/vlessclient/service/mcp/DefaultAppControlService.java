@@ -364,9 +364,15 @@ public class DefaultAppControlService implements AppControlService {
 
     @Override
     public SettingsInfo setProxyMode(String mode) throws McpToolException {
-        AppSettings settings = configStore.getSettings();
-        settings.setProxyMode(parseMode(mode));
-        configStore.saveSettings(settings);
+        ProxyMode parsed = parseMode(mode);
+        // Settings are mutated on the FX thread only, like the Settings view
+        // does: this runs on an HTTP worker, and the dashboard reads the same
+        // instance from the FX thread with nothing in between.
+        FxExecutor.run(() -> {
+            AppSettings settings = configStore.getSettings();
+            settings.setProxyMode(parsed);
+            configStore.saveSettings(settings);
+        });
         return getSettings();
     }
 
@@ -375,7 +381,25 @@ public class DefaultAppControlService implements AppControlService {
         if (key == null || value == null) {
             throw new McpToolException("Both 'key' and 'value' are required.");
         }
-        AppSettings s = configStore.getSettings();
+        McpToolException[] rejected = new McpToolException[1];
+        FxExecutor.run(() -> {
+            AppSettings s = configStore.getSettings();
+            try {
+                applySetting(s, key, value);
+            } catch (McpToolException e) {
+                rejected[0] = e;
+                return;
+            }
+            configStore.saveSettings(s);
+        });
+        if (rejected[0] != null) {
+            throw rejected[0];
+        }
+        return getSettings();
+    }
+
+    private void applySetting(AppSettings s, String key, JsonNode value)
+            throws McpToolException {
         switch (key.toLowerCase()) {
             case "theme" -> s.setTheme(asText(value, key));
             case "language" -> s.setLanguage(asText(value, key));
@@ -401,8 +425,6 @@ public class DefaultAppControlService implements AppControlService {
                     + "(mcp_enabled/mcp_port require the Settings screen — they restart "
                     + "the server.)");
         }
-        configStore.saveSettings(s);
-        return getSettings();
     }
 
     @Override
