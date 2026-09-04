@@ -87,6 +87,74 @@ public class SettingsViewTest extends ApplicationTest {
         }
     }
 
+    /**
+     * A port field used to persist on every keystroke — and the MCP one also
+     * restarted the listener per digit, with the momentarily empty field
+     * substituting the default. The value now lands when editing ends.
+     */
+    @Test
+    void portFieldsCommitWhenEditingEndsNotPerKeystroke() {
+        TextField socks = lookup("#socksPortField").query();
+        TextField http = lookup("#httpPortField").query();
+        ConfigStore store = ServiceLocator.get(ConfigStore.class);
+        int initial = store.getSettings().getSocksPort();
+        try {
+            interact(() -> {
+                socks.requestFocus();
+                socks.setText("");
+                socks.setText("1");
+                socks.setText("10");
+                socks.setText("1085");
+            });
+            assertThat(store.getSettings().getSocksPort())
+                    .as("typing must not persist a half-typed number")
+                    .isEqualTo(initial);
+
+            interact(http::requestFocus);
+
+            assertThat(store.getSettings().getSocksPort()).isEqualTo(1085);
+            assertThat(new ConfigStore(PlatformPaths.current().dataDir())
+                    .getSettings().getSocksPort())
+                    .as("committed to settings.json, not only to memory")
+                    .isEqualTo(1085);
+        } finally {
+            interact(() -> {
+                socks.requestFocus();
+                socks.setText(String.valueOf(initial));
+                http.requestFocus();
+            });
+        }
+    }
+
+    @Test
+    void clearingAPortFieldKeepsTheStoredPort() {
+        TextField socks = lookup("#socksPortField").query();
+        TextField http = lookup("#httpPortField").query();
+        ConfigStore store = ServiceLocator.get(ConfigStore.class);
+        int initial = store.getSettings().getSocksPort();
+
+        interact(() -> {
+            socks.requestFocus();
+            socks.setText("");
+            http.requestFocus();
+        });
+
+        assertThat(store.getSettings().getSocksPort()).isEqualTo(initial);
+        assertThat(socks.getText())
+                .as("the field shows the value that is actually in effect")
+                .isEqualTo(String.valueOf(initial));
+    }
+
+    @Test
+    void portFieldsRejectNonDigits() {
+        TextField socks = lookup("#socksPortField").query();
+        String before = socks.getText();
+
+        interact(() -> socks.appendText("x"));
+
+        assertThat(socks.getText()).isEqualTo(before);
+    }
+
     @Test
     void mcpControlsExist() {
         assertThat(lookup("#mcpEnabledCheck").tryQuery()).isPresent();
