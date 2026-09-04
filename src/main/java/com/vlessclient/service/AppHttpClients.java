@@ -1,9 +1,12 @@
 package com.vlessclient.service;
 
 import com.vlessclient.model.AppSettings;
+import com.vlessclient.model.ConnectionState;
+import com.vlessclient.model.TunnelHealth;
 import java.net.http.HttpClient;
 import java.util.OptionalInt;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 /**
@@ -40,6 +43,14 @@ public final class AppHttpClients {
      */
     private static final TunnelProxySelector SELECTOR =
             new TunnelProxySelector(() -> PORT.get().get());
+
+    /**
+     * Whether the core is up but the reachability checks have declared the
+     * tunnel broken — the one state in which the selector sends the app's own
+     * requests direct while the user believes they are tunneled.
+     */
+    private static final AtomicReference<BooleanSupplier> BROKEN_WHILE_CONNECTED =
+            new AtomicReference<>(() -> false);
 
     private AppHttpClients() {
     }
@@ -89,6 +100,12 @@ public final class AppHttpClients {
             }
             return OptionalInt.of(settings.get().getHttpPort());
         });
+        BROKEN_WHILE_CONNECTED.set(() -> {
+            SingBoxEngine current = engine.get();
+            return current != null
+                    && current.connectionStateProperty().get() == ConnectionState.CONNECTED
+                    && health.get() == TunnelHealth.BROKEN;
+        });
     }
 
     /**
@@ -99,6 +116,24 @@ public final class AppHttpClients {
      */
     public static void routeDirect() {
         PORT.set(OptionalInt::empty);
+        BROKEN_WHILE_CONNECTED.set(() -> false);
+    }
+
+    /**
+     * True while the core is connected but the tunnel has been declared
+     * broken. Requests made now bypass the tunnel; a caller carrying a
+     * credential in its URL (a subscription fetch) should decline to send
+     * rather than expose it, and the user's real address, directly.
+     *
+     * @return whether the tunnel is being bypassed while it looks connected
+     */
+    public static boolean isTunnelBrokenWhileConnected() {
+        return BROKEN_WHILE_CONNECTED.get().getAsBoolean();
+    }
+
+    /** Test seam: replaces the probe behind {@link #isTunnelBrokenWhileConnected()}. */
+    static void setTunnelBrokenProbe(BooleanSupplier probe) {
+        BROKEN_WHILE_CONNECTED.set(probe == null ? () -> false : probe);
     }
 
     /** The selector every client built here shares. Package-private for tests. */

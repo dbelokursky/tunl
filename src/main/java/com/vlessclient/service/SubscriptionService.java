@@ -1,5 +1,6 @@
 package com.vlessclient.service;
 
+import com.vlessclient.app.AppVersion;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.Subscription;
 import com.vlessclient.platform.PlatformPaths;
@@ -315,6 +316,17 @@ public class SubscriptionService {
             // line, keep everything and say so instead of clearing lastError.
             boolean partial = parsed.skipped() > 0;
             applyNamePrefix(fetchedServers, sub.getName());
+            long insecure = fetchedServers.stream()
+                    .filter(s -> s.getTls() != null && s.getTls().isAllowInsecure())
+                    .count();
+            if (insecure > 0) {
+                // The list is applied as the provider sent it, but silently:
+                // a link that turns certificate verification off is one a
+                // network attacker on the fetch path could have written.
+                log.warn("Subscription '{}': {} server(s) turn certificate verification "
+                        + "off (allowInsecure); they are marked in the server list",
+                        sub.getName(), insecure);
+            }
             diffAndApply(sub, fetchedServers, !partial);
 
             if (partial) {
@@ -447,6 +459,17 @@ public class SubscriptionService {
     }
 
     String fetchContent(String url) throws IOException, InterruptedException {
+        if (AppHttpClients.isTunnelBrokenWhileConnected()) {
+            // The selector falls back to a direct connection in this one
+            // state so the updater keeps working on hostile networks. A
+            // subscription URL carries the account token, and sending it
+            // directly also exposes the user's real address at the exact
+            // moment they believe they are tunneled. Fail the refresh instead;
+            // the next one runs after the tunnel recovers or is torn down.
+            throw new IOException("The tunnel is up but not carrying traffic, so the "
+                    + "subscription was not fetched outside it. Reconnect, or disconnect "
+                    + "and refresh again.");
+        }
         if (isInsecureHttpUrl(url)) {
             // Host only — the path and query can carry an account token.
             String host;
@@ -462,7 +485,7 @@ public class SubscriptionService {
                 .uri(URI.create(url))
                 .GET()
                 .timeout(Duration.ofSeconds(30))
-                .header("User-Agent", "VlessClient/1.0")
+                .header("User-Agent", "Tunl/" + AppVersion.VERSION)
                 .build();
         HttpResponse<InputStream> response =
                 httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
