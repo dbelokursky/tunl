@@ -3,6 +3,7 @@ package com.vlessclient.service;
 import com.maxmind.db.Reader;
 import com.vlessclient.platform.PlatformPaths;
 import com.vlessclient.platform.SecureFiles;
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
@@ -65,6 +66,7 @@ public class GeoIpDatabase {
 
     private final Path databasePath;
     private final HttpClient httpClient;
+    private final String urlTemplate;
 
     /** Opened lazily and kept: the reader memory-maps the file. */
     private volatile Reader reader;
@@ -81,8 +83,14 @@ public class GeoIpDatabase {
 
     /** Test seam: explicit database location and HTTP client. */
     GeoIpDatabase(Path databasePath, HttpClient httpClient) {
+        this(databasePath, httpClient, URL_TEMPLATE);
+    }
+
+    /** Test seam: also where to download from (a {@code %s} takes the month). */
+    GeoIpDatabase(Path databasePath, HttpClient httpClient, String urlTemplate) {
         this.databasePath = databasePath;
         this.httpClient = httpClient;
+        this.urlTemplate = urlTemplate;
     }
 
     /** Whether a database file is present locally. */
@@ -142,7 +150,7 @@ public class GeoIpDatabase {
         for (int attempt = 0; attempt < MONTHS_TO_TRY; attempt++) {
             String stamp = month.minusMonths(attempt)
                     .format(DateTimeFormatter.ofPattern("yyyy-MM"));
-            if (download(String.format(URL_TEMPLATE, stamp))) {
+            if (download(String.format(urlTemplate, stamp))) {
                 return true;
             }
         }
@@ -151,6 +159,7 @@ public class GeoIpDatabase {
     }
 
     private boolean download(String url) {
+        Path staging = databasePath.resolveSibling(DB_FILE + ".part");
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
@@ -165,17 +174,18 @@ public class GeoIpDatabase {
             }
 
             SecureFiles.createPrivateDir(SecureFiles.parentDirectory(databasePath));
-            Path staging = databasePath.resolveSibling(DB_FILE + ".part");
-            try (InputStream in = new GZIPInputStream(response.body())) {
+            // The size cap is enforced while decompressing. Checking the byte
+            // count after the copy let a gzip bomb fill the disk first: the
+            // check only ran once the whole stream had landed.
+            try (InputStream in = new BoundedInputStream(
+                    new GZIPInputStream(response.body()), MAX_BYTES)) {
                 long written = Files.copy(in, staging, StandardCopyOption.REPLACE_EXISTING);
-                // A truncated or absurd download must not be promoted: the
-                // reader would fail on every lookup afterwards.
-                if (written <= 0 || written > MAX_BYTES) {
-                    Files.deleteIfExists(staging);
-                    return false;
+                if (written <= 0) {
+                    throw new IOException("empty download");
                 }
             }
-            // Only becomes the real database once it parses.
+            // Only becomes the real database once it parses: a truncated
+            // file would fail on every lookup afterwards.
             try (Reader probe = new Reader(staging.toFile())) {
                 log.info("Downloaded geo-IP database ({})",
                         probe.getMetadata().databaseType());
@@ -184,10 +194,58 @@ public class GeoIpDatabase {
             return true;
         } catch (IOException | RuntimeException e) {
             log.debug("Geo-IP download from {} failed: {}", url, e.toString());
+            discard(staging);
             return false;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            discard(staging);
             return false;
+        }
+    }
+
+    /** Removes a staging file a failed download left behind. */
+    private static void discard(Path staging) {
+        try {
+            Files.deleteIfExists(staging);
+        } catch (IOException e) {
+            log.debug("Could not remove {}: {}", staging, e.getMessage());
+        }
+    }
+
+    /** Fails the read once more than {@code limit} bytes have gone through. */
+    private static final class BoundedInputStream extends FilterInputStream {
+
+        private final long limit;
+        private long count;
+
+        BoundedInputStream(InputStream in, long limit) {
+            super(in);
+            this.limit = limit;
+        }
+
+        @Override
+        public int read() throws IOException {
+            int b = super.read();
+            if (b >= 0) {
+                account(1);
+            }
+            return b;
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws IOException {
+            int n = super.read(buffer, offset, length);
+            if (n > 0) {
+                account(n);
+            }
+            return n;
+        }
+
+        private void account(long n) throws IOException {
+            count += n;
+            if (count > limit) {
+                throw new IOException("decompressed size exceeds " + limit + " bytes");
+            }
         }
     }
 
