@@ -147,12 +147,7 @@ public class ServersViewController {
 
     /** Returns the service, or null when it is not registered. */
     private <T> T optionalService(Class<T> type) {
-        try {
-            return ServiceLocator.get(type);
-        } catch (IllegalArgumentException e) {
-            log.debug("{} unavailable in this context", type.getSimpleName());
-            return null;
-        }
+        return ServiceLocator.find(type).orElse(null);
     }
 
     private void setUpSearch() {
@@ -414,15 +409,24 @@ public class ServersViewController {
                 ServerConfig server = parseImport(text.trim());
                 configStore.addServer(server);
                 log.info("Imported server: {}", server.getName());
-            } catch (Exception e) {
+            } catch (IllegalArgumentException e) {
+                // Bad input: the parser's message is the explanation, and a
+                // stack trace for a typo would only bury real errors.
+                log.warn("Could not import share link: {}", e.getMessage());
+                showImportError(e);
+            } catch (RuntimeException e) {
                 log.error("Failed to import server", e);
-                Alert alert = new Alert(Alert.AlertType.ERROR);
-                alert.setTitle(I18n.get("servers.import.error.title"));
-                alert.setHeaderText(I18n.get("servers.import.error.header"));
-                alert.setContentText(e.getMessage());
-                alert.showAndWait();
+                showImportError(e);
             }
         });
+    }
+
+    private void showImportError(RuntimeException e) {
+        Alert alert = new Alert(Alert.AlertType.ERROR);
+        alert.setTitle(I18n.get("servers.import.error.title"));
+        alert.setHeaderText(I18n.get("servers.import.error.header"));
+        alert.setContentText(e.getMessage());
+        alert.showAndWait();
     }
 
     /**

@@ -13,6 +13,7 @@ import com.vlessclient.service.TunnelHealthState;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javafx.animation.PauseTransition;
 import javafx.application.Platform;
@@ -75,6 +76,8 @@ public final class HealthCheckCoordinator {
     private final Runnable connectAction;
     private final Runnable disconnectAction;
     private final Runnable reconnectAction;
+    private final Supplier<AppSettings> settingsSupplier;
+    private final Consumer<AppSettings> settingsSaver;
 
     // Health-check / auto-reconnect state. All mutated only on the FX thread.
     private PauseTransition reconnectDelay;
@@ -109,6 +112,35 @@ public final class HealthCheckCoordinator {
             Runnable connectAction,
             Runnable disconnectAction,
             Runnable reconnectAction) {
+        this(controls, reachabilityChecker, healthState, engineSupplier, connectAction,
+                disconnectAction, reconnectAction,
+                () -> ServiceLocator.find(AppSettings.class).orElse(null),
+                settings -> ServiceLocator.find(ConfigStore.class).ifPresentOrElse(
+                        store -> store.saveSettings(settings),
+                        () -> log.warn("ConfigStore not available; "
+                                + "health-target change not persisted")));
+    }
+
+    /**
+     * Creates the coordinator with explicit settings access, so a test can
+     * hand it a settings instance and observe the saves without touching the
+     * global locator; everything else was already injected.
+     *
+     * @param settingsSupplier the current settings, or null when unavailable
+     * @param settingsSaver    persists an edited settings instance
+     */
+    public HealthCheckCoordinator(
+            Controls controls,
+            ServiceReachabilityChecker reachabilityChecker,
+            TunnelHealthState healthState,
+            Supplier<SingBoxEngine> engineSupplier,
+            Runnable connectAction,
+            Runnable disconnectAction,
+            Runnable reconnectAction,
+            Supplier<AppSettings> settingsSupplier,
+            Consumer<AppSettings> settingsSaver) {
+        this.settingsSupplier = settingsSupplier;
+        this.settingsSaver = settingsSaver;
         this.healthCard = controls.healthCard();
         this.healthSummaryLabel = controls.healthSummaryLabel();
         this.serviceStatusList = controls.serviceStatusList();
@@ -201,10 +233,8 @@ public final class HealthCheckCoordinator {
             publishHealth(TunnelHealth.UNMONITORED);
             return;
         }
-        AppSettings settings;
-        try {
-            settings = ServiceLocator.get(AppSettings.class);
-        } catch (IllegalArgumentException e) {
+        AppSettings settings = settingsSupplier.get();
+        if (settings == null) {
             return;
         }
         if (!settings.isHealthCheckEnabled()) {
@@ -532,20 +562,15 @@ public final class HealthCheckCoordinator {
     }
 
     private AppSettings findSettings() {
-        try {
-            return ServiceLocator.get(AppSettings.class);
-        } catch (IllegalArgumentException e) {
+        AppSettings settings = settingsSupplier.get();
+        if (settings == null) {
             log.warn("AppSettings not available for health-target editing");
-            return null;
         }
+        return settings;
     }
 
     private void saveSettingsQuietly(AppSettings settings) {
-        try {
-            ServiceLocator.get(ConfigStore.class).saveSettings(settings);
-        } catch (IllegalArgumentException e) {
-            log.warn("ConfigStore not available; health-target change not persisted");
-        }
+        settingsSaver.accept(settings);
     }
 
     /** Re-probes with the edited list, superseding any in-flight check. */
