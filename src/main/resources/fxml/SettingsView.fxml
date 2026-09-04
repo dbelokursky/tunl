@@ -144,6 +144,11 @@
                            promptText="172.19.0.1/30"/>
             </HBox>
 
+            <CheckBox fx:id="tunIpv6Check" text="Route IPv6 through the tunnel"
+                      styleClass="form-checkbox"/>
+            <Label fx:id="tunIpv6Hint" styleClass="hint-label" wrapText="true" maxWidth="520"
+                   text="Off, IPv6 traffic bypasses the VPN on dual-stack networks. Applies in TUN mode."/>
+
             <CheckBox fx:id="storeSecretsCheck" text="Store credentials in the system keychain"
                       styleClass="form-checkbox"/>
         </VBox>

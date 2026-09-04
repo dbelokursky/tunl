@@ -430,6 +430,31 @@ class SingBoxConfigGeneratorTunTest {
                 && rule.get("rule_set").toString().contains("ru"));
     }
 
+    /**
+     * With only an IPv4 address auto_route covered IPv4 alone, so on a
+     * dual-stack network every IPv6 destination bypassed the tunnel while the
+     * card said "Connected". The device now takes an IPv6 address too, unless
+     * the user turns that off.
+     */
+    @Test
+    void tunMode_takesAnIpv6AddressSoAutoRouteCapturesIpv6() throws Exception {
+        AppSettings settings = tunSettings();
+
+        JsonNode tun = parse(generator.generate(createVlessServer(), settings))
+                .get("inbounds").get(0);
+        assertThat(tun.get("type").asString()).isEqualTo("tun");
+        assertThat(tun.get("address").toString())
+                .contains("172.19.0.1/30")
+                .contains(SingBoxConfigGenerator.TUN_IPV6_ADDRESS);
+
+        settings.setTunIpv6Enabled(false);
+        JsonNode v4Only = parse(generator.generate(createVlessServer(), settings))
+                .get("inbounds").get(0);
+        assertThat(v4Only.get("address").toString())
+                .contains("172.19.0.1/30")
+                .doesNotContain(SingBoxConfigGenerator.TUN_IPV6_ADDRESS);
+    }
+
     @Test
     void tunMode_bootstrapResolverIsTheOsResolver() throws Exception {
         // The proxy server's hostname and remote rule-set hosts must resolve

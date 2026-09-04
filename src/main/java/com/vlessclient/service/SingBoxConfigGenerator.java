@@ -251,6 +251,9 @@ public class SingBoxConfigGenerator {
         return dns;
     }
 
+    /** The TUN device's IPv6 address: sing-box's documented ULA example, a /126 like the v4 /30. */
+    static final String TUN_IPV6_ADDRESS = "fdfe:dcba:9876::1/126";
+
     /** The name-based matchers a route rule can carry over into a DNS rule. */
     private static final List<String> DNS_NAME_MATCHERS =
             List.of("domain", "domain_suffix", "domain_keyword", "domain_regex");
@@ -558,6 +561,13 @@ public class SingBoxConfigGenerator {
             // a CIDR array under `address`.
             ArrayNode address = mapper.createArrayNode();
             address.add(settings.getTunIpv4Address());
+            // Without an IPv6 address auto_route only covers IPv4, so on a
+            // dual-stack network every IPv6 destination bypassed the tunnel
+            // while the card said "Connected". The private and link-local v6
+            // ranges stay excluded below, like their IPv4 counterparts.
+            if (settings.isTunIpv6Enabled()) {
+                address.add(TUN_IPV6_ADDRESS);
+            }
             tun.set("address", address);
             // 1.14 defaults to hijack, but keep this explicit: Tunl relies on
             // native interface DNS plus port-53 interception to prevent DNS

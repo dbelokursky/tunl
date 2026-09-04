@@ -84,6 +84,8 @@ public class SettingsViewController implements ViewShownAware {
     @FXML private TextField directDnsField;
     @FXML private TextField tunInterfaceNameField;
     @FXML private TextField tunIpv4Field;
+    @FXML private CheckBox tunIpv6Check;
+    @FXML private Label tunIpv6Hint;
 
     @FXML private Button checkUpdatesButton;
 
@@ -198,6 +200,12 @@ public class SettingsViewController implements ViewShownAware {
         tunIpv4Field.setText(settings.getTunIpv4Address());
         commitOnEditEnd(tunIpv4Field, text -> {
             settings.setTunIpv4Address(text);
+            saveSettings(settings);
+        });
+
+        tunIpv6Check.setSelected(settings.isTunIpv6Enabled());
+        tunIpv6Check.selectedProperty().addListener((obs, oldVal, newVal) -> {
+            settings.setTunIpv6Enabled(newVal);
             saveSettings(settings);
         });
     }
@@ -489,6 +497,8 @@ public class SettingsViewController implements ViewShownAware {
         directDnsLabel.textProperty().bind(I18n.binding("settings.direct.dns"));
         tunInterfaceNameLabel.textProperty().bind(I18n.binding("settings.tun.interface"));
         tunIpv4Label.textProperty().bind(I18n.binding("settings.tun.ipv4"));
+        tunIpv6Check.textProperty().bind(I18n.binding("settings.tun.ipv6"));
+        tunIpv6Hint.textProperty().bind(I18n.binding("settings.tun.ipv6.hint"));
         // The whole MCP block sat in the FXML in English.
         mcpSectionTitle.textProperty().bind(I18n.binding("settings.mcp.title"));
         mcpHintLabel.textProperty().bind(I18n.binding("settings.mcp.hint"));
