@@ -2,6 +2,7 @@ package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.CountryResolver;
@@ -803,6 +804,10 @@ public class ServersViewController {
                 }
             });
             contextMenu.getItems().addAll(editItem, duplicateItem, copyLinkItem, deleteItem);
+            // There is no share-link format for WireGuard; the item used to
+            // open an error dialog instead of just not applying.
+            contextMenu.setOnShowing(e -> copyLinkItem.setDisable(
+                    getItem() != null && getItem().getProtocol() == Protocol.WIREGUARD));
         }
 
         private MenuItem menuItem(String key, Runnable action) {

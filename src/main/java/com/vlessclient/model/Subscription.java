@@ -22,9 +22,6 @@ public class Subscription {
     @JsonProperty("url")
     private String url;
 
-    @JsonProperty("refreshIntervalHours")
-    private long refreshIntervalHours = 24;
-
     @JsonProperty("lastRefreshedAt")
     private long lastRefreshedAt;
 
@@ -83,14 +80,6 @@ public class Subscription {
 
     public void setUrl(String url) {
         this.url = url;
-    }
-
-    public long getRefreshIntervalHours() {
-        return refreshIntervalHours;
-    }
-
-    public void setRefreshIntervalHours(long refreshIntervalHours) {
-        this.refreshIntervalHours = refreshIntervalHours;
     }
 
     public long getLastRefreshedAt() {
