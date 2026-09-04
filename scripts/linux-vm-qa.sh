@@ -68,7 +68,7 @@ if ! command -v java >/dev/null 2>&1 || ! java -version 2>&1 | grep -q '"25'; th
   echo "deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(. /etc/os-release && echo "$VERSION_CODENAME") main" \
     | sudo tee /etc/apt/sources.list.d/adoptium.list >/dev/null
   sudo apt-get update -q >/dev/null
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq temurin-25-jdk >/dev/null 2>&1
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq temurin-27-jdk >/dev/null 2>&1
 fi
 java -version 2>&1 | head -1
 

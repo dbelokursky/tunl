@@ -418,7 +418,7 @@ Homebrew paths (`/opt/homebrew/bin`, `/usr/local/bin`) or `$PATH`.
 
 ### Requirements
 
-- JDK 25
+- JDK 27
 - Maven 3.9+
 - bash + curl + tar (standard on macOS) — needed by `generate-resources`
   to download sing-box
@@ -440,7 +440,7 @@ mvn test -Dtest=ScreenshotGenerator -Dtunl.screenshots=true -Djacoco.skip=true
 ### Regenerating the icon
 
 ```bash
-java --source 25 scripts/GenerateAppIcon.java
+java --source 27 scripts/GenerateAppIcon.java
 ```
 
 Generates PNGs 16/32/64/128/256/512/1024 into `src/main/resources/icons/`.

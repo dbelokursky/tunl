@@ -21,7 +21,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_DIR="${REPO_ROOT}/target/linux-qa"
-IMAGE="${IMAGE:-eclipse-temurin:25-jdk}"
+IMAGE="${IMAGE:-eclipse-temurin:27-jdk}"
 PLATFORM_ARGS=()
 [[ -n "${PLATFORM:-}" ]] && PLATFORM_ARGS=(--platform "${PLATFORM}")
 BRANCH="$(git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD)"
