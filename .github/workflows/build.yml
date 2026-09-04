@@ -55,6 +55,37 @@ jobs:
           key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
       - run: mvn -B clean verify -Psmoke
 
+  # Early warning for the JDK 27 move (#216): the same suite, smoke included,
+  # on the next runtime — months before anyone has to care.
+  #
+  # A job of its own rather than a fifth matrix leg, for one reason. Packaging
+  # is gated on `needs: test`, so a canary inside that matrix would have to
+  # carry continue-on-error to avoid blocking the installers — and that flag
+  # can mask the very failure the canary exists to report. Standing apart, it
+  # can fail loudly and still stop nothing: nothing needs it, and main requires
+  # only test-macos, test-windows, test-linux and test-linux-arm.
+  #
+  # '27-ea' floats to whatever early-access build is newest. That is right for
+  # a canary and wrong for an installer, which is why this pin appears here and
+  # nowhere near a packaging job: jpackage bakes the CI JDK into the DMG, MSI
+  # and DEB, and an -ea selector never converges to GA. The job goes away when
+  # #216 moves everything to 27 at GA.
+  test-jdk27-ea:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
+        with:
+          java-version: '27-ea'
+          distribution: 'temurin'
+          cache: 'maven'
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/vless-client-build
+          key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
+      - run: mvn -B clean verify -Psmoke
+
   # ========= Packaging: after that OS's tests ==============================
   # Each produces an installable artifact (14 days) so any main commit can be
   # tried without cutting a release. Windows also packages on PRs because its
