@@ -6,7 +6,6 @@ import com.vlessclient.model.TransportType;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -627,31 +626,8 @@ public class ShareLinkParser {
         return value.isNumber() ? value.asInt(defaultValue) : defaultValue;
     }
 
-    private String decodeBase64(String encoded) {
-        // Remove whitespace and newlines
-        encoded = encoded.replaceAll("\\s+", "");
-        // Try standard base64 first, then URL-safe
-        try {
-            return new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException e) {
-            // Try URL-safe base64
-            try {
-                return new String(Base64.getUrlDecoder().decode(encoded), StandardCharsets.UTF_8);
-            } catch (IllegalArgumentException e2) {
-                // Try adding padding
-                String padded = encoded;
-                int pad = padded.length() % 4;
-                if (pad > 0) {
-                    padded = padded + "=".repeat(4 - pad);
-                }
-                try {
-                    return new String(Base64.getDecoder().decode(padded), StandardCharsets.UTF_8);
-                } catch (IllegalArgumentException e3) {
-                    return new String(Base64.getUrlDecoder().decode(padded),
-                            StandardCharsets.UTF_8);
-                }
-            }
-        }
+    private static String decodeBase64(String encoded) {
+        return Base64Lenient.decodeUtf8(encoded);
     }
 
     private TransportType parseTransportType(String type) {

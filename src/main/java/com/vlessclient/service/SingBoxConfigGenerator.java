@@ -1015,18 +1015,30 @@ public class SingBoxConfigGenerator {
         // file would break the next user-mode system-proxy run.
         ObjectNode cacheFile = mapper.createObjectNode();
         cacheFile.put("enabled", true);
-        Path cacheDir = com.vlessclient.platform.PlatformPaths.current()
-                .dataDir().resolve("cache");
-        try {
-            java.nio.file.Files.createDirectories(cacheDir);
-        } catch (java.io.IOException e) {
-            log.warn("Could not create cache dir {}: {}", cacheDir, e.getMessage());
-        }
-        cacheFile.put("path", cacheDir.resolve("sing-box-"
+        cacheFile.put("path", cacheDir().resolve("sing-box-"
                 + settings.getProxyMode().name().toLowerCase(java.util.Locale.ROOT)
                 + ".db").toString());
         experimental.set("cache_file", cacheFile);
 
         return experimental;
+    }
+
+    /** Where the core keeps its cache file, under the app's data directory. */
+    public static Path cacheDir() {
+        return com.vlessclient.platform.PlatformPaths.current().dataDir().resolve("cache");
+    }
+
+    /**
+     * Creates the cache directory the generated config points at. Called by
+     * the engine right before a start; the generator itself no longer touches
+     * the filesystem, so building the diagnostics bundle has no side effects.
+     */
+    public static void ensureCacheDir() {
+        Path cacheDir = cacheDir();
+        try {
+            java.nio.file.Files.createDirectories(cacheDir);
+        } catch (java.io.IOException e) {
+            log.warn("Could not create cache dir {}: {}", cacheDir, e.getMessage());
+        }
     }
 }

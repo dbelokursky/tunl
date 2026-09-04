@@ -18,7 +18,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
@@ -380,11 +379,8 @@ public class SubscriptionService {
             if (scheduler != null && !scheduler.isShutdown()) {
                 return;
             }
-            scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "subscription-auto-refresh");
-                t.setDaemon(true);
-                return t;
-            });
+            scheduler = Executors.newSingleThreadScheduledExecutor(
+                    DaemonThreads.factory("subscription-auto-refresh"));
             scheduler.scheduleAtFixedRate(this::guardedRefreshAll, initialDelay, period, unit);
             log.info("Started subscription auto-refresh");
         }
@@ -405,6 +401,18 @@ public class SubscriptionService {
             refreshAll();
         } catch (Exception e) {
             log.error("Scheduled subscription refresh failed", e);
+        }
+    }
+
+    /**
+     * Stops the auto-refresh for good and releases the HTTP client; for the
+     * service graph going away, where {@link #stopAutoRefresh()} alone left
+     * the client's selector thread behind.
+     */
+    public void shutdown() {
+        stopAutoRefresh();
+        if (httpClient != null) {
+            httpClient.shutdownNow();
         }
     }
 
@@ -557,27 +565,8 @@ public class SubscriptionService {
         return cleaned.matches("^[A-Za-z0-9+/=_-]+$") && cleaned.length() > 20;
     }
 
-    private String decodeBase64(String encoded) {
-        String cleaned = encoded.replaceAll("\\s+", "");
-        try {
-            return new String(Base64.getDecoder().decode(cleaned), StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException e) {
-            try {
-                return new String(Base64.getUrlDecoder().decode(cleaned), StandardCharsets.UTF_8);
-            } catch (IllegalArgumentException e2) {
-                String padded = cleaned;
-                int pad = padded.length() % 4;
-                if (pad > 0) {
-                    padded = padded + "=".repeat(4 - pad);
-                }
-                try {
-                    return new String(Base64.getDecoder().decode(padded), StandardCharsets.UTF_8);
-                } catch (IllegalArgumentException e3) {
-                    return new String(Base64.getUrlDecoder().decode(padded),
-                            StandardCharsets.UTF_8);
-                }
-            }
-        }
+    private static String decodeBase64(String encoded) {
+        return Base64Lenient.decodeUtf8(encoded);
     }
 
     /**

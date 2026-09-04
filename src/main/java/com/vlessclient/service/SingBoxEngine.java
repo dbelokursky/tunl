@@ -176,6 +176,8 @@ public class SingBoxEngine {
         );
         Files.writeString(tempConfigFile, configJson);
         systemProxyTarget = extractSystemProxyTarget(configJson);
+        // The config points the core's cache file into this directory.
+        SingBoxConfigGenerator.ensureCacheDir();
 
         // A launch that throws leaves no process, so the monitor below never
         // runs and nothing else would remove the config we just wrote — and it
@@ -399,16 +401,19 @@ public class SingBoxEngine {
      * @return true if the core is stopped by the deadline
      */
     public boolean awaitStopped(Duration timeout) {
-        long deadline = System.nanoTime() + timeout.toNanos();
-        while (isRunning() && System.nanoTime() < deadline) {
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return !isRunning();
-            }
+        // Single read of the volatile field, then the process's own wait: it
+        // returns the instant the core exits, where a 100 ms poll added up to
+        // a tenth of a second to every reconnect.
+        Process running = process;
+        if (running == null || !running.isAlive()) {
+            return true;
         }
-        return !isRunning();
+        try {
+            return running.waitFor(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return !running.isAlive();
+        }
     }
 
     /**

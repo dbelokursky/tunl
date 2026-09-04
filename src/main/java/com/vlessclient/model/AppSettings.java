@@ -33,9 +33,6 @@ public class AppSettings {
     @JsonProperty("auto_connect")
     private boolean autoConnect;
 
-    @JsonProperty("last_server_id")
-    private String lastServerId;
-
     @JsonProperty("socks_port")
     private int socksPort = 1080;
 
@@ -189,14 +186,6 @@ public class AppSettings {
 
     public void setAutoConnect(boolean autoConnect) {
         this.autoConnect = autoConnect;
-    }
-
-    public String getLastServerId() {
-        return lastServerId;
-    }
-
-    public void setLastServerId(String lastServerId) {
-        this.lastServerId = lastServerId;
     }
 
     public int getSocksPort() {

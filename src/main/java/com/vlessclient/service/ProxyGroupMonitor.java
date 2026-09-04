@@ -84,6 +84,12 @@ public class ProxyGroupMonitor {
         }
     }
 
+    /** Stops polling for good and releases the HTTP client. */
+    public void shutdown() {
+        stop();
+        httpClient.shutdownNow();
+    }
+
     /** Stops polling and clears the published pick. Safe to call when idle. */
     public void stop() {
         Thread running;

@@ -272,7 +272,7 @@ public class GeoIpDatabase {
         }
     }
 
-    /** Closes the reader; safe to call more than once. */
+    /** Closes the reader and the HTTP client; safe to call more than once. */
     public void shutdown() {
         Reader current = reader;
         reader = null;
@@ -282,6 +282,9 @@ public class GeoIpDatabase {
             } catch (IOException e) {
                 log.debug("Error closing the geo-IP database", e);
             }
+        }
+        if (httpClient != null) {
+            httpClient.shutdownNow();
         }
     }
 }

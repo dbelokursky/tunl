@@ -157,7 +157,6 @@ class ConfigStoreTest {
         settings.setTheme("dark");
         settings.setLanguage("ru");
         settings.setAutoConnect(true);
-        settings.setLastServerId(server.getId());
         settings.setSocksPort(2080);
         settings.setHttpPort(2081);
         settings.setClashApiPort(9091);
@@ -189,7 +188,6 @@ class ConfigStoreTest {
         assertThat(loadedSettings.getTheme()).isEqualTo("dark");
         assertThat(loadedSettings.getLanguage()).isEqualTo("ru");
         assertThat(loadedSettings.isAutoConnect()).isTrue();
-        assertThat(loadedSettings.getLastServerId()).isEqualTo(server.getId());
         assertThat(loadedSettings.getSocksPort()).isEqualTo(2080);
         assertThat(loadedSettings.getHttpPort()).isEqualTo(2081);
         assertThat(loadedSettings.getClashApiPort()).isEqualTo(9091);

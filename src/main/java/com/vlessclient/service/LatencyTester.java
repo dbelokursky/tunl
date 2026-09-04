@@ -72,11 +72,8 @@ public class LatencyTester {
     /** Test seam: inject the probe. */
     LatencyTester(ClashApiDelayProbe delayProbe) {
         this.delayProbe = delayProbe;
-        this.executor = Executors.newFixedThreadPool(MAX_CONCURRENT_TESTS, r -> {
-            Thread t = new Thread(r, "latency-tester");
-            t.setDaemon(true);
-            return t;
-        });
+        this.executor = Executors.newFixedThreadPool(MAX_CONCURRENT_TESTS,
+                DaemonThreads.factory("latency-tester"));
     }
 
     /**

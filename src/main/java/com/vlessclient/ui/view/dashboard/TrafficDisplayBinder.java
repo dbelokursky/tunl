@@ -3,6 +3,7 @@ package com.vlessclient.ui.view.dashboard;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
+import com.vlessclient.service.DaemonThreads;
 import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.ui.view.MirroredSparkline;
 import java.util.concurrent.ExecutionException;
@@ -47,11 +48,8 @@ public final class TrafficDisplayBinder {
      * thread, the JVM does not wait for it, and {@code ServiceLocator.shutdown}
      * stops the monitor synchronously on the way out.</p>
      */
-    private final ExecutorService lifecycle = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "traffic-display-lifecycle");
-        t.setDaemon(true);
-        return t;
-    });
+    private final ExecutorService lifecycle = Executors.newSingleThreadExecutor(
+            DaemonThreads.factory("traffic-display-lifecycle"));
 
     /**
      * Creates the binder over the controller's traffic readouts.

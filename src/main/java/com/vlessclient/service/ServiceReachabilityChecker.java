@@ -93,11 +93,8 @@ public class ServiceReachabilityChecker {
      *                      the real HTTP-through-proxy probe
      */
     public ServiceReachabilityChecker(ProbeExecutor probeExecutor) {
-        this.executor = Executors.newFixedThreadPool(POOL_SIZE, r -> {
-            Thread t = new Thread(r, "reachability-checker");
-            t.setDaemon(true);
-            return t;
-        });
+        this.executor = Executors.newFixedThreadPool(POOL_SIZE,
+                DaemonThreads.factory("reachability-checker"));
         this.probeExecutor = probeExecutor != null ? probeExecutor : this::realProbe;
     }
 

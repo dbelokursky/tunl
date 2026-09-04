@@ -103,7 +103,6 @@ public class UpdateManager {
 
     private final ReadOnlyBooleanWrapper updateAvailable = new ReadOnlyBooleanWrapper(false);
     private final ReadOnlyStringWrapper latestVersion = new ReadOnlyStringWrapper("");
-    private final ReadOnlyStringWrapper downloadUrl = new ReadOnlyStringWrapper("");
 
     /**
      * True while an installer is being fetched. The download starts on its own
@@ -139,11 +138,8 @@ public class UpdateManager {
         this.httpClient = httpClient;
         this.staging = staging;
         this.objectMapper = JsonMapper.builder().build();
-        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "update-checker");
-            t.setDaemon(true);
-            return t;
-        });
+        this.scheduler = Executors.newSingleThreadScheduledExecutor(
+                DaemonThreads.factory("update-checker"));
     }
 
     /**
@@ -237,6 +233,11 @@ public class UpdateManager {
      */
     public void shutdown() {
         scheduler.shutdownNow();
+        if (httpClient != null) {
+            // The client keeps a selector thread; the UI test suite rebuilds
+            // the service graph many times per JVM.
+            httpClient.shutdownNow();
+        }
     }
 
     /**
@@ -333,9 +334,11 @@ public class UpdateManager {
             if (isNewerVersion(version, AppVersion.VERSION)) {
                 log.info("Update available: {} -> {}", AppVersion.VERSION, version);
                 candidate = new Candidate(version, installerUrl, asset.digest());
-                Platform.runLater(() -> {
+                // FxExecutor rather than a bare runLater: with no toolkit (a
+                // service test) runLater throws, and the catch below turned a
+                // perfectly good answer into "unreachable".
+                FxExecutor.run(() -> {
                     latestVersion.set(version);
-                    downloadUrl.set(installerUrl);
                     updateAvailable.set(true);
                 });
                 return CheckResult.UPDATE_AVAILABLE;
@@ -588,10 +591,6 @@ public class UpdateManager {
         return latestVersion.getReadOnlyProperty();
     }
 
-    public ReadOnlyStringProperty downloadUrlProperty() {
-        return downloadUrl.getReadOnlyProperty();
-    }
-
     public ReadOnlyBooleanProperty downloadingProperty() {
         return downloading.getReadOnlyProperty();
     }
@@ -706,10 +705,13 @@ public class UpdateManager {
         return fallback;
     }
 
-    /** The architecture token release assets carry: {@code arm64} or {@code amd64}. */
+    /**
+     * The architecture token release assets carry: {@code arm64} or
+     * {@code amd64}. An architecture no release is built for throws, which
+     * the check reports as no answer — it used to download the amd64 build.
+     */
     static String currentArchToken() {
-        String osArch = System.getProperty("os.arch", "").toLowerCase(java.util.Locale.ROOT);
-        return osArch.contains("aarch64") || osArch.contains("arm64") ? "arm64" : "amd64";
+        return com.vlessclient.platform.CpuArch.releaseToken();
     }
 
     /**
