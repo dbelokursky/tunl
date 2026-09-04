@@ -2,7 +2,6 @@ package com.vlessclient.platform;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
 import org.slf4j.Logger;
@@ -51,8 +50,7 @@ public final class WindowsTunLauncher implements TunLauncher {
     public Launched launch(Path binary, Path configFile) throws IOException {
         Path tempDir = Path.of(System.getProperty("java.io.tmpdir"));
         String token = Long.toString(System.nanoTime());
-        Path stopSignalFile = tempDir.resolve("vless-client-stop-" + token + ".signal");
-        Files.deleteIfExists(stopSignalFile);
+        Path stopSignalFile = StopSignals.newStopSignalFile();
 
         Path logOut = tempDir.resolve("vless-tun-" + token + ".out.log");
         Path logErr = tempDir.resolve("vless-tun-" + token + ".err.log");
@@ -130,6 +128,10 @@ public final class WindowsTunLauncher implements TunLauncher {
                 }
                 Emit-New $LogErr ([ref]$posErr)
                 Emit-New $LogOut ([ref]$posOut)
+                # Everything in them has been forwarded to the app's own log
+                # buffer. Left behind, a debug-level core log of every DNS
+                # query and dial target piled up in %TEMP% per connection.
+                Remove-Item -LiteralPath $LogOut, $LogErr -Force -ErrorAction SilentlyContinue
                 try { exit $w.ExitCode } catch { exit 0 }
                 """;
     }

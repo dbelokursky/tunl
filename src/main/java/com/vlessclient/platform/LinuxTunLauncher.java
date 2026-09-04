@@ -1,7 +1,6 @@
 package com.vlessclient.platform;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import org.slf4j.Logger;
@@ -48,9 +47,9 @@ public final class LinuxTunLauncher implements TunLauncher {
 
     @Override
     public Launched launch(Path binary, Path configFile) throws IOException {
-        Path stopSignalFile = Path.of(System.getProperty("java.io.tmpdir"),
-                "vless-client-stop-" + System.nanoTime() + ".signal");
-        Files.deleteIfExists(stopSignalFile);
+        // Owner-only and unguessable, where java.io.tmpdir is usually the
+        // shared /tmp; the root-side wrapper can read it there.
+        Path stopSignalFile = StopSignals.newStopSignalFile();
 
         if (!hasNetAdminCapability(binary)) {
             grantNetAdminCapability(binary);
