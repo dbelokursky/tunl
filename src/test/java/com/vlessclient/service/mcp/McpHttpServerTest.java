@@ -76,6 +76,69 @@ class McpHttpServerTest {
         assertThat(response.statusCode()).isEqualTo(405);
     }
 
+    /**
+     * A raw request, so the test controls the Host header the JDK client
+     * would otherwise set for it.
+     *
+     * @return the response's status line
+     */
+    private String rawStatusLine(String... headerLines) throws Exception {
+        String body = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}";
+        StringBuilder request = new StringBuilder("POST /mcp HTTP/1.1\r\n");
+        for (String header : headerLines) {
+            request.append(header).append("\r\n");
+        }
+        request.append("Authorization: Bearer ").append(TOKEN).append("\r\n")
+                .append("Content-Type: application/json\r\n")
+                .append("Content-Length: ").append(body.length()).append("\r\n")
+                .append("Connection: close\r\n\r\n")
+                .append(body);
+        try (java.net.Socket socket = new java.net.Socket("127.0.0.1", server.boundPort())) {
+            socket.getOutputStream().write(
+                    request.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            socket.getOutputStream().flush();
+            String response = new String(socket.getInputStream().readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            return response.split("\r\n", 2)[0];
+        }
+    }
+
+    /**
+     * DNS rebinding: a hostile page resolves its own name to 127.0.0.1 and
+     * the browser sends the request with that name as Host. The token would
+     * still fail it; the header check fails it a class earlier.
+     */
+    @Test
+    void foreignHostHeader_returns403() throws Exception {
+        assertThat(rawStatusLine("Host: evil.example:" + server.boundPort())).contains("403");
+    }
+
+    @Test
+    void foreignOrigin_returns403() throws Exception {
+        assertThat(rawStatusLine("Host: 127.0.0.1:" + server.boundPort(),
+                "Origin: http://evil.example")).contains("403");
+        assertThat(rawStatusLine("Host: 127.0.0.1:" + server.boundPort(),
+                "Origin: null")).contains("403");
+    }
+
+    @Test
+    void loopbackHostAndOrigin_areAccepted() throws Exception {
+        assertThat(rawStatusLine("Host: localhost:" + server.boundPort(),
+                "Origin: http://127.0.0.1:" + server.boundPort())).contains("200");
+        assertThat(rawStatusLine("Host: [::1]:" + server.boundPort())).contains("200");
+    }
+
+    @Test
+    void isLocalOrigin_decidesOnHostAndOrigin() {
+        assertThat(McpHttpServer.isLocalOrigin("127.0.0.1:5555", null)).isTrue();
+        assertThat(McpHttpServer.isLocalOrigin("localhost", "")).isTrue();
+        assertThat(McpHttpServer.isLocalOrigin("[::1]:5555", "http://localhost:5555")).isTrue();
+        assertThat(McpHttpServer.isLocalOrigin("evil.example", null)).isFalse();
+        assertThat(McpHttpServer.isLocalOrigin("127.0.0.1", "http://evil.example")).isFalse();
+        assertThat(McpHttpServer.isLocalOrigin(null, null)).isFalse();
+        assertThat(McpHttpServer.isLocalOrigin("127.0.0.1", "not a url ://")).isFalse();
+    }
+
     @Test
     void initialize_withToken_returnsServerInfo() throws Exception {
         HttpResponse<String> response = post(
