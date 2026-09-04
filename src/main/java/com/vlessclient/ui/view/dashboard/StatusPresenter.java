@@ -56,6 +56,13 @@ public class StatusPresenter {
     private final Runnable refreshConnectAvailability;
 
     /**
+     * The engine's last failure text, kept so a repaint in the ERROR state
+     * does not wipe it. It used to be recognised by its English prefix, which
+     * would have stopped working the moment the message was translated.
+     */
+    private String engineError;
+
+    /**
      * Creates the presenter.
      *
      * @param controls                   the hero-card controls
@@ -132,6 +139,7 @@ public class StatusPresenter {
      * @param message the engine's error message
      */
     public void showEngineError(String message) {
+        engineError = message;
         statusLabel.setText(message);
     }
 
@@ -219,12 +227,12 @@ public class StatusPresenter {
 
     private void paintStatusSubtitle(TunnelStatus status) {
         if (status == TunnelStatus.ERROR) {
-            // The engine's own message ("Process exited ...") says more than a
-            // generic line, so a repaint must not wipe it.
-            if (!statusLabel.getText().startsWith("Process exited")) {
-                statusLabel.setText(I18n.get("dashboard.status.check.logs"));
-            }
+            // The engine's own message says more than a generic line, so a
+            // repaint must not wipe it.
+            statusLabel.setText(engineError != null
+                    ? engineError : I18n.get("dashboard.status.check.logs"));
         } else {
+            engineError = null;
             statusLabel.setText(subtitleFor(status));
         }
 

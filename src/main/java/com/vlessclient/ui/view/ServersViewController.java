@@ -69,6 +69,7 @@ public class ServersViewController {
 
     private static final Logger log = LoggerFactory.getLogger(ServersViewController.class);
 
+    @FXML private Label titleLabel;
     @FXML private ListView<ServerConfig> serverListView;
     @FXML private Button addServerButton;
     @FXML private Button importLinkButton;
@@ -114,6 +115,7 @@ public class ServersViewController {
      */
     @FXML
     public void initialize() {
+        titleLabel.textProperty().bind(I18n.binding("servers.title"));
         bindEmptyState();
         configStore = ServiceLocator.get(ConfigStore.class);
         latencyTester = optionalService(LatencyTester.class);

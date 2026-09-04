@@ -95,7 +95,7 @@
                      minimums are what lets the row still fit the 500px content
                      width DashboardFitTest pins, now that the labels cannot
                      shrink. -->
-                <Label text="Mode" styleClass="stats-title" minWidth="-Infinity"/>
+                <Label fx:id="modeLabel" text="Mode" styleClass="stats-title" minWidth="-Infinity"/>
                 <!-- 190 is measured, not chosen: "Системный прокси" needs 178
                      in the cell plus the arrow, and at 150 the mode was
                      truncated at every window size rather than only at the
@@ -119,7 +119,7 @@
     <Label fx:id="serverNameLabel" text="" managed="false" visible="false"/>
 
     <!-- Real-time traffic section -->
-    <Label text="Real-time traffic" styleClass="section-header"/>
+    <Label fx:id="trafficSectionTitle" text="Real-time traffic" styleClass="section-header"/>
 
     <!-- Mirrored duplex card: upload plots up from the shared dashed axis and
          download plots down, so a curve travels the way its name says. The
@@ -159,7 +159,7 @@
     <VBox fx:id="healthCard" styleClass="card" spacing="10"
           visible="false" managed="false">
         <HBox alignment="CENTER_LEFT" spacing="10" fillHeight="true">
-            <Label text="Service availability" styleClass="section-header"/>
+            <Label fx:id="healthSectionTitle" text="Service availability" styleClass="section-header"/>
             <Region HBox.hgrow="ALWAYS"/>
             <Label fx:id="healthSummaryLabel" text="—" styleClass="latency-result"/>
             <Button fx:id="addTargetButton" text="+" styleClass="secondary-button"

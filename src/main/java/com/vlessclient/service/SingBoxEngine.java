@@ -1,5 +1,6 @@
 package com.vlessclient.service;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.platform.SecureFiles;
@@ -471,8 +472,8 @@ public class SingBoxEngine {
                         // Message before state: state listeners fire
                         // synchronously inside set(), and they read the
                         // message the moment they see ERROR.
-                        errorMessage.set("Process exited unexpectedly (code "
-                                + exitCode + "): " + lastLine);
+                        errorMessage.set(I18n.get("engine.exited.unexpectedly",
+                                String.valueOf(exitCode)) + ": " + lastLine);
                         connectionState.set(ConnectionState.ERROR);
                     }
                 });

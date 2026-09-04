@@ -39,6 +39,7 @@ public class SubscriptionsViewController {
     private static final DateTimeFormatter TIME_FORMAT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault());
 
+    @FXML private Label titleLabel;
     @FXML private ListView<Subscription> subscriptionListView;
     @FXML private VBox emptyState;
     @FXML private Label emptyStateTitle;
@@ -54,6 +55,7 @@ public class SubscriptionsViewController {
      */
     @FXML
     public void initialize() {
+        titleLabel.textProperty().bind(I18n.binding("subscriptions.title"));
         bindEmptyState();
         ButtonLabels.bindStatic(refreshAllButton, "subscriptions.refresh.all");
         ButtonLabels.bindAddAction(addSubscriptionButton, "button.add.subscription");

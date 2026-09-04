@@ -60,6 +60,7 @@ public class LogsViewController {
 
     private static final Logger log = LoggerFactory.getLogger(LogsViewController.class);
 
+    @FXML private Label titleLabel;
     @FXML private ComboBox<String> logLevelFilter;
     @FXML private TextField searchField;
     @FXML private CheckBox autoScrollCheckBox;
@@ -81,6 +82,8 @@ public class LogsViewController {
      */
     @FXML
     public void initialize() {
+        titleLabel.textProperty().bind(I18n.binding("logs.title"));
+        searchField.promptTextProperty().bind(I18n.binding("logs.search.prompt"));
         ButtonLabels.bindStatic(autoScrollCheckBox, "logs.auto.scroll");
         // Items are the filter codes buildLevelPredicate() switches on; the
         // converter renders the localized names, so translating the UI can
@@ -400,8 +403,8 @@ public class LogsViewController {
                 .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
         chooser.setInitialFileName("tunl-log-" + stamp + ".txt");
         chooser.getExtensionFilters().addAll(
-                new FileChooser.ExtensionFilter("Log files", "*.log", "*.txt"),
-                new FileChooser.ExtensionFilter("All files", "*.*"));
+                new FileChooser.ExtensionFilter(I18n.get("logs.save.filter"), "*.log", "*.txt"),
+                new FileChooser.ExtensionFilter(I18n.get("logs.save.filter.all"), "*.*"));
 
         Window owner = logListView.getScene() == null
                 ? null : logListView.getScene().getWindow();

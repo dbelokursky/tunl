@@ -41,6 +41,13 @@ public class RoutingViewController {
 
     private static final Logger log = LoggerFactory.getLogger(RoutingViewController.class);
 
+    @FXML private Label titleLabel;
+    @FXML private Label bypassCountriesTitle;
+    @FXML private Label bypassListTitle;
+    @FXML private Label bypassListHint;
+    @FXML private Label customRulesTitle;
+    @FXML private Label rulesEmptyTitle;
+    @FXML private Label rulesEmptyHint;
     @FXML private javafx.scene.layout.FlowPane bypassCountryChips;
     @FXML private ComboBox<String> bypassCountryCombo;
     @FXML private Label bypassCountryHint;
@@ -62,6 +69,7 @@ public class RoutingViewController {
     @FXML
     public void initialize() {
         routingService = ServiceLocator.get(RoutingService.class);
+        bindLabels();
 
         RoutingConfig config = routingService.getConfig();
         initBypassCountryChips(config);
@@ -243,14 +251,14 @@ public class RoutingViewController {
             @Override
             protected void updateItem(RoutingRule.RuleType item, boolean empty) {
                 super.updateItem(item, empty);
-                setText(empty || item == null ? null : item.getValue());
+                setText(empty || item == null ? null : formatRuleType(item));
             }
         });
         typeCombo.setButtonCell(new ListCell<>() {
             @Override
             protected void updateItem(RoutingRule.RuleType item, boolean empty) {
                 super.updateItem(item, empty);
-                setText(empty || item == null ? null : item.getValue());
+                setText(empty || item == null ? null : formatRuleType(item));
             }
         });
 
@@ -363,11 +371,44 @@ public class RoutingViewController {
                 : I18n.get("routing.bypass.count.many", String.valueOf(count)));
     }
 
-    private String formatAction(RoutingRule.RuleAction action) {
+    /**
+     * The view's own wording: titles, section headers, hints and the combo
+     * prompt sat in the FXML as English literals while the buttons beside
+     * them answered in the user's language.
+     */
+    private void bindLabels() {
+        titleLabel.textProperty().bind(I18n.binding("routing.title"));
+        bypassCountriesTitle.textProperty().bind(I18n.binding("routing.bypass.countries.title"));
+        bypassCountryHint.textProperty().bind(I18n.binding("routing.bypass.countries.hint"));
+        bypassListTitle.textProperty().bind(I18n.binding("routing.bypass.list.title"));
+        bypassListHint.textProperty().bind(I18n.binding("routing.bypass.list.hint"));
+        customRulesTitle.textProperty().bind(I18n.binding("routing.custom.rules.title"));
+        rulesEmptyTitle.textProperty().bind(I18n.binding("routing.rules.empty.title"));
+        rulesEmptyHint.textProperty().bind(I18n.binding("routing.rules.empty.hint"));
+        if (bypassCountryCombo != null) {
+            bypassCountryCombo.promptTextProperty()
+                    .bind(I18n.binding("routing.bypass.countries.prompt"));
+        }
+    }
+
+    private static String formatAction(RoutingRule.RuleAction action) {
         return switch (action) {
-            case PROXY -> "Proxy";
-            case DIRECT -> "Direct";
-            case BLOCK -> "Block";
+            case PROXY -> I18n.get("routing.action.proxy");
+            case DIRECT -> I18n.get("routing.action.direct");
+            case BLOCK -> I18n.get("routing.action.block");
+        };
+    }
+
+    /** Full key literals, so the bundle test can verify every reference. */
+    private static String formatRuleType(RoutingRule.RuleType type) {
+        return switch (type) {
+            case DOMAIN -> I18n.get("routing.rule.type.domain");
+            case DOMAIN_SUFFIX -> I18n.get("routing.rule.type.domain.suffix");
+            case DOMAIN_KEYWORD -> I18n.get("routing.rule.type.domain.keyword");
+            case DOMAIN_REGEX -> I18n.get("routing.rule.type.domain.regex");
+            case GEOSITE -> I18n.get("routing.rule.type.geosite");
+            case IP_CIDR -> I18n.get("routing.rule.type.ip.cidr");
+            case GEOIP -> I18n.get("routing.rule.type.geoip");
         };
     }
 
@@ -386,7 +427,7 @@ public class RoutingViewController {
             row.getStyleClass().add("server-list-item");
             row.setAlignment(Pos.CENTER_LEFT);
 
-            Label typeLabel = new Label(rule.getType().getValue());
+            Label typeLabel = new Label(formatRuleType(rule.getType()));
             typeLabel.getStyleClass().add("protocol-badge");
             typeLabel.setMinWidth(110);
 

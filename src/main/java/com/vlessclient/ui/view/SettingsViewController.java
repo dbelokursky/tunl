@@ -89,6 +89,10 @@ public class SettingsViewController implements ViewShownAware {
 
     @FXML private Button appUpdateButton;
 
+    @FXML private Label mcpSectionTitle;
+    @FXML private Label mcpHintLabel;
+    @FXML private Label mcpPortLabel;
+    @FXML private Label mcpCommandLabel;
     @FXML private CheckBox mcpEnabledCheck;
     @FXML private TextField mcpPortField;
     @FXML private CheckBox mcpAllowMutationsCheck;
@@ -485,6 +489,15 @@ public class SettingsViewController implements ViewShownAware {
         directDnsLabel.textProperty().bind(I18n.binding("settings.direct.dns"));
         tunInterfaceNameLabel.textProperty().bind(I18n.binding("settings.tun.interface"));
         tunIpv4Label.textProperty().bind(I18n.binding("settings.tun.ipv4"));
+        // The whole MCP block sat in the FXML in English.
+        mcpSectionTitle.textProperty().bind(I18n.binding("settings.mcp.title"));
+        mcpHintLabel.textProperty().bind(I18n.binding("settings.mcp.hint"));
+        mcpEnabledCheck.textProperty().bind(I18n.binding("settings.mcp.enable"));
+        mcpPortLabel.textProperty().bind(I18n.binding("settings.mcp.port"));
+        mcpAllowMutationsCheck.textProperty().bind(I18n.binding("settings.mcp.allow.mutations"));
+        mcpCommandLabel.textProperty().bind(I18n.binding("settings.mcp.command.label"));
+        ButtonLabels.bindStatic(mcpCopyButton, "settings.mcp.copy");
+        ButtonLabels.bindStatic(mcpRegenButton, "settings.mcp.regenerate");
     }
 
     private void refreshLabels() {
@@ -601,9 +614,10 @@ public class SettingsViewController implements ViewShownAware {
         mcpCommandArea.setText(mcpServerService.claudeAddCommand());
         String startError = mcpServerService.getLastStartError();
         if (startError != null) {
-            mcpStatusLabel.setText("○ failed — " + startError);
+            mcpStatusLabel.setText(I18n.get("settings.mcp.status.failed", startError));
         } else {
-            mcpStatusLabel.setText(mcpServerService.isRunning() ? "● running" : "○ stopped");
+            mcpStatusLabel.setText(I18n.get(mcpServerService.isRunning()
+                    ? "settings.mcp.status.running" : "settings.mcp.status.stopped"));
         }
     }
 

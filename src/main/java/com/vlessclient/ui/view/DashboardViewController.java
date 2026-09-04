@@ -85,6 +85,9 @@ public class DashboardViewController implements ViewShownAware {
     @FXML private VBox healthCard;
     @FXML private Label healthSummaryLabel;
     @FXML private Button recheckButton;
+    @FXML private Label modeLabel;
+    @FXML private Label trafficSectionTitle;
+    @FXML private Label healthSectionTitle;
     @FXML private VBox serviceStatusList;
     @FXML private HBox reconnectBanner;
     @FXML private Label reconnectBannerLabel;
@@ -148,6 +151,13 @@ public class DashboardViewController implements ViewShownAware {
         // TrafficDisplayBinder, which only runs when a TrafficMonitor exists.
         uploadCardTitle.textProperty().bind(I18n.binding("dashboard.upload.speed"));
         downloadCardTitle.textProperty().bind(I18n.binding("dashboard.download.speed"));
+        // Section headers and the two health-card buttons sat in the FXML as
+        // English literals; in Russian the dashboard was half-translated.
+        modeLabel.textProperty().bind(I18n.binding("dashboard.mode"));
+        trafficSectionTitle.textProperty().bind(I18n.binding("dashboard.traffic.title"));
+        healthSectionTitle.textProperty().bind(I18n.binding("dashboard.health.title"));
+        ButtonLabels.bindStatic(recheckButton, "dashboard.health.recheck");
+        ButtonLabels.bindStatic(cancelReconnectButton, "button.cancel");
         bindInstallBannerLabels();
         ButtonLabels.bind(updateBannerButton, "settings.update.restart");
         updateBannerSection = new UpdateBannerSection(new UpdateBannerSection.Controls(

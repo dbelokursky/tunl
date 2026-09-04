@@ -17,7 +17,7 @@
       spacing="16">
 
     <!-- Header -->
-    <Label text="Routing" styleClass="view-title"/>
+    <Label fx:id="titleLabel" text="Routing" styleClass="view-title"/>
 
     <!-- Bypass countries: selected codes render as removable chips (added by
          the controller in front of the combo). The combo lists every ISO
@@ -25,7 +25,7 @@
          validated against the ISO catalog, so a typo can never become a
          broken rule-set URL. Empty selection = no country bypass. -->
     <VBox styleClass="card" spacing="8">
-        <Label text="Bypass countries" styleClass="section-title"/>
+        <Label fx:id="bypassCountriesTitle" text="Bypass countries" styleClass="section-title"/>
 
         <FlowPane fx:id="bypassCountryChips" hgap="6" vgap="6"
                   alignment="CENTER_LEFT">
@@ -40,7 +40,7 @@
     <!-- Bypass list: patterns matching these are sent direct, skipping the proxy -->
     <VBox spacing="8" styleClass="card" VBox.vgrow="ALWAYS">
         <HBox alignment="CENTER_LEFT" spacing="10">
-            <Label text="Bypass list" styleClass="section-title"/>
+            <Label fx:id="bypassListTitle" text="Bypass list" styleClass="section-title"/>
             <Label fx:id="bypassCountLabel" text="0 entries" styleClass="count-badge"/>
             <Region HBox.hgrow="ALWAYS"/>
             <!-- Label comes from ButtonLabels.bind; it swaps to "Saved" for a
@@ -48,7 +48,7 @@
             <Button fx:id="saveBypassButton" styleClass="primary-button"
                     onAction="#onSaveBypassClicked"/>
         </HBox>
-        <Label styleClass="hint-label" wrapText="true"
+        <Label fx:id="bypassListHint" styleClass="hint-label" wrapText="true"
                text="One entry per line — these hosts go direct and bypass the VPN. Wildcards: *.example.com, .example.com, *google*; CIDR (192.168.0.0/16); bare IPs; URLs. Lines starting with # are comments."/>
         <!-- One example, not five: a TextArea renders its prompt as a single
              run, so the newlines this used to carry came out concatenated into
@@ -62,7 +62,7 @@
     <!-- Custom rules: always active, composing with the sections above -->
     <VBox fx:id="customRulesSection" spacing="8" styleClass="card" VBox.vgrow="ALWAYS">
         <HBox alignment="CENTER_LEFT" spacing="12">
-            <Label text="Custom rules" styleClass="section-title"/>
+            <Label fx:id="customRulesTitle" text="Custom rules" styleClass="section-title"/>
             <Region HBox.hgrow="ALWAYS"/>
             <Button fx:id="addRuleButton" text="+ Add Rule" styleClass="primary-button"
                     onAction="#onAddRuleClicked"/>
@@ -73,8 +73,8 @@
         <!-- Empty state -->
         <VBox fx:id="emptyState" styleClass="empty-state" spacing="8" alignment="CENTER"
               VBox.vgrow="ALWAYS" managed="true" visible="true">
-            <Label text="No custom rules" styleClass="empty-state-title"/>
-            <Label text="Click 'Add Rule' to create routing rules"
+            <Label fx:id="rulesEmptyTitle" text="No custom rules" styleClass="empty-state-title"/>
+            <Label fx:id="rulesEmptyHint" text="Click 'Add Rule' to create routing rules"
                    styleClass="empty-state-hint"/>
         </VBox>
     </VBox>

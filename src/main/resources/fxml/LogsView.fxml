@@ -17,7 +17,7 @@
       spacing="12">
 
     <!-- Header -->
-    <Label text="Logs" styleClass="view-title"/>
+    <Label fx:id="titleLabel" text="Logs" styleClass="view-title"/>
 
     <!-- Toolbar. The search field is the single elastic element (HBox.hgrow);
          every other control keeps its preferred size (minWidth=-Infinity =
