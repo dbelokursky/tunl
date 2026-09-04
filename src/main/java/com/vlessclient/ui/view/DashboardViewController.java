@@ -14,11 +14,13 @@ import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.CountryResolver;
 import com.vlessclient.service.LatencyTester;
+import com.vlessclient.service.ProxyGroupMonitor;
 import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.SingBoxInstaller;
 import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.service.TunnelHealthState;
+import com.vlessclient.service.outbound.OutboundTags;
 import com.vlessclient.ui.view.dashboard.AddHealthTargetDialog;
 import com.vlessclient.ui.view.dashboard.HealthCheckCoordinator;
 import com.vlessclient.ui.view.dashboard.StatusPresenter;
@@ -116,6 +118,7 @@ public class DashboardViewController implements ViewShownAware {
 
     private ServerConfig activeServer;
     private SingBoxEngine singBoxEngine;
+    private ProxyGroupMonitor groupMonitor;
 
     // Extracted Dashboard collaborators; the controller stays the FXML
     // endpoint and hands each one the few controls it drives.
@@ -174,6 +177,13 @@ public class DashboardViewController implements ViewShownAware {
             latencyTester = null;
         }
 
+        try {
+            groupMonitor = ServiceLocator.get(ProxyGroupMonitor.class);
+        } catch (IllegalArgumentException e) {
+            log.warn("ProxyGroupMonitor not available; the card will name the pinned server");
+            groupMonitor = null;
+        }
+
         ServiceReachabilityChecker reachabilityChecker;
         try {
             reachabilityChecker = ServiceLocator.get(ServiceReachabilityChecker.class);
@@ -205,6 +215,7 @@ public class DashboardViewController implements ViewShownAware {
                 new StatusPresenter.Controls(statusCircle, statusHalo, statusFlag,
                         statusTitle, statusLabel, serverNameLabel, connectButton),
                 () -> activeServer,
+                this::routedServer,
                 this::currentHealth,
                 () -> singBoxEngine,
                 this::refreshConnectButtonAvailability);
@@ -252,25 +263,15 @@ public class DashboardViewController implements ViewShownAware {
             log.debug("ConfigStore not available while wiring server-list listener");
         }
 
+        if (groupMonitor != null) {
+            // The pick can change under a live tunnel (urltest re-probes), so
+            // the card repaints on its own signal, like the health verdict.
+            groupMonitor.currentMemberTagProperty().addListener(
+                    (obs, oldTag, newTag) -> updateUi(currentConnectionState()));
+        }
+
         if (singBoxEngine != null) {
-            singBoxEngine.connectionStateProperty().addListener(
-                    (obs, oldState, newState) -> {
-                        updateUi(newState);
-                        trafficDisplay.onConnectionStateChanged(newState);
-                        healthChecks.onConnectionStateChanged(newState);
-                    });
-
-            singBoxEngine.errorMessageProperty().addListener(
-                    (obs, oldMsg, newMsg) -> {
-                        if (newMsg != null && !newMsg.isEmpty()) {
-                            statusPresenter.showEngineError(newMsg);
-                        }
-                    });
-
-            ConnectionState current = singBoxEngine.connectionStateProperty().get();
-            updateUi(current);
-            trafficDisplay.onConnectionStateChanged(current);
-            healthChecks.onConnectionStateChanged(current);
+            bindEngine(singBoxEngine);
         } else {
             connectionState.addListener((obs, oldState, newState) -> updateUi(newState));
             updateUi(ConnectionState.DISCONNECTED);
@@ -281,6 +282,74 @@ public class DashboardViewController implements ViewShownAware {
         }
         refreshSingBoxMissingBanner();
         refreshConnectButtonAvailability();
+    }
+
+    /**
+     * Wires an engine's signals into the card, the traffic readout, the health
+     * loop and the group monitor, and paints its current state. Called once
+     * at startup and again after an in-app core install swaps the engine; the
+     * two sites used to carry their own copies of the same listeners.
+     */
+    private void bindEngine(SingBoxEngine engine) {
+        engine.connectionStateProperty().addListener(
+                (obs, oldState, newState) -> onEngineState(newState));
+        engine.errorMessageProperty().addListener(
+                (obs, oldMsg, newMsg) -> {
+                    if (newMsg != null && !newMsg.isEmpty()) {
+                        statusPresenter.showEngineError(newMsg);
+                    }
+                });
+        onEngineState(engine.connectionStateProperty().get());
+    }
+
+    private void onEngineState(ConnectionState state) {
+        updateUi(state);
+        trafficDisplay.onConnectionStateChanged(state);
+        healthChecks.onConnectionStateChanged(state);
+        syncGroupMonitor(state);
+    }
+
+    /**
+     * Follows the core's group pick while a tunnel is up in an automatic
+     * selection mode; a pinned server needs no polling to be named.
+     */
+    private void syncGroupMonitor(ConnectionState state) {
+        if (groupMonitor == null) {
+            return;
+        }
+        if (state == ConnectionState.CONNECTED) {
+            AppSettings settings;
+            try {
+                settings = ServiceLocator.get(AppSettings.class);
+            } catch (IllegalArgumentException e) {
+                return;
+            }
+            if (settings.getServerSelection().isAutomatic()) {
+                groupMonitor.start(settings.getClashApiPort(), settings.getClashApiSecret());
+            }
+        } else if (state == ConnectionState.DISCONNECTED || state == ConnectionState.ERROR) {
+            groupMonitor.stop();
+        }
+    }
+
+    /**
+     * The server traffic actually goes through: the proxy group's current
+     * pick when the core has reported one, otherwise the pinned server.
+     */
+    private ServerConfig routedServer() {
+        String tag = groupMonitor != null ? groupMonitor.currentMemberTagProperty().get() : null;
+        if (tag != null) {
+            try {
+                for (ServerConfig server : ServiceLocator.get(ConfigStore.class).getServers()) {
+                    if (tag.equals(OutboundTags.server(server))) {
+                        return server;
+                    }
+                }
+            } catch (IllegalArgumentException e) {
+                log.debug("ConfigStore not available while resolving the routed server");
+            }
+        }
+        return activeServer;
     }
 
     /**
@@ -332,19 +401,7 @@ public class DashboardViewController implements ViewShownAware {
             ServiceLocator.registerSingBoxEngine(path);
             try {
                 singBoxEngine = ServiceLocator.get(SingBoxEngine.class);
-                singBoxEngine.connectionStateProperty().addListener(
-                        (obs, oldState, newState) -> {
-                            updateUi(newState);
-                            trafficDisplay.onConnectionStateChanged(newState);
-                            healthChecks.onConnectionStateChanged(newState);
-                        });
-                singBoxEngine.errorMessageProperty().addListener(
-                        (obs, oldMsg, newMsg) -> {
-                            if (newMsg != null && !newMsg.isEmpty()) {
-                                statusPresenter.showEngineError(newMsg);
-                            }
-                        });
-                updateUi(singBoxEngine.connectionStateProperty().get());
+                bindEngine(singBoxEngine);
             } catch (IllegalArgumentException e) {
                 log.warn("SingBoxEngine still unavailable after install");
             }
@@ -449,8 +506,11 @@ public class DashboardViewController implements ViewShownAware {
             if (singBoxEngine != null
                     && singBoxEngine.connectionStateProperty().get() == ConnectionState.CONNECTED) {
                 log.info("Server selection changed while connected; restarting tunnel");
-                disconnect();
-                connect();
+                // One restart on one thread, like reconnectIfActiveServerChanged:
+                // a separate disconnect() plus connect() spawned two virtual
+                // threads racing for the same core, and when the stop outlasted
+                // the connect's wait the user ended up disconnected.
+                reconnect();
             }
         });
     }

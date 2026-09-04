@@ -9,6 +9,7 @@ import com.vlessclient.service.CountryResolver;
 import com.vlessclient.service.DiagnosticsBundle;
 import com.vlessclient.service.GeoIpDatabase;
 import com.vlessclient.service.LatencyTester;
+import com.vlessclient.service.ProxyGroupMonitor;
 import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ServerBackupService;
 import com.vlessclient.service.ServiceReachabilityChecker;
@@ -115,6 +116,10 @@ public class ServiceLocator {
 
         TrafficMonitor trafficMonitor = new TrafficMonitor();
         register(TrafficMonitor.class, trafficMonitor);
+
+        // Which member of the proxy group carries the traffic right now — the
+        // only way the dashboard can name the server an automatic mode picked.
+        register(ProxyGroupMonitor.class, new ProxyGroupMonitor());
 
         LatencyTester latencyTester = new LatencyTester();
         register(LatencyTester.class, latencyTester);
@@ -319,6 +324,15 @@ public class ServiceLocator {
             }
         } catch (Exception e) {
             log.error("Error stopping TrafficMonitor during shutdown", e);
+        }
+
+        try {
+            Object groupMonitor = services.get(ProxyGroupMonitor.class);
+            if (groupMonitor instanceof ProxyGroupMonitor monitor) {
+                monitor.stop();
+            }
+        } catch (Exception e) {
+            log.error("Error stopping ProxyGroupMonitor during shutdown", e);
         }
 
         try {

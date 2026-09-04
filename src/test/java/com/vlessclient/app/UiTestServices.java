@@ -7,6 +7,7 @@ import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.CountryResolver;
 import com.vlessclient.service.GeoIpDatabase;
 import com.vlessclient.service.LatencyTester;
+import com.vlessclient.service.ProxyGroupMonitor;
 import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.ShareLinkParser;
@@ -55,6 +56,7 @@ public final class UiTestServices {
 
         NoNetworkTrafficMonitor trafficMonitor = new NoNetworkTrafficMonitor();
         ServiceLocator.register(TrafficMonitor.class, trafficMonitor);
+        ServiceLocator.register(ProxyGroupMonitor.class, new NoNetworkProxyGroupMonitor());
 
         NoNetworkLatencyTester latencyTester = new NoNetworkLatencyTester();
         ServiceLocator.register(LatencyTester.class, latencyTester);
@@ -129,6 +131,14 @@ public final class UiTestServices {
         @Override
         public void start(int clashApiPort, String secret) {
             // Leave observable counters at zero without opening the SSE stream.
+        }
+    }
+
+    private static final class NoNetworkProxyGroupMonitor extends ProxyGroupMonitor {
+
+        @Override
+        public void start(int port, String secret) {
+            // Never poll the loopback API from a UI test.
         }
     }
 
