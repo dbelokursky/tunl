@@ -3,6 +3,7 @@ package com.vlessclient.service.mcp;
 import com.vlessclient.app.AppVersion;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.service.Redact;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.mcp.tools.ConnectTool;
 import com.vlessclient.service.mcp.tools.DisconnectTool;
@@ -72,7 +73,10 @@ public class McpServerService {
             while (change.next()) {
                 if (change.wasAdded()) {
                     for (String line : change.getAddedSubList()) {
-                        notifier.broadcastLog(line);
+                        // Same treatment as the diagnostics bundle: a line can
+                        // quote a subscription URL, and the token in it is not
+                        // something every holder of the MCP token should get.
+                        notifier.broadcastLog(Redact.urlsIn(line));
                     }
                 }
             }

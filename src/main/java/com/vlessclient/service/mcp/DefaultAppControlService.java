@@ -11,6 +11,7 @@ import com.vlessclient.model.Subscription;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.FxExecutor;
+import com.vlessclient.service.Redact;
 import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ShareLinkParser;
 import com.vlessclient.service.SingBoxEngine;
@@ -154,9 +155,13 @@ public class DefaultAppControlService implements AppControlService {
         }
         int effectiveLimit = limit > 0 ? limit : snapshot.size();
         if (snapshot.size() > effectiveLimit) {
-            return new ArrayList<>(
+            snapshot = new ArrayList<>(
                     snapshot.subList(snapshot.size() - effectiveLimit, snapshot.size()));
         }
+        // Same treatment as the diagnostics bundle and the SSE stream: a line
+        // can quote a subscription URL, and the token in it is not something
+        // every holder of the MCP token should get.
+        snapshot.replaceAll(Redact::urlsIn);
         return snapshot;
     }
 
