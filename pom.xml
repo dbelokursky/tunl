@@ -26,7 +26,12 @@
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.minimum.version>3.9.0</maven.minimum.version>
-        <maven.compiler.release>25</maven.compiler.release>
+        <!-- 27 is not an LTS line: Adoptium lists its end of availability as
+             March 2027, when JDK 28 ships. That is a deliberate trade - the app
+             ships its own runtime through jpackage, so the JDK a user has
+             installed is irrelevant, and the cost of the cadence is one bump
+             every six months rather than a support risk. The next LTS is 29. -->
+        <maven.compiler.release>27</maven.compiler.release>
         <!-- Must stay on a GA line. 28-ea was an early-access build in a
              product handed to users: EA artifacts are unsupported, can be
              withdrawn from Central, and change under a fixed coordinate. 26.0.2
@@ -306,7 +311,8 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <!-- 0.8.13+ understands Java 25 (class file 69) bytecode. -->
+                <!-- 0.8.15 understands Java 27 (class file 71) bytecode;
+                     an older JaCoCo fails the build rather than mis-reporting. -->
                 <version>0.8.15</version>
                 <executions>
                     <execution>

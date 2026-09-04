@@ -374,7 +374,7 @@ Homebrew-путей (`/opt/homebrew/bin`, `/usr/local/bin`) или из `$PATH`.
 
 ### Требования
 
-- JDK 25
+- JDK 27
 - Maven 3.9+
 - bash + curl + tar (стандартно для macOS) — нужны для `generate-resources`
   чтобы скачать sing-box
@@ -393,7 +393,7 @@ mvn validate                # checkstyle
 ### Регенерация иконки
 
 ```bash
-java --source 25 scripts/GenerateAppIcon.java
+java --source 27 scripts/GenerateAppIcon.java
 ```
 
 Генерирует PNG 16/32/64/128/256/512/1024 в `src/main/resources/icons/`.

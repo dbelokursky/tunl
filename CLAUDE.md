@@ -8,7 +8,7 @@ Keep it short: only what cannot be derived from the sources, the README or
 ## What this is
 
 Tunl: a cross-platform JavaFX desktop client (macOS / Windows / Linux) that
-wraps the `sing-box` binary as a VPN/proxy client. Java 25, JavaFX 26, Maven,
+wraps the `sing-box` binary as a VPN/proxy client. Java 27, JavaFX 26, Maven,
 no DI framework: `ServiceLocator` is the hand-written registry. The bundled
 core is pinned in `src/main/resources/singbox.properties`, the single source of
 truth read by `pom.xml`, `scripts/bundle-singbox.*` and `SingBoxInstaller`.
