@@ -3,10 +3,14 @@ package com.vlessclient.ui.view;
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.Subscription;
+import com.vlessclient.service.Redact;
 import com.vlessclient.service.SubscriptionService;
+import com.vlessclient.service.TrafficMonitor;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import javafx.application.Platform;
 import javafx.collections.ObservableList;
@@ -38,6 +42,8 @@ public class SubscriptionsViewController {
     private static final Logger log = LoggerFactory.getLogger(SubscriptionsViewController.class);
     private static final DateTimeFormatter TIME_FORMAT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault());
+    private static final DateTimeFormatter DATE_FORMAT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneId.systemDefault());
 
     @FXML private Label titleLabel;
     @FXML private ListView<Subscription> subscriptionListView;
@@ -93,9 +99,59 @@ public class SubscriptionsViewController {
 
     @FXML
     private void onAddSubscriptionClicked() {
+        showSubscriptionDialog(I18n.get("button.add.subscription"),
+                I18n.get("subscriptions.add.header"), "", "")
+                .ifPresent(entry -> runOffFxThread(
+                        () -> subscriptionService.addSubscription(entry.name(), entry.url()),
+                        "subscriptions.add.failed"));
+    }
+
+    /**
+     * Renames a subscription or points it at a new URL. Changing a URL used
+     * to mean deleting the subscription (with its servers) and adding it
+     * again.
+     */
+    private void editSubscription(Subscription sub) {
+        showSubscriptionDialog(I18n.get("button.edit"),
+                I18n.get("subscriptions.edit.header"), sub.getName(), sub.getUrl())
+                .ifPresent(entry -> runOffFxThread(
+                        () -> subscriptionService.updateSubscription(
+                                sub.getId(), entry.name(), entry.url()),
+                        "subscriptions.edit.failed"));
+    }
+
+    private record Entry(String name, String url) {
+    }
+
+    /** Runs a service call off the FX thread and reports a failure in a dialog. */
+    private void runOffFxThread(Runnable action, String failureHeaderKey) {
+        Thread.startVirtualThread(() -> {
+            try {
+                action.run();
+                Platform.runLater(() -> subscriptionListView.refresh());
+            } catch (Exception e) {
+                log.error("Subscription change failed", e);
+                Platform.runLater(() -> {
+                    Alert alert = new Alert(Alert.AlertType.ERROR);
+                    alert.setTitle(I18n.get("dialog.error"));
+                    alert.setHeaderText(I18n.get(failureHeaderKey));
+                    alert.setContentText(e.getMessage());
+                    alert.showAndWait();
+                });
+            }
+        });
+    }
+
+    /**
+     * The add/edit form, prefilled with {@code name} and {@code url}.
+     *
+     * @return what the user entered, or empty when cancelled or incomplete
+     */
+    private Optional<Entry> showSubscriptionDialog(String title, String header,
+                                                   String name, String url) {
         Dialog<ButtonType> dialog = new Dialog<>();
-        dialog.setTitle(I18n.get("button.add.subscription"));
-        dialog.setHeaderText(I18n.get("subscriptions.add.header"));
+        dialog.setTitle(title);
+        dialog.setHeaderText(header);
 
         GridPane grid = new GridPane();
         grid.setHgap(10);
@@ -124,6 +180,9 @@ public class SubscriptionsViewController {
             httpWarning.setVisible(insecure);
             httpWarning.setManaged(insecure);
         });
+        // After the listener, so an http URL being edited shows its warning.
+        nameField.setText(name == null ? "" : name);
+        urlField.setText(url == null ? "" : url);
 
         grid.add(new Label(I18n.get("subscriptions.name.label")), 0, 0);
         grid.add(nameField, 1, 0);
@@ -137,32 +196,19 @@ public class SubscriptionsViewController {
         Platform.runLater(nameField::requestFocus);
 
         Optional<ButtonType> result = dialog.showAndWait();
-        if (result.isPresent() && result.get() == ButtonType.OK) {
-            String name = nameField.getText().trim();
-            String url = urlField.getText().trim();
-            if (name.isEmpty() || url.isEmpty()) {
-                Alert alert = new Alert(Alert.AlertType.WARNING);
-                alert.setTitle(I18n.get("subscriptions.invalid.input"));
-                alert.setHeaderText(I18n.get("subscriptions.name.url.required"));
-                alert.showAndWait();
-                return;
-            }
-            Thread.startVirtualThread(() -> {
-                try {
-                    subscriptionService.addSubscription(name, url);
-                    Platform.runLater(() -> subscriptionListView.refresh());
-                } catch (Exception e) {
-                    log.error("Failed to add subscription", e);
-                    Platform.runLater(() -> {
-                        Alert alert = new Alert(Alert.AlertType.ERROR);
-                        alert.setTitle(I18n.get("dialog.error"));
-                        alert.setHeaderText(I18n.get("subscriptions.add.failed"));
-                        alert.setContentText(e.getMessage());
-                        alert.showAndWait();
-                    });
-                }
-            });
+        if (result.isEmpty() || result.get() != ButtonType.OK) {
+            return Optional.empty();
         }
+        String enteredName = nameField.getText().trim();
+        String enteredUrl = urlField.getText().trim();
+        if (enteredName.isEmpty() || enteredUrl.isEmpty()) {
+            Alert alert = new Alert(Alert.AlertType.WARNING);
+            alert.setTitle(I18n.get("subscriptions.invalid.input"));
+            alert.setHeaderText(I18n.get("subscriptions.name.url.required"));
+            alert.showAndWait();
+            return Optional.empty();
+        }
+        return Optional.of(new Entry(enteredName, enteredUrl));
     }
 
     @FXML
@@ -194,6 +240,25 @@ public class SubscriptionsViewController {
         }
     }
 
+    /**
+     * The provider's quota when the response carried one: traffic used of
+     * the plan's total, and the expiry. Null when the provider said nothing.
+     */
+    static String quotaLine(Subscription sub) {
+        List<String> parts = new ArrayList<>();
+        if (sub.getTotalBytes() > 0) {
+            parts.add(I18n.get("subscriptions.traffic",
+                    TrafficMonitor.formatBytes(sub.getUploadBytes() + sub.getDownloadBytes()),
+                    TrafficMonitor.formatBytes(sub.getTotalBytes())));
+        }
+        if (sub.getExpiresAt() > 0) {
+            String date = DATE_FORMAT.format(Instant.ofEpochSecond(sub.getExpiresAt()));
+            boolean expired = sub.getExpiresAt() < Instant.now().getEpochSecond();
+            parts.add(I18n.get(expired ? "subscriptions.expired" : "subscriptions.expires", date));
+        }
+        return parts.isEmpty() ? null : String.join(" · ", parts);
+    }
+
     private class SubscriptionListCell extends ListCell<Subscription> {
 
         @Override
@@ -212,11 +277,10 @@ public class SubscriptionsViewController {
             Label nameLabel = new Label(sub.getName());
             nameLabel.getStyleClass().add("server-name");
 
-            String urlDisplay = sub.getUrl();
-            if (urlDisplay != null && urlDisplay.length() > 50) {
-                urlDisplay = urlDisplay.substring(0, 47) + "...";
-            }
-            Label urlLabel = new Label(urlDisplay);
+            // Scheme and host only: the path and query carry the account
+            // token, and the file this row is read from seals the URL for
+            // exactly that reason. The first 47 characters showed it anyway.
+            Label urlLabel = new Label(sub.getUrl() == null ? "" : Redact.url(sub.getUrl()));
             urlLabel.getStyleClass().add("server-address");
 
             int serverCount = sub.getServerIds().size();
@@ -227,7 +291,9 @@ public class SubscriptionsViewController {
                     ? I18n.get("subscriptions.refreshed", TIME_FORMAT.format(
                             Instant.ofEpochMilli(sub.getLastRefreshedAt())))
                     : I18n.get("subscriptions.never.refreshed");
-            Label statusLabel = new Label(servers + " · " + refresh);
+            String quota = quotaLine(sub);
+            Label statusLabel = new Label(quota == null
+                    ? servers + " · " + refresh : servers + " · " + refresh + " · " + quota);
             statusLabel.getStyleClass().add("server-address");
 
             VBox info = new VBox(2);
@@ -250,13 +316,17 @@ public class SubscriptionsViewController {
             refreshBtn.getStyleClass().add("secondary-button");
             refreshBtn.setOnAction(e -> refreshSubscription(sub));
 
+            Button editBtn = new Button(I18n.get("button.edit"));
+            editBtn.getStyleClass().add("secondary-button");
+            editBtn.setOnAction(e -> editSubscription(sub));
+
             Button deleteBtn = new Button(I18n.get("button.delete"));
             deleteBtn.getStyleClass().add("secondary-button");
             deleteBtn.setOnAction(e -> deleteSubscription(sub));
 
             // 12, like the row around them and like the server rows: 8 was
             // the only gap in a list row that was not.
-            HBox buttons = new HBox(12, refreshBtn, deleteBtn);
+            HBox buttons = new HBox(12, refreshBtn, editBtn, deleteBtn);
             buttons.setAlignment(Pos.CENTER_RIGHT);
 
             row.getChildren().addAll(info, spacer, buttons);

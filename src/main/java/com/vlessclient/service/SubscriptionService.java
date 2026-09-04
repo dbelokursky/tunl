@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
@@ -85,6 +86,14 @@ public class SubscriptionService {
      */
     private final Object refreshApplyLock = new Object();
     private ScheduledExecutorService scheduler;
+
+    /**
+     * The headers of the response the current thread's last
+     * {@link #fetchContent} read. A side channel on purpose: fetchContent's
+     * String contract is the seam every test double overrides, and a double
+     * that never sets this reads as "the provider sent no quota headers".
+     */
+    private final ThreadLocal<HttpHeaders> responseHeaders = new ThreadLocal<>();
 
     /**
      * Creates a subscription service using the default data directory and HTTP client.
@@ -248,8 +257,11 @@ public class SubscriptionService {
 
         String content;
         ParsedContent parsed;
+        HttpHeaders headers;
         try {
+            responseHeaders.remove();
             content = fetchContent(sub.getUrl());
+            headers = responseHeaders.get();
             parsed = parseContent(content);
         } catch (Exception e) {
             // Scrub before both sinks: the throw sites we control are already
@@ -346,11 +358,74 @@ public class SubscriptionService {
                         + "supported ({})", sub.getName(),
                         parsed.unsupportedSchemes().size(), parsed.unsupportedSummary());
             }
+            if (headers != null) {
+                applyUserInfo(sub, headers);
+            }
             sub.setLastRefreshedAt(System.currentTimeMillis());
             saveSubscriptions();
             log.info("Refreshed subscription '{}': {} servers",
                     sub.getName(), sub.getServerIds().size());
         }
+    }
+
+    /**
+     * Reads the quota a provider attaches to the response, in the
+     * {@code subscription-userinfo} header Clash-style clients popularized:
+     * {@code upload=…; download=…; total=…; expire=…}, bytes and Unix seconds.
+     * A header that is absent changes nothing, so a provider that stops
+     * sending it leaves the last known figures in place.
+     *
+     * @param sub     the subscription to annotate
+     * @param headers the response headers
+     */
+    static void applyUserInfo(Subscription sub, HttpHeaders headers) {
+        headers.firstValue("subscription-userinfo").ifPresent(value -> {
+            for (String part : value.split(";")) {
+                String[] pair = part.trim().split("=", 2);
+                if (pair.length != 2) {
+                    continue;
+                }
+                long number;
+                try {
+                    number = Long.parseLong(pair[1].trim());
+                } catch (NumberFormatException e) {
+                    continue;
+                }
+                switch (pair[0].trim().toLowerCase(java.util.Locale.ROOT)) {
+                    case "upload" -> sub.setUploadBytes(number);
+                    case "download" -> sub.setDownloadBytes(number);
+                    case "total" -> sub.setTotalBytes(number);
+                    case "expire" -> sub.setExpiresAt(number);
+                    default -> { }
+                }
+            }
+        });
+    }
+
+    /**
+     * Renames a subscription or points it at a new URL, then refreshes it so
+     * the server names carry the new prefix and a new URL's list replaces the
+     * old one. Changing a URL used to mean deleting the subscription (and its
+     * servers) and adding it again.
+     *
+     * @param subscriptionId the subscription to change
+     * @param name           the new display name
+     * @param url            the new URL; sealed on save like the original
+     */
+    public void updateSubscription(String subscriptionId, String name, String url) {
+        Subscription sub = findById(subscriptionId);
+        if (sub == null) {
+            log.warn("Subscription not found for update: {}", subscriptionId);
+            return;
+        }
+        FxExecutor.run(() -> {
+            synchronized (this) {
+                sub.setName(name);
+                sub.setUrl(url);
+            }
+        });
+        saveSubscriptions();
+        refreshSubscription(subscriptionId);
     }
 
     /**
@@ -497,6 +572,7 @@ public class SubscriptionService {
                 .build();
         HttpResponse<InputStream> response =
                 httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        responseHeaders.set(response.headers());
         try (InputStream body = response.body()) {
             if (response.statusCode() != 200) {
                 // Redacted: this message is both logged and persisted into
@@ -696,10 +772,17 @@ public class SubscriptionService {
     }
 
     private Subscription findById(String id) {
-        return subscriptions.stream()
-                .filter(s -> s.getId().equals(id))
-                .findFirst()
-                .orElse(null);
+        // A plain loop under the monitor, like isRegistered: streaming the
+        // FX-owned list from the scheduler thread could throw a
+        // ConcurrentModificationException against an add on the FX thread.
+        synchronized (this) {
+            for (Subscription sub : subscriptions) {
+                if (sub.getId().equals(id)) {
+                    return sub;
+                }
+            }
+        }
+        return null;
     }
 
     /**

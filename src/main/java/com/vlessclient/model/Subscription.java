@@ -40,6 +40,23 @@ public class Subscription {
     @JsonProperty("lastError")
     private String lastError;
 
+    /**
+     * The provider's quota, from the {@code subscription-userinfo} response
+     * header: bytes used in each direction, the plan's total, and the expiry
+     * as Unix seconds. Zero means the provider did not say.
+     */
+    @JsonProperty("uploadBytes")
+    private long uploadBytes;
+
+    @JsonProperty("downloadBytes")
+    private long downloadBytes;
+
+    @JsonProperty("totalBytes")
+    private long totalBytes;
+
+    @JsonProperty("expiresAt")
+    private long expiresAt;
+
     public Subscription() {
         this.id = UUID.randomUUID().toString();
     }
@@ -99,6 +116,39 @@ public class Subscription {
 
     public void setLastError(String lastError) {
         this.lastError = lastError;
+    }
+
+    public long getUploadBytes() {
+        return uploadBytes;
+    }
+
+    public void setUploadBytes(long uploadBytes) {
+        this.uploadBytes = uploadBytes;
+    }
+
+    public long getDownloadBytes() {
+        return downloadBytes;
+    }
+
+    public void setDownloadBytes(long downloadBytes) {
+        this.downloadBytes = downloadBytes;
+    }
+
+    public long getTotalBytes() {
+        return totalBytes;
+    }
+
+    public void setTotalBytes(long totalBytes) {
+        this.totalBytes = totalBytes;
+    }
+
+    /** The plan's expiry as Unix seconds, or 0 when the provider did not say. */
+    public long getExpiresAt() {
+        return expiresAt;
+    }
+
+    public void setExpiresAt(long expiresAt) {
+        this.expiresAt = expiresAt;
     }
 
     @Override

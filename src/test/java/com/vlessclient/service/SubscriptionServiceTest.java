@@ -221,6 +221,64 @@ class SubscriptionServiceTest {
     }
 
     @Test
+    void applyUserInfo_readsTheProvidersQuotaHeader() {
+        Subscription sub = new Subscription();
+        java.net.http.HttpHeaders headers = java.net.http.HttpHeaders.of(
+                java.util.Map.of("Subscription-Userinfo", List.of(
+                        "upload=1024; download=2048; total=1073741824; expire=1767225600")),
+                (name, value) -> true);
+
+        SubscriptionService.applyUserInfo(sub, headers);
+
+        assertThat(sub.getUploadBytes()).isEqualTo(1024);
+        assertThat(sub.getDownloadBytes()).isEqualTo(2048);
+        assertThat(sub.getTotalBytes()).isEqualTo(1073741824L);
+        assertThat(sub.getExpiresAt()).isEqualTo(1767225600L);
+    }
+
+    @Test
+    void applyUserInfo_ignoresNoiseAndKeepsWhatItAlreadyKnows() {
+        Subscription sub = new Subscription();
+        sub.setTotalBytes(500);
+        java.net.http.HttpHeaders noise = java.net.http.HttpHeaders.of(
+                java.util.Map.of("subscription-userinfo", List.of("total=lots; expire=; junk")),
+                (name, value) -> true);
+        java.net.http.HttpHeaders none = java.net.http.HttpHeaders.of(
+                java.util.Map.of(), (name, value) -> true);
+
+        SubscriptionService.applyUserInfo(sub, noise);
+        SubscriptionService.applyUserInfo(sub, none);
+
+        assertThat(sub.getTotalBytes()).isEqualTo(500);
+        assertThat(sub.getExpiresAt()).isZero();
+    }
+
+    /**
+     * Changing a URL used to mean deleting the subscription, and its servers,
+     * and adding it again.
+     */
+    @Test
+    void updateSubscription_renamesRepointsAndRefreshes() {
+        service.setFetchedContent("vless://uuid1@old.example:443?security=tls&type=tcp#Old\n");
+        service.addSubscription("Before", "https://example.com/before");
+        Subscription sub = service.getSubscriptions().get(0);
+        assertThat(configStore.getServers().get(0).getName()).isEqualTo("[Before] Old");
+
+        service.setFetchedContent("vless://uuid2@new.example:443?security=tls&type=tcp#New\n");
+        service.updateSubscription(sub.getId(), "After", "https://example.com/after");
+
+        assertThat(sub.getName()).isEqualTo("After");
+        assertThat(sub.getUrl()).isEqualTo("https://example.com/after");
+        assertThat(configStore.getServers())
+                .extracting(ServerConfig::getName)
+                .containsExactly("[After] New");
+        assertThat(new TestableSubscriptionService(configStore, shareLinkParser, tempDir)
+                .getSubscriptions().get(0).getUrl())
+                .as("the new URL is persisted, sealed like the original")
+                .isEqualTo("https://example.com/after");
+    }
+
+    @Test
     void removeSubscription_removesAssociatedServers() {
         String content = "vless://uuid1@server1.com:443?security=tls&type=tcp#Server1\n"
                 + "vless://uuid2@server2.com:443?security=tls&type=tcp#Server2\n";
