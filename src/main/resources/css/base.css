@@ -457,6 +457,17 @@
     -fx-padding: 3 8;
 }
 
+/* A server whose TLS certificate is never checked: amber, because a link
+   that says allowInsecure=1 is one a network attacker could have written. */
+.insecure-badge {
+    -fx-background-color: -c-warn-tint;
+    -fx-text-fill: -c-warn-text;
+    -fx-font-size: 10px;
+    -fx-font-weight: bold;
+    -fx-background-radius: 4;
+    -fx-padding: 3 8;
+}
+
 /* ===== Empty State ===== */
 .empty-state {
     -fx-padding: 40 20;

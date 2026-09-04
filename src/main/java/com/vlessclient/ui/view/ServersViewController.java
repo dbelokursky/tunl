@@ -729,6 +729,7 @@ public class ServersViewController {
         private final Label addressLabel = new Label();
         private final Label latencyChip = new Label();
         private final Label protocolBadge = new Label();
+        private final Label insecureBadge = new Label();
         private final Label activeBadge = new Label();
         private final ContextMenu contextMenu = new ContextMenu();
 
@@ -768,6 +769,14 @@ public class ServersViewController {
             HBox.setHgrow(spacer, Priority.ALWAYS);
 
             protocolBadge.getStyleClass().add("protocol-badge");
+            // A link that turns certificate verification off is one a network
+            // attacker on the subscription's fetch path could have written;
+            // the list says so rather than applying it silently.
+            insecureBadge.getStyleClass().add("insecure-badge");
+            insecureBadge.textProperty().bind(I18n.binding("servers.badge.insecure"));
+            Tooltip insecureTooltip = new Tooltip();
+            insecureTooltip.textProperty().bind(I18n.binding("servers.badge.insecure.tooltip"));
+            insecureBadge.setTooltip(insecureTooltip);
             activeBadge.getStyleClass().add("active-badge");
             activeBadge.textProperty().bind(I18n.binding("servers.active.badge"));
 
@@ -826,6 +835,9 @@ public class ServersViewController {
                 row.getChildren().add(latencyChip);
             }
             row.getChildren().add(protocolBadge);
+            if (server.getTls() != null && server.getTls().isAllowInsecure()) {
+                row.getChildren().add(insecureBadge);
+            }
             if (server.isActive()) {
                 row.getChildren().add(activeBadge);
             }
