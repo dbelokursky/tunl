@@ -14,6 +14,8 @@
 # Downloads land in the same build cache the bundlers use, so the follow-up
 # build doesn't re-download.
 #
+# Needs curl, jq, and shasum or sha256sum — nothing a build host lacks.
+#
 # After a successful bump, verify before committing:
 #   mvn clean verify -Psmoke
 #
@@ -32,6 +34,23 @@ API_URL="https://api.github.com/repos/SagerNet/sing-box/releases/tags/v${VERSION
 
 mkdir -p "${CACHE_DIR}"
 
+# jq reads the release JSON: the workflows already assume it on the runner,
+# and it is one interpreter fewer than the python3 this used to need.
+if ! command -v jq >/dev/null 2>&1; then
+    echo "[bump-singbox] jq is required (brew install jq / apt-get install jq)" >&2
+    exit 1
+fi
+
+# shasum on macOS, sha256sum on most Linux distros — the same fallback as
+# bundle-singbox.sh, so a bump can run wherever a build can.
+sha256_of() {
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        sha256sum "$1" | awk '{print $1}'
+    fi
+}
+
 # Retries and timeouts on every download, as in bundle-singbox.sh: a flaky
 # connection is one retry away from a bump, and a stalled transfer must fail
 # rather than sit on the workflow's timeout.
@@ -45,24 +64,28 @@ release_json="$(curl "${CURL_OPTS[@]}" \
     -H 'X-GitHub-Api-Version: 2022-11-28' \
     "${API_URL}")"
 
+release_state="$(jq -r '.prerelease or .draft' <<<"${release_json}")"
+if [[ "${release_state}" != "false" ]]; then
+    echo "[bump-singbox] v${VERSION} is a prerelease or draft — refusing to pin it" >&2
+    exit 1
+fi
+
 # Extracts the sha256 digest the API publishes for one asset name.
 api_digest_for() {
-    python3 -c '
-import json, sys
-release = json.load(sys.stdin)
-if release.get("prerelease") or release.get("draft"):
-    sys.exit("refusing to pin a prerelease/draft release")
-name = sys.argv[1]
-for asset in release.get("assets", []):
-    if asset.get("name") == name:
-        digest = asset.get("digest") or ""
-        if not digest.startswith("sha256:"):
-            sys.exit(f"asset {name} has no sha256 digest in the API response")
-        print(digest[len("sha256:"):])
-        break
-else:
-    sys.exit(f"asset {name} not found in the release")
-' "$1" <<<"${release_json}"
+    local found digest
+    found="$(jq -r --arg name "$1" \
+        '[(.assets // [])[] | select(.name == $name)] | length' <<<"${release_json}")"
+    if [[ "${found}" == "0" ]]; then
+        echo "[bump-singbox] asset $1 not found in the release" >&2
+        return 1
+    fi
+    digest="$(jq -r --arg name "$1" \
+        'first((.assets // [])[] | select(.name == $name)) | .digest // ""' <<<"${release_json}")"
+    if [[ "${digest}" != sha256:* ]]; then
+        echo "[bump-singbox] asset $1 has no sha256 digest in the API response" >&2
+        return 1
+    fi
+    printf '%s\n' "${digest#sha256:}"
 }
 
 # Accumulates the "singbox.sha256.<os>-<arch>=<sha>" lines to pin, in order.
@@ -84,7 +107,7 @@ process_asset() {
     fi
 
     local local_sha api_sha
-    local_sha=$(shasum -a 256 "${file}" | awk '{print $1}')
+    local_sha=$(sha256_of "${file}")
     api_sha=$(api_digest_for "${asset}")
     if [[ "${local_sha}" != "${api_sha}" ]]; then
         echo "[bump-singbox] SHA-256 mismatch for ${os}-${arch}:" >&2
