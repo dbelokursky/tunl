@@ -1,10 +1,14 @@
 package com.vlessclient.service;
 
+import com.vlessclient.testing.Await;
+import com.vlessclient.testing.FxToolkitExtension;
+import java.time.Duration;
+import java.util.Set;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -13,29 +17,11 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static com.vlessclient.testing.FxTestSupport.flushFxEvents;
 import static org.assertj.core.api.Assertions.assertThat;
 
+@ExtendWith(FxToolkitExtension.class)
 class LogReaderTest {
-
-    @BeforeAll
-    static void initJfx() {
-        try {
-            Platform.startup(() -> { });
-        } catch (IllegalStateException ignored) {
-            // Platform already started (e.g. from a previous test)
-        }
-    }
-
-    /**
-     * Runs a no-op on the JavaFX Application Thread and blocks until it completes,
-     * guaranteeing that all previously queued {@link Platform#runLater} tasks have
-     * finished executing.
-     */
-    private static void flushFxEvents() throws InterruptedException {
-        CountDownLatch latch = new CountDownLatch(1);
-        Platform.runLater(latch::countDown);
-        assertThat(latch.await(5, TimeUnit.SECONDS)).isTrue();
-    }
 
     @Test
     void appendsLinesFromInputStreamToObservableList() throws Exception {
@@ -43,11 +29,11 @@ class LogReaderTest {
         InputStream stream = new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8));
         ObservableList<String> logLines = FXCollections.observableArrayList();
 
+        Set<Thread> before = Await.liveThreadsNamed(READER_THREAD);
         LogReader reader = new LogReader(stream, logLines, 100, line -> { });
         reader.start();
 
-        // Wait until reader thread finishes
-        waitForStreamConsumed(stream, 2000);
+        awaitReaderFinished(before);
         flushFxEvents();
 
         assertThat(logLines).containsExactly("line one", "line two", "line three");
@@ -80,10 +66,11 @@ class LogReaderTest {
         InputStream stream = new ByteArrayInputStream(sb.toString().getBytes(StandardCharsets.UTF_8));
         ObservableList<String> logLines = FXCollections.observableArrayList();
 
+        Set<Thread> before = Await.liveThreadsNamed(READER_THREAD);
         LogReader reader = new LogReader(stream, logLines, 5, line -> { });
         reader.start();
 
-        waitForStreamConsumed(stream, 2000);
+        awaitReaderFinished(before);
         flushFxEvents();
 
         assertThat(logLines).hasSize(5);
@@ -97,10 +84,11 @@ class LogReaderTest {
         InputStream stream = new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8));
         ObservableList<String> logLines = FXCollections.observableArrayList();
 
+        Set<Thread> before = Await.liveThreadsNamed(READER_THREAD);
         LogReader reader = new LogReader(stream, logLines, 100, line -> { });
         reader.start();
 
-        waitForStreamConsumed(stream, 2000);
+        awaitReaderFinished(before);
         flushFxEvents();
 
         // Calling stop() after the stream is exhausted must not throw
@@ -109,20 +97,17 @@ class LogReaderTest {
         assertThat(logLines).containsExactly("first", "second");
     }
 
+    /** LogReader reads on a daemon thread with this name and exposes no join. */
+    private static final String READER_THREAD = "singbox-log-reader";
+
     /**
-     * Spin-waits until the given ByteArrayInputStream has been fully consumed
-     * (available() == 0) or the timeout expires.
+     * Waits for the reader thread started since the snapshot to exit. It
+     * ends at EOF, after the last line has been handed to Platform.runLater,
+     * so once it is gone a flush of the FX queue is all that is left.
+     * A drained stream was only a hint: the thread could still be between
+     * the last read and the last runLater, which a 50 ms sleep papered over.
      */
-    private static void waitForStreamConsumed(InputStream stream, long timeoutMillis)
-            throws Exception {
-        long deadline = System.currentTimeMillis() + timeoutMillis;
-        while (System.currentTimeMillis() < deadline) {
-            if (stream.available() == 0) {
-                // Give the reader thread a moment to enqueue the final Platform.runLater calls
-                Thread.sleep(50);
-                return;
-            }
-            Thread.sleep(10);
-        }
+    private static void awaitReaderFinished(Set<Thread> before) {
+        Await.untilThreadsFinished(READER_THREAD, before, Duration.ofSeconds(5));
     }
 }

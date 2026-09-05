@@ -117,6 +117,16 @@ public class TrafficMonitor {
     }
 
     /**
+     * Stops the stream for good and releases the HTTP client. {@link #stop}
+     * is the per-disconnect call and keeps the client for the next connect;
+     * this one is for the service graph going away.
+     */
+    public void shutdown() {
+        stop();
+        httpClient.shutdownNow();
+    }
+
+    /**
      * Stops the monitor and resets the live speed properties to zero. Blocks
      * until the streaming thread has finished so callers can treat it as
      * synchronous. Safe to call when not running.

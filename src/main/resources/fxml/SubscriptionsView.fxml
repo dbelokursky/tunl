@@ -14,7 +14,7 @@
 
     <!-- Header -->
     <HBox alignment="CENTER_LEFT" spacing="12">
-        <Label text="Subscriptions" styleClass="view-title"/>
+        <Label fx:id="titleLabel" text="Subscriptions" styleClass="view-title"/>
         <Region HBox.hgrow="ALWAYS"/>
         <Button fx:id="refreshAllButton" text="Refresh All" styleClass="secondary-button"
                 onAction="#onRefreshAllClicked"/>

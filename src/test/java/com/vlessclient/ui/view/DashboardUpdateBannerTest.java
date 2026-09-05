@@ -1,14 +1,13 @@
 package com.vlessclient.ui.view;
 
-import com.vlessclient.app.UiTestServices;
 import com.vlessclient.ui.view.dashboard.UpdateBannerSection;
 import com.vlessclient.ui.view.dashboard.UpdateBannerSection.State;
+import com.vlessclient.testing.UiTest;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.layout.HBox;
 import javafx.stage.Stage;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
 
@@ -20,21 +19,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * shipped stuck open would greet every user with news of an update that does
  * not exist, on the one screen they cannot avoid.
  */
+@UiTest
 public class DashboardUpdateBannerTest extends ApplicationTest {
-
-    @BeforeAll
-    static void setupHeadless() {
-        System.setProperty("testfx.robot", "glass");
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("prism.order", "sw");
-        System.setProperty("prism.text", "t2k");
-        System.setProperty("java.awt.headless", "true");
-        try {
-            UiTestServices.initialize();
-        } catch (Exception e) {
-            // Tolerate service initialization failures in headless CI
-        }
-    }
 
     @Override
     public void start(Stage stage) throws Exception {

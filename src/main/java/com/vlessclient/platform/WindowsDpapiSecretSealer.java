@@ -29,7 +29,17 @@ final class WindowsDpapiSecretSealer implements SecretSealer {
             + "$b=[Security.Cryptography.ProtectedData]::Unprotect($p,$null,'CurrentUser');"
             + "[Console]::Out.Write([Text.Encoding]::UTF8.GetString($b))";
 
+    private final SecretSealers.Subprocess subprocess;
     private volatile Boolean available;
+
+    WindowsDpapiSecretSealer() {
+        this(SecretSealers::run);
+    }
+
+    /** Test seam: runs {@code powershell} through the given subprocess runner. */
+    WindowsDpapiSecretSealer(SecretSealers.Subprocess subprocess) {
+        this.subprocess = subprocess;
+    }
 
     @Override
     public boolean isAvailable() {
@@ -62,8 +72,8 @@ final class WindowsDpapiSecretSealer implements SecretSealer {
         // Self-contained ciphertext: nothing to clean up outside the file.
     }
 
-    private static Optional<String> powershell(String script, String stdin) {
-        return SecretSealers.run(
+    private Optional<String> powershell(String script, String stdin) {
+        return subprocess.run(
                 new String[] {
                     "powershell", "-NoProfile", "-NonInteractive", "-Command", script
                 },

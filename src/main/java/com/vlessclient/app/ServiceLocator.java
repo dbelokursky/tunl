@@ -2,6 +2,9 @@ package com.vlessclient.app;
 
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.platform.Autostart;
+import com.vlessclient.platform.PlatformPaths;
+import com.vlessclient.platform.SecretSealer;
+import com.vlessclient.platform.SecretSealers;
 import com.vlessclient.service.AppHttpClients;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
@@ -9,6 +12,7 @@ import com.vlessclient.service.CountryResolver;
 import com.vlessclient.service.DiagnosticsBundle;
 import com.vlessclient.service.GeoIpDatabase;
 import com.vlessclient.service.LatencyTester;
+import com.vlessclient.service.ProxyGroupMonitor;
 import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ServerBackupService;
 import com.vlessclient.service.ServiceReachabilityChecker;
@@ -88,7 +92,12 @@ public class ServiceLocator {
             log.info("sing-box binary not found on disk; will be downloaded on startup");
         }
 
-        ConfigStore configStore = new ConfigStore();
+        // The test graph seals nothing: a headless UI test that adds a server
+        // used to write through the developer's login Keychain (CLAUDE.md:
+        // a test never touches the OS keychain).
+        SecretSealer sealer = mode == StartupMode.TEST
+                ? SecretSealers.disabled() : SecretSealers.forCurrentPlatform();
+        ConfigStore configStore = new ConfigStore(PlatformPaths.current().dataDir(), sealer);
         register(ConfigStore.class, configStore);
 
         register(AppSettings.class, configStore.getSettings());
@@ -116,6 +125,10 @@ public class ServiceLocator {
         TrafficMonitor trafficMonitor = new TrafficMonitor();
         register(TrafficMonitor.class, trafficMonitor);
 
+        // Which member of the proxy group carries the traffic right now — the
+        // only way the dashboard can name the server an automatic mode picked.
+        register(ProxyGroupMonitor.class, new ProxyGroupMonitor());
+
         LatencyTester latencyTester = new LatencyTester();
         register(LatencyTester.class, latencyTester);
 
@@ -139,7 +152,7 @@ public class ServiceLocator {
                 new DiagnosticsBundle(configStore, configGenerator, routingService));
 
         SubscriptionService subscriptionService =
-                new SubscriptionService(configStore, shareLinkParser);
+                new SubscriptionService(configStore, shareLinkParser, sealer);
         register(SubscriptionService.class, subscriptionService);
 
         UpdateManager updateManager = new UpdateManager();
@@ -253,6 +266,24 @@ public class ServiceLocator {
     }
 
     /**
+     * Looks a service up without treating its absence as an error.
+     *
+     * <p>{@link #get} throws {@code IllegalArgumentException} for a missing
+     * service, and the controllers wrapped every lookup in a catch of the
+     * same type — the exception {@code ShareLinkParser} throws for bad input,
+     * so a catch around a lookup and a parse could swallow the parse error.
+     * Callers that can live without a service ask here instead.</p>
+     *
+     * @param type the service class
+     * @param <T>  the service type
+     * @return the registered instance, or empty when none is registered
+     */
+    @SuppressWarnings("unchecked")
+    public static <T> Optional<T> find(Class<T> type) {
+        return Optional.ofNullable((T) services.get(type));
+    }
+
+    /**
      * Registers a service instance.
      */
     public static <T> void register(Class<T> type, T instance) {
@@ -306,7 +337,7 @@ public class ServiceLocator {
         try {
             Object subService = services.get(SubscriptionService.class);
             if (subService instanceof SubscriptionService subscriptionService) {
-                subscriptionService.stopAutoRefresh();
+                subscriptionService.shutdown();
             }
         } catch (Exception e) {
             log.error("Error stopping SubscriptionService during shutdown", e);
@@ -315,10 +346,19 @@ public class ServiceLocator {
         try {
             Object monitor = services.get(TrafficMonitor.class);
             if (monitor instanceof TrafficMonitor trafficMonitor) {
-                trafficMonitor.stop();
+                trafficMonitor.shutdown();
             }
         } catch (Exception e) {
             log.error("Error stopping TrafficMonitor during shutdown", e);
+        }
+
+        try {
+            Object groupMonitor = services.get(ProxyGroupMonitor.class);
+            if (groupMonitor instanceof ProxyGroupMonitor monitor) {
+                monitor.shutdown();
+            }
+        } catch (Exception e) {
+            log.error("Error stopping ProxyGroupMonitor during shutdown", e);
         }
 
         try {
@@ -346,6 +386,27 @@ public class ServiceLocator {
             }
         } catch (Exception e) {
             log.error("Error stopping ThemeManager during shutdown", e);
+        }
+
+        // Both were registered and never released: the geo database keeps a
+        // memory-mapped file and the installer an HTTP client, one of each per
+        // graph the UI test suite rebuilds.
+        try {
+            Object geo = services.get(GeoIpDatabase.class);
+            if (geo instanceof GeoIpDatabase database) {
+                database.shutdown();
+            }
+        } catch (Exception e) {
+            log.error("Error closing GeoIpDatabase during shutdown", e);
+        }
+
+        try {
+            Object installer = services.get(SingBoxInstaller.class);
+            if (installer instanceof SingBoxInstaller singBoxInstaller) {
+                singBoxInstaller.shutdown();
+            }
+        } catch (Exception e) {
+            log.error("Error closing SingBoxInstaller during shutdown", e);
         }
 
         services.clear();

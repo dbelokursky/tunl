@@ -1,8 +1,10 @@
 package com.vlessclient.service;
 
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.testing.Await;
 import java.net.http.HttpClient;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -82,9 +84,8 @@ class CountryResolverTest {
         resolver.resolveAsync(server, code -> done.countDown());
         // The callback must NOT fire for an unknown country, so wait for the
         // lookup to land instead of the callback.
-        for (int i = 0; i < 50 && database.lookups.get() == 0; i++) {
-            Thread.sleep(20);
-        }
+        Await.until("the lookup to land", () -> database.lookups.get() > 0,
+                Duration.ofSeconds(5));
 
         assertThat(database.lookups.get()).isEqualTo(1);
         assertThat(done.getCount())
@@ -93,6 +94,9 @@ class CountryResolverTest {
         assertThat(resolver.countryOf(server)).isEmpty();
 
         resolver.resolveAsync(server, code -> { });
+        // A sleep on purpose: a second lookup would run on a virtual thread
+        // the resolver never exposes, and an unknown country calls nothing
+        // back — there is no event to wait for, only the absence of one.
         Thread.sleep(100);
         assertThat(database.lookups.get())
                 .as("a negative answer is cached too")

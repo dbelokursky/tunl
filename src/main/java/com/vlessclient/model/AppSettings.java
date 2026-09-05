@@ -33,9 +33,6 @@ public class AppSettings {
     @JsonProperty("auto_connect")
     private boolean autoConnect;
 
-    @JsonProperty("last_server_id")
-    private String lastServerId;
-
     @JsonProperty("socks_port")
     private int socksPort = 1080;
 
@@ -107,6 +104,14 @@ public class AppSettings {
 
     @JsonProperty("tun_ipv4_address")
     private String tunIpv4Address = "172.19.0.1/30";
+
+    /**
+     * Whether the TUN device also takes an IPv6 address, so auto_route
+     * captures IPv6 traffic. Off, IPv6 destinations on a dual-stack network
+     * bypassed the tunnel entirely while the card said "Connected".
+     */
+    @JsonProperty("tun_ipv6_enabled")
+    private boolean tunIpv6Enabled = true;
 
     @JsonProperty("health_check_enabled")
     private boolean healthCheckEnabled = true;
@@ -189,14 +194,6 @@ public class AppSettings {
 
     public void setAutoConnect(boolean autoConnect) {
         this.autoConnect = autoConnect;
-    }
-
-    public String getLastServerId() {
-        return lastServerId;
-    }
-
-    public void setLastServerId(String lastServerId) {
-        this.lastServerId = lastServerId;
     }
 
     public int getSocksPort() {
@@ -301,6 +298,14 @@ public class AppSettings {
 
     public void setTunIpv4Address(String tunIpv4Address) {
         this.tunIpv4Address = tunIpv4Address;
+    }
+
+    public boolean isTunIpv6Enabled() {
+        return tunIpv6Enabled;
+    }
+
+    public void setTunIpv6Enabled(boolean tunIpv6Enabled) {
+        this.tunIpv6Enabled = tunIpv6Enabled;
     }
 
     public boolean isHealthCheckEnabled() {

@@ -10,7 +10,9 @@ public enum TransportType {
     WEBSOCKET("ws"),
     GRPC("grpc"),
     HTTP2("http"),
-    QUIC("quic");
+    QUIC("quic"),
+    /** HTTP Upgrade: a WebSocket-shaped handshake without the framing. */
+    HTTPUPGRADE("httpupgrade");
 
     private final String value;
 

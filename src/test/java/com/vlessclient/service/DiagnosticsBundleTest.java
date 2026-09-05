@@ -120,8 +120,10 @@ class DiagnosticsBundleTest {
         String config = entries.get("sing-box.json");
 
         // Not an empty stub: the config is only useful if it still describes
-        // the outbound the core would build.
-        assertThat(config).contains("outbounds").contains("198.51.100.7");
+        // the outbound the core would build — its protocol and shape, not the
+        // address, which is what the user is asking not to publish.
+        assertThat(config).contains("outbounds").contains("\"vless\"");
+        assertThat(config).doesNotContain("198.51.100.7");
         assertThat(config).doesNotContain(SERVER_SECRET);
         assertThat(config).doesNotContain(store.getSettings().getClashApiSecret());
         assertThat(config).contains(Redact.REDACTED);

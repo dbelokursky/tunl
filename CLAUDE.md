@@ -42,8 +42,11 @@ truth read by `pom.xml`, `scripts/bundle-singbox.*` and `SingBoxInstaller`.
   baseline blindly.
 - Every user-visible string goes through `I18n.get(key)` with the key present
   in both `messages_en.properties` and `messages_ru.properties`
-  (`I18nBundleConsistencyTest`). FXML `text="..."` literals are placeholders;
-  controllers bind the real, locale-aware text (`ButtonLabels.bindStatic`).
+  (`I18nBundleConsistencyTest`). Every `text="..."` (and `promptText`) in an
+  FXML file is a placeholder the controller must bind to the locale-aware
+  text (`ButtonLabels.bindStatic`, `I18n.binding`); `FxmlLocalizationTest`
+  renders every view in Russian and fails on any placeholder still on screen,
+  which catches both a literal without an `fx:id` and an `fx:id` nothing binds.
 - Commit messages: `type(scope): imperative summary`, then a body that says what
   was wrong before, not just what changed.
 
@@ -73,16 +76,21 @@ and log directories (`~/Library/Application Support/VlessClient`,
 name `"VLESS Client"` and the secret-tool label; the autostart identity
 (`vless-client.desktop`, Windows Run value `VlessClient`); the MSI
 `--win-upgrade-uuid`; the `~/.cache/vless-client-build` cache and CI artifact
-names.
+names. Two more are agent-facing: the MCP server name `vless-client` and the
+`vless://…` resource URIs in `service/mcp/McpServerService.java`, which agents'
+configurations and prompts reference; and the Windows TUN adapter name
+`VlessClientTun` (`AppSettings`), which existing installs carry in their
+`settings.json` and the release checklist looks for.
 
 ## Map
 
-`app/` bootstrap (`Launcher` -> `VlessClientApp` -> `ServiceLocator`);
-`model/` Jackson POJOs persisted as JSON in the data dir; `service/` the engine
-and everything around it (`SingBoxEngine` owns the process,
-`ConnectionService` owns connect/disconnect for the dashboard, tray and MCP,
-`SingBoxConfigGenerator` emits the sing-box JSON, `UpdateManager` verifies
-sha256 plus an Ed25519 signature); `platform/` per-OS shell-outs (TUN
+`app/` bootstrap (`Launcher` -> `VlessClientApp` -> `ServiceLocator`;
+`ServiceLocator.find(Class)` is the lookup for optional services, `get` throws
+for a missing one); `model/` Jackson POJOs persisted as JSON in the data dir;
+`service/` the engine and everything around it (`SingBoxEngine` owns the
+process, `ConnectionService` owns connect/disconnect for the dashboard, tray
+and MCP, `SingBoxConfigGenerator` emits the sing-box JSON, `UpdateManager`
+verifies sha256 plus an Ed25519 signature); `platform/` per-OS shell-outs (TUN
 launchers, system-proxy guards, secret sealers, autostart, update appliers);
 `ui/view/` FXML controllers; `service/mcp/` the loopback MCP server.
 

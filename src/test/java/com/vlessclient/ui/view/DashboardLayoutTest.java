@@ -1,7 +1,7 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.ThemeCss;
-import com.vlessclient.app.UiTestServices;
+import com.vlessclient.testing.UiTest;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Bounds;
 import javafx.scene.Node;
@@ -13,7 +13,6 @@ import javafx.scene.control.ScrollPane;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.Region;
 import javafx.stage.Stage;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
@@ -34,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>The ScrollPane here mirrors the wrapper MainViewController puts around
  * every view, so the layout under test is the one the app actually renders.
  */
+@UiTest
 public class DashboardLayoutTest extends ApplicationTest {
 
     /** Shorter than the dashboard's natural height, so the page must scroll. */
@@ -62,20 +62,6 @@ public class DashboardLayoutTest extends ApplicationTest {
 
     private ScrollPane wrapper;
     private Stage stage;
-
-    @BeforeAll
-    static void setupHeadless() {
-        System.setProperty("testfx.robot", "glass");
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("prism.order", "sw");
-        System.setProperty("prism.text", "t2k");
-        System.setProperty("java.awt.headless", "true");
-        try {
-            UiTestServices.initialize();
-        } catch (Exception e) {
-            // Tolerate service initialization failures in headless CI
-        }
-    }
 
     @Override
     public void start(Stage stage) throws Exception {

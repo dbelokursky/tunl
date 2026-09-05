@@ -14,11 +14,13 @@ import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.CountryResolver;
 import com.vlessclient.service.LatencyTester;
+import com.vlessclient.service.ProxyGroupMonitor;
 import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.SingBoxInstaller;
 import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.service.TunnelHealthState;
+import com.vlessclient.service.outbound.OutboundTags;
 import com.vlessclient.ui.view.dashboard.AddHealthTargetDialog;
 import com.vlessclient.ui.view.dashboard.HealthCheckCoordinator;
 import com.vlessclient.ui.view.dashboard.StatusPresenter;
@@ -34,6 +36,7 @@ import javafx.fxml.FXML;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.Tooltip;
@@ -83,6 +86,10 @@ public class DashboardViewController implements ViewShownAware {
     @FXML private VBox healthCard;
     @FXML private Label healthSummaryLabel;
     @FXML private Button recheckButton;
+    @FXML private Label modeLabel;
+    @FXML private Label trafficSectionTitle;
+    @FXML private Label healthSectionTitle;
+    @FXML private Hyperlink addServerLink;
     @FXML private VBox serviceStatusList;
     @FXML private HBox reconnectBanner;
     @FXML private Label reconnectBannerLabel;
@@ -116,6 +123,7 @@ public class DashboardViewController implements ViewShownAware {
 
     private ServerConfig activeServer;
     private SingBoxEngine singBoxEngine;
+    private ProxyGroupMonitor groupMonitor;
 
     // Extracted Dashboard collaborators; the controller stays the FXML
     // endpoint and hands each one the few controls it drives.
@@ -145,42 +153,33 @@ public class DashboardViewController implements ViewShownAware {
         // TrafficDisplayBinder, which only runs when a TrafficMonitor exists.
         uploadCardTitle.textProperty().bind(I18n.binding("dashboard.upload.speed"));
         downloadCardTitle.textProperty().bind(I18n.binding("dashboard.download.speed"));
+        // Section headers and the two health-card buttons sat in the FXML as
+        // English literals; in Russian the dashboard was half-translated.
+        modeLabel.textProperty().bind(I18n.binding("dashboard.mode"));
+        trafficSectionTitle.textProperty().bind(I18n.binding("dashboard.traffic.title"));
+        healthSectionTitle.textProperty().bind(I18n.binding("dashboard.health.title"));
+        ButtonLabels.bindStatic(recheckButton, "dashboard.health.recheck");
+        ButtonLabels.bindStatic(cancelReconnectButton, "button.cancel");
+        addServerLink.textProperty().bind(I18n.binding("dashboard.cta.add.server"));
         bindInstallBannerLabels();
         ButtonLabels.bind(updateBannerButton, "settings.update.restart");
         updateBannerSection = new UpdateBannerSection(new UpdateBannerSection.Controls(
                 updateBanner, updateBannerTitle, updateBannerHint, updateBannerButton));
         updateBannerSection.init();
 
-        try {
-            singBoxEngine = ServiceLocator.get(SingBoxEngine.class);
-        } catch (IllegalArgumentException e) {
-            log.warn("SingBoxEngine not available; connect/disconnect will be disabled");
-            singBoxEngine = null;
-        }
-
-        TrafficMonitor trafficMonitor;
-        try {
-            trafficMonitor = ServiceLocator.get(TrafficMonitor.class);
-        } catch (IllegalArgumentException e) {
-            log.warn("TrafficMonitor not available");
-            trafficMonitor = null;
-        }
-
-        LatencyTester latencyTester;
-        try {
-            latencyTester = ServiceLocator.get(LatencyTester.class);
-        } catch (IllegalArgumentException e) {
-            log.warn("LatencyTester not available");
-            latencyTester = null;
-        }
-
-        ServiceReachabilityChecker reachabilityChecker;
-        try {
-            reachabilityChecker = ServiceLocator.get(ServiceReachabilityChecker.class);
-        } catch (IllegalArgumentException e) {
-            log.warn("ServiceReachabilityChecker not available; health check disabled");
-            reachabilityChecker = null;
-        }
+        // Every collaborator is optional: a missing one degrades the card
+        // rather than failing the view, and the log says which.
+        singBoxEngine = optional(SingBoxEngine.class,
+                "SingBoxEngine not available; connect/disconnect will be disabled");
+        TrafficMonitor trafficMonitor = optional(TrafficMonitor.class,
+                "TrafficMonitor not available");
+        LatencyTester latencyTester = optional(LatencyTester.class,
+                "LatencyTester not available");
+        groupMonitor = optional(ProxyGroupMonitor.class,
+                "ProxyGroupMonitor not available; the card will name the pinned server");
+        final ServiceReachabilityChecker reachabilityChecker = optional(
+                ServiceReachabilityChecker.class,
+                "ServiceReachabilityChecker not available; health check disabled");
 
         trafficDisplay = new TrafficDisplayBinder(trafficMonitor,
                 uploadSpeedLabel, downloadSpeedLabel, totalUploadLabel, totalDownloadLabel,
@@ -192,30 +191,23 @@ public class DashboardViewController implements ViewShownAware {
                 if (singBoxEngine == null || !singBoxEngine.isRunning()) {
                     return null;
                 }
-                try {
-                    AppSettings settings = ServiceLocator.get(AppSettings.class);
-                    return new LatencyTester.ApiEndpoint(
-                            settings.getClashApiPort(), settings.getClashApiSecret());
-                } catch (IllegalArgumentException e) {
-                    return null;
-                }
+                return ServiceLocator.find(AppSettings.class)
+                        .map(settings -> new LatencyTester.ApiEndpoint(
+                                settings.getClashApiPort(), settings.getClashApiSecret()))
+                        .orElse(null);
             });
         }
         statusPresenter = new StatusPresenter(
                 new StatusPresenter.Controls(statusCircle, statusHalo, statusFlag,
                         statusTitle, statusLabel, serverNameLabel, connectButton),
                 () -> activeServer,
+                this::routedServer,
                 this::currentHealth,
                 () -> singBoxEngine,
                 this::refreshConnectButtonAvailability);
 
-        try {
-            healthState = ServiceLocator.get(TunnelHealthState.class);
-        } catch (IllegalArgumentException e) {
-            log.warn("TunnelHealthState not available; "
-                    + "the status card will report process state only");
-            healthState = null;
-        }
+        healthState = optional(TunnelHealthState.class,
+                "TunnelHealthState not available; the status card will report process state only");
 
         // The engine is supplied lazily because onRetryInstallClicked can swap
         // in a new SingBoxEngine after an in-app install.
@@ -241,36 +233,23 @@ public class DashboardViewController implements ViewShownAware {
             trafficDisplay.bindLabels();
         }
 
-        try {
-            ConfigStore configStore = ServiceLocator.get(ConfigStore.class);
-            configStore.getServers().addListener(
-                    (javafx.collections.ListChangeListener<ServerConfig>) change -> {
-                        refreshConnectButtonAvailability();
-                        reconnectIfActiveServerChanged();
-                    });
-        } catch (IllegalArgumentException e) {
-            log.debug("ConfigStore not available while wiring server-list listener");
+        ServiceLocator.find(ConfigStore.class).ifPresentOrElse(
+                configStore -> configStore.getServers().addListener(
+                        (javafx.collections.ListChangeListener<ServerConfig>) change -> {
+                            refreshConnectButtonAvailability();
+                            reconnectIfActiveServerChanged();
+                        }),
+                () -> log.debug("ConfigStore not available while wiring server-list listener"));
+
+        if (groupMonitor != null) {
+            // The pick can change under a live tunnel (urltest re-probes), so
+            // the card repaints on its own signal, like the health verdict.
+            groupMonitor.currentMemberTagProperty().addListener(
+                    (obs, oldTag, newTag) -> updateUi(currentConnectionState()));
         }
 
         if (singBoxEngine != null) {
-            singBoxEngine.connectionStateProperty().addListener(
-                    (obs, oldState, newState) -> {
-                        updateUi(newState);
-                        trafficDisplay.onConnectionStateChanged(newState);
-                        healthChecks.onConnectionStateChanged(newState);
-                    });
-
-            singBoxEngine.errorMessageProperty().addListener(
-                    (obs, oldMsg, newMsg) -> {
-                        if (newMsg != null && !newMsg.isEmpty()) {
-                            statusPresenter.showEngineError(newMsg);
-                        }
-                    });
-
-            ConnectionState current = singBoxEngine.connectionStateProperty().get();
-            updateUi(current);
-            trafficDisplay.onConnectionStateChanged(current);
-            healthChecks.onConnectionStateChanged(current);
+            bindEngine(singBoxEngine);
         } else {
             connectionState.addListener((obs, oldState, newState) -> updateUi(newState));
             updateUi(ConnectionState.DISCONNECTED);
@@ -281,6 +260,68 @@ public class DashboardViewController implements ViewShownAware {
         }
         refreshSingBoxMissingBanner();
         refreshConnectButtonAvailability();
+    }
+
+    /**
+     * Wires an engine's signals into the card, the traffic readout, the health
+     * loop and the group monitor, and paints its current state. Called once
+     * at startup and again after an in-app core install swaps the engine; the
+     * two sites used to carry their own copies of the same listeners.
+     */
+    private void bindEngine(SingBoxEngine engine) {
+        engine.connectionStateProperty().addListener(
+                (obs, oldState, newState) -> onEngineState(newState));
+        engine.errorMessageProperty().addListener(
+                (obs, oldMsg, newMsg) -> {
+                    if (newMsg != null && !newMsg.isEmpty()) {
+                        statusPresenter.showEngineError(newMsg);
+                    }
+                });
+        onEngineState(engine.connectionStateProperty().get());
+    }
+
+    private void onEngineState(ConnectionState state) {
+        updateUi(state);
+        trafficDisplay.onConnectionStateChanged(state);
+        healthChecks.onConnectionStateChanged(state);
+        syncGroupMonitor(state);
+    }
+
+    /**
+     * Follows the core's group pick while a tunnel is up in an automatic
+     * selection mode; a pinned server needs no polling to be named.
+     */
+    private void syncGroupMonitor(ConnectionState state) {
+        if (groupMonitor == null) {
+            return;
+        }
+        if (state == ConnectionState.CONNECTED) {
+            AppSettings settings = ServiceLocator.find(AppSettings.class).orElse(null);
+            if (settings != null && settings.getServerSelection().isAutomatic()) {
+                groupMonitor.start(settings.getClashApiPort(), settings.getClashApiSecret());
+            }
+        } else if (state == ConnectionState.DISCONNECTED || state == ConnectionState.ERROR) {
+            groupMonitor.stop();
+        }
+    }
+
+    /**
+     * The server traffic actually goes through: the proxy group's current
+     * pick when the core has reported one, otherwise the pinned server.
+     */
+    private ServerConfig routedServer() {
+        String tag = groupMonitor != null ? groupMonitor.currentMemberTagProperty().get() : null;
+        if (tag != null) {
+            ConfigStore configStore = ServiceLocator.find(ConfigStore.class).orElse(null);
+            if (configStore != null) {
+                for (ServerConfig server : configStore.getServers()) {
+                    if (tag.equals(OutboundTags.server(server))) {
+                        return server;
+                    }
+                }
+            }
+        }
+        return activeServer;
     }
 
     /**
@@ -317,10 +358,8 @@ public class DashboardViewController implements ViewShownAware {
 
     @FXML
     private void onRetryInstallClicked() {
-        SingBoxInstaller installer;
-        try {
-            installer = ServiceLocator.get(SingBoxInstaller.class);
-        } catch (IllegalArgumentException e) {
+        SingBoxInstaller installer = ServiceLocator.find(SingBoxInstaller.class).orElse(null);
+        if (installer == null) {
             showError(I18n.get("dashboard.error.installer.title"),
                     I18n.get("dashboard.error.installer.body"));
             return;
@@ -330,22 +369,10 @@ public class DashboardViewController implements ViewShownAware {
                 new com.vlessclient.ui.view.SingBoxInstallerDialog(installer);
         dialog.showAndWait().ifPresent(path -> {
             ServiceLocator.registerSingBoxEngine(path);
-            try {
-                singBoxEngine = ServiceLocator.get(SingBoxEngine.class);
-                singBoxEngine.connectionStateProperty().addListener(
-                        (obs, oldState, newState) -> {
-                            updateUi(newState);
-                            trafficDisplay.onConnectionStateChanged(newState);
-                            healthChecks.onConnectionStateChanged(newState);
-                        });
-                singBoxEngine.errorMessageProperty().addListener(
-                        (obs, oldMsg, newMsg) -> {
-                            if (newMsg != null && !newMsg.isEmpty()) {
-                                statusPresenter.showEngineError(newMsg);
-                            }
-                        });
-                updateUi(singBoxEngine.connectionStateProperty().get());
-            } catch (IllegalArgumentException e) {
+            singBoxEngine = ServiceLocator.find(SingBoxEngine.class).orElse(null);
+            if (singBoxEngine != null) {
+                bindEngine(singBoxEngine);
+            } else {
                 log.warn("SingBoxEngine still unavailable after install");
             }
             refreshSingBoxMissingBanner();
@@ -370,12 +397,9 @@ public class DashboardViewController implements ViewShownAware {
             }
         });
 
-        try {
-            AppSettings settings = ServiceLocator.get(AppSettings.class);
-            proxyModeCombo.setValue(settings.getProxyMode());
-        } catch (IllegalArgumentException e) {
-            proxyModeCombo.setValue(ProxyMode.SYSTEM_PROXY);
-        }
+        proxyModeCombo.setValue(ServiceLocator.find(AppSettings.class)
+                .map(AppSettings::getProxyMode)
+                .orElse(ProxyMode.SYSTEM_PROXY));
 
         updateProxyModeWarning(proxyModeCombo.getValue());
 
@@ -384,12 +408,7 @@ public class DashboardViewController implements ViewShownAware {
             if (syncingFromSettings) {
                 return;
             }
-            try {
-                ConfigStore configStore = ServiceLocator.get(ConfigStore.class);
-                AppSettings settings = configStore.getSettings();
-                settings.setProxyMode(newVal);
-                configStore.saveSettings(settings);
-            } catch (IllegalArgumentException e) {
+            if (!saveSetting(settings -> settings.setProxyMode(newVal))) {
                 log.warn("Could not save proxy mode setting");
             }
         });
@@ -426,31 +445,26 @@ public class DashboardViewController implements ViewShownAware {
             }
         });
 
-        try {
-            serverSelectionCombo.setValue(
-                    ServiceLocator.get(AppSettings.class).getServerSelection());
-        } catch (IllegalArgumentException e) {
-            serverSelectionCombo.setValue(ServerSelection.SINGLE);
-        }
+        serverSelectionCombo.setValue(ServiceLocator.find(AppSettings.class)
+                .map(AppSettings::getServerSelection)
+                .orElse(ServerSelection.SINGLE));
 
         serverSelectionCombo.valueProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal == null || newVal == oldVal || syncingFromSettings) {
                 return;
             }
-            try {
-                ConfigStore configStore = ServiceLocator.get(ConfigStore.class);
-                AppSettings settings = configStore.getSettings();
-                settings.setServerSelection(newVal);
-                configStore.saveSettings(settings);
-            } catch (IllegalArgumentException e) {
+            if (!saveSetting(settings -> settings.setServerSelection(newVal))) {
                 log.warn("Could not save server selection setting");
                 return;
             }
             if (singBoxEngine != null
                     && singBoxEngine.connectionStateProperty().get() == ConnectionState.CONNECTED) {
                 log.info("Server selection changed while connected; restarting tunnel");
-                disconnect();
-                connect();
+                // One restart on one thread, like reconnectIfActiveServerChanged:
+                // a separate disconnect() plus connect() spawned two virtual
+                // threads racing for the same core, and when the stop outlasted
+                // the connect's wait the user ended up disconnected.
+                reconnect();
             }
         });
     }
@@ -497,18 +511,41 @@ public class DashboardViewController implements ViewShownAware {
             return I18n.get("settings.tun.warning");
         }
         if (mode == ProxyMode.SYSTEM_PROXY && !systemProxyCapable()) {
-            try {
-                AppSettings settings = ServiceLocator.get(AppSettings.class);
-                // As a String: MessageFormat would render an int through
-                // NumberFormat and turn port 8080 into "8,080".
-                return I18n.get("settings.proxy.system.unsupported",
-                        String.valueOf(settings.getHttpPort()));
-            } catch (IllegalArgumentException e) {
+            AppSettings settings = ServiceLocator.find(AppSettings.class).orElse(null);
+            if (settings == null) {
                 log.warn("Could not read the HTTP port for the proxy warning");
                 return null;
             }
+            // As a String: MessageFormat would render an int through
+            // NumberFormat and turn port 8080 into "8,080".
+            return I18n.get("settings.proxy.system.unsupported",
+                    String.valueOf(settings.getHttpPort()));
         }
         return null;
+    }
+
+    /** The service, or null with a warning: the dashboard degrades rather than fails. */
+    private static <T> T optional(Class<T> type, String absentMessage) {
+        return ServiceLocator.find(type).orElseGet(() -> {
+            log.warn(absentMessage);
+            return null;
+        });
+    }
+
+    /**
+     * Applies one change to the stored settings and persists it.
+     *
+     * @return false when there is no store to save into
+     */
+    private static boolean saveSetting(java.util.function.Consumer<AppSettings> change) {
+        ConfigStore configStore = ServiceLocator.find(ConfigStore.class).orElse(null);
+        if (configStore == null) {
+            return false;
+        }
+        AppSettings settings = configStore.getSettings();
+        change.accept(settings);
+        configStore.saveSettings(settings);
+        return true;
     }
 
     private boolean systemProxyCapable() {
@@ -542,10 +579,8 @@ public class DashboardViewController implements ViewShownAware {
      */
     @Override
     public void onViewShown() {
-        AppSettings settings;
-        try {
-            settings = ServiceLocator.get(AppSettings.class);
-        } catch (IllegalArgumentException e) {
+        AppSettings settings = ServiceLocator.find(AppSettings.class).orElse(null);
+        if (settings == null) {
             log.warn("Could not re-read settings on view show");
             return;
         }
@@ -618,13 +653,8 @@ public class DashboardViewController implements ViewShownAware {
      * dialog at every launch. Invoked once after the main window is shown.
      */
     public void autoConnectIfEnabled() {
-        AppSettings settings;
-        try {
-            settings = ServiceLocator.get(AppSettings.class);
-        } catch (IllegalArgumentException e) {
-            return;
-        }
-        if (!settings.isAutoConnect()) {
+        AppSettings settings = ServiceLocator.find(AppSettings.class).orElse(null);
+        if (settings == null || !settings.isAutoConnect()) {
             return;
         }
         if (singBoxEngine == null) {
@@ -764,12 +794,10 @@ public class DashboardViewController implements ViewShownAware {
 
     /** The connect-flow owner, or null when it is not registered. */
     private ConnectionService connectionService() {
-        try {
-            return ServiceLocator.get(ConnectionService.class);
-        } catch (IllegalArgumentException e) {
-            log.error("ConnectionService not available; connect is disabled", e);
+        return ServiceLocator.find(ConnectionService.class).orElseGet(() -> {
+            log.error("ConnectionService not available; connect is disabled");
             return null;
-        }
+        });
     }
 
     /**
@@ -821,46 +849,50 @@ public class DashboardViewController implements ViewShownAware {
     }
 
     @FXML
+    private void onAddServerLinkClicked() {
+        ServiceLocator.find(MainViewController.class).ifPresent(MainViewController::showServers);
+    }
+
+    @FXML
     private void onCancelReconnectClicked() {
         healthChecks.cancelReconnectCountdown();
     }
 
     private ServerConfig findActiveServer() {
-        try {
-            ConfigStore configStore = ServiceLocator.get(ConfigStore.class);
-            List<ServerConfig> servers = configStore.getServers();
-            if (servers.isEmpty()) {
-                return null;
-            }
-            Optional<ServerConfig> active = servers.stream()
-                    .filter(ServerConfig::isActive)
-                    .findFirst();
-            return active.orElse(null);
-        } catch (IllegalArgumentException e) {
-            log.warn("ConfigStore not available: {}", e.getMessage());
+        ConfigStore configStore = ServiceLocator.find(ConfigStore.class).orElse(null);
+        if (configStore == null) {
+            log.warn("ConfigStore not available; keeping the last known active server");
             return activeServer;
         }
+        return configStore.getServers().stream()
+                .filter(ServerConfig::isActive)
+                .findFirst()
+                .orElse(null);
     }
 
     private void refreshConnectButtonAvailability() {
-        try {
-            ConfigStore configStore = ServiceLocator.get(ConfigStore.class);
-            List<ServerConfig> servers = configStore.getServers();
-            if (servers.isEmpty()) {
-                connectButton.setDisable(true);
-                connectButton.setTooltip(new Tooltip(I18n.get("dashboard.no.servers")));
-            } else if (findActiveServer() == null) {
-                // Gate on activation, not list size: enabling Connect with no
-                // active server turns a click into a modal error telling the
-                // user to "mark it active" — a gesture the UI never offers.
-                connectButton.setDisable(true);
-                connectButton.setTooltip(new Tooltip(I18n.get("dashboard.no.server")));
-            } else {
-                connectButton.setDisable(false);
-                connectButton.setTooltip(null);
-            }
-        } catch (IllegalArgumentException e) {
+        ConfigStore configStore = ServiceLocator.find(ConfigStore.class).orElse(null);
+        if (configStore == null) {
             log.debug("ConfigStore not available while refreshing connect button");
+            return;
+        }
+        List<ServerConfig> servers = configStore.getServers();
+        // A fresh install used to show a disabled Connect and a sentence,
+        // with the way forward two views away. The link is that way.
+        addServerLink.setVisible(servers.isEmpty());
+        addServerLink.setManaged(servers.isEmpty());
+        if (servers.isEmpty()) {
+            connectButton.setDisable(true);
+            connectButton.setTooltip(new Tooltip(I18n.get("dashboard.no.servers")));
+        } else if (findActiveServer() == null) {
+            // Gate on activation, not list size: enabling Connect with no
+            // active server turns a click into a modal error telling the
+            // user to "mark it active" — a gesture the UI never offers.
+            connectButton.setDisable(true);
+            connectButton.setTooltip(new Tooltip(I18n.get("dashboard.no.server")));
+        } else {
+            connectButton.setDisable(false);
+            connectButton.setTooltip(null);
         }
     }
 
@@ -879,9 +911,5 @@ public class DashboardViewController implements ViewShownAware {
     public void setActiveServer(ServerConfig server) {
         this.activeServer = server;
         statusPresenter.showActiveServerName(server);
-    }
-
-    public ObjectProperty<ConnectionState> connectionStateProperty() {
-        return connectionState;
     }
 }

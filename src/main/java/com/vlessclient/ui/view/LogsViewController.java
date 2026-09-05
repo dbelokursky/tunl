@@ -60,6 +60,7 @@ public class LogsViewController {
 
     private static final Logger log = LoggerFactory.getLogger(LogsViewController.class);
 
+    @FXML private Label titleLabel;
     @FXML private ComboBox<String> logLevelFilter;
     @FXML private TextField searchField;
     @FXML private CheckBox autoScrollCheckBox;
@@ -81,6 +82,8 @@ public class LogsViewController {
      */
     @FXML
     public void initialize() {
+        titleLabel.textProperty().bind(I18n.binding("logs.title"));
+        searchField.promptTextProperty().bind(I18n.binding("logs.search.prompt"));
         ButtonLabels.bindStatic(autoScrollCheckBox, "logs.auto.scroll");
         // Items are the filter codes buildLevelPredicate() switches on; the
         // converter renders the localized names, so translating the UI can
@@ -400,8 +403,8 @@ public class LogsViewController {
                 .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
         chooser.setInitialFileName("tunl-log-" + stamp + ".txt");
         chooser.getExtensionFilters().addAll(
-                new FileChooser.ExtensionFilter("Log files", "*.log", "*.txt"),
-                new FileChooser.ExtensionFilter("All files", "*.*"));
+                new FileChooser.ExtensionFilter(I18n.get("logs.save.filter"), "*.log", "*.txt"),
+                new FileChooser.ExtensionFilter(I18n.get("logs.save.filter.all"), "*.*"));
 
         Window owner = logListView.getScene() == null
                 ? null : logListView.getScene().getWindow();
@@ -548,17 +551,29 @@ public class LogsViewController {
         if (level == null || "all".equals(level)) {
             return line -> true;
         }
-        return line -> {
-            String lower = line.toLowerCase();
-            return switch (level) {
-                case "error" -> lower.contains("error") || lower.contains("fatal");
-                case "warn" -> lower.contains("warn") || lower.contains("error")
-                        || lower.contains("fatal");
-                case "info" -> lower.contains("info") || lower.contains("warn")
-                        || lower.contains("error") || lower.contains("fatal");
-                case "debug" -> true;
-                default -> true;
-            };
+        return line -> matchesLevel(LogLineFormatter.levelOf(line), level);
+    }
+
+    /**
+     * Whether a line of the given level belongs under a filter.
+     *
+     * <p>The filter used to look for the level's name anywhere in the line, so
+     * an INFO line saying "no error" showed up under Error and a DEBUG line
+     * mentioning "info" under Info. The level is now the parsed one the
+     * formatter already colours. A line with no recognizable level (a panic
+     * trace, a continuation) passes every filter: hiding it would cut the
+     * lines that explain the error above them.</p>
+     */
+    static boolean matchesLevel(LogLineFormatter.Kind lineLevel, String filter) {
+        if (lineLevel == null || lineLevel == LogLineFormatter.Kind.PLAIN) {
+            return true;
+        }
+        return switch (filter) {
+            case "error" -> lineLevel == LogLineFormatter.Kind.LEVEL_ERROR;
+            case "warn" -> lineLevel == LogLineFormatter.Kind.LEVEL_ERROR
+                    || lineLevel == LogLineFormatter.Kind.LEVEL_WARN;
+            case "info" -> lineLevel != LogLineFormatter.Kind.LEVEL_DEBUG;
+            default -> true;
         };
     }
 

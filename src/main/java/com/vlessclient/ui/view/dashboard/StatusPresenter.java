@@ -50,17 +50,33 @@ public class StatusPresenter {
     private final Button connectButton;
 
     private final Supplier<ServerConfig> activeServer;
+    private final Supplier<ServerConfig> routedServer;
     private final Supplier<TunnelHealth> health;
     private final Supplier<SingBoxEngine> engine;
     private final Runnable refreshConnectAvailability;
 
     /**
+     * The engine's last failure text, kept so a repaint in the ERROR state
+     * does not wipe it. It used to be recognised by its English prefix, which
+     * would have stopped working the moment the message was translated.
+     */
+    private String engineError;
+
+    /**
      * Creates the presenter.
      *
      * @param controls                   the hero-card controls
-     * @param activeServer               the server the card describes, read on
-     *                                   every repaint because it changes under
-     *                                   the card
+     * @param activeServer               the pinned server, read on every
+     *                                   repaint because it changes under the
+     *                                   card
+     * @param routedServer               the server traffic actually goes
+     *                                   through while connected: the proxy
+     *                                   group's current pick when the core has
+     *                                   reported one, otherwise the pinned
+     *                                   server. In the automatic mode the two
+     *                                   differ, and the card used to name the
+     *                                   pinned one while the tunnel used
+     *                                   another
      * @param health                     the current reachability verdict
      * @param engine                     the current engine, for the guard on a
      *                                   late-arriving country lookup
@@ -69,6 +85,7 @@ public class StatusPresenter {
      */
     public StatusPresenter(Controls controls,
                            Supplier<ServerConfig> activeServer,
+                           Supplier<ServerConfig> routedServer,
                            Supplier<TunnelHealth> health,
                            Supplier<SingBoxEngine> engine,
                            Runnable refreshConnectAvailability) {
@@ -80,9 +97,15 @@ public class StatusPresenter {
         this.serverNameLabel = controls.serverNameLabel();
         this.connectButton = controls.connectButton();
         this.activeServer = activeServer;
+        this.routedServer = routedServer;
         this.health = health;
         this.engine = engine;
         this.refreshConnectAvailability = refreshConnectAvailability;
+    }
+
+    private ServerConfig routed() {
+        ServerConfig routed = routedServer.get();
+        return routed != null ? routed : activeServer.get();
     }
 
     /**
@@ -116,6 +139,7 @@ public class StatusPresenter {
      * @param message the engine's error message
      */
     public void showEngineError(String message) {
+        engineError = message;
         statusLabel.setText(message);
     }
 
@@ -179,9 +203,9 @@ public class StatusPresenter {
         }
 
         // The exit-country flag belongs to a running core, whatever the probes
-        // then make of it.
+        // then make of it — and to the server it actually exits through.
         if (state == ConnectionState.CONNECTED) {
-            showStatusFlag(activeServer.get());
+            showStatusFlag(routed());
         } else {
             hideStatusFlag();
         }
@@ -203,12 +227,12 @@ public class StatusPresenter {
 
     private void paintStatusSubtitle(TunnelStatus status) {
         if (status == TunnelStatus.ERROR) {
-            // The engine's own message ("Process exited ...") says more than a
-            // generic line, so a repaint must not wipe it.
-            if (!statusLabel.getText().startsWith("Process exited")) {
-                statusLabel.setText(I18n.get("dashboard.status.check.logs"));
-            }
+            // The engine's own message says more than a generic line, so a
+            // repaint must not wipe it.
+            statusLabel.setText(engineError != null
+                    ? engineError : I18n.get("dashboard.status.check.logs"));
         } else {
+            engineError = null;
             statusLabel.setText(subtitleFor(status));
         }
 
@@ -221,9 +245,10 @@ public class StatusPresenter {
 
     private String subtitleFor(TunnelStatus status) {
         ServerConfig server = activeServer.get();
+        ServerConfig routed = routed();
         return switch (status) {
-            case CONNECTED -> server != null
-                    ? I18n.get("dashboard.status.routing.through", server.getName())
+            case CONNECTED -> routed != null
+                    ? I18n.get("dashboard.status.routing.through", routed.getName())
                     : I18n.get("dashboard.status.routing");
             case CONNECTING -> I18n.get("dashboard.status.establishing");
             case VERIFYING -> I18n.get("dashboard.status.verifying");
@@ -289,7 +314,7 @@ public class StatusPresenter {
         resolver.resolveAsync(server, code -> Platform.runLater(() -> {
             // Only paint if this is still the server we are connected to.
             SingBoxEngine current = engine.get();
-            if (activeServer.get() == server
+            if (routed() == server
                     && current != null
                     && current.connectionStateProperty().get() == ConnectionState.CONNECTED) {
                 paintStatusFlag(code);

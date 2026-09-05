@@ -141,13 +141,27 @@ public class SingBoxInstaller {
     /** Test constructor: allows overriding install dir, URL template, and checksums. */
     SingBoxInstaller(
             Path installDir, String downloadUrlTemplate, Map<String, String> expectedSha256) {
+        this(installDir, downloadUrlTemplate, expectedSha256,
+                AppHttpClients.newBuilder()
+                        .connectTimeout(Duration.ofSeconds(30))
+                        .followRedirects(HttpClient.Redirect.ALWAYS)
+                        .build());
+    }
+
+    /** Test constructor: also the HTTP client, like every other downloading service. */
+    SingBoxInstaller(Path installDir, String downloadUrlTemplate,
+                     Map<String, String> expectedSha256, HttpClient httpClient) {
         this.installDir = installDir;
         this.downloadUrlTemplate = downloadUrlTemplate;
         this.expectedSha256 = Map.copyOf(expectedSha256);
-        this.httpClient = AppHttpClients.newBuilder()
-                .connectTimeout(Duration.ofSeconds(30))
-                .followRedirects(HttpClient.Redirect.ALWAYS)
-                .build();
+        this.httpClient = httpClient;
+    }
+
+    /** Releases the HTTP client; the installer downloads nothing after startup. */
+    public void shutdown() {
+        if (httpClient != null) {
+            httpClient.shutdownNow();
+        }
     }
 
     /** Test constructor: install dir only, uses production URL + checksums. */
@@ -502,14 +516,7 @@ public class SingBoxInstaller {
     }
 
     String detectArch() {
-        String osArch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
-        if (osArch.contains("aarch64") || osArch.contains("arm64")) {
-            return "arm64";
-        }
-        if (osArch.contains("x86_64") || osArch.contains("amd64")) {
-            return "amd64";
-        }
-        throw new IllegalStateException("Unsupported CPU architecture: " + osArch);
+        return com.vlessclient.platform.CpuArch.releaseToken();
     }
 
     void downloadWithProgress(String url, Path target, DoubleConsumer progress)

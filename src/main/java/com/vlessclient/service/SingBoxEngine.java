@@ -1,5 +1,6 @@
 package com.vlessclient.service;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.platform.SecureFiles;
@@ -398,16 +399,19 @@ public class SingBoxEngine {
      * @return true if the core is stopped by the deadline
      */
     public boolean awaitStopped(Duration timeout) {
-        long deadline = System.nanoTime() + timeout.toNanos();
-        while (isRunning() && System.nanoTime() < deadline) {
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return !isRunning();
-            }
+        // Single read of the volatile field, then the process's own wait: it
+        // returns the instant the core exits, where a 100 ms poll added up to
+        // a tenth of a second to every reconnect.
+        Process running = process;
+        if (running == null || !running.isAlive()) {
+            return true;
         }
-        return !isRunning();
+        try {
+            return running.waitFor(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return !running.isAlive();
+        }
     }
 
     /**
@@ -471,8 +475,8 @@ public class SingBoxEngine {
                         // Message before state: state listeners fire
                         // synchronously inside set(), and they read the
                         // message the moment they see ERROR.
-                        errorMessage.set("Process exited unexpectedly (code "
-                                + exitCode + "): " + lastLine);
+                        errorMessage.set(I18n.get("engine.exited.unexpectedly",
+                                String.valueOf(exitCode)) + ": " + lastLine);
                         connectionState.set(ConnectionState.ERROR);
                     }
                 });

@@ -13,8 +13,8 @@
 # after the release assets are built; the committed template carries a 0.0.0
 # version and all-zero checksum placeholders.
 #
-# The bundled sing-box binary is GPL-3.0; the app's own license is not yet
-# declared upstream (README: TBD), hence license=('custom').
+# The app is Apache-2.0 (LICENSE in the repository). The sing-box binary
+# bundled inside the .deb is GPL-3.0; see NOTICE.
 
 pkgname=tunl-bin
 pkgver=0.0.0
@@ -22,7 +22,7 @@ pkgrel=1
 pkgdesc="Tunl — desktop multi-protocol proxy client wrapping sing-box with a JavaFX GUI (binary release)"
 arch=('x86_64' 'aarch64')
 url="https://github.com/dbelokursky/tunl"
-license=('custom')
+license=('Apache-2.0')
 # The JRE and sing-box ship inside the .deb, so no java or sing-box deps. The
 # JavaFX GUI links GTK3 at runtime; hicolor-icon-theme owns the icon theme dirs
 # the bundled .desktop entry integrates into.

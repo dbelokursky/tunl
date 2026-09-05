@@ -19,7 +19,7 @@
 
     <!-- Header -->
     <HBox alignment="CENTER_LEFT" spacing="12">
-        <Label text="Servers" styleClass="view-title"/>
+        <Label fx:id="titleLabel" text="Servers" styleClass="view-title"/>
         <Region HBox.hgrow="ALWAYS"/>
         <!-- Export/import of the whole list. A menu rather than two more
              buttons: the header already carries two, and a third and fourth

@@ -2,6 +2,7 @@ package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.CountryResolver;
@@ -69,6 +70,7 @@ public class ServersViewController {
 
     private static final Logger log = LoggerFactory.getLogger(ServersViewController.class);
 
+    @FXML private Label titleLabel;
     @FXML private ListView<ServerConfig> serverListView;
     @FXML private Button addServerButton;
     @FXML private Button importLinkButton;
@@ -114,6 +116,7 @@ public class ServersViewController {
      */
     @FXML
     public void initialize() {
+        titleLabel.textProperty().bind(I18n.binding("servers.title"));
         bindEmptyState();
         configStore = ServiceLocator.get(ConfigStore.class);
         latencyTester = optionalService(LatencyTester.class);
@@ -145,12 +148,7 @@ public class ServersViewController {
 
     /** Returns the service, or null when it is not registered. */
     private <T> T optionalService(Class<T> type) {
-        try {
-            return ServiceLocator.get(type);
-        } catch (IllegalArgumentException e) {
-            log.debug("{} unavailable in this context", type.getSimpleName());
-            return null;
-        }
+        return ServiceLocator.find(type).orElse(null);
     }
 
     private void setUpSearch() {
@@ -356,7 +354,12 @@ public class ServersViewController {
             // Clear first: otherwise the selection model reshuffles onto
             // surviving rows as each removal lands.
             serverListView.getSelectionModel().clearSelection();
-            targets.forEach(server -> configStore.removeServer(server.getId()));
+            // One save and one keychain sweep for the batch. Deleting through
+            // removeServer wrote servers.json — and re-sealed every stored
+            // credential — once per row, the quadratic cost applyServerBatch
+            // exists to avoid.
+            configStore.applyServerBatch(List.of(),
+                    targets.stream().map(ServerConfig::getId).toList());
             log.info("Deleted {} servers", targets.size());
         }
     }
@@ -407,15 +410,24 @@ public class ServersViewController {
                 ServerConfig server = parseImport(text.trim());
                 configStore.addServer(server);
                 log.info("Imported server: {}", server.getName());
-            } catch (Exception e) {
+            } catch (IllegalArgumentException e) {
+                // Bad input: the parser's message is the explanation, and a
+                // stack trace for a typo would only bury real errors.
+                log.warn("Could not import share link: {}", e.getMessage());
+                showImportError(e);
+            } catch (RuntimeException e) {
                 log.error("Failed to import server", e);
-                Alert alert = new Alert(Alert.AlertType.ERROR);
-                alert.setTitle(I18n.get("servers.import.error.title"));
-                alert.setHeaderText(I18n.get("servers.import.error.header"));
-                alert.setContentText(e.getMessage());
-                alert.showAndWait();
+                showImportError(e);
             }
         });
+    }
+
+    private void showImportError(RuntimeException e) {
+        Alert alert = new Alert(Alert.AlertType.ERROR);
+        alert.setTitle(I18n.get("servers.import.error.title"));
+        alert.setHeaderText(I18n.get("servers.import.error.header"));
+        alert.setContentText(e.getMessage());
+        alert.showAndWait();
     }
 
     /**
@@ -548,41 +560,49 @@ public class ServersViewController {
      * unknown country leaves the slot empty rather than showing a placeholder
      * — a row without a flag reads as "no information", which is the truth.
      */
-    private void showFlag(StackPane slot, ServerConfig server) {
-        CountryResolver resolver;
-        try {
-            resolver = ServiceLocator.get(CountryResolver.class);
-        } catch (IllegalArgumentException e) {
+    private void showFlag(ListCell<ServerConfig> cell, StackPane slot, ServerConfig server) {
+        // The slot is reused across items: clear what the previous one left.
+        slot.getChildren().clear();
+        CountryResolver resolver = optionalService(CountryResolver.class);
+        if (resolver == null) {
             return;
         }
         resolver.countryOf(server)
                 .ifPresent(code -> slot.getChildren().setAll(Flags.of(code, 15)));
         resolver.resolveAsync(server, code -> Platform.runLater(() -> {
-            // The cell may have been recycled onto another server by now.
-            if (server.getAddress() != null && slot.getScene() != null) {
+            // The cell may have been recycled onto another server by now. The
+            // slot being in a scene says nothing about which server it shows
+            // — only the cell's current item does — so a late answer used to
+            // paint the previous row's flag onto whichever server now sat
+            // there.
+            if (cell.getItem() == server) {
                 slot.getChildren().setAll(Flags.of(code, 15));
             }
         }));
     }
 
     /**
-     * The last measured latency for a row, when one exists. Absent rather than
-     * a dash: a row with no chip reads as "not measured", which is the truth,
-     * while a placeholder reads as a measurement that came back empty.
+     * Paints the last measured latency into a row's chip, when one exists.
+     * Absent rather than a dash: a row with no chip reads as "not measured",
+     * which is the truth, while a placeholder reads as a measurement that
+     * came back empty.
+     *
+     * @return whether the chip carries a measurement and should be shown
      */
-    private Optional<Label> latencyChip(ServerConfig server) {
-        if (latencyTester == null) {
-            return Optional.empty();
+    private boolean updateLatencyChip(Label chip, ServerConfig server) {
+        Optional<LatencyTester.Result> measured = latencyTester == null
+                ? Optional.empty() : latencyTester.lastResult(server.getId());
+        if (measured.isEmpty()) {
+            return false;
         }
-        return latencyTester.lastResult(server.getId()).map(result -> {
-            Label chip = new Label(result.reachable()
-                    ? result.millis() + " ms" : I18n.get("dashboard.latency.timeout"));
-            chip.getStyleClass().addAll("latency-chip",
-                    result.reachable() ? "latency-chip-ok" : "latency-chip-fail");
-            Tooltip.install(chip, new Tooltip(I18n.get(result.throughProxy()
-                    ? "dashboard.latency.via.proxy" : "dashboard.latency.via.tcp")));
-            return chip;
-        });
+        LatencyTester.Result result = measured.get();
+        chip.setText(result.reachable()
+                ? result.millis() + " ms" : I18n.get("dashboard.latency.timeout"));
+        chip.getStyleClass().setAll("latency-chip",
+                result.reachable() ? "latency-chip-ok" : "latency-chip-fail");
+        chip.setTooltip(new Tooltip(I18n.get(result.throughProxy()
+                ? "dashboard.latency.via.proxy" : "dashboard.latency.via.tcp")));
+        return true;
     }
 
     /** Picks the parser from the text's own shape rather than asking the user. */
@@ -699,8 +719,26 @@ public class ServersViewController {
     /**
      * Custom list cell that renders server info with name, address, active badge,
      * and a right-click context menu.
+     *
+     * <p>The row, its labels and the context menu are built once per cell and
+     * only re-filled in {@link #updateItem}: a ListView recycles a handful of
+     * cells across the whole list, so rebuilding the graphic on every update
+     * cost an HBox, five labels, a four-item menu and a country lookup per
+     * scroll tick.</p>
      */
     private class ServerListCell extends ListCell<ServerConfig> {
+
+        private final HBox row = new HBox(12);
+        private final StackPane flagSlot = new StackPane();
+        private final VBox info;
+        private final Region spacer = new Region();
+        private final Label nameLabel = new Label();
+        private final Label addressLabel = new Label();
+        private final Label latencyChip = new Label();
+        private final Label protocolBadge = new Label();
+        private final Label insecureBadge = new Label();
+        private final Label activeBadge = new Label();
+        private final ContextMenu contextMenu = new ContextMenu();
 
         /**
          * Activation is a click, not a selection change.
@@ -722,6 +760,65 @@ public class ServersViewController {
                 }
                 setActiveServer(getItem());
             });
+
+            row.getStyleClass().add("server-list-item");
+            row.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
+
+            // Fixed-width slot so rows stay aligned whether or not a country
+            // is known — a flag appearing later must not shift the layout.
+            flagSlot.setMinWidth(24);
+            flagSlot.setPrefWidth(24);
+
+            nameLabel.getStyleClass().add("server-name");
+            addressLabel.getStyleClass().add("server-address");
+            info = new VBox(2, nameLabel, addressLabel);
+
+            HBox.setHgrow(spacer, Priority.ALWAYS);
+
+            protocolBadge.getStyleClass().add("protocol-badge");
+            // A link that turns certificate verification off is one a network
+            // attacker on the subscription's fetch path could have written;
+            // the list says so rather than applying it silently.
+            insecureBadge.getStyleClass().add("insecure-badge");
+            insecureBadge.textProperty().bind(I18n.binding("servers.badge.insecure"));
+            Tooltip insecureTooltip = new Tooltip();
+            insecureTooltip.textProperty().bind(I18n.binding("servers.badge.insecure.tooltip"));
+            insecureBadge.setTooltip(insecureTooltip);
+            activeBadge.getStyleClass().add("active-badge");
+            activeBadge.textProperty().bind(I18n.binding("servers.active.badge"));
+
+            // Context menu for right-click. Every item reads getItem() when it
+            // fires, so the one menu serves whichever server the cell shows.
+            MenuItem editItem = menuItem("servers.menu.edit", () -> editServer(getItem()));
+            MenuItem duplicateItem = menuItem("button.duplicate",
+                    () -> duplicateServer(getItem()));
+            MenuItem copyLinkItem = menuItem("button.copy.share.link",
+                    () -> copyShareLink(getItem()));
+            // Acts on the whole selection when there is one, so right-clicking
+            // inside a multi-select does what it looks like it will.
+            MenuItem deleteItem = menuItem("button.delete", () -> {
+                if (serverListView.getSelectionModel().getSelectedItems().contains(getItem())) {
+                    deleteSelected();
+                } else {
+                    deleteServer(getItem());
+                }
+            });
+            contextMenu.getItems().addAll(editItem, duplicateItem, copyLinkItem, deleteItem);
+            // There is no share-link format for WireGuard; the item used to
+            // open an error dialog instead of just not applying.
+            contextMenu.setOnShowing(e -> copyLinkItem.setDisable(
+                    getItem() != null && getItem().getProtocol() == Protocol.WIREGUARD));
+        }
+
+        private MenuItem menuItem(String key, Runnable action) {
+            MenuItem item = new MenuItem();
+            item.textProperty().bind(I18n.binding(key));
+            item.setOnAction(e -> {
+                if (getItem() != null) {
+                    action.run();
+                }
+            });
+            return item;
         }
 
         @Override
@@ -734,71 +831,29 @@ public class ServersViewController {
                 return;
             }
 
-            HBox row = new HBox(12);
-            row.getStyleClass().add("server-list-item");
-            row.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
-
-            // Fixed-width slot so rows stay aligned whether or not a country
-            // is known — a flag appearing later must not shift the layout.
-            StackPane flagSlot = new StackPane();
-            flagSlot.setMinWidth(24);
-            flagSlot.setPrefWidth(24);
-            showFlag(flagSlot, server);
-
-            VBox info = new VBox(2);
-            Label nameLabel = new Label(
+            nameLabel.setText(
                     server.getName() != null ? server.getName() : I18n.get("servers.unnamed"));
-            nameLabel.getStyleClass().add("server-name");
-
-            String addressText = server.getAddress() + ":" + server.getPort();
-            Label addressLabel = new Label(addressText);
-            addressLabel.getStyleClass().add("server-address");
-
-            info.getChildren().addAll(nameLabel, addressLabel);
-
-            Region spacer = new Region();
-            HBox.setHgrow(spacer, Priority.ALWAYS);
-
-            Label protocolBadge = new Label(server.getProtocol() != null
+            addressLabel.setText(server.getAddress() + ":" + server.getPort());
+            protocolBadge.setText(server.getProtocol() != null
                     ? server.getProtocol().getValue().toUpperCase()
                     : "VLESS");
-            protocolBadge.getStyleClass().add("protocol-badge");
+            showFlag(this, flagSlot, server);
 
-            row.getChildren().addAll(flagSlot, info, spacer);
-            latencyChip(server).ifPresent(chip -> row.getChildren().add(chip));
+            // The same nodes every time; only which of the optional ones
+            // appear changes with the item.
+            row.getChildren().setAll(flagSlot, info, spacer);
+            if (updateLatencyChip(latencyChip, server)) {
+                row.getChildren().add(latencyChip);
+            }
             row.getChildren().add(protocolBadge);
-
+            if (server.getTls() != null && server.getTls().isAllowInsecure()) {
+                row.getChildren().add(insecureBadge);
+            }
             if (server.isActive()) {
-                Label activeBadge = new Label(I18n.get("servers.active.badge"));
-                activeBadge.getStyleClass().add("active-badge");
                 row.getChildren().add(activeBadge);
             }
 
-            // Context menu for right-click
-            MenuItem editItem = new MenuItem(I18n.get("servers.menu.edit"));
-            editItem.setOnAction(e -> editServer(server));
-
-            MenuItem deleteItem = new MenuItem(I18n.get("button.delete"));
-            // Acts on the whole selection when there is one, so right-clicking
-            // inside a multi-select does what it looks like it will.
-            deleteItem.setOnAction(e -> {
-                if (serverListView.getSelectionModel().getSelectedItems().contains(server)) {
-                    deleteSelected();
-                } else {
-                    deleteServer(server);
-                }
-            });
-
-            MenuItem duplicateItem = new MenuItem(I18n.get("button.duplicate"));
-            duplicateItem.setOnAction(e -> duplicateServer(server));
-
-            MenuItem copyLinkItem = new MenuItem(I18n.get("button.copy.share.link"));
-            copyLinkItem.setOnAction(e -> copyShareLink(server));
-
-            ContextMenu contextMenu = new ContextMenu();
-            contextMenu.getItems().addAll(editItem, duplicateItem, copyLinkItem, deleteItem);
             setContextMenu(contextMenu);
-
             setGraphic(row);
         }
     }

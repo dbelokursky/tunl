@@ -38,6 +38,9 @@ class WindowsTunLauncherTest {
         assertThat(outer).contains("Emit-New $LogOut");
         // Shares the file with the elevated writer instead of locking it.
         assertThat(outer).contains("'Open', 'Read', 'ReadWrite'");
+        // The per-connection core logs are forwarded, then removed: at debug
+        // level they hold every DNS query and dial target.
+        assertThat(outer).contains("Remove-Item -LiteralPath $LogOut, $LogErr");
     }
 
     @Test

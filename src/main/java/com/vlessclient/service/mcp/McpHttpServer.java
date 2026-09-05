@@ -7,6 +7,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.concurrent.ExecutorService;
@@ -140,6 +141,11 @@ public class McpHttpServer {
 
     private void handle(HttpExchange exchange) throws IOException {
         try {
+            if (!isLocalOrigin(exchange.getRequestHeaders().getFirst("Host"),
+                    exchange.getRequestHeaders().getFirst("Origin"))) {
+                sendPlain(exchange, 403, "Forbidden");
+                return;
+            }
             String method = exchange.getRequestMethod();
             if ("GET".equalsIgnoreCase(method)) {
                 handleSse(exchange);
@@ -227,6 +233,55 @@ public class McpHttpServer {
             Thread.currentThread().interrupt();
         } finally {
             notifier.unsubscribe(subscriber);
+        }
+    }
+
+    /**
+     * DNS-rebinding guard. A page on a hostile site can point a name it
+     * controls at 127.0.0.1 and have the browser send requests here; the
+     * bearer token already stops them, but the Host and Origin headers close
+     * the class itself, since a browser cannot forge either. Host must be a
+     * loopback literal or {@code localhost}; Origin, when a browser sends
+     * one, must be loopback too. MCP clients send no Origin at all.
+     *
+     * @param host   the request's Host header, possibly with a port
+     * @param origin the request's Origin header, or null when absent
+     * @return whether the request may proceed
+     */
+    static boolean isLocalOrigin(String host, String origin) {
+        if (host == null || !isLoopbackName(stripPort(host.trim()))) {
+            return false;
+        }
+        if (origin == null || origin.isBlank()) {
+            return true;
+        }
+        try {
+            String originHost = URI.create(origin.trim()).getHost();
+            return originHost != null && isLoopbackName(stripPort(originHost));
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    private static String stripPort(String host) {
+        if (host.startsWith("[")) {
+            int end = host.indexOf(']');
+            return end > 0 ? host.substring(1, end) : host;
+        }
+        int colon = host.lastIndexOf(':');
+        // One colon at most: an unbracketed IPv6 literal has several and
+        // carries no port.
+        return colon > 0 && host.indexOf(':') == colon ? host.substring(0, colon) : host;
+    }
+
+    private static boolean isLoopbackName(String name) {
+        if ("localhost".equalsIgnoreCase(name)) {
+            return true;
+        }
+        try {
+            return InetAddress.ofLiteral(name).isLoopbackAddress();
+        } catch (IllegalArgumentException e) {
+            return false;
         }
     }
 

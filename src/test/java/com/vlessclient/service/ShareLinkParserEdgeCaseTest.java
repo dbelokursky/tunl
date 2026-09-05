@@ -181,12 +181,13 @@ class ShareLinkParserEdgeCaseTest {
         }
 
         @Test
-        void emptyFragmentYieldsEmptyName() {
-            // With a trailing '#' the name is the decoded empty fragment,
-            // not the host:port fallback.
+        void emptyFragmentFallsBackToHostAndPort() {
+            // A trailing '#' used to yield an empty name, which the server
+            // list rendered as a blank label. Nothing usable in the fragment
+            // means the same as no fragment at all.
             ServerConfig config = parser.parse("vless://uuid@host.example:443#");
 
-            assertThat(config.getName()).isEmpty();
+            assertThat(config.getName()).isEqualTo("host.example:443");
         }
 
         @Test

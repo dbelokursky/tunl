@@ -9,6 +9,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 class LogLineFormatterTest {
 
     @Test
+    void levelOfReadsTheLevelTokenNotTheMessage() {
+        assertThat(LogLineFormatter.levelOf(
+                "+0900 2026-04-15 09:22:18 INFO network: no error here"))
+                .isEqualTo(LogLineFormatter.Kind.LEVEL_INFO);
+        assertThat(LogLineFormatter.levelOf("FATAL[0000] start service: boom"))
+                .isEqualTo(LogLineFormatter.Kind.LEVEL_ERROR);
+        assertThat(LogLineFormatter.levelOf("2026-04-15 09:22:18 WARN dns: slow"))
+                .isEqualTo(LogLineFormatter.Kind.LEVEL_WARN);
+        assertThat(LogLineFormatter.levelOf("DEBUG[1234] info about the info"))
+                .isEqualTo(LogLineFormatter.Kind.LEVEL_DEBUG);
+        assertThat(LogLineFormatter.levelOf("goroutine 1 [running]:"))
+                .isEqualTo(LogLineFormatter.Kind.PLAIN);
+        assertThat(LogLineFormatter.levelOf(null)).isEqualTo(LogLineFormatter.Kind.PLAIN);
+    }
+
+    @Test
     void emptyLineProducesNoSegments() {
         assertThat(LogLineFormatter.format("")).isEmpty();
         assertThat(LogLineFormatter.format(null)).isEmpty();

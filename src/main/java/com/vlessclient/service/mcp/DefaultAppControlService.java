@@ -11,6 +11,7 @@ import com.vlessclient.model.Subscription;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.FxExecutor;
+import com.vlessclient.service.Redact;
 import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ShareLinkParser;
 import com.vlessclient.service.SingBoxEngine;
@@ -154,9 +155,13 @@ public class DefaultAppControlService implements AppControlService {
         }
         int effectiveLimit = limit > 0 ? limit : snapshot.size();
         if (snapshot.size() > effectiveLimit) {
-            return new ArrayList<>(
+            snapshot = new ArrayList<>(
                     snapshot.subList(snapshot.size() - effectiveLimit, snapshot.size()));
         }
+        // Same treatment as the diagnostics bundle and the SSE stream: a line
+        // can quote a subscription URL, and the token in it is not something
+        // every holder of the MCP token should get.
+        snapshot.replaceAll(Redact::urlsIn);
         return snapshot;
     }
 
@@ -359,9 +364,15 @@ public class DefaultAppControlService implements AppControlService {
 
     @Override
     public SettingsInfo setProxyMode(String mode) throws McpToolException {
-        AppSettings settings = configStore.getSettings();
-        settings.setProxyMode(parseMode(mode));
-        configStore.saveSettings(settings);
+        ProxyMode parsed = parseMode(mode);
+        // Settings are mutated on the FX thread only, like the Settings view
+        // does: this runs on an HTTP worker, and the dashboard reads the same
+        // instance from the FX thread with nothing in between.
+        FxExecutor.run(() -> {
+            AppSettings settings = configStore.getSettings();
+            settings.setProxyMode(parsed);
+            configStore.saveSettings(settings);
+        });
         return getSettings();
     }
 
@@ -370,7 +381,25 @@ public class DefaultAppControlService implements AppControlService {
         if (key == null || value == null) {
             throw new McpToolException("Both 'key' and 'value' are required.");
         }
-        AppSettings s = configStore.getSettings();
+        McpToolException[] rejected = new McpToolException[1];
+        FxExecutor.run(() -> {
+            AppSettings s = configStore.getSettings();
+            try {
+                applySetting(s, key, value);
+            } catch (McpToolException e) {
+                rejected[0] = e;
+                return;
+            }
+            configStore.saveSettings(s);
+        });
+        if (rejected[0] != null) {
+            throw rejected[0];
+        }
+        return getSettings();
+    }
+
+    private void applySetting(AppSettings s, String key, JsonNode value)
+            throws McpToolException {
         switch (key.toLowerCase()) {
             case "theme" -> s.setTheme(asText(value, key));
             case "language" -> s.setLanguage(asText(value, key));
@@ -383,6 +412,7 @@ public class DefaultAppControlService implements AppControlService {
             case "dns_strategy", "dnsstrategy" -> s.setDnsStrategy(asText(value, key));
             case "tun_interface_name", "tuninterfacename" ->
                     s.setTunInterfaceName(asText(value, key));
+            case "tun_ipv6_enabled", "tunipv6enabled" -> s.setTunIpv6Enabled(value.asBoolean());
             case "core_log_level", "coreloglevel" ->
                     s.setCoreLogLevel(asCoreLogLevel(value, key));
             case "health_check_enabled", "healthcheckenabled" ->
@@ -392,12 +422,11 @@ public class DefaultAppControlService implements AppControlService {
             default -> throw new McpToolException("Setting '" + key + "' is not settable via MCP. "
                     + "Allowed: theme, language, auto_connect, socks_port, http_port, "
                     + "clash_api_port, proxy_dns, direct_dns, dns_strategy, tun_interface_name, "
-                    + "core_log_level, health_check_enabled, mcp_allow_mutations. "
+                    + "tun_ipv6_enabled, core_log_level, health_check_enabled, "
+                    + "mcp_allow_mutations. "
                     + "(mcp_enabled/mcp_port require the Settings screen — they restart "
                     + "the server.)");
         }
-        configStore.saveSettings(s);
-        return getSettings();
     }
 
     @Override

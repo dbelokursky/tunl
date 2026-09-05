@@ -1,10 +1,12 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.ServiceLocator;
-import com.vlessclient.app.UiTestServices;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.SingBoxEngine;
+import com.vlessclient.testing.Await;
+import com.vlessclient.testing.UiTest;
+import java.time.Duration;
 import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
@@ -34,11 +36,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>The assertion is deliberately two-sided: the failure must reach the status
  * line, <em>and</em> it must not reach the thread's uncaught handler.</p>
  */
+@UiTest
 public class DashboardConnectFailureTest extends ApplicationTest {
 
     private static final String BOOM = "sing-box argv rejected";
 
-    private static ConnectionService previous;
     private static Thread.UncaughtExceptionHandler previousHandler;
     private static final AtomicReference<Throwable> escaped = new AtomicReference<>();
 
@@ -46,21 +48,6 @@ public class DashboardConnectFailureTest extends ApplicationTest {
 
     @BeforeAll
     static void setupHeadless() {
-        System.setProperty("testfx.robot", "glass");
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("prism.order", "sw");
-        System.setProperty("prism.text", "t2k");
-        System.setProperty("java.awt.headless", "true");
-        try {
-            UiTestServices.initialize();
-        } catch (Exception e) {
-            // Tolerate service initialization failures in headless CI.
-        }
-        try {
-            previous = ServiceLocator.get(ConnectionService.class);
-        } catch (IllegalArgumentException e) {
-            previous = null;
-        }
         // Present but never started: the throwing double replaces the flow.
         ServiceLocator.register(SingBoxEngine.class,
                 new SingBoxEngine(Path.of("target", "no-such-sing-box")));
@@ -71,13 +58,8 @@ public class DashboardConnectFailureTest extends ApplicationTest {
     }
 
     @AfterAll
-    static void restoreServices() {
+    static void restoreHandler() {
         Thread.setDefaultUncaughtExceptionHandler(previousHandler);
-        // The locator is process-wide; leaving a double behind would follow
-        // every later test class in this JVM.
-        if (previous != null) {
-            ServiceLocator.register(ConnectionService.class, previous);
-        }
     }
 
     @Override
@@ -94,10 +76,8 @@ public class DashboardConnectFailureTest extends ApplicationTest {
         Platform.runLater(controller::toggleConnection);
 
         Label status = lookup("#statusLabel").query();
-        long deadline = System.currentTimeMillis() + 10_000;
-        while (!status.getText().contains(BOOM) && System.currentTimeMillis() < deadline) {
-            Thread.sleep(25);
-        }
+        Await.until("the failure to reach the status line",
+                () -> status.getText().contains(BOOM), Duration.ofSeconds(10));
 
         assertThat(status.getText())
                 .as("without the catch the status line keeps its previous text "

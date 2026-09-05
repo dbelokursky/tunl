@@ -4,11 +4,13 @@ import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.service.TrafficMonitor;
-import javafx.application.Platform;
+import com.vlessclient.ui.view.MirroredSparkline;
+import com.vlessclient.testing.FxToolkitExtension;
 import javafx.scene.control.Label;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -17,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Label binding itself rides on TrafficMonitor's formatting, which is covered
  * by TrafficMonitorTest; here we pin the lifecycle decisions.
  */
+@ExtendWith(FxToolkitExtension.class)
 class TrafficDisplayBinderTest {
 
     private static AppSettings priorSettings;
@@ -39,13 +42,19 @@ class TrafficDisplayBinderTest {
         }
     }
 
-    @BeforeAll
-    static void initJfx() {
-        try {
-            Platform.startup(() -> { });
-        } catch (IllegalStateException ignored) {
-            // Platform already started (e.g. from a previous test)
+    /** Counts clears, which is the one thing the binder does to the chart. */
+    private static final class RecordingSparkline extends MirroredSparkline {
+        private int clears;
+
+        @Override
+        public void clear() {
+            clears++;
+            super.clear();
         }
+    }
+
+    @BeforeAll
+    static void rememberPriorSettings() {
         try {
             priorSettings = ServiceLocator.get(AppSettings.class);
         } catch (IllegalArgumentException e) {
@@ -121,12 +130,26 @@ class TrafficDisplayBinderTest {
         assertThat(monitor.stopped).isFalse();
     }
 
+    /**
+     * Without a monitor the binder must leave the chart alone too: a
+     * DISCONNECTED or ERROR with a live monitor clears the sparkline, so the
+     * chart is the one observable thing a "no-op" can get wrong.
+     */
     @Test
-    void nullMonitorIsNoOpForAllStates() {
-        TrafficDisplayBinder binder = binderOver(null);
+    void nullMonitorLeavesTheChartAndLabelsUntouched() {
+        RecordingSparkline sparkline = new RecordingSparkline();
+        Label download = new Label("42 KB/s");
+        TrafficDisplayBinder binder = new TrafficDisplayBinder(null,
+                new Label(), download, new Label(), new Label(), sparkline);
+
         for (ConnectionState state : ConnectionState.values()) {
             binder.onConnectionStateChanged(state);
         }
-        // Reaching here without an exception is the contract.
+        assertThat(binder.awaitIdle(10_000)).isTrue();
+
+        assertThat(sparkline.clears)
+                .as("no monitor means nothing to stop, so nothing to clear either")
+                .isZero();
+        assertThat(download.getText()).isEqualTo("42 KB/s");
     }
 }

@@ -19,7 +19,17 @@ final class MacKeychainSecretSealer implements SecretSealer {
     private static final String SERVICE = "VLESS Client";
     private static final String TAG = SEAL_PREFIX + "keychain:v1";
 
+    private final SecretSealers.Subprocess subprocess;
     private volatile Boolean available;
+
+    MacKeychainSecretSealer() {
+        this(SecretSealers::run);
+    }
+
+    /** Test seam: runs {@code security} through the given subprocess runner. */
+    MacKeychainSecretSealer(SecretSealers.Subprocess subprocess) {
+        this.subprocess = subprocess;
+    }
 
     @Override
     public boolean isAvailable() {
@@ -45,7 +55,7 @@ final class MacKeychainSecretSealer implements SecretSealer {
                 .encodeToString(plaintext.getBytes(StandardCharsets.UTF_8));
         String command = "add-generic-password -U -a " + quote(key)
                 + " -s " + quote(SERVICE) + " -w " + quote(payload);
-        return SecretSealers.run(new String[] {"security", "-i"}, command + "\n")
+        return subprocess.run(new String[] {"security", "-i"}, command + "\n")
                 .map(out -> TAG)
                 .orElse(null);
     }
@@ -55,7 +65,7 @@ final class MacKeychainSecretSealer implements SecretSealer {
         if (!TAG.equals(stored)) {
             return Optional.empty();
         }
-        return SecretSealers.run(
+        return subprocess.run(
                         new String[] {
                             "security", "find-generic-password",
                             "-a", key, "-s", SERVICE, "-w"
@@ -67,7 +77,7 @@ final class MacKeychainSecretSealer implements SecretSealer {
 
     @Override
     public void delete(String key) {
-        SecretSealers.run(
+        subprocess.run(
                 new String[] {
                     "security", "delete-generic-password", "-a", key, "-s", SERVICE
                 },

@@ -1,6 +1,6 @@
 package com.vlessclient.ui.view;
 
-import com.vlessclient.app.UiTestServices;
+import com.vlessclient.testing.UiTest;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
 import javafx.scene.Parent;
@@ -8,7 +8,6 @@ import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.stage.Stage;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
 
@@ -17,21 +16,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Smoke tests for DashboardView using TestFX with Monocle headless rendering.
  */
+@UiTest
 public class DashboardViewTest extends ApplicationTest {
-
-    @BeforeAll
-    static void setupHeadless() {
-        System.setProperty("testfx.robot", "glass");
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("prism.order", "sw");
-        System.setProperty("prism.text", "t2k");
-        System.setProperty("java.awt.headless", "true");
-        try {
-            UiTestServices.initialize();
-        } catch (Exception e) {
-            // Tolerate service initialization failures in headless CI
-        }
-    }
 
     @Override
     public void start(Stage stage) throws Exception {

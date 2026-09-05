@@ -1,7 +1,7 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.ThemeCss;
-import com.vlessclient.app.UiTestServices;
+import com.vlessclient.testing.UiTest;
 import java.util.ArrayList;
 import java.util.List;
 import javafx.fxml.FXMLLoader;
@@ -11,7 +11,6 @@ import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.layout.Region;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
 
@@ -28,20 +27,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>The dialog is not a page and is not checked: it opens in its own window
  * with no content area around it, so its insets are its own business.</p>
  */
+@UiTest
 public class PageGutterTest extends ApplicationTest {
 
     private static final List<String> PAGES = List.of("DashboardView", "ServersView",
             "SubscriptionsView", "RoutingView", "LogsView", "SettingsView");
-
-    @BeforeAll
-    static void setupHeadless() {
-        System.setProperty("testfx.robot", "glass");
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("prism.order", "sw");
-        System.setProperty("prism.text", "t2k");
-        System.setProperty("java.awt.headless", "true");
-        UiTestServices.initialize();
-    }
 
     @Test
     void noPageAddsAGutterOfItsOwn() {

@@ -165,11 +165,8 @@ public class ThemeManager {
         if (watcher != null || !isMac()) {
             return;
         }
-        watcher = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "theme-watcher");
-            t.setDaemon(true);
-            return t;
-        });
+        watcher = Executors.newSingleThreadScheduledExecutor(
+                DaemonThreads.factory("theme-watcher"));
         watcher.scheduleWithFixedDelay(this::pollSystemAppearance,
                 WATCH_INTERVAL_SECONDS, WATCH_INTERVAL_SECONDS, TimeUnit.SECONDS);
         log.debug("Theme watcher started ({}s interval)", WATCH_INTERVAL_SECONDS);

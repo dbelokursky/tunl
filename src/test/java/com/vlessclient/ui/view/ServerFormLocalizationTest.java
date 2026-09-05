@@ -3,6 +3,7 @@ package com.vlessclient.ui.view;
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ThemeCss;
 import com.vlessclient.model.Protocol;
+import com.vlessclient.testing.UiTest;
 import java.util.Locale;
 import java.util.Map;
 import javafx.fxml.FXMLLoader;
@@ -12,7 +13,6 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.Labeled;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
 
@@ -24,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * can quietly undo that: a label drifting back out of the bundle, and a
  * {@code setText} landing on a property that is now bound.
  */
+@UiTest
 public class ServerFormLocalizationTest extends ApplicationTest {
 
     /** Label fx:id -> the bundle key it must render. */
@@ -48,15 +49,6 @@ public class ServerFormLocalizationTest extends ApplicationTest {
             Map.entry("cancelButton", "button.cancel.action"));
 
     private Scene scene;
-
-    @BeforeAll
-    static void setupHeadless() {
-        System.setProperty("testfx.robot", "glass");
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("prism.order", "sw");
-        System.setProperty("prism.text", "t2k");
-        System.setProperty("java.awt.headless", "true");
-    }
 
     @AfterEach
     void resetLocale() {

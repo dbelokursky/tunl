@@ -1,18 +1,19 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.ServiceLocator;
-import com.vlessclient.app.UiTestServices;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.SingBoxEngine;
+import com.vlessclient.testing.Await;
+import com.vlessclient.testing.UiTest;
+import java.time.Duration;
 import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Label;
 import javafx.stage.Stage;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
@@ -37,30 +38,15 @@ import static org.assertj.core.api.Assertions.assertThat;
  * the tray menu shipped with. A recording double stands in for the service so
  * this stays a headless test with no core, no dialogs and no real network.</p>
  */
+@UiTest
 public class DashboardConnectDelegationTest extends ApplicationTest {
 
     private static RecordingConnectionService recording;
-    private static ConnectionService previous;
 
     private DashboardViewController controller;
 
     @BeforeAll
     static void setupHeadless() {
-        System.setProperty("testfx.robot", "glass");
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("prism.order", "sw");
-        System.setProperty("prism.text", "t2k");
-        System.setProperty("java.awt.headless", "true");
-        try {
-            UiTestServices.initialize();
-        } catch (Exception e) {
-            // Tolerate service initialization failures in headless CI.
-        }
-        try {
-            previous = ServiceLocator.get(ConnectionService.class);
-        } catch (IllegalArgumentException e) {
-            previous = null;
-        }
         // An engine must be present or the controller reports "sing-box not
         // found" with a modal dialog, which would hang a headless run. It is
         // never started: the recording service replaces the whole flow.
@@ -68,15 +54,6 @@ public class DashboardConnectDelegationTest extends ApplicationTest {
                 new SingBoxEngine(Path.of("target", "no-such-sing-box")));
         recording = new RecordingConnectionService();
         ServiceLocator.register(ConnectionService.class, recording);
-    }
-
-    @AfterAll
-    static void restoreServices() {
-        // The locator is process-wide; leaving a double behind would follow
-        // every later test class in this JVM.
-        if (previous != null) {
-            ServiceLocator.register(ConnectionService.class, previous);
-        }
     }
 
     @Override
@@ -110,10 +87,8 @@ public class DashboardConnectDelegationTest extends ApplicationTest {
         // The STARTED branch hops back to the FX thread to name the server; give
         // that runLater a chance to land before sampling the label.
         Label serverName = lookup("#serverNameLabel").query();
-        long deadline = System.currentTimeMillis() + 5_000;
-        while (!"Tokyo".equals(serverName.getText()) && System.currentTimeMillis() < deadline) {
-            Thread.sleep(25);
-        }
+        Await.until("the server name to reach the label",
+                () -> "Tokyo".equals(serverName.getText()), Duration.ofSeconds(5));
         assertThat(serverName.getText()).isEqualTo("Tokyo");
     }
 

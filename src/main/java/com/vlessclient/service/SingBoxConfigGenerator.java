@@ -17,6 +17,7 @@ import com.vlessclient.service.outbound.WireguardEndpointBuilder;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -124,7 +125,7 @@ public class SingBoxConfigGenerator {
         root.set("log", buildLog(settings));
 
         if (settings.getProxyMode() == ProxyMode.TUN) {
-            root.set("dns", buildDns(settings));
+            root.set("dns", buildDns(settings, routingConfig));
         }
 
         root.set("inbounds", buildInbounds(settings));
@@ -195,7 +196,7 @@ public class SingBoxConfigGenerator {
         return log;
     }
 
-    private ObjectNode buildDns(AppSettings settings) {
+    private ObjectNode buildDns(AppSettings settings, RoutingConfig routingConfig) {
         ObjectNode proxyDns = mapper.createObjectNode();
         proxyDns.put("tag", "proxy-dns");
         populateDnsServerAddress(proxyDns, settings.getProxyDns());
@@ -237,6 +238,7 @@ public class SingBoxConfigGenerator {
         localRule.put("server", "local-dns");
         ArrayNode dnsRules = mapper.createArrayNode();
         dnsRules.add(localRule);
+        directDnsRules(routingConfig).forEach(dnsRules::add);
         dns.set("rules", dnsRules);
 
         // In sing-box 1.13 the dns.rules[].outbound match-all form and
@@ -247,6 +249,92 @@ public class SingBoxConfigGenerator {
         dns.put("strategy", settings.getDnsStrategy());
 
         return dns;
+    }
+
+    /** The TUN device's IPv6 address: sing-box's documented ULA example, a /126 like the v4 /30. */
+    static final String TUN_IPV6_ADDRESS = "fdfe:dcba:9876::1/126";
+
+    /** The name-based matchers a route rule can carry over into a DNS rule. */
+    private static final List<String> DNS_NAME_MATCHERS =
+            List.of("domain", "domain_suffix", "domain_keyword", "domain_regex");
+
+    /**
+     * DNS rules that send the names of direct-routed traffic to
+     * {@code direct-dns}.
+     *
+     * <p>The direct DNS server was declared and never referenced: every query
+     * fell through to {@code dns.final}, so a domain the user routes around
+     * the tunnel was still resolved through the proxy resolver — the remote
+     * side saw the query, and a geo-aware answer came back for the wrong
+     * location. The Settings field for it changed nothing. These rules mirror
+     * the route rules that go direct (the bypass list, custom direct rules,
+     * the country bypass), so resolution follows the same split as the
+     * traffic. IP-based rules have no DNS counterpart: a query carries a name,
+     * not an address, and the rule-set tags referenced here are the same ones
+     * {@link #buildRoute} declares.</p>
+     */
+    private List<ObjectNode> directDnsRules(RoutingConfig routingConfig) {
+        List<ObjectNode> out = new ArrayList<>();
+        if (routingConfig == null) {
+            return out;
+        }
+
+        ObjectNode bypass = buildBypassRule(routingConfig.getBypassList());
+        if (bypass != null) {
+            ObjectNode rule = copyNameMatchers(bypass);
+            if (!rule.isEmpty()) {
+                rule.put("server", "direct-dns");
+                out.add(rule);
+            }
+        }
+
+        List<RoutingRule> customRules = routingConfig.getRules();
+        if (customRules != null) {
+            for (RoutingRule custom : customRules) {
+                if (custom.getAction() != RoutingRule.RuleAction.DIRECT) {
+                    continue;
+                }
+                ObjectNode routeRule = buildCustomRule(custom, new LinkedHashSet<>());
+                ObjectNode rule = copyNameMatchers(routeRule);
+                if (custom.getType() == RoutingRule.RuleType.GEOSITE) {
+                    rule.set("rule_set", routeRule.get("rule_set"));
+                }
+                if (!rule.isEmpty()) {
+                    rule.put("server", "direct-dns");
+                    out.add(rule);
+                }
+            }
+        }
+
+        List<String> countries = routingConfig.getBypassCountries();
+        if (countries != null && !countries.isEmpty()) {
+            Set<String> geositeTags = new LinkedHashSet<>();
+            for (String country : countries) {
+                String tag = geositeTagFor(country);
+                if (tag != null) {
+                    geositeTags.add(tag);
+                }
+            }
+            if (!geositeTags.isEmpty()) {
+                ObjectNode rule = mapper.createObjectNode();
+                ArrayNode refs = mapper.createArrayNode();
+                geositeTags.forEach(refs::add);
+                rule.set("rule_set", refs);
+                rule.put("server", "direct-dns");
+                out.add(rule);
+            }
+        }
+        return out;
+    }
+
+    private ObjectNode copyNameMatchers(ObjectNode routeRule) {
+        ObjectNode rule = mapper.createObjectNode();
+        for (String matcher : DNS_NAME_MATCHERS) {
+            if (routeRule.has(matcher)) {
+                rule.set(matcher, routeRule.get(matcher));
+            }
+        }
+        return rule;
     }
 
     /**
@@ -473,6 +561,13 @@ public class SingBoxConfigGenerator {
             // a CIDR array under `address`.
             ArrayNode address = mapper.createArrayNode();
             address.add(settings.getTunIpv4Address());
+            // Without an IPv6 address auto_route only covers IPv4, so on a
+            // dual-stack network every IPv6 destination bypassed the tunnel
+            // while the card said "Connected". The private and link-local v6
+            // ranges stay excluded below, like their IPv4 counterparts.
+            if (settings.isTunIpv6Enabled()) {
+                address.add(TUN_IPV6_ADDRESS);
+            }
             tun.set("address", address);
             // 1.14 defaults to hijack, but keep this explicit: Tunl relies on
             // native interface DNS plus port-53 interception to prevent DNS
@@ -844,7 +939,6 @@ public class SingBoxConfigGenerator {
 
     private ObjectNode buildCustomRule(RoutingRule rule, Set<String> ruleSetTags) {
         ObjectNode ruleNode = mapper.createObjectNode();
-        String outbound = rule.getAction().getValue();
 
         switch (rule.getType()) {
             case DOMAIN -> {
@@ -894,7 +988,19 @@ public class SingBoxConfigGenerator {
             default -> throw new IllegalStateException("Unexpected: " + rule.getType());
         }
 
-        ruleNode.put("outbound", outbound);
+        if (rule.getAction() == RoutingRule.RuleAction.BLOCK) {
+            // A block rule used to say outbound: "block" — and no outbound of
+            // that tag exists in the config (sing-box 1.11 retired the block
+            // outbound type). The core started anyway and dropped matching
+            // connections only as the side effect of an unresolvable tag,
+            // silently, the same way outbound: "nonexistent" would. The reject
+            // action is the supported form: TCP gets a reset and UDP an ICMP
+            // unreachable, so a blocked destination fails fast and visibly.
+            ruleNode.put("action", "reject");
+        } else {
+            ruleNode.put("action", "route");
+            ruleNode.put("outbound", rule.getAction().getValue());
+        }
         return ruleNode;
     }
 
@@ -919,18 +1025,34 @@ public class SingBoxConfigGenerator {
         // file would break the next user-mode system-proxy run.
         ObjectNode cacheFile = mapper.createObjectNode();
         cacheFile.put("enabled", true);
-        Path cacheDir = com.vlessclient.platform.PlatformPaths.current()
-                .dataDir().resolve("cache");
-        try {
-            java.nio.file.Files.createDirectories(cacheDir);
-        } catch (java.io.IOException e) {
-            log.warn("Could not create cache dir {}: {}", cacheDir, e.getMessage());
-        }
-        cacheFile.put("path", cacheDir.resolve("sing-box-"
+        // Created here, not only by the engine: the smoke suites hand a
+        // generated config straight to a TUN launcher, and the core refuses
+        // to start when the directory its cache file points into is missing.
+        ensureCacheDir();
+        cacheFile.put("path", cacheDir().resolve("sing-box-"
                 + settings.getProxyMode().name().toLowerCase(java.util.Locale.ROOT)
                 + ".db").toString());
         experimental.set("cache_file", cacheFile);
 
         return experimental;
+    }
+
+    /** Where the core keeps its cache file, under the app's data directory. */
+    public static Path cacheDir() {
+        return com.vlessclient.platform.PlatformPaths.current().dataDir().resolve("cache");
+    }
+
+    /**
+     * Creates the cache directory the generated config points at. Best
+     * effort: a failure is logged and the core reports the real error at
+     * start.
+     */
+    public static void ensureCacheDir() {
+        Path cacheDir = cacheDir();
+        try {
+            java.nio.file.Files.createDirectories(cacheDir);
+        } catch (java.io.IOException e) {
+            log.warn("Could not create cache dir {}: {}", cacheDir, e.getMessage());
+        }
     }
 }

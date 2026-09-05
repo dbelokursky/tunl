@@ -52,20 +52,6 @@ class PlatformPathsTest {
     }
 
     @Test
-    void linux_downloadsHonorUserDirs(@org.junit.jupiter.api.io.TempDir Path home) throws Exception {
-        Path config = home.resolve(".config");
-        java.nio.file.Files.createDirectories(config);
-        java.nio.file.Files.writeString(config.resolve("user-dirs.dirs"), """
-                # This file is written by xdg-user-dirs-update
-                XDG_DESKTOP_DIR="$HOME/Desktop"
-                XDG_DOWNLOAD_DIR="$HOME/Stuff/Downloads"
-                """);
-
-        LinuxPlatformPaths paths = new LinuxPlatformPaths(home, null);
-
-    }
-
-    @Test
     void current_matchesDetectedPlatform() {
         // The suite runs with the data dir redirected, so current() hands back
         // the wrapper; the per-OS choice being asserted here is its delegate.

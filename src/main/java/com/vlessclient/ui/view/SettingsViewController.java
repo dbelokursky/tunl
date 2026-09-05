@@ -14,6 +14,7 @@ import com.vlessclient.ui.view.settings.UpdatesSection;
 import java.io.IOException;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Consumer;
 import javafx.fxml.FXML;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
@@ -22,6 +23,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TextFormatter;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.VBox;
@@ -82,11 +84,17 @@ public class SettingsViewController implements ViewShownAware {
     @FXML private TextField directDnsField;
     @FXML private TextField tunInterfaceNameField;
     @FXML private TextField tunIpv4Field;
+    @FXML private CheckBox tunIpv6Check;
+    @FXML private Label tunIpv6Hint;
 
     @FXML private Button checkUpdatesButton;
 
     @FXML private Button appUpdateButton;
 
+    @FXML private Label mcpSectionTitle;
+    @FXML private Label mcpHintLabel;
+    @FXML private Label mcpPortLabel;
+    @FXML private Label mcpCommandLabel;
     @FXML private CheckBox mcpEnabledCheck;
     @FXML private TextField mcpPortField;
     @FXML private CheckBox mcpAllowMutationsCheck;
@@ -166,20 +174,20 @@ public class SettingsViewController implements ViewShownAware {
 
     private void initAdvancedSettings(AppSettings settings) {
         proxyDnsField.setText(settings.getProxyDns());
-        proxyDnsField.textProperty().addListener((obs, oldVal, newVal) -> {
-            settings.setProxyDns(newVal == null ? "" : newVal.trim());
+        commitOnEditEnd(proxyDnsField, text -> {
+            settings.setProxyDns(text);
             saveSettings(settings);
         });
 
         directDnsField.setText(settings.getDirectDns());
-        directDnsField.textProperty().addListener((obs, oldVal, newVal) -> {
-            settings.setDirectDns(newVal == null ? "" : newVal.trim());
+        commitOnEditEnd(directDnsField, text -> {
+            settings.setDirectDns(text);
             saveSettings(settings);
         });
 
         tunInterfaceNameField.setText(settings.getTunInterfaceName());
-        tunInterfaceNameField.textProperty().addListener((obs, oldVal, newVal) -> {
-            settings.setTunInterfaceName(newVal == null ? "" : newVal.trim());
+        commitOnEditEnd(tunInterfaceNameField, text -> {
+            settings.setTunInterfaceName(text);
             saveSettings(settings);
         });
 
@@ -190,8 +198,14 @@ public class SettingsViewController implements ViewShownAware {
         });
 
         tunIpv4Field.setText(settings.getTunIpv4Address());
-        tunIpv4Field.textProperty().addListener((obs, oldVal, newVal) -> {
-            settings.setTunIpv4Address(newVal == null ? "" : newVal.trim());
+        commitOnEditEnd(tunIpv4Field, text -> {
+            settings.setTunIpv4Address(text);
+            saveSettings(settings);
+        });
+
+        tunIpv6Check.setSelected(settings.isTunIpv6Enabled());
+        tunIpv6Check.selectedProperty().addListener((obs, oldVal, newVal) -> {
+            settings.setTunIpv6Enabled(newVal);
             saveSettings(settings);
         });
     }
@@ -277,23 +291,25 @@ public class SettingsViewController implements ViewShownAware {
 
         initLaunchAtLogin();
 
+        restrictToDigits(socksPortField);
         socksPortField.setText(String.valueOf(settings.getSocksPort()));
-        socksPortField.textProperty().addListener((obs, oldVal, newVal) -> {
-            int port = parsePort(newVal, 1080);
+        commitOnEditEnd(socksPortField, text -> {
+            // An empty or out-of-range entry keeps the stored port rather than
+            // resetting a customized one to the default.
+            int port = parsePort(text, settings.getSocksPort());
             settings.setSocksPort(port);
+            socksPortField.setText(String.valueOf(port));
             saveSettings(settings);
         });
 
+        restrictToDigits(httpPortField);
         httpPortField.setText(String.valueOf(settings.getHttpPort()));
-        httpPortField.textProperty().addListener((obs, oldVal, newVal) -> {
-            int port = parsePort(newVal, 1081);
+        commitOnEditEnd(httpPortField, text -> {
+            int port = parsePort(text, settings.getHttpPort());
             settings.setHttpPort(port);
+            httpPortField.setText(String.valueOf(port));
             saveSettings(settings);
         });
-
-        // Restrict port fields to numeric input
-        addNumericFilter(socksPortField);
-        addNumericFilter(httpPortField);
     }
 
     private void initHealthCheckSettings(AppSettings settings) {
@@ -309,21 +325,24 @@ public class SettingsViewController implements ViewShownAware {
             saveSettings(settings);
         });
 
+        restrictToDigits(healthCheckIntervalField);
         healthCheckIntervalField.setText(String.valueOf(settings.getHealthCheckIntervalSeconds()));
-        healthCheckIntervalField.textProperty().addListener((obs, oldVal, newVal) -> {
-            settings.setHealthCheckIntervalSeconds(parseSeconds(newVal, 5));
+        commitOnEditEnd(healthCheckIntervalField, text -> {
+            int seconds = parseSeconds(text, settings.getHealthCheckIntervalSeconds());
+            settings.setHealthCheckIntervalSeconds(seconds);
+            healthCheckIntervalField.setText(String.valueOf(seconds));
             saveSettings(settings);
         });
 
+        restrictToDigits(healthCheckReconnectDelayField);
         healthCheckReconnectDelayField.setText(
                 String.valueOf(settings.getHealthCheckDelaySeconds()));
-        healthCheckReconnectDelayField.textProperty().addListener((obs, oldVal, newVal) -> {
-            settings.setHealthCheckDelaySeconds(parseSeconds(newVal, 10));
+        commitOnEditEnd(healthCheckReconnectDelayField, text -> {
+            int seconds = parseSeconds(text, settings.getHealthCheckDelaySeconds());
+            settings.setHealthCheckDelaySeconds(seconds);
+            healthCheckReconnectDelayField.setText(String.valueOf(seconds));
             saveSettings(settings);
         });
-
-        addNumericFilter(healthCheckIntervalField);
-        addNumericFilter(healthCheckReconnectDelayField);
     }
 
     /**
@@ -478,6 +497,17 @@ public class SettingsViewController implements ViewShownAware {
         directDnsLabel.textProperty().bind(I18n.binding("settings.direct.dns"));
         tunInterfaceNameLabel.textProperty().bind(I18n.binding("settings.tun.interface"));
         tunIpv4Label.textProperty().bind(I18n.binding("settings.tun.ipv4"));
+        tunIpv6Check.textProperty().bind(I18n.binding("settings.tun.ipv6"));
+        tunIpv6Hint.textProperty().bind(I18n.binding("settings.tun.ipv6.hint"));
+        // The whole MCP block sat in the FXML in English.
+        mcpSectionTitle.textProperty().bind(I18n.binding("settings.mcp.title"));
+        mcpHintLabel.textProperty().bind(I18n.binding("settings.mcp.hint"));
+        mcpEnabledCheck.textProperty().bind(I18n.binding("settings.mcp.enable"));
+        mcpPortLabel.textProperty().bind(I18n.binding("settings.mcp.port"));
+        mcpAllowMutationsCheck.textProperty().bind(I18n.binding("settings.mcp.allow.mutations"));
+        mcpCommandLabel.textProperty().bind(I18n.binding("settings.mcp.command.label"));
+        ButtonLabels.bindStatic(mcpCopyButton, "settings.mcp.copy");
+        ButtonLabels.bindStatic(mcpRegenButton, "settings.mcp.regenerate");
     }
 
     private void refreshLabels() {
@@ -538,10 +568,12 @@ public class SettingsViewController implements ViewShownAware {
             applyMcp();
         });
 
+        restrictToDigits(mcpPortField);
         mcpPortField.setText(String.valueOf(settings.getMcpPort()));
-        addNumericFilter(mcpPortField);
-        mcpPortField.textProperty().addListener((obs, oldVal, newVal) -> {
-            settings.setMcpPort(parsePort(newVal, 55555));
+        commitOnEditEnd(mcpPortField, text -> {
+            int port = parsePort(text, settings.getMcpPort());
+            settings.setMcpPort(port);
+            mcpPortField.setText(String.valueOf(port));
             saveSettings(settings);
             applyMcp();
         });
@@ -592,9 +624,10 @@ public class SettingsViewController implements ViewShownAware {
         mcpCommandArea.setText(mcpServerService.claudeAddCommand());
         String startError = mcpServerService.getLastStartError();
         if (startError != null) {
-            mcpStatusLabel.setText("○ failed — " + startError);
+            mcpStatusLabel.setText(I18n.get("settings.mcp.status.failed", startError));
         } else {
-            mcpStatusLabel.setText(mcpServerService.isRunning() ? "● running" : "○ stopped");
+            mcpStatusLabel.setText(I18n.get(mcpServerService.isRunning()
+                    ? "settings.mcp.status.running" : "settings.mcp.status.stopped"));
         }
     }
 
@@ -648,11 +681,50 @@ public class SettingsViewController implements ViewShownAware {
         return defaultSeconds;
     }
 
-    private void addNumericFilter(TextField field) {
-        field.textProperty().addListener((obs, oldVal, newVal) -> {
-            if (newVal != null && !newVal.matches("\\d*")) {
-                field.setText(oldVal);
+    /**
+     * Commits a text field when editing ends — focus leaving the field, or
+     * Enter — rather than on every keystroke.
+     *
+     * <p>The per-keystroke listeners wrote settings.json (a temp file plus an
+     * atomic rename) on every character, and the MCP port one also restarted
+     * the listener: typing {@code 55556} rebound it on 5, 55, 555, 5555 and
+     * 55556, with the momentarily empty field silently substituting the
+     * default. Committing once per edit also means a half-typed value never
+     * reaches the store.</p>
+     *
+     * @param field  the field to watch
+     * @param commit receives the trimmed text; may normalize what the field
+     *               shows (an invalid port is put back to the stored one)
+     */
+    private static void commitOnEditEnd(TextField field, Consumer<String> commit) {
+        String[] lastCommitted = {trimmed(field.getText())};
+        Runnable fire = () -> {
+            String text = trimmed(field.getText());
+            if (text.equals(lastCommitted[0])) {
+                return;
+            }
+            commit.accept(text);
+            lastCommitted[0] = trimmed(field.getText());
+        };
+        field.setOnAction(event -> fire.run());
+        field.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
+            if (!isFocused) {
+                fire.run();
             }
         });
+    }
+
+    private static String trimmed(String text) {
+        return text == null ? "" : text.trim();
+    }
+
+    /**
+     * Lets only digits into a field. A formatter filter rejects the change
+     * before it lands, where the old text listener re-set the previous text
+     * after the fact and re-entered every other listener on the field.
+     */
+    private static void restrictToDigits(TextField field) {
+        field.setTextFormatter(new TextFormatter<String>(change ->
+                change.getControlNewText().matches("\\d*") ? change : null));
     }
 }

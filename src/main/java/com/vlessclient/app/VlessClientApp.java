@@ -164,16 +164,7 @@ public class VlessClientApp extends Application {
                     log.info("Desktop quit handler fired — terminating");
                     // Don't let shutdown block us forever: kick a watchdog
                     // that force-halts after 2 seconds no matter what.
-                    Thread killer = new Thread(() -> {
-                        try {
-                            Thread.sleep(2000);
-                        } catch (InterruptedException ignored) {
-                            Thread.currentThread().interrupt();
-                        }
-                        forceKill.run();
-                    }, "vless-quit-killer");
-                    killer.setDaemon(true);
-                    killer.start();
+                    runAfter(2000, "vless-quit-killer", forceKill);
 
                     try {
                         shutdown();
@@ -189,9 +180,30 @@ public class VlessClientApp extends Application {
             }
         } catch (Throwable e) {
             // Throwable: a poisoned AWT Toolkit (headless=false, no display)
-            // surfaces as an Error here — must not abort startup.
-            log.debug("Could not install Desktop quit handler: {}", e.toString());
+            // surfaces as an Error here — must not abort startup. Warn, not
+            // debug: the consequence is the same as the unsupported branch
+            // above (Cmd+Q can strand the JVM), and it was invisible in the log.
+            log.warn("Could not install Desktop quit handler: {}", e.toString());
         }
+    }
+
+    /**
+     * A daemon thread that waits and then runs {@code action} — the shape of
+     * every "if the orderly path stalls, end the process anyway" guard in this
+     * class. An interrupt does not cancel it: the guards exist precisely for
+     * the case where nothing else can be relied on.
+     */
+    private static void runAfter(long delayMs, String name, Runnable action) {
+        Thread thread = new Thread(() -> {
+            try {
+                Thread.sleep(delayMs);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+            action.run();
+        }, name);
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private void setDockIcon() {
@@ -296,6 +308,9 @@ public class VlessClientApp extends Application {
         // after the window is shown so any error dialog has a parent.
         MainViewController mainController = loader.getController();
         if (mainController != null) {
+            // Views that want to navigate (the dashboard's first-run link)
+            // find the sidebar's owner here rather than holding a reference.
+            ServiceLocator.register(MainViewController.class, mainController);
             mainController.triggerAutoConnect();
         }
 
@@ -397,20 +412,10 @@ public class VlessClientApp extends Application {
         // the JVM from terminating. Force the process to exit so the app
         // actually quits when the user picks Quit from the tray menu or
         // uses Cmd+Q.
-        Runnable forceExit = () -> {
+        runAfter(500, "vless-jvm-exit", () -> {
             log.info("Forcing JVM shutdown");
             Runtime.getRuntime().halt(0);
-        };
-        Thread killer = new Thread(() -> {
-            try {
-                Thread.sleep(500);
-            } catch (InterruptedException ignored) {
-                Thread.currentThread().interrupt();
-            }
-            forceExit.run();
-        }, "vless-jvm-exit");
-        killer.setDaemon(true);
-        killer.start();
+        });
         teardownReachedExit.set(true);
         // In case the killer thread is somehow not enough, call System.exit
         // directly too. It waits for shutdown hooks (including our sing-box
@@ -457,20 +462,13 @@ public class VlessClientApp extends Application {
         // it would leave the core running under sudo with the TUN device up and
         // its ports held, so the tunnel would outlive the app that owns it and
         // the next launch would find the ports taken. exit() runs the hooks.
-        Thread lastResort = new Thread(() -> {
-            try {
-                Thread.sleep(HOOK_GRACE_MS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
+        runAfter(HOOK_GRACE_MS, "vless-last-resort", () -> {
             // Reached only if a hook is stuck too. Nothing else is going to end
             // this process, and staying up is the one outcome already known to
             // be worse than any of the alternatives.
             log.error("Shutdown hooks did not finish either; halting");
             Runtime.getRuntime().halt(1);
-        }, "vless-last-resort");
-        lastResort.setDaemon(true);
-        lastResort.start();
+        });
         System.exit(0);
     }
 

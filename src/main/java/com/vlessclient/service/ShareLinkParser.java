@@ -6,7 +6,6 @@ import com.vlessclient.model.TransportType;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -45,8 +44,67 @@ public class ShareLinkParser {
             case "trojan" -> parseTrojan(uri);
             case "ss" -> parseShadowsocks(uri);
             case "hysteria2", "hy2" -> parseHysteria2(uri);
-            default -> throw new IllegalArgumentException("Unsupported protocol scheme: " + scheme);
+            default -> throw new UnsupportedSchemeException(scheme);
         };
+    }
+
+    /** Longest display name kept from a link; anything past it is noise. */
+    static final int MAX_NAME_LENGTH = 200;
+
+    /**
+     * A display name safe to store, render and log.
+     *
+     * <p>The name comes straight out of the link's fragment, URL-decoded, and
+     * went into {@code tunl.log} verbatim on every connect. A fragment holding
+     * {@code %0A} forged a line in the file people attach to bug reports, and
+     * an unbounded one could be as long as the provider liked. Control
+     * characters become spaces and the result is trimmed and capped.</p>
+     *
+     * @param raw the decoded fragment or JSON name, possibly null
+     * @return the cleaned name, empty when nothing usable remains
+     */
+    static String cleanName(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String cleaned = raw.replaceAll("[\\p{Cntrl}\\u2028\\u2029]", " ").trim();
+        return cleaned.length() > MAX_NAME_LENGTH ? cleaned.substring(0, MAX_NAME_LENGTH) : cleaned;
+    }
+
+    /** The fragment as the name, or {@code host:port} when it yields nothing. */
+    private static String displayName(String fragment, String host, int port) {
+        String cleaned = cleanName(fragment);
+        return cleaned.isEmpty() ? host + ":" + port : cleaned;
+    }
+
+    /**
+     * A link that is well-formed but uses a protocol this client does not
+     * implement.
+     *
+     * <p>Kept distinct from the other {@link IllegalArgumentException}s so a
+     * caller reading a whole list — a subscription — can tell "this provider
+     * also hands out TUIC" from "this line is garbage". The first is not
+     * evidence that the list was truncated or corrupted, and must not be
+     * treated as one.</p>
+     */
+    public static final class UnsupportedSchemeException extends IllegalArgumentException {
+
+        private final String scheme;
+
+        /**
+         * Creates the exception for a scheme.
+         *
+         * @param scheme the lower-cased scheme of the rejected link
+         */
+        public UnsupportedSchemeException(String scheme) {
+            super("Unsupported protocol scheme: " + scheme);
+            this.scheme = scheme;
+        }
+
+        /** The scheme of the rejected link, e.g. {@code tuic}. */
+        public String scheme() {
+            return scheme;
+        }
     }
 
     /**
@@ -103,7 +161,7 @@ public class ShareLinkParser {
         config.setUuid(userInfo);
         config.setAddress(host);
         config.setPort(port);
-        config.setName(fragment != null ? fragment : host + ":" + port);
+        config.setName(displayName(fragment, host, port));
 
         // Encryption
         String encryption = params.get("encryption");
@@ -151,7 +209,7 @@ public class ShareLinkParser {
         ServerConfig config = new ServerConfig();
         config.setProtocol(Protocol.VMESS);
 
-        config.setName(getJsonString(node, "ps", ""));
+        config.setName(cleanName(getJsonString(node, "ps", "")));
         config.setAddress(getJsonString(node, "add", ""));
         config.setPort(getJsonInt(node, "port", 443));
         config.setUuid(getJsonString(node, "id", ""));
@@ -260,7 +318,7 @@ public class ShareLinkParser {
         config.setUuid(password);
         config.setAddress(host);
         config.setPort(port);
-        config.setName(fragment != null ? fragment : host + ":" + port);
+        config.setName(displayName(fragment, host, port));
 
         // Transport
         Map<String, String> params = parseQueryParams(parsed.getRawQuery());
@@ -290,8 +348,9 @@ public class ShareLinkParser {
             config.getTls().setAlpn(alpn);
         }
 
-        String allowInsecure = params.get("allowInsecure");
-        if ("1".equals(allowInsecure)) {
+        // Both spellings circulate: allowInsecure=1 (v2rayN, Xray) and
+        // insecure=1 (sing-box-flavoured links).
+        if ("1".equals(params.get("allowInsecure")) || "1".equals(params.get("insecure"))) {
             config.getTls().setAllowInsecure(true);
         }
 
@@ -388,7 +447,7 @@ public class ShareLinkParser {
         config.setUuid(password);
         config.setAddress(host);
         config.setPort(port);
-        config.setName(fragment != null ? fragment : host + ":" + port);
+        config.setName(displayName(fragment, host, port));
 
         return config;
     }
@@ -445,7 +504,7 @@ public class ShareLinkParser {
         config.setUuid(password);
         config.setAddress(host);
         config.setPort(port);
-        config.setName(fragment != null ? fragment : host + ":" + port);
+        config.setName(displayName(fragment, host, port));
 
         // TLS - hysteria2 defaults to TLS
         config.getTls().setEnabled(true);
@@ -531,8 +590,9 @@ public class ShareLinkParser {
             config.getTls().setRealityShortId(sid);
         }
 
-        String allowInsecure = params.get("allowInsecure");
-        if ("1".equals(allowInsecure)) {
+        // Both spellings circulate: allowInsecure=1 (v2rayN, Xray) and
+        // insecure=1 (sing-box-flavoured links).
+        if ("1".equals(params.get("allowInsecure")) || "1".equals(params.get("insecure"))) {
             config.getTls().setAllowInsecure(true);
         }
     }
@@ -568,31 +628,8 @@ public class ShareLinkParser {
         return value.isNumber() ? value.asInt(defaultValue) : defaultValue;
     }
 
-    private String decodeBase64(String encoded) {
-        // Remove whitespace and newlines
-        encoded = encoded.replaceAll("\\s+", "");
-        // Try standard base64 first, then URL-safe
-        try {
-            return new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException e) {
-            // Try URL-safe base64
-            try {
-                return new String(Base64.getUrlDecoder().decode(encoded), StandardCharsets.UTF_8);
-            } catch (IllegalArgumentException e2) {
-                // Try adding padding
-                String padded = encoded;
-                int pad = padded.length() % 4;
-                if (pad > 0) {
-                    padded = padded + "=".repeat(4 - pad);
-                }
-                try {
-                    return new String(Base64.getDecoder().decode(padded), StandardCharsets.UTF_8);
-                } catch (IllegalArgumentException e3) {
-                    return new String(Base64.getUrlDecoder().decode(padded),
-                            StandardCharsets.UTF_8);
-                }
-            }
-        }
+    private static String decodeBase64(String encoded) {
+        return Base64Lenient.decodeUtf8(encoded);
     }
 
     private TransportType parseTransportType(String type) {

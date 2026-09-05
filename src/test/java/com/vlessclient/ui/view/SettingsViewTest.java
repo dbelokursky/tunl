@@ -2,10 +2,10 @@ package com.vlessclient.ui.view;
 
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.app.ThemeCss;
-import com.vlessclient.app.UiTestServices;
 import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.platform.PlatformPaths;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.testing.UiTest;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
@@ -14,7 +14,6 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.stage.Stage;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
 
@@ -25,21 +24,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * section, whose fx:ids and action handlers must match the controller or the
  * FXML fails to load.
  */
+@UiTest
 public class SettingsViewTest extends ApplicationTest {
-
-    @BeforeAll
-    static void setupHeadless() {
-        System.setProperty("testfx.robot", "glass");
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("prism.order", "sw");
-        System.setProperty("prism.text", "t2k");
-        System.setProperty("java.awt.headless", "true");
-        try {
-            UiTestServices.initialize();
-        } catch (Exception e) {
-            // Tolerate service initialization failures in headless CI
-        }
-    }
 
     @Override
     public void start(Stage stage) throws Exception {
@@ -87,6 +73,74 @@ public class SettingsViewTest extends ApplicationTest {
         }
     }
 
+    /**
+     * A port field used to persist on every keystroke — and the MCP one also
+     * restarted the listener per digit, with the momentarily empty field
+     * substituting the default. The value now lands when editing ends.
+     */
+    @Test
+    void portFieldsCommitWhenEditingEndsNotPerKeystroke() {
+        TextField socks = lookup("#socksPortField").query();
+        TextField http = lookup("#httpPortField").query();
+        ConfigStore store = ServiceLocator.get(ConfigStore.class);
+        int initial = store.getSettings().getSocksPort();
+        try {
+            interact(() -> {
+                socks.requestFocus();
+                socks.setText("");
+                socks.setText("1");
+                socks.setText("10");
+                socks.setText("1085");
+            });
+            assertThat(store.getSettings().getSocksPort())
+                    .as("typing must not persist a half-typed number")
+                    .isEqualTo(initial);
+
+            interact(http::requestFocus);
+
+            assertThat(store.getSettings().getSocksPort()).isEqualTo(1085);
+            assertThat(new ConfigStore(PlatformPaths.current().dataDir())
+                    .getSettings().getSocksPort())
+                    .as("committed to settings.json, not only to memory")
+                    .isEqualTo(1085);
+        } finally {
+            interact(() -> {
+                socks.requestFocus();
+                socks.setText(String.valueOf(initial));
+                http.requestFocus();
+            });
+        }
+    }
+
+    @Test
+    void clearingAPortFieldKeepsTheStoredPort() {
+        TextField socks = lookup("#socksPortField").query();
+        TextField http = lookup("#httpPortField").query();
+        ConfigStore store = ServiceLocator.get(ConfigStore.class);
+        int initial = store.getSettings().getSocksPort();
+
+        interact(() -> {
+            socks.requestFocus();
+            socks.setText("");
+            http.requestFocus();
+        });
+
+        assertThat(store.getSettings().getSocksPort()).isEqualTo(initial);
+        assertThat(socks.getText())
+                .as("the field shows the value that is actually in effect")
+                .isEqualTo(String.valueOf(initial));
+    }
+
+    @Test
+    void portFieldsRejectNonDigits() {
+        TextField socks = lookup("#socksPortField").query();
+        String before = socks.getText();
+
+        interact(() -> socks.appendText("x"));
+
+        assertThat(socks.getText()).isEqualTo(before);
+    }
+
     @Test
     void mcpControlsExist() {
         assertThat(lookup("#mcpEnabledCheck").tryQuery()).isPresent();
@@ -123,16 +177,21 @@ public class SettingsViewTest extends ApplicationTest {
      * class pins a 34px height so every field in a form matches. The pin won,
      * so the box rendered one row tall and cut the glyphs through the middle:
      * a command nobody could read, next to a button offering to copy it.</p>
+     *
+     * <p>Measured through layoutBounds, which is the control's own height:
+     * boundsInLocal grows to swallow children that spill past the edge, so it
+     * can report a tall box around a control that is still pinned to one
+     * line.</p>
      */
     @Test
     void mcpCommandAreaIsTallEnoughToReadTheCommand() {
         TextArea command = lookup("#mcpCommandArea").query();
-        double singleLineField = lookup("#mcpPortField").query().getBoundsInLocal().getHeight();
+        double singleLineField = lookup("#mcpPortField").query().getLayoutBounds().getHeight();
 
-        assertThat(command.getBoundsInLocal().getHeight())
+        assertThat(command.getLayoutBounds().getHeight())
                 .withFailMessage("the MCP command area is %.1fpx tall, no more than the "
                         + "%.1fpx single-line field beside it — it asks for %d rows",
-                        command.getBoundsInLocal().getHeight(), singleLineField,
+                        command.getLayoutBounds().getHeight(), singleLineField,
                         command.getPrefRowCount())
                 .isGreaterThan(singleLineField);
     }

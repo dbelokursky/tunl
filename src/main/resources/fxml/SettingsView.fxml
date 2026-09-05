@@ -144,15 +144,20 @@
                            promptText="172.19.0.1/30"/>
             </HBox>
 
+            <CheckBox fx:id="tunIpv6Check" text="Route IPv6 through the tunnel"
+                      styleClass="form-checkbox"/>
+            <Label fx:id="tunIpv6Hint" styleClass="hint-label" wrapText="true" maxWidth="520"
+                   text="Off, IPv6 traffic bypasses the VPN on dual-stack networks. Applies in TUN mode."/>
+
             <CheckBox fx:id="storeSecretsCheck" text="Store credentials in the system keychain"
                       styleClass="form-checkbox"/>
         </VBox>
 
         <!-- Agent Control (MCP) Section -->
         <VBox spacing="12" styleClass="card">
-            <Label text="Agent Control (MCP)" styleClass="form-section-title"/>
+            <Label fx:id="mcpSectionTitle" text="Agent Control (MCP)" styleClass="form-section-title"/>
 
-            <Label text="Expose a local, loopback-only MCP server so AI agents can read status/logs and manage the client. Guarded by a bearer token."
+            <Label fx:id="mcpHintLabel" text="Expose a local, loopback-only MCP server so AI agents can read status/logs and manage the client. Guarded by a bearer token."
                    styleClass="status-subtitle" wrapText="true" maxWidth="520"/>
 
             <CheckBox fx:id="mcpEnabledCheck" text="Enable MCP server" styleClass="form-checkbox"/>
@@ -161,7 +166,7 @@
                 <!-- 210 and 110: the label gutter and the numeric-field width
                      every other label+field row in this view uses. At 120/120
                      this row's field started 90px left of all of them. -->
-                <Label text="Port" styleClass="form-label" prefWidth="210"/>
+                <Label fx:id="mcpPortLabel" text="Port" styleClass="form-label" prefWidth="210"/>
                 <TextField fx:id="mcpPortField" styleClass="form-field" prefWidth="110"
                            promptText="55555"/>
                 <Label fx:id="mcpStatusLabel" text="" styleClass="stats-value"
@@ -174,7 +179,7 @@
 
             <Separator styleClass="sidebar-separator"/>
 
-            <Label text="Add to Claude Code (copy &amp; run):" styleClass="form-label"/>
+            <Label fx:id="mcpCommandLabel" text="Add to Claude Code (copy &amp; run):" styleClass="form-label"/>
             <TextArea fx:id="mcpCommandArea" editable="false" wrapText="true" prefRowCount="3"
                       styleClass="form-field"/>
 

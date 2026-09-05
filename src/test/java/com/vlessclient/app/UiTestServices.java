@@ -2,11 +2,13 @@ package com.vlessclient.app;
 
 import com.vlessclient.model.HealthCheckTarget;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.platform.SecretSealers;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.CountryResolver;
 import com.vlessclient.service.GeoIpDatabase;
 import com.vlessclient.service.LatencyTester;
+import com.vlessclient.service.ProxyGroupMonitor;
 import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.ShareLinkParser;
@@ -55,6 +57,7 @@ public final class UiTestServices {
 
         NoNetworkTrafficMonitor trafficMonitor = new NoNetworkTrafficMonitor();
         ServiceLocator.register(TrafficMonitor.class, trafficMonitor);
+        ServiceLocator.register(ProxyGroupMonitor.class, new NoNetworkProxyGroupMonitor());
 
         NoNetworkLatencyTester latencyTester = new NoNetworkLatencyTester();
         ServiceLocator.register(LatencyTester.class, latencyTester);
@@ -132,6 +135,14 @@ public final class UiTestServices {
         }
     }
 
+    private static final class NoNetworkProxyGroupMonitor extends ProxyGroupMonitor {
+
+        @Override
+        public void start(int port, String secret) {
+            // Never poll the loopback API from a UI test.
+        }
+    }
+
     private static final class NoNetworkLatencyTester extends LatencyTester {
 
         @Override
@@ -173,7 +184,8 @@ public final class UiTestServices {
 
         private NoNetworkSubscriptionService(
                 ConfigStore configStore, ShareLinkParser shareLinkParser) {
-            super(configStore, shareLinkParser);
+            // Never the platform sealer: a UI test must not reach the keychain.
+            super(configStore, shareLinkParser, SecretSealers.disabled());
         }
 
         @Override

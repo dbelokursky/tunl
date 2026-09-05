@@ -56,6 +56,17 @@ public final class SecretSealers {
     }
 
     /**
+     * The seam every backend shells out through: one command, an optional
+     * stdin payload, and its stdout when it exited 0. {@link #run} is the
+     * production implementation; the sealer tests substitute a recording fake
+     * so nothing reaches a real keychain.
+     */
+    @FunctionalInterface
+    interface Subprocess {
+        Optional<String> run(String[] command, String stdin);
+    }
+
+    /**
      * Runs a command, feeding {@code stdin} (may be null) and capturing
      * stdout. Returns empty on non-zero exit, timeout, or launch failure.
      */

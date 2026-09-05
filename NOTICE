@@ -21,3 +21,61 @@ repository, and the two are distributed together as an aggregation. The exact
 version bundled by any given build is pinned in
 src/main/resources/singbox.properties, and its corresponding source is
 available from the upstream repository above.
+
+--------------------------------------------------------------------------
+
+Bundled third-party components: the Java runtime and libraries
+
+The installers (DMG / MSI / DEB) are jpackage images: a Java runtime produced
+by jlink, the application jar with the libraries below, and the sing-box
+binary above. The Maven coordinates are those of pom.xml, where the versions
+are pinned; the release workflow builds with the Eclipse Temurin JDK.
+
+Eclipse Temurin (OpenJDK) runtime
+    A runtime image produced by jlink from the Eclipse Temurin JDK on the
+    build host, reduced to the modules the application needs.
+    License: GNU General Public License v2.0 with the Classpath Exception.
+    https://adoptium.net/ | https://openjdk.org/legal/gplv2+ce.html
+
+OpenJFX (org.openjfx: javafx-base, javafx-graphics, javafx-controls,
+javafx-fxml)
+    License: GNU General Public License v2.0 with the Classpath Exception.
+    https://openjfx.io/ | https://github.com/openjdk/jfx/blob/master/LICENSE
+
+Jackson (tools.jackson.core: jackson-core, jackson-databind;
+com.fasterxml.jackson.core: jackson-annotations)
+    Copyright FasterXML, LLC and contributors.
+    License: Apache License, Version 2.0.
+    https://github.com/FasterXML/jackson
+
+MaxMind DB Reader for Java (com.maxmind.db: maxmind-db)
+    Copyright MaxMind, Inc.
+    License: Apache License, Version 2.0.
+    https://github.com/maxmind/MaxMind-DB-Reader-java
+
+SLF4J (org.slf4j: slf4j-api)
+    Copyright QOS.ch Sarl (Switzerland).
+    License: MIT License.
+    https://www.slf4j.org/license.html
+
+Logback (ch.qos.logback: logback-classic, logback-core)
+    Copyright QOS.ch Sarl (Switzerland).
+    License: dual-licensed under the Eclipse Public License v1.0 and the GNU
+    Lesser General Public License v2.1.
+    https://logback.qos.ch/license.html
+
+--------------------------------------------------------------------------
+
+Data downloaded at runtime: DB-IP IP to Country Lite
+
+The application downloads the "IP to Country Lite" database published by
+DB-IP (https://db-ip.com/db/download/ip-to-country-lite) at runtime, for
+local IP-to-country lookups behind the server flags. It is not part of the
+installers; the application fetches the current monthly file itself.
+
+    License: Creative Commons Attribution 4.0 International (CC BY 4.0),
+    https://creativecommons.org/licenses/by/4.0/
+
+CC BY 4.0 requires attribution. This product attributes the data as
+"IP Geolocation by DB-IP" (https://db-ip.com) here and in the application,
+under Settings -> About.

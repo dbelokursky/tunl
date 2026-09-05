@@ -1,5 +1,6 @@
 package com.vlessclient.service;
 
+import com.vlessclient.app.AppVersion;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.Subscription;
 import com.vlessclient.platform.PlatformPaths;
@@ -10,6 +11,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
@@ -17,7 +19,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
@@ -87,19 +88,41 @@ public class SubscriptionService {
     private ScheduledExecutorService scheduler;
 
     /**
+     * The headers of the response the current thread's last
+     * {@link #fetchContent} read. A side channel on purpose: fetchContent's
+     * String contract is the seam every test double overrides, and a double
+     * that never sets this reads as "the provider sent no quota headers".
+     */
+    private final ThreadLocal<HttpHeaders> responseHeaders = new ThreadLocal<>();
+
+    /**
      * Creates a subscription service using the default data directory and HTTP client.
      *
      * @param configStore the store that holds the parsed servers
      * @param shareLinkParser the parser used to decode share links from subscription content
      */
     public SubscriptionService(ConfigStore configStore, ShareLinkParser shareLinkParser) {
+        this(configStore, shareLinkParser, SecretSealers.forCurrentPlatform());
+    }
+
+    /**
+     * Creates a subscription service with an explicit sealer for the stored
+     * URLs; the headless UI test graph passes {@link SecretSealers#disabled()}
+     * so a test never reaches the OS keychain.
+     *
+     * @param configStore     the store that holds the parsed servers
+     * @param shareLinkParser the parser used to decode share links
+     * @param sealer          how subscription URLs are protected at rest
+     */
+    public SubscriptionService(ConfigStore configStore, ShareLinkParser shareLinkParser,
+                               SecretSealer sealer) {
         this(configStore, shareLinkParser,
                 resolveDataDir(),
                 AppHttpClients.newBuilder()
                         .connectTimeout(Duration.ofSeconds(15))
                         .followRedirects(HttpClient.Redirect.NORMAL)
                         .build(),
-                SecretSealers.forCurrentPlatform());
+                sealer);
     }
 
     /**
@@ -248,8 +271,11 @@ public class SubscriptionService {
 
         String content;
         ParsedContent parsed;
+        HttpHeaders headers;
         try {
+            responseHeaders.remove();
             content = fetchContent(sub.getUrl());
+            headers = responseHeaders.get();
             parsed = parseContent(content);
         } catch (Exception e) {
             // Scrub before both sinks: the throw sites we control are already
@@ -277,12 +303,19 @@ public class SubscriptionService {
         // its servers down, and that case has no ambiguity to protect against.
         List<ServerConfig> fetchedServers = parsed.servers();
         if (fetchedServers.isEmpty() && content != null && !content.isBlank()) {
-            log.warn("Subscription '{}' returned {} bytes with no recognizable "
+            log.warn("Subscription '{}' returned {} bytes with no usable "
                     + "server links; keeping the {} server(s) already stored",
                     sub.getName(), content.length(), sub.getServerIds().size());
-            sub.setLastError("The response contained no recognizable server links. "
-                    + "The subscription may have expired, or a captive portal "
-                    + "may have answered instead of the provider.");
+            if (parsed.unsupportedSchemes().isEmpty()) {
+                sub.setLastError("The response contained no recognizable server links. "
+                        + "The subscription may have expired, or a captive portal "
+                        + "may have answered instead of the provider.");
+            } else {
+                // The list was read fine; it just holds nothing this client
+                // can connect to. Say so rather than hinting at expiry.
+                sub.setLastError("Every link in the response uses a protocol this "
+                        + "app does not support (" + parsed.unsupportedSummary() + ").");
+            }
             saveSubscriptions();
             return;
         }
@@ -308,6 +341,17 @@ public class SubscriptionService {
             // line, keep everything and say so instead of clearing lastError.
             boolean partial = parsed.skipped() > 0;
             applyNamePrefix(fetchedServers, sub.getName());
+            long insecure = fetchedServers.stream()
+                    .filter(s -> s.getTls() != null && s.getTls().isAllowInsecure())
+                    .count();
+            if (insecure > 0) {
+                // The list is applied as the provider sent it, but silently:
+                // a link that turns certificate verification off is one a
+                // network attacker on the fetch path could have written.
+                log.warn("Subscription '{}': {} server(s) turn certificate verification "
+                        + "off (allowInsecure); they are marked in the server list",
+                        sub.getName(), insecure);
+            }
             diffAndApply(sub, fetchedServers, !partial);
 
             if (partial) {
@@ -321,11 +365,81 @@ public class SubscriptionService {
             } else {
                 sub.setLastError(null);
             }
+            if (!parsed.unsupportedSchemes().isEmpty()) {
+                // Not an error and not a reason to keep withdrawn servers: the
+                // provider also hands out protocols this client lacks.
+                log.info("Subscription '{}': {} link(s) left out, protocol not "
+                        + "supported ({})", sub.getName(),
+                        parsed.unsupportedSchemes().size(), parsed.unsupportedSummary());
+            }
+            if (headers != null) {
+                applyUserInfo(sub, headers);
+            }
             sub.setLastRefreshedAt(System.currentTimeMillis());
             saveSubscriptions();
             log.info("Refreshed subscription '{}': {} servers",
                     sub.getName(), sub.getServerIds().size());
         }
+    }
+
+    /**
+     * Reads the quota a provider attaches to the response, in the
+     * {@code subscription-userinfo} header Clash-style clients popularized:
+     * {@code upload=…; download=…; total=…; expire=…}, bytes and Unix seconds.
+     * A header that is absent changes nothing, so a provider that stops
+     * sending it leaves the last known figures in place.
+     *
+     * @param sub     the subscription to annotate
+     * @param headers the response headers
+     */
+    static void applyUserInfo(Subscription sub, HttpHeaders headers) {
+        headers.firstValue("subscription-userinfo").ifPresent(value -> {
+            for (String part : value.split(";")) {
+                String[] pair = part.trim().split("=", 2);
+                if (pair.length != 2) {
+                    continue;
+                }
+                long number;
+                try {
+                    number = Long.parseLong(pair[1].trim());
+                } catch (NumberFormatException e) {
+                    continue;
+                }
+                switch (pair[0].trim().toLowerCase(java.util.Locale.ROOT)) {
+                    case "upload" -> sub.setUploadBytes(number);
+                    case "download" -> sub.setDownloadBytes(number);
+                    case "total" -> sub.setTotalBytes(number);
+                    case "expire" -> sub.setExpiresAt(number);
+                    default -> { }
+                }
+            }
+        });
+    }
+
+    /**
+     * Renames a subscription or points it at a new URL, then refreshes it so
+     * the server names carry the new prefix and a new URL's list replaces the
+     * old one. Changing a URL used to mean deleting the subscription (and its
+     * servers) and adding it again.
+     *
+     * @param subscriptionId the subscription to change
+     * @param name           the new display name
+     * @param url            the new URL; sealed on save like the original
+     */
+    public void updateSubscription(String subscriptionId, String name, String url) {
+        Subscription sub = findById(subscriptionId);
+        if (sub == null) {
+            log.warn("Subscription not found for update: {}", subscriptionId);
+            return;
+        }
+        FxExecutor.run(() -> {
+            synchronized (this) {
+                sub.setName(name);
+                sub.setUrl(url);
+            }
+        });
+        saveSubscriptions();
+        refreshSubscription(subscriptionId);
     }
 
     /**
@@ -354,11 +468,8 @@ public class SubscriptionService {
             if (scheduler != null && !scheduler.isShutdown()) {
                 return;
             }
-            scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "subscription-auto-refresh");
-                t.setDaemon(true);
-                return t;
-            });
+            scheduler = Executors.newSingleThreadScheduledExecutor(
+                    DaemonThreads.factory("subscription-auto-refresh"));
             scheduler.scheduleAtFixedRate(this::guardedRefreshAll, initialDelay, period, unit);
             log.info("Started subscription auto-refresh");
         }
@@ -379,6 +490,18 @@ public class SubscriptionService {
             refreshAll();
         } catch (Exception e) {
             log.error("Scheduled subscription refresh failed", e);
+        }
+    }
+
+    /**
+     * Stops the auto-refresh for good and releases the HTTP client; for the
+     * service graph going away, where {@link #stopAutoRefresh()} alone left
+     * the client's selector thread behind.
+     */
+    public void shutdown() {
+        stopAutoRefresh();
+        if (httpClient != null) {
+            httpClient.shutdownNow();
         }
     }
 
@@ -433,6 +556,17 @@ public class SubscriptionService {
     }
 
     String fetchContent(String url) throws IOException, InterruptedException {
+        if (AppHttpClients.isTunnelBrokenWhileConnected()) {
+            // The selector falls back to a direct connection in this one
+            // state so the updater keeps working on hostile networks. A
+            // subscription URL carries the account token, and sending it
+            // directly also exposes the user's real address at the exact
+            // moment they believe they are tunneled. Fail the refresh instead;
+            // the next one runs after the tunnel recovers or is torn down.
+            throw new IOException("The tunnel is up but not carrying traffic, so the "
+                    + "subscription was not fetched outside it. Reconnect, or disconnect "
+                    + "and refresh again.");
+        }
         if (isInsecureHttpUrl(url)) {
             // Host only — the path and query can carry an account token.
             String host;
@@ -448,10 +582,11 @@ public class SubscriptionService {
                 .uri(URI.create(url))
                 .GET()
                 .timeout(Duration.ofSeconds(30))
-                .header("User-Agent", "VlessClient/1.0")
+                .header("User-Agent", "Tunl/" + AppVersion.VERSION)
                 .build();
         HttpResponse<InputStream> response =
                 httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        responseHeaders.set(response.headers());
         try (InputStream body = response.body()) {
             if (response.statusCode() != 200) {
                 // Redacted: this message is both logged and persisted into
@@ -520,56 +655,58 @@ public class SubscriptionService {
         return cleaned.matches("^[A-Za-z0-9+/=_-]+$") && cleaned.length() > 20;
     }
 
-    private String decodeBase64(String encoded) {
-        String cleaned = encoded.replaceAll("\\s+", "");
-        try {
-            return new String(Base64.getDecoder().decode(cleaned), StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException e) {
-            try {
-                return new String(Base64.getUrlDecoder().decode(cleaned), StandardCharsets.UTF_8);
-            } catch (IllegalArgumentException e2) {
-                String padded = cleaned;
-                int pad = padded.length() % 4;
-                if (pad > 0) {
-                    padded = padded + "=".repeat(4 - pad);
-                }
-                try {
-                    return new String(Base64.getDecoder().decode(padded), StandardCharsets.UTF_8);
-                } catch (IllegalArgumentException e3) {
-                    return new String(Base64.getUrlDecoder().decode(padded),
-                            StandardCharsets.UTF_8);
-                }
-            }
-        }
+    private static String decodeBase64(String encoded) {
+        return Base64Lenient.decodeUtf8(encoded);
     }
 
     /**
-     * What a fetched body yielded: the servers, and how many non-blank lines
-     * were rejected. The count is the whole point — a line the parser cannot
-     * read is indistinguishable, to {@code diffAndApply}, from a server the
-     * provider withdrew.
+     * What a fetched body yielded: the servers, how many non-blank lines were
+     * rejected as unreadable, and the schemes of the links this client does
+     * not implement. The distinction is the whole point — a line the parser
+     * cannot read is indistinguishable, to {@code diffAndApply}, from a
+     * server the provider withdrew, whereas a {@code tuic://} link is merely a
+     * server this client cannot use. Counting the second kind as the first
+     * left every mixed-protocol subscription permanently "failed", with
+     * removals disabled on every refresh.
      */
-    record ParsedContent(List<ServerConfig> servers, int skipped) {
+    record ParsedContent(List<ServerConfig> servers, int skipped,
+                         List<String> unsupportedSchemes) {
+
+        ParsedContent(List<ServerConfig> servers, int skipped) {
+            this(servers, skipped, List.of());
+        }
+
+        /** The distinct unsupported schemes, comma-separated, for messages. */
+        String unsupportedSummary() {
+            return String.join(", ", new java.util.TreeSet<>(unsupportedSchemes));
+        }
     }
 
     private ParsedContent parseLines(String text) {
         List<ServerConfig> servers = new ArrayList<>();
+        List<String> unsupported = new ArrayList<>();
         int skipped = 0;
         String[] lines = text.split("\\r?\\n");
         for (String line : lines) {
             String trimmedLine = line.trim();
-            if (trimmedLine.isEmpty()) {
+            if (trimmedLine.isEmpty()
+                    || trimmedLine.startsWith("#") || trimmedLine.startsWith("//")) {
+                // Blank, or a comment line some providers put in a plain-text
+                // list. Neither stands for a server, so neither is "skipped".
                 continue;
             }
             try {
                 ServerConfig server = shareLinkParser.parse(trimmedLine);
                 servers.add(server);
+            } catch (ShareLinkParser.UnsupportedSchemeException e) {
+                unsupported.add(e.scheme());
+                log.debug("Leaving out a {} link: protocol not supported", e.scheme());
             } catch (Exception e) {
                 skipped++;
                 log.debug("Skipping unparseable line: {}", e.getMessage());
             }
         }
-        return new ParsedContent(servers, skipped);
+        return new ParsedContent(servers, skipped, List.copyOf(unsupported));
     }
 
     private void applyNamePrefix(List<ServerConfig> servers, String subscriptionName) {
@@ -649,10 +786,17 @@ public class SubscriptionService {
     }
 
     private Subscription findById(String id) {
-        return subscriptions.stream()
-                .filter(s -> s.getId().equals(id))
-                .findFirst()
-                .orElse(null);
+        // A plain loop under the monitor, like isRegistered: streaming the
+        // FX-owned list from the scheduler thread could throw a
+        // ConcurrentModificationException against an add on the FX thread.
+        synchronized (this) {
+            for (Subscription sub : subscriptions) {
+                if (sub.getId().equals(id)) {
+                    return sub;
+                }
+            }
+        }
+        return null;
     }
 
     /**
@@ -768,6 +912,11 @@ public class SubscriptionService {
             log.info("Loaded {} subscriptions from {}", subscriptions.size(), file);
         } catch (JacksonException e) {
             log.error("Failed to load subscriptions from {}", file, e);
+            // Same treatment as servers.json and settings.json: the next save
+            // would otherwise overwrite the only copy of a file that was very
+            // likely still recoverable by hand — and the sealed URLs in it
+            // are the keys the keychain entries are filed under.
+            ConfigStore.quarantineCorrupt(file);
         }
     }
 

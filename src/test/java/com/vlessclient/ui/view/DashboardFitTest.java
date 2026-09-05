@@ -1,14 +1,13 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.ThemeCss;
-import com.vlessclient.app.UiTestServices;
+import com.vlessclient.testing.UiTest;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Bounds;
 import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.stage.Stage;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
 
@@ -20,26 +19,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * the viewport is clipped and unreachable. This lays the Dashboard out at that
  * width and asserts the key actions stay within it.
  */
+@UiTest
 public class DashboardFitTest extends ApplicationTest {
 
     /** Window min 760 - sidebar 200 - content padding 48 = 512; test a hair tighter. */
     private static final double MIN_CONTENT_WIDTH = 500;
 
     private Scene scene;
-
-    @BeforeAll
-    static void setupHeadless() {
-        System.setProperty("testfx.robot", "glass");
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("prism.order", "sw");
-        System.setProperty("prism.text", "t2k");
-        System.setProperty("java.awt.headless", "true");
-        try {
-            UiTestServices.initialize();
-        } catch (Exception e) {
-            // headless CI tolerance
-        }
-    }
 
     @Override
     public void start(Stage stage) throws Exception {

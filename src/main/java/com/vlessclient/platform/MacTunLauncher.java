@@ -27,10 +27,9 @@ public final class MacTunLauncher implements TunLauncher {
 
     @Override
     public Launched launch(Path binary, Path configFile) throws IOException {
-        // Use /tmp so both root and the user can read/write the signal file.
-        Path stopSignalFile = Path.of("/tmp",
-                "vless-client-stop-" + System.nanoTime() + ".signal");
-        Files.deleteIfExists(stopSignalFile);
+        // Owner-only and unguessable; the wrapper runs as this user (sudo
+        // path) or as root (osascript path), and both can read it there.
+        Path stopSignalFile = StopSignals.newStopSignalFile();
 
         // Try to install the sudoers rule on first run (one password prompt,
         // ever). If it's already installed this is a fast no-op.

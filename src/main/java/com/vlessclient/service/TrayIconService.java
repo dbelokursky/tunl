@@ -426,9 +426,36 @@ public class TrayIconService {
         if (engine == null) {
             return;
         }
-        stateListener = (obs, oldVal, newVal) -> refreshTrayState();
+        stateListener = (obs, oldVal, newVal) -> {
+            refreshTrayState();
+            if (newVal == ConnectionState.ERROR) {
+                notifyTunnelFailed();
+            }
+        };
         engine.connectionStateProperty().addListener(stateListener);
         listeningTo = engine;
+    }
+
+    /**
+     * A system notification for a core that died. With the window hidden, a
+     * change of icon colour was all the user got — and a tunnel that stops
+     * is exactly the moment the app must not be quiet.
+     */
+    private void notifyTunnelFailed() {
+        TrayIcon icon = trayIcon;
+        SingBoxEngine engine = engine();
+        if (icon == null || engine == null) {
+            return;
+        }
+        String detail = engine.errorMessageProperty().get();
+        String body = detail == null || detail.isBlank()
+                ? I18n.get("tray.notify.failed.body") : detail;
+        try {
+            icon.displayMessage(I18n.get("tray.notify.failed.title"), body,
+                    TrayIcon.MessageType.ERROR);
+        } catch (RuntimeException e) {
+            log.debug("Could not show the tray notification: {}", e.toString());
+        }
     }
 
     private void detachEngineListener() {

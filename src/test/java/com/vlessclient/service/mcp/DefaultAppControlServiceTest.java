@@ -9,10 +9,10 @@ import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ShareLinkParser;
 import com.vlessclient.service.SingBoxConfigGenerator;
 import com.vlessclient.service.SingBoxEngine;
-import javafx.application.Platform;
-import org.junit.jupiter.api.BeforeAll;
+import com.vlessclient.testing.FxToolkitExtension;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
@@ -30,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * JavaFX toolkit: the TUN-confirm gate, mode parsing, and server selection all
  * resolve before any FX-thread access.
  */
+@ExtendWith(FxToolkitExtension.class)
 class DefaultAppControlServiceTest {
 
     @TempDir
@@ -37,15 +38,6 @@ class DefaultAppControlServiceTest {
 
     private ConfigStore store;
     private DefaultAppControlService service;
-
-    @BeforeAll
-    static void initJfx() {
-        try {
-            Platform.startup(() -> { });
-        } catch (IllegalStateException ignored) {
-            // Already started by another test class.
-        }
-    }
 
     @BeforeEach
     void setUp() {
