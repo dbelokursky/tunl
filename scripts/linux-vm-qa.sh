@@ -75,8 +75,19 @@ java -version 2>&1 | head -1
 echo "=== build ($QA_BRANCH) ==="
 git clone -q -b "$QA_BRANCH" "$REPO" "$WORK/repo" && cd "$WORK/repo"
 git log --oneline -1
-mvn -B -q clean package -DskipTests < /dev/null 2>&1 | tail -2 || true
-JAR=$(ls target/vless-client-*.jar | head -1)
+# The guest runs without -e so a failed phase cannot skip the ones after it,
+# which is why the build is checked by hand: without a jar every phase below
+# would launch nothing and report INCONCLUSIVE instead of failing.
+if ! mvn -B -q clean package -DskipTests < /dev/null > "$OUT/build.log" 2>&1; then
+  tail -20 "$OUT/build.log"
+  echo "BUILD FAILED on $QA_BRANCH -- see $OUT/build.log; nothing to test" >&2
+  exit 1
+fi
+JAR=$(ls target/vless-client-*.jar 2>/dev/null | head -1)
+if [ -z "$JAR" ]; then
+  echo "BUILD FAILED: mvn package succeeded but left no target/vless-client-*.jar" >&2
+  exit 1
+fi
 echo "jar: $JAR"
 
 # Fixtures: one dummy active server; health checks off to keep logs quiet.
@@ -187,8 +198,15 @@ GUEST_EOF
 
 echo "[vm-qa] running the guest scenario (first run provisions JDK + Maven cache)"
 limactl cp "${GUEST_SCRIPT}" "${VM}:vm-qa-generated.sh"
-limactl shell "${VM}" -- bash "/home/${USER}.linux/vm-qa-generated.sh" 2>/dev/null \
-  || limactl shell "${VM}" -- bash vm-qa-generated.sh
+# limactl cp lands the file in the guest user's home, so let the guest resolve
+# that path itself. Guessing Lima's "<user>.linux" naming and retrying with a
+# relative path on failure re-ran the entire scenario (provisioning, clone,
+# build) whenever the first run failed for a real reason, with the first
+# run's stderr thrown away. The exit status is kept: a failed guest run must
+# fail this script, but only after the artifacts have been collected.
+guest_status=0
+# shellcheck disable=SC2016  # $HOME is the guest's, expanded by the guest shell
+limactl shell "${VM}" -- bash -c 'exec bash "$HOME/vm-qa-generated.sh"' || guest_status=$?
 
 echo "[vm-qa] collecting artifacts"
 limactl shell "${VM}" -- bash -c 'cd ~/vless-qa/out 2>/dev/null && tar cf - .' 2>/dev/null \
@@ -199,4 +217,9 @@ if [ "${1:-}" = "--delete" ]; then
     limactl stop "${VM}" || true
     limactl delete "${VM}"
     echo "[vm-qa] VM deleted"
+fi
+
+if [ "${guest_status}" -ne 0 ]; then
+    echo "[vm-qa] guest scenario failed (exit ${guest_status}) — see the output above and ${OUT_DIR}" >&2
+    exit "${guest_status}"
 fi
