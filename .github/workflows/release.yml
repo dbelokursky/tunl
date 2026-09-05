@@ -119,6 +119,10 @@ jobs:
     runs-on: macos-latest
     # notarytool --wait normally returns within minutes but Apple has taken half an hour.
     timeout-minutes: 45
+    # The digest of the DMG this job uploaded; sign-release and
+    # update-packaging refuse an asset on the draft that does not match it.
+    outputs:
+      dmg_sha256: ${{ steps.checksum.outputs.sha256 }}
     permissions:
       contents: write
     # The `secrets` context is not allowed in step `if:`, so the steps gate on
@@ -230,6 +234,18 @@ jobs:
           xcrun stapler staple dist/*.dmg
           xcrun stapler validate dist/*.dmg
           spctl -a -t open --context context:primary-signature dist/*.dmg
+      - name: Record the DMG checksum
+        id: checksum
+        # After stapling, which rewrites the DMG: the digest must describe
+        # the file the next step uploads, byte for byte.
+        run: |
+          set -euo pipefail
+          files=(dist/*.dmg)
+          if [ "${#files[@]}" -ne 1 ] || [ ! -f "${files[0]}" ]; then
+            echo "::error::expected exactly one DMG in dist/"
+            exit 1
+          fi
+          echo "sha256=$(shasum -a 256 "${files[0]}" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: ${{ needs.prepare-release.outputs.title }}
@@ -244,6 +260,10 @@ jobs:
     needs: prepare-release
     runs-on: windows-latest
     timeout-minutes: 30
+    # The digest of the MSI this job uploaded; sign-release refuses an asset
+    # on the draft that does not match it.
+    outputs:
+      msi_sha256: ${{ steps.checksum.outputs.sha256 }}
     permissions:
       contents: write
     # Only the gate lives in job env — the `secrets` context can't be used in
@@ -317,6 +337,18 @@ jobs:
       - name: Smoke-test MSI install and uninstall
         shell: pwsh
         run: ./scripts/windows-msi-smoke.ps1 -MsiPath 'dist\*.msi' -ExpectedVersion ($env:GITHUB_REF_NAME -replace '^v', '')
+      - name: Record the MSI checksum
+        id: checksum
+        # After signing, which rewrites the MSI (the install smoke only reads
+        # it): the digest must describe the file the next step uploads.
+        shell: pwsh
+        run: |
+          $msis = @(Get-ChildItem dist -Filter '*.msi' -File)
+          if ($msis.Count -ne 1) {
+            throw "expected exactly one MSI in dist/, found $($msis.Count)"
+          }
+          $hash = (Get-FileHash -Algorithm SHA256 $msis[0].FullName).Hash.ToLowerInvariant()
+          "sha256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: ${{ needs.prepare-release.outputs.title }}
@@ -330,6 +362,10 @@ jobs:
     needs: prepare-release
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The digest of the DEB this job uploaded; sign-release and
+    # update-packaging refuse an asset on the draft that does not match it.
+    outputs:
+      deb_sha256: ${{ steps.checksum.outputs.sha256 }}
     permissions:
       contents: write
     steps:
@@ -366,6 +402,16 @@ jobs:
             xvfb xauth libgtk-3-0t64 libglib2.0-0t64 libxtst6 libxi6 libxrender1 libxrandr2 \
             libfreetype6 fontconfig libasound2t64 libgl1 libpango-1.0-0 libcairo2 fonts-dejavu-core
           scripts/linux-deb-smoke.sh dist/*.deb "${GITHUB_REF_NAME#v}"
+      - name: Record the DEB checksum
+        id: checksum
+        run: |
+          set -euo pipefail
+          files=(dist/*.deb)
+          if [ "${#files[@]}" -ne 1 ] || [ ! -f "${files[0]}" ]; then
+            echo "::error::expected exactly one DEB in dist/"
+            exit 1
+          fi
+          echo "sha256=$(sha256sum "${files[0]}" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: ${{ needs.prepare-release.outputs.title }}
@@ -380,6 +426,10 @@ jobs:
     needs: prepare-release
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
+    # The digest of the DEB this job uploaded; sign-release and
+    # update-packaging refuse an asset on the draft that does not match it.
+    outputs:
+      deb_sha256: ${{ steps.checksum.outputs.sha256 }}
     permissions:
       contents: write
     steps:
@@ -405,6 +455,16 @@ jobs:
         run: mvn -B test -Psmoke -Dtest=SingBoxRealBinarySmokeTest
       - name: Create DEB with jpackage
         run: scripts/package-linux.sh "${GITHUB_REF_NAME#v}"
+      - name: Record the DEB checksum
+        id: checksum
+        run: |
+          set -euo pipefail
+          files=(dist/*.deb)
+          if [ "${#files[@]}" -ne 1 ] || [ ! -f "${files[0]}" ]; then
+            echo "::error::expected exactly one DEB in dist/"
+            exit 1
+          fi
+          echo "sha256=$(sha256sum "${files[0]}" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: ${{ needs.prepare-release.outputs.title }}
@@ -423,6 +483,11 @@ jobs:
   # app, so a release that reaches the page unsigned is one the in-app updater
   # will refuse for every user on a build that carries the key — a broken
   # release that would otherwise go out green. Missing secret, failed job.
+  #
+  # Signs only what the builder jobs produced: every asset is downloaded
+  # from the draft and checked against the SHA-256 its builder recorded (the
+  # jobs' outputs above) before a single signature is made, so a file
+  # swapped on the draft between upload and signing gets no signature.
   sign-release:
     needs: [prepare-release, release-macos, release-windows, release-linux, release-linux-arm64]
     runs-on: ubuntu-latest
@@ -437,6 +502,10 @@ jobs:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          BUILT_DMG_SHA256: ${{ needs.release-macos.outputs.dmg_sha256 }}
+          BUILT_MSI_SHA256: ${{ needs.release-windows.outputs.msi_sha256 }}
+          BUILT_DEB_AMD64_SHA256: ${{ needs.release-linux.outputs.deb_sha256 }}
+          BUILT_DEB_ARM64_SHA256: ${{ needs.release-linux-arm64.outputs.deb_sha256 }}
         run: |
           set -euo pipefail
           if [ -z "$RELEASE_SIGNING_KEY" ]; then
@@ -458,11 +527,37 @@ jobs:
             "tunl_${V}_amd64.deb"
             "tunl_${V}_arm64.deb"
           )
+          # Asset name -> the SHA-256 its builder job recorded for the file it
+          # uploaded. A digest that is missing or malformed fails the release
+          # too: a job whose output went missing must not pass as "nothing to
+          # compare".
+          declare -A built=(
+            ["tunl_${V}.dmg"]="$BUILT_DMG_SHA256"
+            ["tunl_${V}.msi"]="$BUILT_MSI_SHA256"
+            ["tunl_${V}_amd64.deb"]="$BUILT_DEB_AMD64_SHA256"
+            ["tunl_${V}_arm64.deb"]="$BUILT_DEB_ARM64_SHA256"
+          )
+          # Download and verify every asset before signing any: a file that
+          # changed on the draft between its upload and this download gets no
+          # signature, and a bad draft never ends up half-signed.
+          for asset in "${assets[@]}"; do
+              expected="${built[$asset]}"
+              if ! [[ "$expected" =~ ^[0-9a-f]{64}$ ]]; then
+                echo "::error::No builder digest for ${asset} (got '${expected}'). Refusing to sign an asset this run cannot vouch for."
+                exit 1
+              fi
+              gh release download "$GITHUB_REF_NAME" -p "$asset" \
+                -O "$RUNNER_TEMP/$asset" --clobber
+              actual=$(sha256sum "$RUNNER_TEMP/$asset" | awk '{print $1}')
+              if [ "$actual" != "$expected" ]; then
+                echo "::error::${asset} on the draft release is not the file its builder job uploaded (built ${expected}, downloaded ${actual}). Not signing."
+                exit 1
+              fi
+              echo "verified $asset ($actual)"
+          done
           PUB="$RUNNER_TEMP/release.pub.pem"
           openssl pkey -in "$KEY" -pubout -out "$PUB"
           for asset in "${assets[@]}"; do
-              gh release download "$GITHUB_REF_NAME" -p "$asset" \
-                -O "$RUNNER_TEMP/$asset" --clobber
               hex=$(sha256sum "$RUNNER_TEMP/$asset" | awk '{print $1}')
               # No trailing newline: the updater signs and verifies exactly
               # the digest string it builds itself, with nothing around it.
@@ -495,15 +590,32 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          BUILT_DMG_SHA256: ${{ needs.release-macos.outputs.dmg_sha256 }}
+          BUILT_DEB_AMD64_SHA256: ${{ needs.release-linux.outputs.deb_sha256 }}
+          BUILT_DEB_ARM64_SHA256: ${{ needs.release-linux-arm64.outputs.deb_sha256 }}
         run: |
+          set -euo pipefail
           V="${GITHUB_REF_NAME#v}"
-          sha_of() {
+          # The digest stamped into the cask and the PKGBUILD is the one the
+          # asset's builder job recorded; the download only confirms the
+          # draft still holds that exact file (the check sign-release makes).
+          sha_of() { # $1 asset name, $2 the builder's digest
+            if ! [[ "$2" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "::error::No builder digest for $1 (got '$2')." >&2
+              return 1
+            fi
             gh release download "$GITHUB_REF_NAME" -p "$1" -O "$RUNNER_TEMP/$1" --clobber
-            sha256sum "$RUNNER_TEMP/$1" | awk '{print $1}'
+            local actual
+            actual=$(sha256sum "$RUNNER_TEMP/$1" | awk '{print $1}')
+            if [ "$actual" != "$2" ]; then
+              echo "::error::$1 on the draft release is not the file its builder job uploaded (built $2, downloaded $actual)." >&2
+              return 1
+            fi
+            printf '%s\n' "$actual"
           }
-          DMG=$(sha_of "tunl_${V}.dmg")
-          DEB_AMD64=$(sha_of "tunl_${V}_amd64.deb")
-          DEB_ARM64=$(sha_of "tunl_${V}_arm64.deb")
+          DMG=$(sha_of "tunl_${V}.dmg" "$BUILT_DMG_SHA256")
+          DEB_AMD64=$(sha_of "tunl_${V}_amd64.deb" "$BUILT_DEB_AMD64_SHA256")
+          DEB_ARM64=$(sha_of "tunl_${V}_arm64.deb" "$BUILT_DEB_ARM64_SHA256")
           scripts/update-packaging.sh "$V" "$DMG" "$DEB_AMD64" "$DEB_ARM64"
       # Re-assert name/body alongside the packaging uploads so this final call
       # can never blank the notes the platform jobs set.
