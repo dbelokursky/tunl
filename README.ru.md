@@ -413,6 +413,11 @@ claude mcp add --transport http tunl http://127.0.0.1:55555/mcp \
 `vless://routing`, `vless://settings`, `vless://logs/recent`. Живой стрим логов
 доступен по SSE (`GET /mcp`, `notifications/message`).
 
+`get_status` возвращает состояние ядра в `state` / `connected`, а доступность
+сервисов — в `health` и `tunnelStatus`. Поля `activeServerId` / `activeServer`
+описывают сохранённый выбор; `currentServerId` / `currentServer` — последний
+сервер, сообщённый ядром (null, пока он неизвестен или соединение отключено).
+
 ---
 
 ## Траблшутинг
