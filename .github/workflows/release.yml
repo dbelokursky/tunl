@@ -4,6 +4,9 @@ on:
     tags: ['v*']
 permissions:
   contents: read
+# No job here pushes, so every checkout passes persist-credentials: false:
+# the token would otherwise sit in .git/config for every later step and for
+# the third-party release action, which uploads with the token it is handed.
 jobs:
   # Derive the release's title and body from the pushed annotated tag's message
   # (subject line -> title, message body -> notes) so a release is fully written
@@ -129,6 +132,8 @@ jobs:
       MACOS_NOTARY_CONFIGURED: ${{ secrets.MACOS_NOTARY_KEY_BASE64 != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
           java-version: '25'
@@ -249,6 +254,8 @@ jobs:
       WINDOWS_SIGNING_CONFIGURED: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
           java-version: '25'
@@ -327,6 +334,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
           java-version: '25'
@@ -375,6 +384,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
           java-version: '25'
@@ -478,6 +489,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Regenerate cask + PKGBUILD with release checksums
         env:
           GH_TOKEN: ${{ github.token }}
