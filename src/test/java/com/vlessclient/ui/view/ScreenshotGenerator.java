@@ -4,16 +4,22 @@ import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.app.ThemeCss;
 import com.vlessclient.app.UiTestServices;
 import com.vlessclient.model.ConnectionState;
+import com.vlessclient.model.HealthCheckTarget;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.service.CountryResolver;
+import com.vlessclient.service.GeoIpDatabase;
 import com.vlessclient.service.LatencyTester;
+import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TrafficMonitor;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.function.Consumer;
 import javafx.beans.property.LongProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
@@ -69,6 +75,14 @@ public class ScreenshotGenerator extends ApplicationTest {
     @Override
     public void start(Stage stage) throws Exception {
         seedSampleServers();
+        // The offline test graph answers "unreachable" and "no country"; a
+        // working install answers with latencies and flags, which is what the
+        // screenshots document. Both doubles go in before the views load,
+        // since the dashboard picks its collaborators up in initialize().
+        ServiceLocator.register(ServiceReachabilityChecker.class,
+                new ServiceReachabilityChecker(ScreenshotGenerator::sampleProbe));
+        ServiceLocator.register(CountryResolver.class,
+                new SampleCountryResolver(ServiceLocator.get(GeoIpDatabase.class)));
         // The runner has no sing-box, so ServiceLocator leaves the engine
         // unregistered and the dashboard renders its "not installed" branch.
         // Registering an engine that is never started gives the same view a
@@ -152,7 +166,7 @@ public class ScreenshotGenerator extends ApplicationTest {
     private static void setPrivateField(Object target, String fieldName,
                                         Consumer<Consumer<Object>> supply) {
         try {
-            var field = target.getClass().getDeclaredField(fieldName);
+            var field = declaredField(target.getClass(), fieldName);
             field.setAccessible(true);
             supply.accept(value -> {
                 try {
@@ -167,15 +181,74 @@ public class ScreenshotGenerator extends ApplicationTest {
         }
     }
 
+    /**
+     * The field as declared on {@code type} or a superclass. The test graph
+     * registers subclasses (NoNetworkTrafficMonitor extends TrafficMonitor),
+     * and getDeclaredField on the subclass does not see inherited fields.
+     */
+    private static java.lang.reflect.Field declaredField(Class<?> type, String fieldName)
+            throws NoSuchFieldException {
+        for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+            try {
+                return current.getDeclaredField(fieldName);
+            } catch (NoSuchFieldException e) {
+                // keep walking up
+            }
+        }
+        throw new NoSuchFieldException(fieldName);
+    }
+
     private static void setPrivateProperty(Object target, String fieldName,
                                            Consumer<Object> mutate) {
         try {
-            var field = target.getClass().getDeclaredField(fieldName);
+            var field = declaredField(target.getClass(), fieldName);
             field.setAccessible(true);
             mutate.accept(field.get(target));
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException(
                     "field '" + fieldName + "' moved; update the generator", e);
+        }
+    }
+
+    /** The sample servers' countries, so the flags render without a geo database. */
+    private static final Map<String, String> SAMPLE_COUNTRIES = Map.of(
+            "185.107.56.12", "NL",
+            "88.198.0.1", "DE",
+            "172.104.100.1", "JP",
+            "95.216.32.11", "FI",
+            "128.199.83.144", "SG");
+
+    /** A reachable answer with a plausible latency, as a healthy tunnel gives. */
+    private static ServiceReachabilityChecker.ProbeResult sampleProbe(
+            HealthCheckTarget target, int httpProxyPort) {
+        long millis = "X".equals(target.getName()) ? 513 : 320;
+        return new ServiceReachabilityChecker.ProbeResult(
+                target.getName(), target.getUrl(), true, millis, "HTTP 204");
+    }
+
+    /** Knows the sample servers' countries without a database or a network. */
+    private static final class SampleCountryResolver extends CountryResolver {
+
+        SampleCountryResolver(GeoIpDatabase database) {
+            super(database);
+        }
+
+        @Override
+        public Optional<String> countryOf(ServerConfig server) {
+            if (server == null || server.getAddress() == null) {
+                return Optional.empty();
+            }
+            return Optional.ofNullable(SAMPLE_COUNTRIES.get(server.getAddress()));
+        }
+
+        @Override
+        public void resolveAsync(ServerConfig server, Consumer<String> onResolved) {
+            countryOf(server).ifPresent(onResolved);
+        }
+
+        @Override
+        public void warmUp() {
+            // Nothing to download.
         }
     }
 
