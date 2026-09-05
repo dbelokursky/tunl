@@ -80,6 +80,15 @@ public class AppSettings {
     @JsonProperty("system_proxy_auto_config")
     private boolean systemProxyAutoConfig = true;
 
+    /**
+     * Whether the dashboard's traffic-history panel is expanded. Persisted so
+     * the card comes back the way it was left: the panel is opened from a
+     * small line of text, and re-finding that click on every launch is the
+     * kind of friction that makes a feature go unused.
+     */
+    @JsonProperty("traffic_history_expanded")
+    private boolean trafficHistoryExpanded;
+
     @JsonProperty("proxy_dns")
     private String proxyDns = "https://1.1.1.1/dns-query";
 
@@ -258,6 +267,14 @@ public class AppSettings {
 
     public void setSystemProxyAutoConfig(boolean systemProxyAutoConfig) {
         this.systemProxyAutoConfig = systemProxyAutoConfig;
+    }
+
+    public boolean isTrafficHistoryExpanded() {
+        return trafficHistoryExpanded;
+    }
+
+    public void setTrafficHistoryExpanded(boolean trafficHistoryExpanded) {
+        this.trafficHistoryExpanded = trafficHistoryExpanded;
     }
 
     public String getProxyDns() {

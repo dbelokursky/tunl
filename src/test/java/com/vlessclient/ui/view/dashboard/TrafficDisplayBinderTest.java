@@ -65,7 +65,7 @@ class TrafficDisplayBinderTest {
         return new TrafficDisplayBinder(monitor,
                 new TrafficDisplayBinder.Readout(new Label(), new Label()),
                 new TrafficDisplayBinder.Readout(new Label(), new Label()),
-                new Label(), summary);
+                new Label(), summary, new VBox(), () -> null);
     }
 
     @Test
@@ -165,7 +165,7 @@ class TrafficDisplayBinderTest {
         TrafficDisplayBinder binder = new TrafficDisplayBinder(null,
                 new TrafficDisplayBinder.Readout(new Label(), new Label()),
                 new TrafficDisplayBinder.Readout(new Label(), download),
-                new Label(), summary);
+                new Label(), summary, new VBox(), () -> null);
 
         for (ConnectionState state : ConnectionState.values()) {
             binder.onConnectionStateChanged(state);

@@ -51,7 +51,7 @@ class TrafficLifecycleOrderTest {
     }
 
     private static TrafficDisplayBinder binderOver(TrafficMonitor monitor) {
-        return new TrafficDisplayBinder(monitor, null, null, null, null);
+        return new TrafficDisplayBinder(monitor, null, null, null, null, null, null);
     }
 
     @Test

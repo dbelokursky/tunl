@@ -23,6 +23,7 @@ import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.SingBoxInstaller;
 import com.vlessclient.service.SubscriptionService;
 import com.vlessclient.service.ThemeManager;
+import com.vlessclient.service.TrafficHistoryStore;
 import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.service.TrayIconService;
 import com.vlessclient.service.TunnelHealthState;
@@ -124,6 +125,12 @@ public class ServiceLocator {
 
         TrafficMonitor trafficMonitor = new TrafficMonitor();
         register(TrafficMonitor.class, trafficMonitor);
+
+        // Per-day totals behind the dashboard's history panel. It is the
+        // dashboard that attaches it to the monitor, because only the
+        // dashboard can say which server is carrying traffic in an automatic
+        // mode.
+        register(TrafficHistoryStore.class, new TrafficHistoryStore());
 
         // Which member of the proxy group carries the traffic right now — the
         // only way the dashboard can name the server an automatic mode picked.
@@ -342,6 +349,19 @@ public class ServiceLocator {
             }
         } catch (Exception e) {
             log.error("Error stopping SubscriptionService during shutdown", e);
+        }
+
+        // After the monitor, so the last samples it published are in the
+        // buckets before they are written. Up to a minute of counting lives
+        // only in memory between flushes; this is what saves it on a clean
+        // exit.
+        try {
+            Object history = services.get(TrafficHistoryStore.class);
+            if (history instanceof TrafficHistoryStore historyStore) {
+                historyStore.flush();
+            }
+        } catch (Exception e) {
+            log.error("Error flushing TrafficHistoryStore during shutdown", e);
         }
 
         try {

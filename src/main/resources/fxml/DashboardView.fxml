@@ -99,7 +99,10 @@
                  exactly as it did before this block existed. -->
             <VBox fx:id="trafficSummary" alignment="CENTER_RIGHT" spacing="1"
                   minWidth="-Infinity" visible="false" managed="false">
-                <HBox alignment="CENTER_RIGHT" spacing="14">
+                <!-- Speeds are the part that only means something while a
+                     tunnel is up; the total line below them outlives the
+                     session, because it is also the handle for the history. -->
+                <HBox fx:id="trafficSpeeds" alignment="CENTER_RIGHT" spacing="14">
                     <HBox fx:id="uploadReadout" alignment="CENTER_LEFT" spacing="3">
                         <Label fx:id="uploadCardIcon" styleClass="stats-icon-upload"/>
                         <Label fx:id="uploadSpeedLabel" text="0 B/s" styleClass="speed-value"/>
@@ -109,7 +112,9 @@
                         <Label fx:id="downloadSpeedLabel" text="0 B/s" styleClass="speed-value"/>
                     </HBox>
                 </HBox>
-                <Label fx:id="sessionTotalLabel" text="—" styleClass="session-total"/>
+                <Label fx:id="sessionTotalLabel" text="—"
+                       styleClass="session-total, session-total-link"
+                       onMouseClicked="#onSessionTotalClicked"/>
             </VBox>
         </HBox>
 
@@ -143,6 +148,33 @@
             </HBox>
             <Label fx:id="proxyModeWarning" text="" styleClass="hint-label"
                    wrapText="true" maxWidth="Infinity" visible="false" managed="false"/>
+        </VBox>
+
+        <!-- Traffic history, opened by clicking the session total in row 1.
+             Collapsed by default and remembered in settings, so the card is
+             exactly what it was before this existed until someone asks for
+             more. The bars are built in TrafficHistorySection: 30 of them,
+             one per day, and a fixed count is what lets them be plain Regions
+             in an HBox rather than another canvas. -->
+        <VBox fx:id="trafficHistoryPanel" styleClass="traffic-history" spacing="8"
+              visible="false" managed="false">
+            <HBox alignment="CENTER_LEFT" spacing="10">
+                <Label fx:id="trafficHistoryTitle" text="Last 30 days" styleClass="stats-title"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Label fx:id="trafficHistoryServers" styleClass="session-total"/>
+                <Hyperlink fx:id="trafficHistoryReset"
+                           onAction="#onResetTrafficHistoryClicked"/>
+            </HBox>
+
+            <HBox fx:id="trafficHistoryBars" styleClass="traffic-history-bars"
+                  alignment="BOTTOM_LEFT" spacing="3"
+                  minHeight="46" prefHeight="46" maxHeight="46"/>
+
+            <HBox alignment="CENTER_LEFT" spacing="8">
+                <Label fx:id="trafficHistoryRange" styleClass="session-total"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Label fx:id="trafficHistoryMonth" styleClass="session-total"/>
+            </HBox>
         </VBox>
     </VBox>
 
