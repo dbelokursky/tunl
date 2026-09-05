@@ -24,8 +24,6 @@ import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import org.slf4j.Logger;
@@ -726,63 +724,14 @@ public class SubscriptionService {
      */
     private void diffAndApply(Subscription sub, List<ServerConfig> fetchedServers,
             boolean allowRemovals) {
-        // Build map of existing servers by matching key (address+port+protocol)
-        Map<String, ServerConfig> existingByKey = sub.getServerIds().stream()
+        List<ServerConfig> existing = sub.getServerIds().stream()
                 .map(configStore::getServerById)
-                .filter(java.util.Optional::isPresent)
-                .map(java.util.Optional::get)
-                .collect(Collectors.toMap(this::serverKey, Function.identity(),
-                        (a, b) -> a));
-
-        Map<String, ServerConfig> fetchedByKey = fetchedServers.stream()
-                .collect(Collectors.toMap(this::serverKey, Function.identity(),
-                        (a, b) -> a));
-
-        List<String> newServerIds = new ArrayList<>();
-        List<ServerConfig> upserts = new ArrayList<>(fetchedByKey.size());
-        List<String> removals = new ArrayList<>();
-
-        // Add new or update existing
-        for (Map.Entry<String, ServerConfig> entry : fetchedByKey.entrySet()) {
-            String key = entry.getKey();
-            ServerConfig fetched = entry.getValue();
-            ServerConfig existing = existingByKey.get(key);
-
-            if (existing != null) {
-                // Update: keep the existing ID, update fields
-                fetched.setId(existing.getId());
-                fetched.setActive(existing.isActive());
-                newServerIds.add(existing.getId());
-            } else {
-                newServerIds.add(fetched.getId());
-            }
-            upserts.add(fetched);
-        }
-
-        // Remove servers that are no longer in the subscription
-        for (Map.Entry<String, ServerConfig> entry : existingByKey.entrySet()) {
-            if (!fetchedByKey.containsKey(entry.getKey())) {
-                if (allowRemovals) {
-                    removals.add(entry.getValue().getId());
-                } else {
-                    // Keeping the server is only half of it: dropping its id
-                    // here would leave it in the store with no subscription
-                    // owning it, which no later refresh or delete could reach.
-                    newServerIds.add(entry.getValue().getId());
-                }
-            }
-        }
-
-        // One save for the whole refresh. Going through addServer/updateServer/
-        // removeServer meant a full save — and a full re-seal of every stored
-        // credential — per changed server.
-        configStore.applyServerBatch(upserts, removals);
-
-        sub.setServerIds(newServerIds);
-    }
-
-    private String serverKey(ServerConfig server) {
-        return server.getAddress() + ":" + server.getPort() + ":" + server.getProtocol();
+                .flatMap(java.util.Optional::stream)
+                .toList();
+        SubscriptionReconciler.Batch batch =
+                SubscriptionReconciler.reconcile(existing, fetchedServers, allowRemovals);
+        configStore.applyServerBatch(batch.upserts(), batch.removals());
+        sub.setServerIds(batch.serverIds());
     }
 
     private Subscription findById(String id) {
