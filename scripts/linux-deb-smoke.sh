@@ -3,7 +3,7 @@
 # Installs the Tunl .deb on this host, checks the installed payload, runs the
 # packaged launcher under a virtual X server until the app logs its own
 # startup line, then uninstalls it and checks the cleanup. Linux twin of
-# windows-msi-smoke.ps1: build.yml runs it on every merge to main,
+# windows-msi-smoke.ps1: build.yml runs it on PRs and every merge to main,
 # release.yml on every tagged release. A packaging smoke, not a TUN/network
 # test.
 #
@@ -92,6 +92,12 @@ on_exit() {
     exit "${status}"
 }
 trap on_exit EXIT
+
+# Desktop installations provide this XDG menu directory, but the headless
+# runner does not. jpackage's maintainer scripts call xdg-desktop-menu for
+# both install and removal, which otherwise exit 3 before we reach the app.
+# Supply the desktop prerequisite rather than ignoring a dpkg failure.
+sudo install -d -m 0755 /usr/share/desktop-directories
 
 echo "[linux-deb-smoke] installing ${DEB}"
 installed=1
