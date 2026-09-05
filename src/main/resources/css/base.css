@@ -327,6 +327,21 @@
     -fx-pref-height: 34;
 }
 
+/* A MenuButton draws its text in a child .label and its chevron in an
+   .arrow, and Modena colours both from -fx-background (light) rather than
+   from the button's -fx-text-fill — so the Backup menu came out as dark
+   text on the dark surface. Point both at the same colour the text uses.
+   The label also carries Modena's own vertical padding on top of the
+   button's, which overflowed the 34px pin and clipped the descenders. */
+.secondary-button > .label {
+    -fx-text-fill: -c-button-secondary-fg;
+    -fx-padding: 0 6 0 0;
+}
+
+.secondary-button > .arrow-button > .arrow {
+    -fx-background-color: -c-button-secondary-fg;
+}
+
 .secondary-button:hover {
     -fx-background-color: -c-surface-sunken;
     -fx-border-color: -c-text-muted;
