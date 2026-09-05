@@ -4,6 +4,10 @@ on:
     tags: ['v*']
 permissions:
   contents: read
+env:
+  # The JDK jpackage bakes into every installer of a release: one pin for
+  # the whole workflow, the same one build.yml tests on.
+  JAVA_VERSION: '25'
 # No job here pushes, so every checkout passes persist-credentials: false:
 # the token would otherwise sit in .git/config for every later step and for
 # the third-party release action, which uploads with the token it is handed.
@@ -140,7 +144,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
-          java-version: '25'
+          java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: 'maven'
       # Shares the cache the Build workflow populates on merge to main, so a
@@ -278,7 +282,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
-          java-version: '25'
+          java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: 'maven'
       # Shares the cache the Build workflow populates on merge to main, so a
@@ -374,7 +378,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
-          java-version: '25'
+          java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: 'maven'
       # Shares the cache the Build workflow populates on merge to main, so a
@@ -438,7 +442,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
-          java-version: '25'
+          java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: 'maven'
       # Shares the cache the Build workflow populates on merge to main, so a
