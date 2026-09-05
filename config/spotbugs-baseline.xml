@@ -55,6 +55,12 @@
     <SourceLine endBytecode='36' classname='com.vlessclient.service.SubscriptionService' start='88' end='88' sourcepath='com/vlessclient/service/SubscriptionService.java' sourcefile='SubscriptionService.java' startBytecode='36' primary='true'/>
     <SourceLine endBytecode='36' classname='com.vlessclient.service.SubscriptionService' start='88' end='88' sourcepath='com/vlessclient/service/SubscriptionService.java' sourcefile='SubscriptionService.java' startBytecode='36'/>
   </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='e87a8f0ab71843af00c61d127907a515' rank='16' abbrev='CT' category='BAD_PRACTICE' priority='2' type='CT_CONSTRUCTOR_THROW' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.service.SubscriptionService' primary='true'/>
+    <Method isStatic='false' classname='com.vlessclient.service.SubscriptionService' signature='(Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/ShareLinkParser;Lcom/vlessclient/platform/SecretSealer;)V' name='&lt;init&gt;' primary='true'/>
+    <SourceLine endBytecode='34' classname='com.vlessclient.service.SubscriptionService' start='119' end='119' sourcepath='com/vlessclient/service/SubscriptionService.java' sourcefile='SubscriptionService.java' startBytecode='34' primary='true'/>
+    <SourceLine endBytecode='34' classname='com.vlessclient.service.SubscriptionService' start='119' end='119' sourcepath='com/vlessclient/service/SubscriptionService.java' sourcefile='SubscriptionService.java' startBytecode='34'/>
+  </BugInstance>
   <BugInstance instanceOccurrenceNum='0' instanceHash='896881dfdf52c2f4ab9b1119cf80f633' rank='16' abbrev='CT' category='BAD_PRACTICE' priority='2' type='CT_CONSTRUCTOR_THROW' instanceOccurrenceMax='0'>
     <Class classname='com.vlessclient.service.SubscriptionService' primary='true'/>
     <Method isStatic='false' classname='com.vlessclient.service.SubscriptionService' signature='(Lcom/vlessclient/service/ConfigStore;Lcom/vlessclient/service/ShareLinkParser;Ljava/nio/file/Path;Ljava/net/http/HttpClient;)V' name='&lt;init&gt;' primary='true'/>
