@@ -75,17 +75,15 @@ if [[ -z "${RUNTIME_MODULES}" ]]; then
     exit 1
 fi
 
-# Without --add-modules jpackage links every module that exports an API, so
-# the installer carries a ~290 MB runtime for an app that uses a dozen of
-# them. --jlink-options REPLACES jpackage's defaults rather than adding to
-# them, so the four it would have passed are repeated here.
-#
-# Deliberately WITHOUT --compress: every installer is itself a compressed
-# archive, and a pre-compressed lib/modules is one the DMG's zlib, the MSI's
-# cabinet and the .deb's zstd can no longer squeeze. Measured on the same jar:
-# the DMG went 86.6 MB -> 91.8 MB with --compress=zip-6, and the amd64 .deb
-# 78.8 MB -> 86.9 MB. Compression only helps a runtime that ships loose.
-JLINK_OPTIONS="--strip-native-commands --strip-debug --no-man-pages --no-header-files"
+# The jlink options are shared the same way through scripts/jlink-options.txt
+# (one option per line, '#' starts a comment); the reasoning behind each
+# option lives there. Joined with spaces: --jlink-options takes one string.
+JLINK_OPTIONS="$(awk '{ sub(/#.*/, ""); gsub(/^[[:space:]]+|[[:space:]]+$/, ""); if ($0 != "") { printf "%s%s", sep, $0; sep = " " } }' \
+    "${REPO_ROOT}/scripts/jlink-options.txt")"
+if [[ -z "${JLINK_OPTIONS}" ]]; then
+    echo "[package-dmg] scripts/jlink-options.txt lists no options" >&2
+    exit 1
+fi
 
 # Stage just the shaded jar (not the original-*.jar the shade plugin
 # leaves alongside it).
