@@ -220,9 +220,22 @@ public class DashboardLayoutTest extends ApplicationTest {
                 .isLessThanOrEqualTo(card.getMaxY() + 0.5);
     }
 
+    /**
+     * The window is sized from the page here rather than from the class
+     * constant: merging the traffic readout into the hero card took the
+     * standalone chart section off the dashboard, and at 420px the window was
+     * no longer shorter than what was left -- the assertion would have gone on
+     * passing while testing the window instead of the ScrollPane. Half the
+     * page's own natural height is short by construction, whatever the page
+     * gains or loses next.
+     */
     @Test
     void shortWindowScrollsInsteadOfSquashingThePage() {
         Region page = (Region) wrapper.getContent();
+        double natural = page.prefHeight(page.getWidth());
+        interact(() -> stage.setHeight(natural / 2));
+        WaitForAsyncUtils.waitForFxEvents();
+
         double viewport = wrapper.getViewportBounds().getHeight();
 
         assertThat(page.getHeight())
@@ -233,29 +246,50 @@ public class DashboardLayoutTest extends ApplicationTest {
     }
 
     /**
-     * No readout may sit on top of the chart.
+     * The traffic readout shares row 1 with the status text now that the
+     * standalone chart is gone, and the subtitle beside it is wrapText +
+     * hgrow with minWidth=0 -- a combination that hands a long server name
+     * every pixel it asks for. Without the readout's own minWidth pin the
+     * numbers are what gives way: they are pushed past the card's right edge,
+     * where no scrollbar reveals them and nothing clips them either, so the
+     * only symptom is speeds that quietly leave the window.
      *
-     * <p>These four labels used to be children of a StackPane over the
-     * sparkline, pinned to its corners. Nothing there stopped a curve from
-     * running underneath a number — it only happened to miss at the values
-     * anyone looked at, and a session total is exactly the kind of value that
-     * grows until it does not. They are rows above and below the canvas now,
-     * and this is the guard that keeps them there: put them back over the
-     * chart and the intersection below is no longer empty.</p>
+     * <p>The block is hidden until a tunnel is up, so the test shows it the
+     * way TrafficDisplayBinder does before measuring anything.</p>
      */
     @Test
-    void trafficReadoutsNeverOverlapTheChart() {
-        Bounds chart = toScene(lookup("#trafficSparkline").query());
+    void trafficReadoutStaysInsideTheHeroCardAtNarrowWidths() {
+        Region summary = lookup("#trafficSummary").query();
+        Label subtitle = lookup("#statusLabel").query();
+        interact(() -> {
+            summary.setVisible(true);
+            summary.setManaged(true);
+            // The FXML placeholder is "0 B/s", four characters narrower than a
+            // real reading. Measuring the placeholder would leave the block a
+            // pixel from fitting and call that a pass; these are the widest
+            // strings TrafficMonitor.formatSpeed can produce in practice.
+            ((Label) lookup("#uploadSpeedLabel").query()).setText("128.4 MB/s");
+            ((Label) lookup("#downloadSpeedLabel").query()).setText("128.4 MB/s");
+            subtitle.setText("Routing traffic through [amsterdam] mac-dima-exit-node-01");
+        });
 
-        for (String id : new String[] {"#uploadCardTitle", "#totalUploadLabel",
-                "#uploadSpeedLabel", "#downloadCardTitle", "#totalDownloadLabel",
-                "#downloadSpeedLabel"}) {
-            Bounds label = toScene(lookup(id).query());
-            assertThat(chart.intersects(label))
-                    .withFailMessage("%s at [%.1f..%.1f] vertically overlaps the chart "
-                            + "at [%.1f..%.1f]", id, label.getMinY(), label.getMaxY(),
-                            chart.getMinY(), chart.getMaxY())
-                    .isFalse();
+        for (int width : new int[] {NARROW_CONTENT_WIDTH, MIN_CONTENT_WIDTH}) {
+            interact(() -> stage.setWidth(width));
+            WaitForAsyncUtils.waitForFxEvents();
+
+            Bounds readout = toScene(summary);
+            Bounds hero = toScene(lookup(".hero-card").query());
+            assertThat(readout.getMaxX())
+                    .withFailMessage("at %dpx the traffic readout reaches %.1fpx, %.1fpx"
+                            + " past the hero card's right edge", width, readout.getMaxX(),
+                            readout.getMaxX() - hero.getMaxX())
+                    .isLessThanOrEqualTo(hero.getMaxX() + 0.5);
+
+            assertThat(readout.getWidth())
+                    .withFailMessage("at %dpx the traffic readout was squeezed to %.1fpx,"
+                            + " below the %.1fpx its numbers need", width,
+                            readout.getWidth(), summary.prefWidth(-1))
+                    .isGreaterThanOrEqualTo(summary.prefWidth(-1) - 0.5);
         }
     }
 

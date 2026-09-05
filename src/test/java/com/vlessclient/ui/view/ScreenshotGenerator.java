@@ -124,18 +124,14 @@ public class ScreenshotGenerator extends ApplicationTest {
         setPrivateProperty(traffic, "totalUpload",
                 property -> ((LongProperty) property).set(311_842_000L));
 
-        // A run of samples, not one value: the sparkline draws the series it
-        // has been fed, so a single number would render as a flat line.
-        for (int i = 0; i < 48; i++) {
-            double phase = i / 6.0;
-            long down = (long) (2_600_000 + 1_900_000 * Math.sin(phase)
-                    + 420_000 * Math.sin(phase * 3.1));
-            long up = (long) (240_000 + 170_000 * Math.sin(phase * 1.4 + 1.0));
-            setPrivateProperty(traffic, "downloadSpeed",
-                    property -> ((LongProperty) property).set(Math.max(0, down)));
-            setPrivateProperty(traffic, "uploadSpeed",
-                    property -> ((LongProperty) property).set(Math.max(0, up)));
-        }
+        // One sample each is enough now that the readout is two numbers: the
+        // run of 48 this used to push existed only to give the retired
+        // sparkline a series to draw. Both are non-zero on purpose — zero is
+        // the muted resting state, and the screenshot documents a busy link.
+        setPrivateProperty(traffic, "downloadSpeed",
+                property -> ((LongProperty) property).set(3_620_000L));
+        setPrivateProperty(traffic, "uploadSpeed",
+                property -> ((LongProperty) property).set(284_000L));
     }
 
     /** Reaches the dashboard's controller through MainView's cache. */

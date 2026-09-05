@@ -4,9 +4,9 @@ import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.service.TrafficMonitor;
-import com.vlessclient.ui.view.MirroredSparkline;
 import com.vlessclient.testing.FxToolkitExtension;
 import javafx.scene.control.Label;
+import javafx.scene.layout.VBox;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -42,17 +42,6 @@ class TrafficDisplayBinderTest {
         }
     }
 
-    /** Counts clears, which is the one thing the binder does to the chart. */
-    private static final class RecordingSparkline extends MirroredSparkline {
-        private int clears;
-
-        @Override
-        public void clear() {
-            clears++;
-            super.clear();
-        }
-    }
-
     @BeforeAll
     static void rememberPriorSettings() {
         try {
@@ -69,8 +58,14 @@ class TrafficDisplayBinderTest {
     }
 
     private static TrafficDisplayBinder binderOver(TrafficMonitor monitor) {
+        return binderOver(monitor, new VBox());
+    }
+
+    private static TrafficDisplayBinder binderOver(TrafficMonitor monitor, VBox summary) {
         return new TrafficDisplayBinder(monitor,
-                new Label(), new Label(), new Label(), new Label(), null);
+                new TrafficDisplayBinder.Readout(new Label(), new Label()),
+                new TrafficDisplayBinder.Readout(new Label(), new Label()),
+                new Label(), summary);
     }
 
     @Test
@@ -131,25 +126,55 @@ class TrafficDisplayBinderTest {
     }
 
     /**
-     * Without a monitor the binder must leave the chart alone too: a
-     * DISCONNECTED or ERROR with a live monitor clears the sparkline, so the
-     * chart is the one observable thing a "no-op" can get wrong.
+     * The readout is hidden in the FXML and shown only while a tunnel is up:
+     * there is no traffic to report otherwise, and the status row then looks
+     * exactly as it did before the block was merged into it.
      */
     @Test
-    void nullMonitorLeavesTheChartAndLabelsUntouched() {
-        RecordingSparkline sparkline = new RecordingSparkline();
+    void connectingAndDroppingTheTunnelShowsAndHidesTheReadout() {
+        AppSettings settings = new AppSettings();
+        ServiceLocator.register(AppSettings.class, settings);
+
+        VBox summary = new VBox();
+        summary.setVisible(false);
+        summary.setManaged(false);
+        TrafficDisplayBinder binder = binderOver(new RecordingMonitor(), summary);
+
+        binder.onConnectionStateChanged(ConnectionState.CONNECTED);
+        assertThat(binder.awaitIdle(10_000)).isTrue();
+        assertThat(summary.isVisible()).as("a live tunnel has traffic to report").isTrue();
+        assertThat(summary.isManaged())
+                .as("visible but unmanaged would leave a hole in the row")
+                .isTrue();
+
+        binder.onConnectionStateChanged(ConnectionState.DISCONNECTED);
+        assertThat(binder.awaitIdle(10_000)).isTrue();
+        assertThat(summary.isVisible()).isFalse();
+        assertThat(summary.isManaged()).isFalse();
+    }
+
+    /**
+     * Without a monitor the binder must leave the readout alone too: with a
+     * live monitor a DISCONNECTED or ERROR hides the block and zeroes its
+     * labels, so those are the observable things a "no-op" can get wrong.
+     */
+    @Test
+    void nullMonitorLeavesTheReadoutUntouched() {
+        VBox summary = new VBox();
         Label download = new Label("42 KB/s");
         TrafficDisplayBinder binder = new TrafficDisplayBinder(null,
-                new Label(), download, new Label(), new Label(), sparkline);
+                new TrafficDisplayBinder.Readout(new Label(), new Label()),
+                new TrafficDisplayBinder.Readout(new Label(), download),
+                new Label(), summary);
 
         for (ConnectionState state : ConnectionState.values()) {
             binder.onConnectionStateChanged(state);
         }
         assertThat(binder.awaitIdle(10_000)).isTrue();
 
-        assertThat(sparkline.clears)
-                .as("no monitor means nothing to stop, so nothing to clear either")
-                .isZero();
+        assertThat(summary.isVisible())
+                .as("no monitor means nothing to start, so nothing to reveal or hide")
+                .isTrue();
         assertThat(download.getText()).isEqualTo("42 KB/s");
     }
 }

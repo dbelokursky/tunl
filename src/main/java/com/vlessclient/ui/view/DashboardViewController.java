@@ -63,12 +63,11 @@ public class DashboardViewController implements ViewShownAware {
     @FXML private Label statusTitle;
     @FXML private Label statusLabel;
     @FXML private Label serverNameLabel;
-    @FXML private MirroredSparkline trafficSparkline;
     @FXML private Button connectButton;
+    @FXML private VBox trafficSummary;
     @FXML private Label uploadSpeedLabel;
     @FXML private Label downloadSpeedLabel;
-    @FXML private Label totalUploadLabel;
-    @FXML private Label totalDownloadLabel;
+    @FXML private Label sessionTotalLabel;
     @FXML private Label uploadCardIcon;
     @FXML private Label downloadCardIcon;
     @FXML private ComboBox<ProxyMode> proxyModeCombo;
@@ -76,8 +75,6 @@ public class DashboardViewController implements ViewShownAware {
     @FXML private ComboBox<ServerSelection> serverSelectionCombo;
     @FXML private Label proxyModeWarning;
     @FXML private HBox singBoxMissingBanner;
-    @FXML private Label uploadCardTitle;
-    @FXML private Label downloadCardTitle;
     @FXML private Label singBoxMissingTitle;
     @FXML private Label singBoxMissingHint;
     @FXML private Label brewCommandLabel;
@@ -87,7 +84,6 @@ public class DashboardViewController implements ViewShownAware {
     @FXML private Label healthSummaryLabel;
     @FXML private Button recheckButton;
     @FXML private Label modeLabel;
-    @FXML private Label trafficSectionTitle;
     @FXML private Label healthSectionTitle;
     @FXML private Hyperlink addServerLink;
     @FXML private VBox serviceStatusList;
@@ -140,8 +136,8 @@ public class DashboardViewController implements ViewShownAware {
      */
     @FXML
     public void initialize() {
-        uploadCardIcon.setGraphic(Icons.chevronDoubleUp(16));
-        downloadCardIcon.setGraphic(Icons.chevronDoubleDown(16));
+        uploadCardIcon.setGraphic(Icons.chevronDoubleUp(13));
+        downloadCardIcon.setGraphic(Icons.chevronDoubleDown(13));
 
         // The connect button's label is driven by the connection state below,
         // so its width is pinned from the four labels that state can produce
@@ -149,14 +145,9 @@ public class DashboardViewController implements ViewShownAware {
         ButtonLabels.pinWidth(connectButton, "button.connect", "button.disconnect",
                 "button.cancel", "button.retry");
 
-        // Titles, not readouts: they belong here rather than in
-        // TrafficDisplayBinder, which only runs when a TrafficMonitor exists.
-        uploadCardTitle.textProperty().bind(I18n.binding("dashboard.upload.speed"));
-        downloadCardTitle.textProperty().bind(I18n.binding("dashboard.download.speed"));
         // Section headers and the two health-card buttons sat in the FXML as
         // English literals; in Russian the dashboard was half-translated.
         modeLabel.textProperty().bind(I18n.binding("dashboard.mode"));
-        trafficSectionTitle.textProperty().bind(I18n.binding("dashboard.traffic.title"));
         healthSectionTitle.textProperty().bind(I18n.binding("dashboard.health.title"));
         ButtonLabels.bindStatic(recheckButton, "dashboard.health.recheck");
         ButtonLabels.bindStatic(cancelReconnectButton, "button.cancel");
@@ -182,8 +173,9 @@ public class DashboardViewController implements ViewShownAware {
                 "ServiceReachabilityChecker not available; health check disabled");
 
         trafficDisplay = new TrafficDisplayBinder(trafficMonitor,
-                uploadSpeedLabel, downloadSpeedLabel, totalUploadLabel, totalDownloadLabel,
-                trafficSparkline);
+                new TrafficDisplayBinder.Readout(uploadCardIcon, uploadSpeedLabel),
+                new TrafficDisplayBinder.Readout(downloadCardIcon, downloadSpeedLabel),
+                sessionTotalLabel, trafficSummary);
         if (latencyTester != null) {
             // While connected, measure through the proxy instead of TCP-pinging
             // its address; the supplier returns null when the core is down.
@@ -227,7 +219,6 @@ public class DashboardViewController implements ViewShownAware {
 
         initProxyModeCombo();
         initServerSelectionCombo();
-        trafficDisplay.initSparklines();
 
         if (trafficMonitor != null) {
             trafficDisplay.bindLabels();
