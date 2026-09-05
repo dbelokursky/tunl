@@ -185,8 +185,12 @@ public class GeoIpDatabase {
                 }
             }
             // Only becomes the real database once it parses: a truncated
-            // file would fail on every lookup afterwards.
-            try (Reader probe = new Reader(staging.toFile())) {
+            // file would fail on every lookup afterwards. Probed through a
+            // stream rather than the file: a Reader that throws from its
+            // constructor never closes the file it mapped, and on Windows the
+            // open mapping then blocks the delete of the rejected file.
+            try (InputStream probeIn = Files.newInputStream(staging);
+                    Reader probe = new Reader(probeIn)) {
                 log.info("Downloaded geo-IP database ({})",
                         probe.getMetadata().databaseType());
             }
