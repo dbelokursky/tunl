@@ -31,6 +31,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
 
 if ([string]::IsNullOrEmpty($MsiVersion)) {
     $MsiVersion = $Version
