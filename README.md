@@ -319,8 +319,8 @@ else saves on click.
 | | Proxy Mode | System Proxy / TUN — the same switch as **Mode** on the Dashboard |
 | | Set system proxy automatically | In System Proxy mode, point the OS at the local ports on connect and restore it on disconnect |
 | Health Check | Enable health check | After connecting, verify that traffic actually reaches a few services (on by default) |
-| | Auto-reconnect when unreachable | Reconnect after the reconnect delay when every check fails |
-| | Check interval / Reconnect delay | Seconds between checks (`5`) and before a reconnect (`10`) |
+| | Auto-reconnect when unreachable | Recover after a core crash or when every check fails; retry delay doubles up to 5 minutes |
+| | Check interval / Reconnect delay | Seconds between checks (`5`) and before the first retry (`10`) |
 | Advanced | Proxy DNS | Resolver for tunnelled names, queried through the tunnel (`https://1.1.1.1/dns-query`) |
 | | Direct DNS | Resolver for direct-routed names — the bypass list, Direct rules, bypassed countries (`https://223.5.5.5/dns-query`) |
 | | TUN Interface Name | `utun99` on macOS and Linux, `VlessClientTun` on Windows |

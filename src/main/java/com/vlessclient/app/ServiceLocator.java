@@ -26,6 +26,7 @@ import com.vlessclient.service.ThemeManager;
 import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.service.TrayIconService;
 import com.vlessclient.service.TunnelHealthState;
+import com.vlessclient.service.TunnelRecoveryService;
 import com.vlessclient.service.UpdateManager;
 import com.vlessclient.service.mcp.AppControlService;
 import com.vlessclient.service.mcp.DefaultAppControlService;
@@ -167,6 +168,10 @@ public class ServiceLocator {
         ConnectionService connectionService = new ConnectionService(
                 configStore, configGenerator, routingService, engine);
         register(ConnectionService.class, connectionService);
+        TunnelRecoveryService recovery = connectionService.getRecoveryService();
+        register(TunnelRecoveryService.class, recovery);
+        get(TunnelHealthState.class).healthProperty().addListener(
+                (obs, old, health) -> recovery.onHealth(health));
 
         // MCP control server: a facade over the services above, plus the server
         // that exposes it to agents. Started here so `mcp_enabled` takes effect
@@ -309,6 +314,7 @@ public class ServiceLocator {
         AppHttpClients.routeDirect();
 
         stopMcpServer();
+        find(TunnelRecoveryService.class).ifPresent(TunnelRecoveryService::close);
 
         // Stop the engine early — right after MCP so no in-flight agent connect
         // survives it — and before the slow steps below. An in-flight

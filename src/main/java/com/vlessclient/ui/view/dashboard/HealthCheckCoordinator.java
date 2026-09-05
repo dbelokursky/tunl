@@ -10,6 +10,7 @@ import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TunnelHealthState;
+import com.vlessclient.service.TunnelRecoveryService;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -73,23 +74,14 @@ public final class HealthCheckCoordinator {
     private final ServiceReachabilityChecker reachabilityChecker;
     private final TunnelHealthState healthState;
     private final Supplier<SingBoxEngine> engineSupplier;
-    private final Runnable connectAction;
-    private final Runnable disconnectAction;
-    private final Runnable reconnectAction;
+    private final TunnelRecoveryService recovery;
     private final Supplier<AppSettings> settingsSupplier;
     private final Consumer<AppSettings> settingsSaver;
 
-    // Health-check / auto-reconnect state. All mutated only on the FX thread.
-    private PauseTransition reconnectDelay;
-    // Schedules the next periodic reachability probe while the tunnel is up.
+    // Probe scheduling and rendering remain FX-owned; recovery lives in the service.
     private PauseTransition periodicCheckDelay;
     private final AtomicBoolean healthCheckInFlight = new AtomicBoolean();
     private final AtomicInteger healthGeneration = new AtomicInteger();
-    private int reconnectAttempt;
-    // True while we are tearing down and restarting the tunnel ourselves, so
-    // the self-inflicted DISCONNECTED/ERROR transition is not mistaken for a
-    // user disconnect that should cancel the health loop.
-    private boolean suppressDisconnectHandling;
     // Whether this connection has produced a verdict yet. Gates the CHECKING
     // signal: with a 5s default interval, publishing it on every periodic
     // re-probe would flicker the tray icon and the hero card twelve times a
@@ -99,9 +91,8 @@ public final class HealthCheckCoordinator {
     /**
      * Creates the coordinator over the given controls. The engine is read
      * through {@code engineSupplier} on every use because the controller may
-     * swap in a new {@link SingBoxEngine} after an in-app install; the
-     * connect/disconnect actions are the controller's own, so a reconnect
-     * behaves exactly like the user pressing the buttons. {@code healthState}
+     * swap in a new {@link SingBoxEngine} after an in-app install. Recovery
+     * and its countdown belong to the connection service. {@code healthState}
      * may be null, in which case verdicts are rendered here and nowhere else.
      */
     public HealthCheckCoordinator(
@@ -109,11 +100,8 @@ public final class HealthCheckCoordinator {
             ServiceReachabilityChecker reachabilityChecker,
             TunnelHealthState healthState,
             Supplier<SingBoxEngine> engineSupplier,
-            Runnable connectAction,
-            Runnable disconnectAction,
-            Runnable reconnectAction) {
-        this(controls, reachabilityChecker, healthState, engineSupplier, connectAction,
-                disconnectAction, reconnectAction,
+            TunnelRecoveryService recovery) {
+        this(controls, reachabilityChecker, healthState, engineSupplier, recovery,
                 () -> ServiceLocator.find(AppSettings.class).orElse(null),
                 settings -> ServiceLocator.find(ConfigStore.class).ifPresentOrElse(
                         store -> store.saveSettings(settings),
@@ -134,9 +122,7 @@ public final class HealthCheckCoordinator {
             ServiceReachabilityChecker reachabilityChecker,
             TunnelHealthState healthState,
             Supplier<SingBoxEngine> engineSupplier,
-            Runnable connectAction,
-            Runnable disconnectAction,
-            Runnable reconnectAction,
+            TunnelRecoveryService recovery,
             Supplier<AppSettings> settingsSupplier,
             Consumer<AppSettings> settingsSaver) {
         this.settingsSupplier = settingsSupplier;
@@ -149,9 +135,13 @@ public final class HealthCheckCoordinator {
         this.reachabilityChecker = reachabilityChecker;
         this.healthState = healthState;
         this.engineSupplier = engineSupplier;
-        this.connectAction = connectAction;
-        this.disconnectAction = disconnectAction;
-        this.reconnectAction = reconnectAction;
+        this.recovery = recovery;
+        if (recovery != null) {
+            recovery.retryProperty().addListener((obs, old, next) -> renderRetry(next));
+            renderRetry(recovery.retryProperty().get());
+        } else {
+            hideReconnectBanner();
+        }
     }
 
     private SingBoxEngine engine() {
@@ -163,7 +153,7 @@ public final class HealthCheckCoordinator {
      * On CONNECTED we verify the tunnel actually carries traffic; on a
      * user-initiated DISCONNECTED/ERROR we tear the health loop down. A
      * self-inflicted transition during our own auto-reconnect restart is
-     * ignored via {@link #suppressDisconnectHandling}.
+     * ignored via {@link TunnelRecoveryService#isRecovering()}.
      */
     public void onConnectionStateChanged(ConnectionState state) {
         if (healthCard == null) {
@@ -180,8 +170,11 @@ public final class HealthCheckCoordinator {
         // the previous one's answer.
         hasVerdict.set(false);
         publishHealth(TunnelHealth.UNMONITORED);
+        healthGeneration.incrementAndGet();
+        healthCheckInFlight.set(false);
+        cancelPeriodicCheck();
         if (state == ConnectionState.DISCONNECTED || state == ConnectionState.ERROR) {
-            if (suppressDisconnectHandling) {
+            if (recovery != null && recovery.isRecovering()) {
                 return;
             }
             cancelHealthLoop();
@@ -189,18 +182,13 @@ public final class HealthCheckCoordinator {
     }
 
     /**
-     * Manual re-check, wired to the card's "Re-check" button. Supersedes any
-     * pending auto-reconnect countdown; no-op while not connected.
+     * Manual re-check, wired to the card's "Re-check" button. A successful
+     * verdict cancels pending recovery; no-op while not connected.
      */
     public void recheck() {
         if (engine() == null
                 || engine().connectionStateProperty().get() != ConnectionState.CONNECTED) {
             return;
-        }
-        // A manual re-check supersedes any pending auto-reconnect countdown.
-        if (reconnectDelay != null) {
-            reconnectDelay.stop();
-            reconnectDelay = null;
         }
         runReachabilityCheck();
     }
@@ -210,11 +198,9 @@ public final class HealthCheckCoordinator {
      * the banner's "Cancel" button.
      */
     public void cancelReconnectCountdown() {
-        if (reconnectDelay != null) {
-            reconnectDelay.stop();
-            reconnectDelay = null;
+        if (recovery != null) {
+            recovery.cancel();
         }
-        reconnectAttempt = 0;
         hideReconnectBanner();
     }
 
@@ -327,19 +313,9 @@ public final class HealthCheckCoordinator {
 
     private void evaluateReconnect(List<ServiceReachabilityChecker.ProbeResult> results,
                                    AppSettings settings) {
-        boolean broken = settings.isHealthCheckEnabled()
-                && settings.isHealthCheckAutoReconnect()
-                && ServiceReachabilityChecker.allUnreachable(results);
-        if (broken) {
-            scheduleReconnect(settings);
-        } else {
-            reconnectAttempt = 0;
-            hideReconnectBanner();
-            // Keep monitoring: re-probe after the configured interval. When the
-            // reconnect path runs instead, the restart itself drives the next
-            // check, so we don't double-schedule here.
-            schedulePeriodicCheck(settings);
-        }
+        // The shared health verdict drives recovery through the service graph.
+        // Continue probing during a countdown so restored reachability can cancel it.
+        schedulePeriodicCheck(settings);
     }
 
     /**
@@ -373,60 +349,19 @@ public final class HealthCheckCoordinator {
         }
     }
 
-    /**
-     * Starts the (cancelable) countdown to the next reconnect. No-op if a
-     * countdown is already running. The loop is unbounded by design — it
-     * repeats every {@code health_check_delay_seconds} until a service becomes
-     * reachable or the user disconnects/cancels.
-     */
-    private void scheduleReconnect(AppSettings settings) {
-        if (reconnectDelay != null) {
-            return;
-        }
-        int seconds = Math.max(1, settings.getHealthCheckDelaySeconds());
-        reconnectAttempt++;
-        showReconnectBanner(I18n.get("dashboard.reconnect.banner",
-                String.valueOf(seconds), String.valueOf(reconnectAttempt)));
-        reconnectDelay = new PauseTransition(Duration.seconds(seconds));
-        reconnectDelay.setOnFinished(e -> performReconnect());
-        reconnectDelay.play();
-    }
-
-    /**
-     * Restarts the tunnel through {@code ConnectionService.reconnect}, which
-     * waits for the old core to exit before starting the new one. The
-     * DISCONNECTED that our own stop produces is suppressed for the whole
-     * restart so it is not mistaken for a user disconnect. The subsequent
-     * CONNECTED drives the next reachability check, continuing the loop.
-     */
-    private void performReconnect() {
-        reconnectDelay = null;
-        if (engine() == null
-                || engine().connectionStateProperty().get() != ConnectionState.CONNECTED) {
-            return;   // user disconnected or state changed during the wait
-        }
-        log.info("Auto-reconnect (attempt {}): all services unreachable, restarting tunnel",
-                reconnectAttempt);
-        hideReconnectBanner();
-        suppressDisconnectHandling = true;
-        // One restart, not disconnect-then-hope. The old 700 ms gap was shorter
-        // than a stop can take — SingBoxEngine waits out a SIGTERM grace period
-        // and can force-kill after it — so the suppress flag was already back
-        // to false when DISCONNECTED finally arrived. onConnectionStateChanged
-        // then treated the app's own restart as a user disconnect: attempt
-        // counter reset, card hidden, health published as UNMONITORED, in the
-        // middle of a reconnect this class had started. ConnectionService
-        // .reconnect waits for the old core itself, and its javadoc names this
-        // caller as the reason it exists.
-        Thread.startVirtualThread(() -> {
-            try {
-                reconnectAction.run();
-            } finally {
-                // Held for the whole restart, and cleared on the FX thread
-                // because that is where every other read of it happens.
-                Platform.runLater(() -> suppressDisconnectHandling = false);
+    private void renderRetry(TunnelRecoveryService.Retry next) {
+        if (next == null) {
+            hideReconnectBanner();
+            if (engine() != null
+                    && engine().connectionStateProperty().get() != ConnectionState.CONNECTED
+                    && (recovery == null || !recovery.isRecovering())) {
+                setHealthCardVisible(false);
             }
-        });
+        } else {
+            setHealthCardVisible(true);
+            showReconnectBanner(I18n.get("dashboard.reconnect.banner",
+                    String.valueOf(next.delaySeconds()), String.valueOf(next.attempt())));
+        }
     }
 
     /**
@@ -435,12 +370,7 @@ public final class HealthCheckCoordinator {
      * disconnect.
      */
     private void cancelHealthLoop() {
-        if (reconnectDelay != null) {
-            reconnectDelay.stop();
-            reconnectDelay = null;
-        }
         cancelPeriodicCheck();
-        reconnectAttempt = 0;
         healthGeneration.incrementAndGet(); // invalidate any in-flight probe result
         healthCheckInFlight.set(false);
         hasVerdict.set(false);
@@ -453,6 +383,9 @@ public final class HealthCheckCoordinator {
             healthSummaryLabel.setText("—");
         }
         setHealthCardVisible(false);
+        if (recovery != null) {
+            renderRetry(recovery.retryProperty().get());
+        }
     }
 
     private void renderPendingRows(List<HealthCheckTarget> targets) {
