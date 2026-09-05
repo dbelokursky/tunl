@@ -11,6 +11,8 @@ import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TestConfigStores;
 import com.vlessclient.service.TunnelHealthState;
+import com.vlessclient.service.TunnelRecoveryService;
+import org.junit.jupiter.api.AfterEach;
 import com.vlessclient.testing.FxToolkitExtension;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -153,17 +155,30 @@ class HealthCheckCoordinatorTest {
 
     /** Replaced by the reconnect tests; a no-op everywhere else. */
     private Runnable reconnectAction = () -> { };
+    private TunnelRecoveryService recovery;
+
+    @AfterEach
+    void stopRecovery() {
+        if (recovery != null) {
+            recovery.close();
+        }
+    }
 
     private HealthCheckCoordinator coordinatorWith(ServiceReachabilityChecker checker) {
+        recovery = new TunnelRecoveryService(() -> ServiceLocator.get(AppSettings.class), guard -> {
+            reconnectAction.run();
+            return true;
+        });
+        recovery.connectionRequested();
+        engine.state.addListener((obs, old, next) -> recovery.onConnectionState(next));
+        healthState.healthProperty().addListener((obs, old, next) -> recovery.onHealth(next));
         return new HealthCheckCoordinator(
                 new HealthCheckCoordinator.Controls(
                         healthCard, summaryLabel, statusList, banner, bannerLabel),
                 checker,
                 healthState,
                 () -> engine,
-                () -> { },
-                () -> { },
-                reconnectAction);
+                recovery);
     }
 
     private static AppSettings healthSettings(boolean autoReconnect, HealthCheckTarget... targets) {
@@ -247,6 +262,24 @@ class HealthCheckCoordinatorTest {
 
         onFxAndWait(coordinator::cancelReconnectCountdown);
         assertThat(banner.isVisible()).isFalse();
+    }
+
+    @Test
+    void coreCrashKeepsTheRecoveryBannerVisibleAndCancelable() throws Exception {
+        healthSettings(true, new HealthCheckTarget("a", "https://a"));
+        FakeChecker checker = new FakeChecker();
+        checker.results = List.of(probe("a", true));
+        HealthCheckCoordinator coordinator = coordinatorWith(checker);
+        connectAndCheck(coordinator);
+        onFxAndWait(() -> {
+            engine.state.set(ConnectionState.ERROR);
+            coordinator.onConnectionStateChanged(ConnectionState.ERROR);
+        });
+        assertThat(banner.isVisible()).isTrue();
+        assertThat(healthCard.isVisible()).isTrue();
+        onFxAndWait(coordinator::cancelReconnectCountdown);
+        assertThat(banner.isVisible()).isFalse();
+        assertThat(healthCard.isVisible()).isFalse();
     }
 
     @Test

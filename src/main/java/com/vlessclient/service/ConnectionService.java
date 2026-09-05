@@ -1,13 +1,16 @@
 package com.vlessclient.service;
 
 import com.vlessclient.model.AppSettings;
+import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.ServerConfig;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 import javafx.application.Platform;
+import javafx.beans.value.ChangeListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,7 +56,9 @@ public class ConnectionService {
         /** Nothing is selected to connect to. */
         NO_ACTIVE_SERVER,
         /** A core was already running, so this attempt was refused. */
-        ALREADY_RUNNING
+        ALREADY_RUNNING,
+        /** A newer user request superseded this connection attempt. */
+        CANCELLED
     }
 
     /**
@@ -81,6 +86,11 @@ public class ConnectionService {
      * (see {@link #setEngine}) and read as a single volatile snapshot per call.
      */
     private volatile SingBoxEngine engine;
+    private final Object operations = new Object();
+    private final TunnelRecoveryService recovery;
+    private final ChangeListener<ConnectionState> recoveryListener;
+    private volatile ProxyMode requestedMode;
+
 
     /**
      * Creates the service.
@@ -97,7 +107,11 @@ public class ConnectionService {
         this.configStore = configStore;
         this.configGenerator = configGenerator;
         this.routingService = routingService;
-        this.engine = engine;
+        this.recovery = new TunnelRecoveryService(
+                () -> configStore != null ? configStore.getSettings() : new AppSettings(),
+                this::recover);
+        this.recoveryListener = (obs, old, state) -> recovery.onConnectionState(state);
+        bindEngine(engine);
     }
 
     /**
@@ -107,7 +121,24 @@ public class ConnectionService {
      * @param engine the engine to drive from now on
      */
     public void setEngine(SingBoxEngine engine) {
-        this.engine = engine;
+        bindEngine(engine);
+    }
+
+    private void bindEngine(SingBoxEngine engine) {
+        FxExecutor.run(() -> {
+            if (this.engine != null) {
+                this.engine.connectionStateProperty().removeListener(recoveryListener);
+            }
+            this.engine = engine;
+            if (engine != null) {
+                engine.connectionStateProperty().addListener(recoveryListener);
+            }
+        });
+    }
+
+    /** The application-owned recovery loop, shared with health reporting and the UI. */
+    public TunnelRecoveryService getRecoveryService() {
+        return recovery;
     }
 
     /** The engine currently driven, or null when no binary is available. */
@@ -147,7 +178,15 @@ public class ConnectionService {
      */
     public ConnectAttempt connect(ProxyMode modeOverride) throws IOException {
         requireOffFxThread("connect");
+        requestedMode = modeOverride;
+        long request = recovery.connectionRequested();
+        synchronized (operations) {
+            return connectInternal(modeOverride, () -> recovery.isWanted(request));
+        }
+    }
 
+    private ConnectAttempt connectInternal(ProxyMode modeOverride, BooleanSupplier allowed)
+            throws IOException {
         SingBoxEngine current = engine;
         if (current == null) {
             return new ConnectAttempt(Outcome.NO_ENGINE, null);
@@ -168,11 +207,14 @@ public class ConnectionService {
 
         AppSettings settings = configStore.getSettings();
         ProxyMode mode = modeOverride != null ? modeOverride : settings.getProxyMode();
-        String configJson =
+        final String configJson =
                 configGenerator.generate(candidates, active, settings, safeRoutingConfig());
 
         log.info("Connecting to server: {} ({})", active.getName(), mode);
         current.awaitStopped(STOP_WAIT);
+        if (!allowed.getAsBoolean()) {
+            return new ConnectAttempt(Outcome.CANCELLED, active);
+        }
         try {
             current.start(configJson, mode);
         } catch (IllegalStateException e) {
@@ -189,12 +231,18 @@ public class ConnectionService {
      */
     public void disconnect() {
         requireOffFxThread("disconnect");
-        SingBoxEngine current = engine;
-        if (current == null) {
-            return;
+        recovery.cancel();
+        synchronized (operations) {
+            stopCurrent();
         }
-        log.info("Disconnecting");
-        current.stop();
+    }
+
+    private void stopCurrent() {
+        SingBoxEngine current = engine;
+        if (current != null) {
+            log.info("Disconnecting");
+            current.stop();
+        }
     }
 
     /**
@@ -208,8 +256,23 @@ public class ConnectionService {
      * @throws IllegalStateException if called on the JavaFX thread
      */
     public ConnectAttempt reconnect(ProxyMode modeOverride) throws IOException {
-        disconnect();
-        return connect(modeOverride);
+        requireOffFxThread("reconnect");
+        requestedMode = modeOverride;
+        long request = recovery.connectionRequested();
+        synchronized (operations) {
+            stopCurrent();
+            return connectInternal(modeOverride, () -> recovery.isWanted(request));
+        }
+    }
+
+    private boolean recover(BooleanSupplier allowed) throws IOException {
+        synchronized (operations) {
+            if (!allowed.getAsBoolean()) {
+                return false;
+            }
+            stopCurrent();
+            return connectInternal(requestedMode, allowed).started();
+        }
     }
 
     /**

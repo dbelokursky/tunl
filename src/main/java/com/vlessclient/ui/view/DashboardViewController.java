@@ -215,7 +215,7 @@ public class DashboardViewController implements ViewShownAware {
                 new HealthCheckCoordinator.Controls(healthCard, healthSummaryLabel,
                         serviceStatusList, reconnectBanner, reconnectBannerLabel),
                 reachabilityChecker, healthState, () -> singBoxEngine,
-                this::connect, this::disconnect, this::reconnectForHealthCheck);
+                connectionService() != null ? connectionService().getRecoveryService() : null);
 
         // A verdict arriving does not change the process state, so the hero
         // card has to be repainted on its own signal — otherwise a tunnel that
@@ -698,28 +698,6 @@ public class DashboardViewController implements ViewShownAware {
     }
 
     /**
-     * Restarts the tunnel and blocks until the restart has finished.
-     *
-     * <p>For {@link com.vlessclient.ui.view.dashboard.HealthCheckCoordinator},
-     * which holds its self-disconnect guard for exactly as long as this runs.
-     * The guard is the whole point: a stop can take seconds, and any
-     * DISCONNECTED arriving before this returns is the app's own restart, not
-     * the user's. Called from the coordinator's virtual thread, never from the
-     * FX thread — {@code runConnect} marshals its own UI updates.</p>
-     */
-    void reconnectForHealthCheck() {
-        ConnectionService service = connectionService();
-        if (service == null) {
-            return;
-        }
-        Platform.runLater(() -> {
-            activeServer = findActiveServer();
-            connectButton.setDisable(true);
-        });
-        runConnect(service, true);
-    }
-
-    /**
      * Restarts the tunnel, waiting for the old core to exit first. Used when the
      * active server changes while connected.
      */
@@ -749,6 +727,7 @@ public class DashboardViewController implements ViewShownAware {
                         showError(I18n.get("error.singbox.not.found"),
                                 I18n.get("dashboard.error.singbox.body")));
                 case ALREADY_RUNNING -> log.warn("sing-box already running");
+                case CANCELLED -> log.debug("Connect superseded by a newer user request");
                 // STARTED: the engine's state listener drives the UI from here.
                 default -> Platform.runLater(() -> setActiveServer(attempt.server()));
             }
