@@ -88,10 +88,12 @@ jobs:
 
   # ========= Packaging: after that OS's tests ==============================
   # Each produces an installable artifact (14 days) so any main commit can be
-  # tried without cutting a release. Windows also packages on PRs because its
-  # MSI install/uninstall smoke test is the only automated installer check.
-  # Tagged releases build their installers in release.yml through the same
-  # scripts.
+  # tried without cutting a release, and each installer is checked on the
+  # runner that built it: the MSI is installed and uninstalled, the DEB is
+  # installed, launched under Xvfb and removed, the DMG is mounted and its
+  # app bundle inspected. Windows also packages on PRs because its MSI smoke
+  # is the only one of those that runs before merge. Tagged releases build
+  # and check their installers in release.yml through the same scripts.
 
   package-macos:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -116,6 +118,11 @@ jobs:
       - run: mvn -B package -DskipTests
       - name: Package DMG
         run: scripts/package-dmg.sh "1.0.0-dev-${GITHUB_SHA:0:7}" "1.0.${{ github.run_number }}"
+      - name: Smoke-test the DMG payload
+        # Mounts the DMG and checks Tunl.app inside it: launcher, runtime,
+        # app.version, CFBundleVersion, the darwin core in the jar. Not
+        # launched — the script says why a CI Mac is the wrong place for it.
+        run: scripts/macos-dmg-smoke.sh dist/*.dmg "1.0.0-dev-${GITHUB_SHA:0:7}" "1.0.${{ github.run_number }}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vless-client-${{ github.sha }}
@@ -178,6 +185,17 @@ jobs:
       - run: mvn -B package -DskipTests
       - name: Package DEB
         run: scripts/package-linux.sh "1.0.0-dev-${GITHUB_SHA:0:7}" "1.0.0+dev${{ github.run_number }}"
+      - name: Smoke-test DEB install, launch and uninstall
+        # Installs the .deb on the runner, runs /opt/tunl/bin/tunl under Xvfb
+        # until the app writes "Tunl started" to its own log, then removes
+        # the package. The libraries are the set scripts/linux-qa.sh needs to
+        # render JavaFX without a GPU.
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
+            xvfb xauth libgtk-3-0t64 libglib2.0-0t64 libxtst6 libxi6 libxrender1 libxrandr2 \
+            libfreetype6 fontconfig libasound2t64 libgl1 libpango-1.0-0 libcairo2 fonts-dejavu-core
+          scripts/linux-deb-smoke.sh dist/*.deb "1.0.0-dev-${GITHUB_SHA:0:7}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vless-client-linux-${{ github.sha }}

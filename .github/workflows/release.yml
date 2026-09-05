@@ -206,6 +206,11 @@ jobs:
         env:
           MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
         run: scripts/package-dmg.sh "${GITHUB_REF_NAME#v}"
+      - name: Smoke-test the DMG payload
+        # Before notarization, which takes minutes: mounts the DMG and checks
+        # Tunl.app inside it (launcher, runtime, app.version, CFBundleVersion,
+        # the darwin core in the jar) without launching it.
+        run: scripts/macos-dmg-smoke.sh dist/*.dmg "${GITHUB_REF_NAME#v}"
       - name: Notarize and staple the DMG
         if: ${{ env.MACOS_NOTARY_CONFIGURED == 'true' }}
         env:
@@ -343,6 +348,15 @@ jobs:
         run: mvn -B test -Psmoke -Dtest=SingBoxRealBinarySmokeTest
       - name: Create DEB with jpackage
         run: scripts/package-linux.sh "${GITHUB_REF_NAME#v}"
+      - name: Smoke-test DEB install, launch and uninstall
+        # The same check build.yml runs on every merge: install the .deb,
+        # launch it under Xvfb until "Tunl started" is logged, uninstall.
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
+            xvfb xauth libgtk-3-0t64 libglib2.0-0t64 libxtst6 libxi6 libxrender1 libxrandr2 \
+            libfreetype6 fontconfig libasound2t64 libgl1 libpango-1.0-0 libcairo2 fonts-dejavu-core
+          scripts/linux-deb-smoke.sh dist/*.deb "${GITHUB_REF_NAME#v}"
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: ${{ needs.prepare-release.outputs.title }}
