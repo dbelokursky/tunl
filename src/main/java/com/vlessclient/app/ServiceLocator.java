@@ -2,6 +2,9 @@ package com.vlessclient.app;
 
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.platform.Autostart;
+import com.vlessclient.platform.PlatformPaths;
+import com.vlessclient.platform.SecretSealer;
+import com.vlessclient.platform.SecretSealers;
 import com.vlessclient.service.AppHttpClients;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
@@ -89,7 +92,12 @@ public class ServiceLocator {
             log.info("sing-box binary not found on disk; will be downloaded on startup");
         }
 
-        ConfigStore configStore = new ConfigStore();
+        // The test graph seals nothing: a headless UI test that adds a server
+        // used to write through the developer's login Keychain (CLAUDE.md:
+        // a test never touches the OS keychain).
+        SecretSealer sealer = mode == StartupMode.TEST
+                ? SecretSealers.disabled() : SecretSealers.forCurrentPlatform();
+        ConfigStore configStore = new ConfigStore(PlatformPaths.current().dataDir(), sealer);
         register(ConfigStore.class, configStore);
 
         register(AppSettings.class, configStore.getSettings());
@@ -144,7 +152,7 @@ public class ServiceLocator {
                 new DiagnosticsBundle(configStore, configGenerator, routingService));
 
         SubscriptionService subscriptionService =
-                new SubscriptionService(configStore, shareLinkParser);
+                new SubscriptionService(configStore, shareLinkParser, sealer);
         register(SubscriptionService.class, subscriptionService);
 
         UpdateManager updateManager = new UpdateManager();

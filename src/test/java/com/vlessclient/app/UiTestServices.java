@@ -2,6 +2,7 @@ package com.vlessclient.app;
 
 import com.vlessclient.model.HealthCheckTarget;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.platform.SecretSealers;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.CountryResolver;
@@ -183,7 +184,8 @@ public final class UiTestServices {
 
         private NoNetworkSubscriptionService(
                 ConfigStore configStore, ShareLinkParser shareLinkParser) {
-            super(configStore, shareLinkParser);
+            // Never the platform sealer: a UI test must not reach the keychain.
+            super(configStore, shareLinkParser, SecretSealers.disabled());
         }
 
         @Override

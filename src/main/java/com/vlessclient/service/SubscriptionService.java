@@ -102,13 +102,27 @@ public class SubscriptionService {
      * @param shareLinkParser the parser used to decode share links from subscription content
      */
     public SubscriptionService(ConfigStore configStore, ShareLinkParser shareLinkParser) {
+        this(configStore, shareLinkParser, SecretSealers.forCurrentPlatform());
+    }
+
+    /**
+     * Creates a subscription service with an explicit sealer for the stored
+     * URLs; the headless UI test graph passes {@link SecretSealers#disabled()}
+     * so a test never reaches the OS keychain.
+     *
+     * @param configStore     the store that holds the parsed servers
+     * @param shareLinkParser the parser used to decode share links
+     * @param sealer          how subscription URLs are protected at rest
+     */
+    public SubscriptionService(ConfigStore configStore, ShareLinkParser shareLinkParser,
+                               SecretSealer sealer) {
         this(configStore, shareLinkParser,
                 resolveDataDir(),
                 AppHttpClients.newBuilder()
                         .connectTimeout(Duration.ofSeconds(15))
                         .followRedirects(HttpClient.Redirect.NORMAL)
                         .build(),
-                SecretSealers.forCurrentPlatform());
+                sealer);
     }
 
     /**

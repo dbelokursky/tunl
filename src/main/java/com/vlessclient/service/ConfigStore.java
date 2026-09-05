@@ -98,7 +98,18 @@ public class ConfigStore {
         this(dataDir, SecretSealers.disabled());
     }
 
-    ConfigStore(Path dataDir, SecretSealer sealer) {
+    /**
+     * Creates a store backed by an explicit directory and an explicit sealer.
+     *
+     * <p>Public so the locator can build the headless UI test graph over the
+     * real data-dir resolution with {@link SecretSealers#disabled()}: that
+     * graph used the platform sealer, and a UI test that added a server wrote
+     * through the developer's login Keychain.</p>
+     *
+     * @param dataDir the directory backing this store
+     * @param sealer  how credentials are protected at rest
+     */
+    public ConfigStore(Path dataDir, SecretSealer sealer) {
         this.dataDir = dataDir;
         this.sealer = sealer;
         this.objectMapper = JsonMapper.builder()
