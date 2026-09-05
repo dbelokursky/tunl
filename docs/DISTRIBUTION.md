@@ -7,48 +7,63 @@ Primary distribution is **direct download** from the
 each `v*` tag. Everything below is a convenience layer on top of those same
 assets — no channel is the source of the binaries.
 
-`packaging/` holds the source-of-truth **Homebrew cask** and **AUR PKGBUILD**.
-On release, `scripts/update-packaging.sh` regenerates them (new version + the
-released assets' SHA-256) so the published channels track the latest tag.
+## What exists today
 
-## Live / prepared
+`packaging/` holds two templates: the Homebrew cask
+(`packaging/homebrew/tunl.rb`) and the AUR `PKGBUILD` with its `.SRCINFO`
+(`packaging/aur/`). They are committed with version `0.0.0` and all-zero
+checksums. On every release the `update-packaging` job of `release.yml` runs
+`scripts/update-packaging.sh <version> <dmg sha256> <amd64 deb sha256>
+<arm64 deb sha256>`, which stamps the version and checksums into the three
+files, and attaches the results — `tunl.rb`, `PKGBUILD` and `.SRCINFO`
+(GitHub lists it as `default.SRCINFO`) — to the GitHub release. The
+`publish-release` job refuses to make the release public without them.
 
-### Homebrew cask (macOS)
+That is all the workflow does. **Nothing is pushed to a tap, to the AUR, or
+back into this repository**; the templates in git stay at `0.0.0`.
 
-Installed via a personal tap:
+There is **no Homebrew tap** (`dbelokursky/homebrew-tap` does not exist) and
+**no AUR package** (`tunl-bin` is not registered), so
+`brew install --cask dbelokursky/tap/tunl` and `yay -S tunl-bin` do not work.
+The files are attached so that publishing either channel — by the project or
+by anyone else — is a copy rather than a rewrite.
 
-```bash
-brew install --cask dbelokursky/tap/tunl
-```
+### Homebrew cask (macOS) — not published
 
-One-time setup of the external tap repo:
+Homebrew installs casks only from a tap: `brew install --cask ./tunl.rb`
+stops with "Homebrew requires casks to be in a tap" (Homebrew 6), so the
+attached file is of no use on its own. To publish it:
 
-1. Create a public GitHub repo named **`dbelokursky/homebrew-tap`** (the
-   `homebrew-` prefix is what lets `dbelokursky/tap` resolve to it).
-2. Add the cask at `Casks/tunl.rb` — a copy of `packaging/`'s
-   source-of-truth cask, pointing `url` at the release DMG with its `sha256`.
-3. On each release, `scripts/update-packaging.sh` refreshes the cask and it is
-   pushed to the tap.
+1. Create a public GitHub repository named **`dbelokursky/homebrew-tap`**
+   (the `homebrew-` prefix is what lets `dbelokursky/tap` resolve to it);
+   `brew tap-new dbelokursky/tap` scaffolds one locally.
+2. Copy the release's `tunl.rb` to `Casks/tunl.rb`, commit, push.
+3. On each release, replace it with the newly attached `tunl.rb` — only the
+   `version` and `sha256` lines change.
 
-Until the DMG is signed & notarized (see `SIGNING.md`), the cask still installs
-an unsigned app, so first launch needs the Gatekeeper unblock from the README.
+Users then run `brew install --cask dbelokursky/tap/tunl`. Until the DMG is
+signed and notarized (`SIGNING.md`), the cask installs an unsigned app; its
+`caveats` block repeats the README's Gatekeeper walkthrough, and the
+`livecheck` stanza follows GitHub's latest release.
 
-### AUR (Arch Linux)
+### AUR (Arch Linux) — not published
 
-```bash
-yay -S tunl-bin
-```
+The `PKGBUILD` is a `-bin` package: it downloads the release `.deb` for the
+build host's architecture (amd64 or arm64) and unpacks it into `$pkgdir`, so
+Arch users get exactly the artifact the release workflow built — bundled
+runtime and sing-box included. It works locally without any AUR involvement:
+download `PKGBUILD` from the release into an empty directory and run
+`makepkg -si`; `makepkg` fetches the `.deb` and checks its SHA-256.
 
-`-bin` because the package installs the pre-built `.deb` payload from Releases
-rather than compiling from source. One-time setup of the AUR package repo:
+To publish it:
 
-1. Create an AUR account and register your SSH public key.
-2. Clone the (empty) package repo:
-   `git clone ssh://aur@aur.archlinux.org/tunl-bin.git`.
-3. Add the `PKGBUILD` (from `packaging/`) and generate `.SRCINFO`
-   (`makepkg --printsrcinfo > .SRCINFO`), then commit and push.
-4. On each release, `scripts/update-packaging.sh` bumps `pkgver` + the source
-   `sha256sums`; commit the refreshed `PKGBUILD`/`.SRCINFO` and push.
+1. Create an AUR account and register an SSH public key.
+2. `git clone ssh://aur@aur.archlinux.org/tunl-bin.git` (empty until the
+   first push).
+3. Add the release's `PKGBUILD` and `.SRCINFO` (rename `default.SRCINFO`
+   back, or regenerate it with `makepkg --printsrcinfo > .SRCINFO`), commit
+   and push.
+4. On each release, copy the newly attached pair over the old one and push.
 
 ## Deferred (with rationale)
 
@@ -57,8 +72,8 @@ rather than compiling from source. One-time setup of the AUR package repo:
   effectively requires a **signed** installer (unsigned MSIs get flagged in
   validation and by SmartScreen on install). Revisit once Windows signing lands
   (`SIGNING.md`).
-- **Flatpak** — the app creates a **TUN device**, **elevates** to do it, and
-  downloads/manages the **sing-box core** at runtime. The Flatpak sandbox
-  fights all three (no raw TUN, no privilege escalation, read-only runtime).
-  Making it work is real effort with low near-term payoff, so the `.deb` +
-  AUR cover Linux for now.
+- **Flatpak** — the app creates a **TUN device** and **elevates** to do it,
+  and it runs the bundled **sing-box** as a separate process. The Flatpak
+  sandbox fights the first two (no raw TUN, no privilege escalation). Making
+  it work is real effort with low near-term payoff, so the `.deb` covers
+  Linux for now, with the `PKGBUILD` for Arch.
