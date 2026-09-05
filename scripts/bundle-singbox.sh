@@ -101,7 +101,13 @@ for target in ${targets}; do
     if [[ ! -f "${tarball}" ]]; then
         url="https://github.com/SagerNet/sing-box/releases/download/v${VERSION}/sing-box-${VERSION}-${os}-${arch}.tar.gz"
         echo "[bundle-singbox] downloading ${url}"
-        curl --fail --silent --show-error --location --output "${tarball}.part" "${url}"
+        # Retries and timeouts: a runner's flaky connection to the GitHub CDN
+        # is one retry away from a green build, and a stalled transfer must
+        # fail here rather than sit on the job's timeout.
+        curl --fail --silent --show-error --location \
+            --retry 3 --retry-all-errors --retry-delay 2 \
+            --connect-timeout 20 --max-time 300 \
+            --output "${tarball}.part" "${url}"
         mv "${tarball}.part" "${tarball}"
     fi
 

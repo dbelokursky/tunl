@@ -32,8 +32,15 @@ API_URL="https://api.github.com/repos/SagerNet/sing-box/releases/tags/v${VERSION
 
 mkdir -p "${CACHE_DIR}"
 
+# Retries and timeouts on every download, as in bundle-singbox.sh: a flaky
+# connection is one retry away from a bump, and a stalled transfer must fail
+# rather than sit on the workflow's timeout.
+CURL_OPTS=(--fail --silent --show-error --location
+    --retry 3 --retry-all-errors --retry-delay 2
+    --connect-timeout 20 --max-time 300)
+
 echo "[bump-singbox] fetching release metadata: ${API_URL}"
-release_json="$(curl --fail --silent --show-error \
+release_json="$(curl "${CURL_OPTS[@]}" \
     -H 'Accept: application/vnd.github+json' \
     -H 'X-GitHub-Api-Version: 2022-11-28' \
     "${API_URL}")"
@@ -72,7 +79,7 @@ process_asset() {
 
     if [[ ! -f "${file}" ]]; then
         echo "[bump-singbox] downloading ${url}"
-        curl --fail --silent --show-error --location --output "${file}.part" "${url}"
+        curl "${CURL_OPTS[@]}" --output "${file}.part" "${url}"
         mv "${file}.part" "${file}"
     fi
 

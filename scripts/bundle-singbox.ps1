@@ -77,7 +77,26 @@ if (-not (Test-Path $zip)) {
     $url = "https://github.com/SagerNet/sing-box/releases/download/v$Version/sing-box-$Version-windows-$arch.zip"
     Write-Host "[bundle-singbox] downloading $url"
     $part = "$zip.part"
-    Invoke-WebRequest -Uri $url -OutFile $part -UseBasicParsing
+    # Windows PowerShell 5.1 has no -MaximumRetryCount, so the retry loop is
+    # spelled out: three attempts two seconds apart, five minutes each at
+    # most -- the budget bundle-singbox.sh gives curl. A flaky connection to
+    # the GitHub CDN is one retry away from a green build, and a stalled
+    # transfer must fail here rather than sit on the job's timeout.
+    $maxAttempts = 3
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $part -UseBasicParsing -TimeoutSec 300
+            break
+        } catch {
+            Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $part
+            if ($attempt -eq $maxAttempts) {
+                throw ("[bundle-singbox] download failed after $maxAttempts attempts: $url`n" +
+                    "  $($_.Exception.Message)")
+            }
+            Write-Warning "[bundle-singbox] attempt $attempt of $maxAttempts failed: $($_.Exception.Message); retrying in 2s"
+            Start-Sleep -Seconds 2
+        }
+    }
     Move-Item -Force -LiteralPath $part -Destination $zip
 }
 
