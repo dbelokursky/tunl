@@ -177,16 +177,21 @@ public class SettingsViewTest extends ApplicationTest {
      * class pins a 34px height so every field in a form matches. The pin won,
      * so the box rendered one row tall and cut the glyphs through the middle:
      * a command nobody could read, next to a button offering to copy it.</p>
+     *
+     * <p>Measured through layoutBounds, which is the control's own height:
+     * boundsInLocal grows to swallow children that spill past the edge, so it
+     * can report a tall box around a control that is still pinned to one
+     * line.</p>
      */
     @Test
     void mcpCommandAreaIsTallEnoughToReadTheCommand() {
         TextArea command = lookup("#mcpCommandArea").query();
-        double singleLineField = lookup("#mcpPortField").query().getBoundsInLocal().getHeight();
+        double singleLineField = lookup("#mcpPortField").query().getLayoutBounds().getHeight();
 
-        assertThat(command.getBoundsInLocal().getHeight())
+        assertThat(command.getLayoutBounds().getHeight())
                 .withFailMessage("the MCP command area is %.1fpx tall, no more than the "
                         + "%.1fpx single-line field beside it — it asks for %d rows",
-                        command.getBoundsInLocal().getHeight(), singleLineField,
+                        command.getLayoutBounds().getHeight(), singleLineField,
                         command.getPrefRowCount())
                 .isGreaterThan(singleLineField);
     }
