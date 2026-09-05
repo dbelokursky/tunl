@@ -12,6 +12,14 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
+env:
+  # The JDK every job tests on and jpackage bakes into every installer: one
+  # pin for the whole workflow. test-jdk27-ea keeps its own '27-ea' on
+  # purpose — it is the canary for the next runtime and must float ahead.
+  JAVA_VERSION: '25'
+# Every checkout passes persist-credentials: false except dev-release's, the
+# one job that pushes (git tag -f and a force push of dev-latest). Nothing
+# else needs the token in .git/config, where every later step could read it.
 jobs:
   # ============ Tests: run on every PR and push, one job per OS ============
   # -Psmoke additionally runs the real-binary smoke suites against the
@@ -40,9 +48,11 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
-          java-version: '25'
+          java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: 'maven'
       # The sing-box tarballs are fetched at generate-resources on every build
@@ -54,6 +64,13 @@ jobs:
           path: ~/.cache/vless-client-build
           key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
       - run: mvn -B clean verify -Psmoke
+      - name: Probe a runtime linked from scripts/runtime-modules.txt
+        # The suite runs on the full JDK, so a module missing from the
+        # packaged runtime is invisible to it: this links exactly the listed
+        # modules and probes what no test exercises. Linux only — the list is
+        # the same on every OS, and one leg is enough to notice a gap.
+        if: matrix.name == 'linux'
+        run: scripts/verify-runtime-modules.sh
 
   # Early warning for the JDK 27 move (#216): the same suite, smoke included,
   # on the next runtime — months before anyone has to care.
@@ -75,6 +92,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
           java-version: '27-ea'
@@ -88,10 +107,12 @@ jobs:
 
   # ========= Packaging: after that OS's tests ==============================
   # Each produces an installable artifact (14 days) so any main commit can be
-  # tried without cutting a release. Windows also packages on PRs because its
-  # MSI install/uninstall smoke test is the only automated installer check.
-  # Tagged releases build their installers in release.yml through the same
-  # scripts.
+  # tried without cutting a release, and each installer is checked on the
+  # runner that built it: the MSI is installed and uninstalled, the DEB is
+  # installed, launched under Xvfb and removed, the DMG is mounted and its
+  # app bundle inspected. Windows also packages on PRs because its MSI smoke
+  # is the only one of those that runs before merge. Tagged releases build
+  # and check their installers in release.yml through the same scripts.
 
   package-macos:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -100,9 +121,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
-          java-version: '25'
+          java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: 'maven'
       # The sing-box tarballs are fetched at generate-resources on every build
@@ -116,6 +139,11 @@ jobs:
       - run: mvn -B package -DskipTests
       - name: Package DMG
         run: scripts/package-dmg.sh "1.0.0-dev-${GITHUB_SHA:0:7}" "1.0.${{ github.run_number }}"
+      - name: Smoke-test the DMG payload
+        # Mounts the DMG and checks Tunl.app inside it: launcher, runtime,
+        # app.version, CFBundleVersion, the darwin core in the jar. Not
+        # launched — the script says why a CI Mac is the wrong place for it.
+        run: scripts/macos-dmg-smoke.sh dist/*.dmg "1.0.0-dev-${GITHUB_SHA:0:7}" "1.0.${{ github.run_number }}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vless-client-${{ github.sha }}
@@ -130,9 +158,11 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
-          java-version: '25'
+          java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: 'maven'
       # The sing-box tarballs are fetched at generate-resources on every build
@@ -162,9 +192,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
-          java-version: '25'
+          java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: 'maven'
       # The sing-box tarballs are fetched at generate-resources on every build
@@ -178,6 +210,17 @@ jobs:
       - run: mvn -B package -DskipTests
       - name: Package DEB
         run: scripts/package-linux.sh "1.0.0-dev-${GITHUB_SHA:0:7}" "1.0.0+dev${{ github.run_number }}"
+      - name: Smoke-test DEB install, launch and uninstall
+        # Installs the .deb on the runner, runs /opt/tunl/bin/tunl under Xvfb
+        # until the app writes "Tunl started" to its own log, then removes
+        # the package. The libraries are the set scripts/linux-qa.sh needs to
+        # render JavaFX without a GPU.
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
+            xvfb xauth libgtk-3-0t64 libglib2.0-0t64 libxtst6 libxi6 libxrender1 libxrandr2 \
+            libfreetype6 fontconfig libasound2t64 libgl1 libpango-1.0-0 libcairo2 fonts-dejavu-core
+          scripts/linux-deb-smoke.sh dist/*.deb "1.0.0-dev-${GITHUB_SHA:0:7}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vless-client-linux-${{ github.sha }}
@@ -192,9 +235,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
         with:
-          java-version: '25'
+          java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: 'maven'
       # The sing-box tarballs are fetched at generate-resources on every build
@@ -230,6 +275,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Keeps the persisted token: this is the job that pushes the tag below.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:

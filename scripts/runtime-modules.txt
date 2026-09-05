@@ -8,7 +8,8 @@
 # Adding a module is cheap; missing one is a crash the test suite cannot see,
 # because the tests run on a full JDK. So the list is verified two ways
 # before it changes: the whole test suite runs against an image built from
-# exactly these modules, and scripts/verify-runtime-modules.sh probes the
+# exactly these modules, and scripts/verify-runtime-modules.sh — run by the
+# test-linux leg of build.yml on every push and pull request — probes the
 # capabilities that no test exercises (Russian locale data, EC/TLS, the
 # Windows charsets).
 #
