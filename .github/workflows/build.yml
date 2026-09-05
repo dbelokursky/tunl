@@ -59,6 +59,13 @@ jobs:
           path: ~/.cache/vless-client-build
           key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
       - run: mvn -B clean verify -Psmoke
+      - name: Probe a runtime linked from scripts/runtime-modules.txt
+        # The suite runs on the full JDK, so a module missing from the
+        # packaged runtime is invisible to it: this links exactly the listed
+        # modules and probes what no test exercises. Linux only — the list is
+        # the same on every OS, and one leg is enough to notice a gap.
+        if: matrix.name == 'linux'
+        run: scripts/verify-runtime-modules.sh
 
   # Early warning for the JDK 27 move (#216): the same suite, smoke included,
   # on the next runtime — months before anyone has to care.
