@@ -94,4 +94,19 @@ class McpTokenStoreTest {
         assertThat(Files.getPosixFilePermissions(store.tokenPath()))
                 .isEqualTo(PosixFilePermissions.fromString("rw-------"));
     }
+
+    /** A token file an older build left world-readable is tightened on the next read. */
+    @Test
+    void aWorldReadableTokenFromAnOlderBuildIsTightenedWhenServed() throws IOException {
+        assumeTrue(POSIX, "POSIX permissions only");
+        McpTokenStore store = new McpTokenStore(tempDir);
+        Files.createDirectories(store.tokenPath().getParent());
+        Files.writeString(store.tokenPath(), "0123456789abcdef");
+        Files.setPosixFilePermissions(store.tokenPath(),
+                PosixFilePermissions.fromString("rw-r--r--"));
+
+        assertThat(store.getOrCreate()).isEqualTo("0123456789abcdef");
+        assertThat(Files.getPosixFilePermissions(store.tokenPath()))
+                .isEqualTo(PosixFilePermissions.fromString("rw-------"));
+    }
 }

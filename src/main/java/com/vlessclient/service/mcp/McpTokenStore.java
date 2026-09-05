@@ -52,6 +52,9 @@ public class McpTokenStore {
      */
     public synchronized String getOrCreate() throws IOException {
         if (Files.exists(tokenPath)) {
+            // A token file an older build wrote 0644 was served as it was;
+            // only a regenerated one was ever tightened.
+            SecureFiles.restrictExisting(tokenPath);
             String existing = Files.readString(tokenPath, StandardCharsets.UTF_8).trim();
             if (!existing.isEmpty()) {
                 return existing;
