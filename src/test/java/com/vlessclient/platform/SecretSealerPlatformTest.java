@@ -3,6 +3,7 @@ package com.vlessclient.platform;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -12,10 +13,16 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * usable (macOS Keychain, Windows DPAPI, Linux Secret Service). Skipped on
  * machines without a working backend — availability itself is probed, not
  * assumed from the OS.
+ *
+ * <p>The round-trip runs on CI only. On a developer's Mac it writes into the
+ * real login Keychain under the production service name, which is exactly
+ * what a test run must not do; the commands each backend issues are pinned
+ * by the per-backend unit tests, which never leave the JVM.</p>
  */
 class SecretSealerPlatformTest {
 
     @Test
+    @EnabledIfEnvironmentVariable(named = "CI", matches = "true")
     void roundTripThroughThePlatformBackend() {
         SecretSealer sealer = SecretSealers.forCurrentPlatform();
         assumeTrue(sealer.isAvailable(), "no usable secret backend on this machine");

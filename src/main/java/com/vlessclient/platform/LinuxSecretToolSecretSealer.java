@@ -20,7 +20,17 @@ final class LinuxSecretToolSecretSealer implements SecretSealer {
     private static final String ATTRIBUTE_VALUE = "vless-client";
     private static final String TAG = SEAL_PREFIX + "secretservice:v1";
 
+    private final SecretSealers.Subprocess subprocess;
     private volatile Boolean available;
+
+    LinuxSecretToolSecretSealer() {
+        this(SecretSealers::run);
+    }
+
+    /** Test seam: runs {@code secret-tool} through the given subprocess runner. */
+    LinuxSecretToolSecretSealer(SecretSealers.Subprocess subprocess) {
+        this.subprocess = subprocess;
+    }
 
     @Override
     public boolean isAvailable() {
@@ -39,7 +49,7 @@ final class LinuxSecretToolSecretSealer implements SecretSealer {
         // regardless of encoding or trailing-newline handling.
         String payload = Base64.getEncoder()
                 .encodeToString(plaintext.getBytes(StandardCharsets.UTF_8));
-        return SecretSealers.run(
+        return subprocess.run(
                         new String[] {
                             "secret-tool", "store", "--label=VLESS Client " + key,
                             ATTRIBUTE, ATTRIBUTE_VALUE, "key", key
@@ -54,7 +64,7 @@ final class LinuxSecretToolSecretSealer implements SecretSealer {
         if (!TAG.equals(stored)) {
             return Optional.empty();
         }
-        return SecretSealers.run(
+        return subprocess.run(
                         new String[] {
                             "secret-tool", "lookup", ATTRIBUTE, ATTRIBUTE_VALUE, "key", key
                         },
@@ -74,7 +84,7 @@ final class LinuxSecretToolSecretSealer implements SecretSealer {
 
     @Override
     public void delete(String key) {
-        SecretSealers.run(
+        subprocess.run(
                 new String[] {
                     "secret-tool", "clear", ATTRIBUTE, ATTRIBUTE_VALUE, "key", key
                 },
