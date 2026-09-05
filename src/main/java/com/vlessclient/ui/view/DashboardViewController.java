@@ -18,6 +18,7 @@ import com.vlessclient.service.ProxyGroupMonitor;
 import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.SingBoxInstaller;
+import com.vlessclient.service.TrafficHistoryStore;
 import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.service.outbound.OutboundTags;
@@ -25,6 +26,7 @@ import com.vlessclient.ui.view.dashboard.AddHealthTargetDialog;
 import com.vlessclient.ui.view.dashboard.HealthCheckCoordinator;
 import com.vlessclient.ui.view.dashboard.StatusPresenter;
 import com.vlessclient.ui.view.dashboard.TrafficDisplayBinder;
+import com.vlessclient.ui.view.dashboard.TrafficHistorySection;
 import com.vlessclient.ui.view.dashboard.UpdateBannerSection;
 import java.io.IOException;
 import java.util.List;
@@ -35,6 +37,7 @@ import javafx.beans.property.SimpleObjectProperty;
 import javafx.fxml.FXML;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
@@ -68,6 +71,14 @@ public class DashboardViewController implements ViewShownAware {
     @FXML private Label uploadSpeedLabel;
     @FXML private Label downloadSpeedLabel;
     @FXML private Label sessionTotalLabel;
+    @FXML private HBox trafficSpeeds;
+    @FXML private VBox trafficHistoryPanel;
+    @FXML private Label trafficHistoryTitle;
+    @FXML private Label trafficHistoryServers;
+    @FXML private Hyperlink trafficHistoryReset;
+    @FXML private HBox trafficHistoryBars;
+    @FXML private Label trafficHistoryRange;
+    @FXML private Label trafficHistoryMonth;
     @FXML private Label uploadCardIcon;
     @FXML private Label downloadCardIcon;
     @FXML private ComboBox<ProxyMode> proxyModeCombo;
@@ -124,6 +135,7 @@ public class DashboardViewController implements ViewShownAware {
     // Extracted Dashboard collaborators; the controller stays the FXML
     // endpoint and hands each one the few controls it drives.
     private TrafficDisplayBinder trafficDisplay;
+    private TrafficHistorySection trafficHistory;
     private HealthCheckCoordinator healthChecks;
     private TunnelHealthState healthState;
     private UpdateBannerSection updateBannerSection;
@@ -172,10 +184,17 @@ public class DashboardViewController implements ViewShownAware {
                 ServiceReachabilityChecker.class,
                 "ServiceReachabilityChecker not available; health check disabled");
 
+        // The history panel degrades like every other collaborator: without a
+        // store it simply never opens, and the session total stops being a
+        // click target rather than throwing at one.
+        TrafficHistoryStore historyStore = optional(TrafficHistoryStore.class,
+                "TrafficHistoryStore not available; the traffic history stays closed");
+
         trafficDisplay = new TrafficDisplayBinder(trafficMonitor,
                 new TrafficDisplayBinder.Readout(uploadCardIcon, uploadSpeedLabel),
                 new TrafficDisplayBinder.Readout(downloadCardIcon, downloadSpeedLabel),
-                sessionTotalLabel, trafficSummary);
+                sessionTotalLabel, trafficSummary, trafficSpeeds,
+                () -> monthSummary(historyStore));
         if (latencyTester != null) {
             // While connected, measure through the proxy instead of TCP-pinging
             // its address; the supplier returns null when the core is down.
@@ -224,6 +243,20 @@ public class DashboardViewController implements ViewShownAware {
             trafficDisplay.bindLabels();
         }
 
+        trafficHistory = new TrafficHistorySection(historyStore,
+                new TrafficHistorySection.Controls(trafficHistoryPanel, sessionTotalLabel,
+                        trafficHistoryTitle, trafficHistoryServers, trafficHistoryReset,
+                        trafficHistoryBars, trafficHistoryRange, trafficHistoryMonth),
+                this::persistTrafficHistoryExpanded);
+        trafficHistory.init(ServiceLocator.find(AppSettings.class)
+                .map(AppSettings::isTrafficHistoryExpanded).orElse(false));
+        if (historyStore != null && trafficMonitor != null) {
+            // Attribution happens here and not in ServiceLocator because only
+            // this controller can name the server an automatic mode picked --
+            // the same routedServer the status card labels itself with.
+            historyStore.attach(trafficMonitor, this::routedServer);
+        }
+
         ServiceLocator.find(ConfigStore.class).ifPresentOrElse(
                 configStore -> configStore.getServers().addListener(
                         (javafx.collections.ListChangeListener<ServerConfig>) change -> {
@@ -245,6 +278,11 @@ public class DashboardViewController implements ViewShownAware {
             connectionState.addListener((obs, oldState, newState) -> updateUi(newState));
             updateUi(ConnectionState.DISCONNECTED);
         }
+        // Nothing above has necessarily told the readout what to show: without
+        // an engine there is no state change to react to, and a core that is
+        // not installed yet is exactly the case where last month's figure is
+        // the only thing the card can honestly report.
+        trafficDisplay.refreshIdleSummary();
 
         if (brewCommandLabel != null) {
             brewCommandLabel.setText(SingBoxInstaller.brewInstallCommand());
@@ -274,6 +312,9 @@ public class DashboardViewController implements ViewShownAware {
     private void onEngineState(ConnectionState state) {
         updateUi(state);
         trafficDisplay.onConnectionStateChanged(state);
+        // A disconnect closes off a day's worth of samples, so the panel is
+        // stale the moment the tunnel drops.
+        trafficHistory.refresh();
         healthChecks.onConnectionStateChanged(state);
         syncGroupMonitor(state);
     }
@@ -847,6 +888,54 @@ public class DashboardViewController implements ViewShownAware {
     @FXML
     private void onCancelReconnectClicked() {
         healthChecks.cancelReconnectCountdown();
+    }
+
+    /** The session total doubles as the handle for the history panel. */
+    @FXML
+    private void onSessionTotalClicked() {
+        trafficHistory.toggle();
+    }
+
+    @FXML
+    private void onResetTrafficHistoryClicked() {
+        trafficHistory.reset(this::confirmTrafficHistoryReset);
+        // Clearing the record can empty the line that opened this panel.
+        trafficDisplay.refreshIdleSummary();
+    }
+
+    /**
+     * Nothing in the history expires on its own, so clearing it is the only
+     * way it ever goes away — and there is no undo. That is worth a dialog.
+     */
+    private boolean confirmTrafficHistoryReset() {
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        confirm.setTitle(I18n.get("dashboard.traffic.history.reset.title"));
+        confirm.setHeaderText(I18n.get("dashboard.traffic.history.reset.confirm"));
+        confirm.setContentText(I18n.get("dashboard.traffic.history.reset.content"));
+        return confirm.showAndWait().filter(button -> button == ButtonType.OK).isPresent();
+    }
+
+    /**
+     * What the total line reads while nothing is connected: this month's
+     * figure, or null when there is no history to point at and the readout
+     * should simply not be there.
+     */
+    private static String monthSummary(TrafficHistoryStore historyStore) {
+        if (historyStore == null) {
+            return null;
+        }
+        long total = historyStore.totalForMonth(java.time.YearMonth.now());
+        return total == 0 ? null
+                : I18n.get("dashboard.traffic.history.month",
+                        TrafficMonitor.formatBytes(total));
+    }
+
+    private void persistTrafficHistoryExpanded(boolean expanded) {
+        ServiceLocator.find(AppSettings.class).ifPresent(settings -> {
+            settings.setTrafficHistoryExpanded(expanded);
+            ServiceLocator.find(ConfigStore.class)
+                    .ifPresent(store -> store.saveSettings(settings));
+        });
     }
 
     private ServerConfig findActiveServer() {

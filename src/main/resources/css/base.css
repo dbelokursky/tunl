@@ -1062,6 +1062,38 @@
     -fx-text-fill: -c-text-secondary;
 }
 
+/* The session total is also the handle that opens the history panel, so it
+   has to look like something you can click -- a plain grey line does not. */
+.session-total-link {
+    -fx-cursor: hand;
+}
+
+.session-total-link:hover {
+    -fx-underline: true;
+}
+
+/* ===== Traffic history (hero card, collapsed by default) ===== */
+/* Border on top only, so the panel reads as detail hanging off the bottom of
+   the card rather than as a second card wedged inside the first. */
+.traffic-history {
+    -fx-border-color: -c-border transparent transparent transparent;
+    -fx-border-width: 0.5 0 0 0;
+    -fx-padding: 12 0 0 0;
+}
+
+/* One bar per day. derive() rather than a second token: the bars are the same
+   blue as the download readout, one step lighter, and a day that is "less
+   blue" than its neighbour is not a thing the eye should try to read. */
+.traffic-history-bar {
+    -fx-background-color: derive(-c-info, 45%);
+    -fx-background-radius: 2;
+}
+
+.traffic-history-bar-today {
+    -fx-background-color: -c-info;
+    -fx-background-radius: 2;
+}
+
 /* ===== Content scroll wrapper ===== */
 .content-scroll {
     -fx-background-color: transparent;

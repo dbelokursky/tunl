@@ -11,6 +11,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 import javafx.scene.Node;
 import javafx.scene.control.Label;
 import javafx.scene.control.Tooltip;
@@ -49,6 +50,18 @@ public final class TrafficDisplayBinder {
     private final Readout download;
     private final Label sessionTotalLabel;
     private final Node trafficSummary;
+    private final Node trafficSpeeds;
+
+    /**
+     * What the total line says when no tunnel is up, or null when there is
+     * nothing worth saying.
+     *
+     * <p>The line cannot simply vanish with the speeds: it is also what opens
+     * the traffic history, and the history is most worth reading precisely
+     * when you are not connected. So while the speeds go away, the line stays
+     * and changes what it counts — this session, or this month.</p>
+     */
+    private final Supplier<String> idleSummary;
 
     /**
      * Last totals seen, kept so the session line can be re-rendered when the
@@ -58,6 +71,14 @@ public final class TrafficDisplayBinder {
      */
     private long lastTotalUpload;
     private long lastTotalDownload;
+
+    /**
+     * Whether a tunnel is up, tracked rather than read back off a node.
+     * {@code Node.isVisible()} is that node's own flag and says nothing about
+     * whether an ancestor is hidden, so asking the speeds row whether it is on
+     * screen answered "yes" while the whole readout was collapsed.
+     */
+    private boolean connected;
 
     /**
      * Serialises start and stop off the FX thread.
@@ -87,16 +108,24 @@ public final class TrafficDisplayBinder {
      * @param upload the upload chevron and speed readout
      * @param download the download chevron and speed readout
      * @param sessionTotalLabel the combined "N this session" line
-     * @param trafficSummary the container shown only while a tunnel is up
+     * @param trafficSummary the whole readout, hidden when it has nothing at
+     *     all to report
+     * @param trafficSpeeds the two speed readouts, hidden whenever no tunnel
+     *     is up
+     * @param idleSummary supplies the disconnected wording for the total line,
+     *     returning null when there is no history to point at
      */
     public TrafficDisplayBinder(TrafficMonitor trafficMonitor,
                                 Readout upload, Readout download,
-                                Label sessionTotalLabel, Node trafficSummary) {
+                                Label sessionTotalLabel, Node trafficSummary,
+                                Node trafficSpeeds, Supplier<String> idleSummary) {
         this.trafficMonitor = trafficMonitor;
         this.upload = upload;
         this.download = download;
         this.sessionTotalLabel = sessionTotalLabel;
         this.trafficSummary = trafficSummary;
+        this.trafficSpeeds = trafficSpeeds;
+        this.idleSummary = idleSummary;
     }
 
     /**
@@ -209,18 +238,52 @@ public final class TrafficDisplayBinder {
                 return;
             }
             lifecycle.execute(() -> trafficMonitor.start(port, secret));
-            setSummaryVisible(true);
+            showConnected();
         } else if (state == ConnectionState.DISCONNECTED || state == ConnectionState.ERROR) {
             lifecycle.execute(trafficMonitor::stop);
-            setSummaryVisible(false);
             resetReadouts();
+            showIdle();
         }
     }
 
-    private void setSummaryVisible(boolean visible) {
-        if (trafficSummary != null) {
-            trafficSummary.setVisible(visible);
-            trafficSummary.setManaged(visible);
+    /**
+     * Re-reads the disconnected wording. Called when the history behind it
+     * changes -- clearing it can empty the line, and the first recorded bytes
+     * can bring it back.
+     */
+    public void refreshIdleSummary() {
+        if (connected) {
+            return;
+        }
+        showIdle();
+    }
+
+    private void showConnected() {
+        connected = true;
+        setVisible(trafficSpeeds, true);
+        setVisible(trafficSummary, true);
+    }
+
+    private void showIdle() {
+        connected = false;
+        setVisible(trafficSpeeds, false);
+        String idle = idleSummary != null ? idleSummary.get() : null;
+        if (idle == null || idle.isBlank()) {
+            setVisible(trafficSummary, false);
+            return;
+        }
+        if (sessionTotalLabel != null) {
+            sessionTotalLabel.setText(idle);
+        }
+        setVisible(trafficSummary, true);
+    }
+
+    private static void setVisible(Node node, boolean visible) {
+        if (node != null) {
+            node.setVisible(visible);
+            // managed too: visible=false alone still reserves the space, and
+            // an empty gap where the numbers were is worse than no numbers.
+            node.setManaged(visible);
         }
     }
 
