@@ -78,12 +78,11 @@ Notes:
   xattr -d com.apple.quarantine "/Applications/Tunl.app"
   ```
 
-Or install via [Homebrew](https://brew.sh) once the tap is set up (see
-[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)):
-
-```bash
-brew install --cask dbelokursky/tap/tunl
-```
+There is no Homebrew tap yet, so `brew install` cannot fetch Tunl today. Every
+release does attach a ready-made cask file (`tunl.rb`, version and SHA-256
+filled in) for anyone who wants to publish it in a tap of their own — Homebrew
+refuses to install a cask from a bare file. See
+[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
 
 ### Windows
 
@@ -104,12 +103,11 @@ sudo apt install ./tunl_*.deb
 The app installs into `/opt/tunl` and shows up in the application
 menu (Network category).
 
-On Arch-based distros an [AUR](https://aur.archlinux.org) package is available
-(see [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)):
-
-```bash
-yay -S tunl-bin
-```
+There is no AUR package yet. Every release attaches a `PKGBUILD` (and its
+`.SRCINFO`, listed as `default.SRCINFO` on the release page) that repackages
+the `.deb` for Arch: download the `PKGBUILD` into an empty directory and run
+`makepkg -si`, or use it to publish the package yourself — see
+[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
 
 ### Upgrading from VLESS Client (1.4.x and older)
 
@@ -128,13 +126,15 @@ not where it stores things.
 ## First connection
 
 1. **Add a server.** **Servers** tab → **Import Link** → paste the
-   `vless://…` / `vmess://…` / `trojan://…` / `ss://…` link from your
-   provider — the form fills itself. (Or **Add Server** and fill the form
-   manually; a third way is the **Subscriptions** tab with a subscription
-   URL — the server list will keep itself in sync.)
+   `vless://…` / `vmess://…` / `trojan://…` / `ss://…` / `hysteria2://…`
+   link from your provider, or a whole WireGuard `.conf` — the form fills
+   itself. (Or **Add Server** and fill the form manually; a third way is the
+   **Subscriptions** tab with a subscription URL — the server list will keep
+   itself in sync.) On a fresh install the Dashboard card links straight to
+   the Servers view.
 2. **Check the active server** — clicking a server row gives it the
    **ACTIVE** badge; that's the server used when you connect.
-3. **Hit Connect** on the **Dashboard** tab (or `⌘K` / `Ctrl+K`).
+3. **Hit Connect** on the **Dashboard** tab (or `⌘⇧C` / `Ctrl+Shift+C`).
    Green indicator — connected, orange — connecting, red — error (check the
    **Logs** tab).
 4. **Verify your IP**: open [ifconfig.me](https://ifconfig.me) or run
@@ -150,9 +150,20 @@ The **Mode** dropdown on the Dashboard:
 | Privileges | none needed | required (see below) |
 | When to pick | everyday browsing | messengers, games, system services |
 
+Next to it, **Server** decides who carries the traffic: **Selected server** —
+the one with the ACTIVE badge — or **Fastest available**, where the core
+measures every server, moves traffic to the quickest one on its own, and the
+status line names the server it actually picked.
+
 Either way, Tunl's own requests — subscription refreshes, update checks and
 downloads, the country database — go **through the tunnel** while it is up, so
-they work on a network that blocks the sites they talk to.
+they work on a network that blocks the sites they talk to. (While the tunnel
+is up but failing its reachability checks, a subscription refresh is postponed
+rather than sent around it.)
+
+In TUN mode the tunnel captures IPv6 as well (**Settings → Advanced → Route
+IPv6 through the tunnel**, on by default); turn it off for a server without
+IPv6 egress.
 
 What TUN asks for on each OS:
 
@@ -180,12 +191,26 @@ but does not work ranks where it belongs.
 
 Click a server to make it active; Cmd/Shift-click builds a selection, and
 deleting one asks once for the whole batch. Right-click for **Edit**,
-**Duplicate**, **Copy Share Link**, **Delete**.
+**Duplicate**, **Copy Share Link** (greyed out for WireGuard, which has no
+share-link format), **Delete**.
+
+A server whose TLS certificate is never verified (`allowInsecure` in the link
+or the subscription) carries an amber **NO CERT CHECK** badge: anyone on the
+network path could impersonate it.
+
+**Backup** exports every server to a JSON file — credentials in plain text, so
+keep it somewhere private — and imports such a file, or a plain list of share
+links, back.
 
 ### Subscriptions
 
-**Subscriptions** tab: add a URL — the server list is fetched and
-periodically re-synced.
+**Subscriptions** tab: add a URL — the server list is fetched and re-synced
+every hour. **Edit** changes the name or the URL in place (the servers follow
+the new list). The row shows only the scheme and host of the URL, since the
+account token lives in the path, and the provider's quota when the response
+carries a `subscription-userinfo` header ("12.3 GB of 100 GB used · expires
+…"). Links of protocols Tunl does not support (TUIC, AnyTLS, …) are left out
+without marking the subscription failed.
 
 ### Routing
 
@@ -193,12 +218,24 @@ periodically re-synced.
   <img src="docs/screenshots/routing.png" width="900" alt="Routing tab: bypass countries, bypass list and custom rules"/>
 </p>
 
-**Routing** tab — routing rules: geoip, geosite, domain, ruleset.
+**Routing** tab, top to bottom: **Bypass countries** (their traffic goes
+direct; countries match by IP ranges, and ru, cn and ir by domain as well), a
+**Bypass list** (one host, wildcard, CIDR or IP per line) and **Custom rules**
+that match by domain, domain suffix, domain keyword, domain regex, GeoSite,
+IP CIDR or GeoIP and send the match to **Proxy**, **Direct** or **Block**. A
+Block rule rejects the connection outright (TCP reset, ICMP unreachable)
+rather than silently dropping it. In TUN mode the names of direct-routed
+traffic — the bypass list, Direct rules, bypassed countries — are resolved
+through the **Direct DNS** server from Settings instead of through the tunnel,
+so resolution follows the same split as the traffic.
 
 ### Monitoring
 
 The **Dashboard** shows live stats: upload/download speed and totals.
-**Logs** streams sing-box logs with a level filter.
+**Logs** streams sing-box logs with a level filter (how much the core writes
+is **Settings → Core log level**); the download button saves the core log,
+and **Save diagnostics** writes a zip for bug reports with credentials, URLs,
+server addresses and SNIs redacted — read it before sharing anyway.
 
 ### Tray / menu bar
 
@@ -226,6 +263,10 @@ start?" — it stays amber until the service checks come back:
 With the service checks switched off there is nothing to verify, so a
 connected tunnel is simply green.
 
+When the core exits unexpectedly the tray also posts a system notification
+("Tunnel stopped") — a tunnel that dies while the window is hidden should not
+be silent.
+
 ### Autostart
 
 | OS | Mechanism |
@@ -244,18 +285,18 @@ discarded, so the bundled binary always wins.
 
 `⌘` on macOS = `Ctrl` on Windows/Linux.
 
-| Hotkey | Action                                  |
-|--------|-----------------------------------------|
-| `⌘K`   | Connect / Disconnect                    |
-| `⌘N`   | Add server                              |
-| `⌘1`   | Dashboard                               |
-| `⌘2`   | Servers                                 |
-| `⌘3`   | Subscriptions                           |
-| `⌘4`   | Routing                                 |
-| `⌘5`   | Logs                                    |
-| `⌘,`   | Settings                                |
-| `⌘W`   | Hide window (keeps running in the tray) |
-| `⌘Q`   | Quit                                    |
+| Hotkey | Action                                                        |
+|--------|---------------------------------------------------------------|
+| `⌘⇧C`  | Connect / Disconnect                                          |
+| `⌘N`   | Add server                                                    |
+| `⌘1`   | Dashboard                                                     |
+| `⌘2`   | Servers                                                       |
+| `⌘3`   | Subscriptions                                                 |
+| `⌘4`   | Routing                                                       |
+| `⌘5`   | Logs                                                          |
+| `⌘,`   | Settings                                                      |
+| `⌘W`   | Hide window (keeps running in the tray)                       |
+| `⌘Q`   | Quit (macOS; on Windows/Linux use **Quit** in the tray menu)  |
 
 ### Settings
 
@@ -263,15 +304,34 @@ discarded, so the bundled binary always wins.
   <img src="docs/screenshots/settings.png" width="900" alt="Settings: appearance, connection and health check"/>
 </p>
 
-| Field                    | Description                                           |
-|--------------------------|-------------------------------------------------------|
-| Theme                    | Light / Dark                                          |
-| Language                 | Russian / English                                     |
-| Mixed port               | SOCKS/HTTP proxy port (default `2080`)                |
-| Clash API port           | Traffic stats port (default `9090`)                   |
-| Auto-connect on start    | Connect to the active server on launch                |
-| Check for updates        | Periodic app update checks                            |
-| Allow LAN                | Allow proxy connections from the local network        |
+The view is a column of cards. Text fields save when you press Enter or leave
+the field (an empty or out-of-range number keeps the stored value); everything
+else saves on click.
+
+| Card | Setting | Description |
+|---|---|---|
+| Appearance | Theme | Auto (follows the OS) / Light / Dark |
+| | Language | English / Russian |
+| Connection | Auto-connect on startup | Connect to the active server on launch |
+| | Launch at login | Start Tunl with the OS (see [Autostart](#autostart)) |
+| | SOCKS Port / HTTP Port | The local proxy listeners, `1080` and `1081` by default; both bind to `127.0.0.1` only |
+| | Core log level | How much sing-box writes to the Logs tab: Debug / Info / Warning / Error; takes effect on the next connect |
+| | Proxy Mode | System Proxy / TUN — the same switch as **Mode** on the Dashboard |
+| | Set system proxy automatically | In System Proxy mode, point the OS at the local ports on connect and restore it on disconnect |
+| Health Check | Enable health check | After connecting, verify that traffic actually reaches a few services (on by default) |
+| | Auto-reconnect when unreachable | Reconnect after the reconnect delay when every check fails |
+| | Check interval / Reconnect delay | Seconds between checks (`5`) and before a reconnect (`10`) |
+| Advanced | Proxy DNS | Resolver for tunnelled names, queried through the tunnel (`https://1.1.1.1/dns-query`) |
+| | Direct DNS | Resolver for direct-routed names — the bypass list, Direct rules, bypassed countries (`https://223.5.5.5/dns-query`) |
+| | TUN Interface Name | `utun99` on macOS and Linux, `VlessClientTun` on Windows |
+| | TUN IPv4 Address | `172.19.0.1/30` |
+| | Route IPv6 through the tunnel | On by default; off, IPv6 traffic bypasses the VPN on dual-stack networks |
+| | Store credentials in the system keychain | Seal server credentials and subscription URLs with Keychain / DPAPI / Secret Service instead of writing them into the JSON files |
+| Agent Control (MCP) | Enable MCP server, Port, Allow configuration changes, Copy command, Regenerate token | See [Agent control](#agent-control-mcp) |
+| About | Tunl version, sing-box version, Check for updates | The version rows double as update status; **Restart now** appears once an update is staged. The DB-IP attribution for the country flags lives here too |
+
+The DNS and TUN settings only apply in TUN mode: in System Proxy mode the
+core has no DNS section and the OS resolver is used as before.
 
 Where the data lives (`settings.json`, `servers.json`, `subscriptions.json`,
 `routing.json`, binary cache `bin/`):
@@ -306,20 +366,27 @@ and more.
 
 ### Security
 
-- Listens on **`127.0.0.1`** (loopback) only — never reachable from the network.
+- Listens on **`127.0.0.1`** (loopback) only — never reachable from the
+  network — and refuses any request whose `Host` or `Origin` header is not
+  loopback (HTTP 403), which shuts the door on DNS-rebinding pages that would
+  otherwise reach the port through the browser.
 - Every request needs an `Authorization: Bearer <token>` header; the token lives
   in `mcp-token` (in the data dir) with `0600` permissions.
 - **Off by default** — enabled from Settings.
-- Mutating operations are gated by the "Allow configuration changes" toggle. The
-  most dangerous ones (connecting in TUN mode, which prompts for the macOS admin
-  password; deleting a server) additionally require an explicit `confirm: true`.
+- Mutating operations are gated by the "Allow configuration changes" toggle
+  (on by default). The most dangerous ones (connecting in TUN mode, which
+  prompts for the macOS admin password; deleting a server) additionally
+  require an explicit `confirm: true`.
 - Every mutating call is appended to `logs/mcp-audit.log`.
+- Log lines handed to agents (`get_logs`, the SSE stream) have URLs reduced to
+  scheme and host, so a subscription's account token never leaves the app
+  through this door.
 
 ### Enable it
 
 **Settings → Agent Control (MCP):**
 1. Tick **Enable MCP server** (default port `55555`).
-2. Optionally toggle **Allow configuration changes**.
+2. Optionally toggle **Allow configuration changes** (on by default).
 3. Click **Copy command** and run it:
 
 ```bash
@@ -355,19 +422,21 @@ afresh. Same procedure.
 
 **Connect button is disabled**
 No active server — on the Servers tab click a server so it gets the
-**ACTIVE** badge.
+**ACTIVE** badge (on a fresh install the Dashboard card links straight there).
 
 **"Process exited unexpectedly (code N)"**
-sing-box crashed. The reason is in the **Logs** tab. Common ones: wrong UUID,
-wrong transport, unreachable server, port conflict.
+sing-box crashed; the tray posts a "Tunnel stopped" notification. The reason
+is in the **Logs** tab. Common ones: wrong UUID, wrong transport, unreachable
+server, port conflict.
 
 **TUN mode asks for a password every time**
 Creating a TUN interface requires root/admin: macOS shows an osascript prompt
 (or set up sudo-NOPASSWD — then the password is asked once), Windows — UAC,
 Linux — pkexec (or a one-time `setcap`).
 
-**Port 2080 is busy**
-Change `Mixed port` in Settings to a free one.
+**Port 1080 or 1081 is busy**
+The core fails to start and the **Logs** tab shows the bind error. Change
+**SOCKS Port** / **HTTP Port** in **Settings → Connection** to free ones.
 
 **Linux: no tray icon**
 Stock GNOME has no tray (needs an extension like AppIndicator), closing the
@@ -471,14 +540,16 @@ per the [migration guide](https://sing-box.sagernet.org/migration/), then bump.
 
 ### Releasing, signing & distribution
 
-- [docs/RELEASE-CHECKLIST.md](docs/RELEASE-CHECKLIST.md) — manual pre-release
-  checks (Windows-heavy, since no CI or VM covers the UAC/tray/proxy paths).
+- [docs/RELEASE-CHECKLIST.md](docs/RELEASE-CHECKLIST.md) — what `release.yml`
+  automates on a `v*` tag, and the checks that stay manual (Windows-heavy,
+  since no CI or VM covers the UAC/tray/proxy paths).
 - [docs/SIGNING.md](docs/SIGNING.md) — activate the dormant macOS notarization
   and Windows signing by adding the documented secrets; the workflow steps are
   already in place.
-- [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md) — Homebrew cask and AUR (source
-  of truth in [packaging/](packaging/), regenerated on release by
-  [scripts/update-packaging.sh](scripts/update-packaging.sh)); winget/Flatpak
+- [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md) — the Homebrew cask and AUR
+  PKGBUILD templates in [packaging/](packaging/), filled in by
+  [scripts/update-packaging.sh](scripts/update-packaging.sh) and attached to
+  every release; no tap or AUR package is published yet. winget/Flatpak
   deferred with rationale.
 
 ### Layout
@@ -511,15 +582,20 @@ scripts/
 ### Features (full list)
 
 - **Protocols:** VLESS, VMess, Trojan, Shadowsocks, Hysteria2, WireGuard (via sing-box)
-- **Transports:** TCP, WebSocket, gRPC, HTTP/2, QUIC
+- **Transports:** TCP, WebSocket, gRPC, HTTP/2, HTTP Upgrade, QUIC
 - **TLS / Reality / XTLS-Vision**
-- **Modes:** System Proxy, TUN
-- **Subscriptions** — auto-refreshing server lists from a URL
-- **Routing rules** — geoip, geosite, domain, ruleset
-- **Share links** — import/export of `vless://`, `vmess://`, `trojan://`, `ss://`
-- **Latency** — one-click ping of every server
+- **Modes:** System Proxy, TUN (IPv4 and IPv6)
+- **Server selection** — the pinned server, or the fastest available (sing-box `urltest`)
+- **Subscriptions** — hourly-refreshing server lists from a URL, with the provider's quota
+- **Routing** — bypass countries, a bypass list, custom rules by domain / suffix / keyword / regex / GeoSite / IP CIDR / GeoIP → Proxy, Direct or Block
+- **Share links** — import of `vless://`, `vmess://`, `trojan://`, `ss://`, `hysteria2://` (`hy2://`) and WireGuard `.conf`; export of everything but WireGuard
+- **Backup** — export/import of the server list
+- **Latency** — one-click ping of every server, through the proxy while connected
 - **Traffic** — live stats via the Clash API
-- **Tray/menu bar**, **hotkeys**, light/dark **themes**, **Russian/English**
+- **Diagnostics** — a redacted bundle for bug reports
+- **Tray/menu bar**, **hotkeys**, Auto/light/dark **themes**, **Russian/English**
+- **Agent control** — a loopback MCP server for AI agents
+- **Updates** — in-app updater verifying SHA-256 and an Ed25519 signature
 
 ---
 
