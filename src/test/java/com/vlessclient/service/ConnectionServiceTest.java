@@ -6,10 +6,11 @@ import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.ServerSelection;
+import com.vlessclient.testing.FxToolkitExtension;
 import javafx.application.Platform;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
@@ -30,21 +31,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * MCP) and had drifted apart; these tests pin the single owner's behaviour so
  * the divergence cannot come back through any one caller.
  */
+@ExtendWith(FxToolkitExtension.class)
 class ConnectionServiceTest {
 
     @TempDir
     Path tempDir;
 
     private ConfigStore store;
-
-    @BeforeAll
-    static void initJfx() {
-        try {
-            Platform.startup(() -> { });
-        } catch (IllegalStateException ignored) {
-            // Already started by another test class.
-        }
-    }
 
     @BeforeEach
     void setUp() {

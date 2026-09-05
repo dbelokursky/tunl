@@ -1,26 +1,17 @@
 package com.vlessclient.service;
 
+import com.vlessclient.testing.FxToolkitExtension;
 import javafx.application.Platform;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@ExtendWith(FxToolkitExtension.class)
 class TrafficMonitorTest {
-
-    @BeforeAll
-    static void initJavaFx() throws InterruptedException {
-        CountDownLatch latch = new CountDownLatch(1);
-        try {
-            Platform.startup(latch::countDown);
-            latch.await(5, TimeUnit.SECONDS);
-        } catch (IllegalStateException e) {
-            // Platform already initialized
-        }
-    }
 
     // --- formatSpeed tests ---
 

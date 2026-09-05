@@ -1,8 +1,9 @@
 package com.vlessclient.service;
 
+import com.vlessclient.testing.FxToolkitExtension;
 import javafx.application.Platform;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -18,22 +19,12 @@ import static org.assertj.core.api.Assertions.assertThatCode;
  * that's fine: we're verifying the lifecycle state machine, not the network
  * behavior.
  */
+@ExtendWith(FxToolkitExtension.class)
 class TrafficMonitorConcurrencyTest {
 
     // A port that is almost certainly not listening locally. The HTTP client
     // will fail to connect and the worker thread will exit shortly after.
     private static final int DUMMY_PORT = 1; // privileged port, refused on macOS
-
-    @BeforeAll
-    static void initJavaFx() throws InterruptedException {
-        CountDownLatch latch = new CountDownLatch(1);
-        try {
-            Platform.startup(latch::countDown);
-            latch.await(5, TimeUnit.SECONDS);
-        } catch (IllegalStateException e) {
-            // Platform already initialized
-        }
-    }
 
     @Test
     void stopBeforeStart_isNoOp() {

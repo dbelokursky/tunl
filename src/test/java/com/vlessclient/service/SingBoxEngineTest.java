@@ -2,11 +2,12 @@ package com.vlessclient.service;
 
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
+import com.vlessclient.testing.FxToolkitExtension;
 import javafx.application.Platform;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.CleanupMode;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -20,6 +21,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import static com.vlessclient.testing.FxTestSupport.flushFxEvents;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -34,24 +36,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 // JUnit's cleanup failed the test *after* it had already passed. The OS
 // reclaims these directories anyway; letting JUnit try only converts a
 // platform quirk into a red build.
+@ExtendWith(FxToolkitExtension.class)
 class SingBoxEngineTest {
 
     private static final String DUMMY_CONFIG = "{\"log\":{\"level\":\"info\"}}";
-
-    @BeforeAll
-    static void initJfx() {
-        try {
-            Platform.startup(() -> { });
-        } catch (IllegalStateException ignored) {
-            // Already started
-        }
-    }
-
-    private static void flushFxEvents() throws InterruptedException {
-        CountDownLatch latch = new CountDownLatch(1);
-        Platform.runLater(latch::countDown);
-        assertThat(latch.await(5, TimeUnit.SECONDS)).isTrue();
-    }
 
     /**
      * Creates an executable shell script at the given path that prints a "started"

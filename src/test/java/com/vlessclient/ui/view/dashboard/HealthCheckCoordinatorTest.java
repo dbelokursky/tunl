@@ -11,6 +11,7 @@ import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TestConfigStores;
 import com.vlessclient.service.TunnelHealthState;
+import com.vlessclient.testing.FxToolkitExtension;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,8 +28,10 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 
+import static com.vlessclient.testing.FxTestSupport.flushFxEvents;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -36,6 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * summary transitions, card visibility, reconnect banner, teardown, and
  * target-list editing.
  */
+@ExtendWith(FxToolkitExtension.class)
 class HealthCheckCoordinatorTest {
 
     @TempDir
@@ -115,12 +119,7 @@ class HealthCheckCoordinatorTest {
     }
 
     @BeforeAll
-    static void initJfx() {
-        try {
-            Platform.startup(() -> { });
-        } catch (IllegalStateException ignored) {
-            // Platform already started
-        }
+    static void rememberPriorServices() {
         priorSettings = tryGet(AppSettings.class);
         priorStore = tryGet(ConfigStore.class);
     }
@@ -195,10 +194,6 @@ class HealthCheckCoordinatorTest {
             }
         });
         assertThat(latch.await(5, TimeUnit.SECONDS)).isTrue();
-    }
-
-    private static void flushFxEvents() throws InterruptedException {
-        onFxAndWait(() -> { });
     }
 
     private void connectAndCheck(HealthCheckCoordinator coordinator) throws InterruptedException {

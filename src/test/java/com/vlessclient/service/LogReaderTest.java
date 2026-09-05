@@ -1,10 +1,11 @@
 package com.vlessclient.service;
 
+import com.vlessclient.testing.FxToolkitExtension;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -13,29 +14,11 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static com.vlessclient.testing.FxTestSupport.flushFxEvents;
 import static org.assertj.core.api.Assertions.assertThat;
 
+@ExtendWith(FxToolkitExtension.class)
 class LogReaderTest {
-
-    @BeforeAll
-    static void initJfx() {
-        try {
-            Platform.startup(() -> { });
-        } catch (IllegalStateException ignored) {
-            // Platform already started (e.g. from a previous test)
-        }
-    }
-
-    /**
-     * Runs a no-op on the JavaFX Application Thread and blocks until it completes,
-     * guaranteeing that all previously queued {@link Platform#runLater} tasks have
-     * finished executing.
-     */
-    private static void flushFxEvents() throws InterruptedException {
-        CountDownLatch latch = new CountDownLatch(1);
-        Platform.runLater(latch::countDown);
-        assertThat(latch.await(5, TimeUnit.SECONDS)).isTrue();
-    }
 
     @Test
     void appendsLinesFromInputStreamToObservableList() throws Exception {

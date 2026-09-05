@@ -3,6 +3,7 @@ package com.vlessclient.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.testing.FxToolkitExtension;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -10,10 +11,10 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import javafx.application.Platform;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
@@ -26,26 +27,11 @@ import org.junit.jupiter.api.io.TempDir;
  * deadlock, so these tests pin both halves: mutations land on the FX thread,
  * and no path waits for the FX thread while holding the store's monitor.</p>
  */
+@ExtendWith(FxToolkitExtension.class)
 class ConfigStoreFxThreadTest {
 
     @TempDir
     Path tempDir;
-
-    @BeforeAll
-    static void startToolkit() throws InterruptedException {
-        // Monocle headless: these tests need a real FX thread to marshal onto.
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("glass.platform", "Monocle");
-        System.setProperty("monocle.platform", "Headless");
-        System.setProperty("prism.order", "sw");
-        try {
-            CountDownLatch started = new CountDownLatch(1);
-            Platform.startup(started::countDown);
-            started.await(10, TimeUnit.SECONDS);
-        } catch (IllegalStateException alreadyRunning) {
-            // Another suite in this JVM booted the toolkit first; fine.
-        }
-    }
 
     private static ServerConfig server(String name) {
         ServerConfig config = new ServerConfig();

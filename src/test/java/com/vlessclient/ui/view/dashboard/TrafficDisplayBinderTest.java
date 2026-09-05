@@ -5,11 +5,12 @@ import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.ui.view.MirroredSparkline;
-import javafx.application.Platform;
+import com.vlessclient.testing.FxToolkitExtension;
 import javafx.scene.control.Label;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -18,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Label binding itself rides on TrafficMonitor's formatting, which is covered
  * by TrafficMonitorTest; here we pin the lifecycle decisions.
  */
+@ExtendWith(FxToolkitExtension.class)
 class TrafficDisplayBinderTest {
 
     private static AppSettings priorSettings;
@@ -52,12 +54,7 @@ class TrafficDisplayBinderTest {
     }
 
     @BeforeAll
-    static void initJfx() {
-        try {
-            Platform.startup(() -> { });
-        } catch (IllegalStateException ignored) {
-            // Platform already started (e.g. from a previous test)
-        }
+    static void rememberPriorSettings() {
         try {
             priorSettings = ServiceLocator.get(AppSettings.class);
         } catch (IllegalArgumentException e) {
