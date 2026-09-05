@@ -15,6 +15,8 @@ import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Label;
+import javafx.scene.input.MouseButton;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Region;
 import javafx.stage.Stage;
@@ -94,19 +96,37 @@ public class DashboardTrafficHistoryTest extends ApplicationTest {
     }
 
     /**
-     * A real click through the robot rather than a direct handler call: the
-     * thing worth proving is that the FXML wiring and the label's own hit box
-     * work, and calling the handler would prove neither.
+     * A synthetic MOUSE_CLICKED delivered to the label, not a robot click.
+     *
+     * <p>The robot version passed on macOS and Linux x64 and failed on Windows
+     * and Linux arm64 -- Monocle's pointer does not land on this label on every
+     * platform. Firing the event still goes through the FXML {@code
+     * onMouseClicked} wiring, which is the behaviour under test; what it no
+     * longer covers is whether the label is reachable by an actual pointer, so
+     * the tests below assert that it is on screen and laid out instead of
+     * assuming a click proved it.</p>
      */
     private void clickSessionTotal() {
         Label total = lookup("#sessionTotalLabel").query();
-        clickOn(total);
+        interact(() -> total.fireEvent(new MouseEvent(MouseEvent.MOUSE_CLICKED,
+                0, 0, 0, 0, MouseButton.PRIMARY, 1,
+                false, false, false, false, true, false, false, false, false, false, null)));
         WaitForAsyncUtils.waitForFxEvents();
     }
 
     @Test
     void theHistoryStaysClosedUntilTheSessionTotalIsClicked() {
         Region panel = lookup("#trafficHistoryPanel").query();
+        Label handle = lookup("#sessionTotalLabel").query();
+        Region summary = lookup("#trafficSummary").query();
+        // Both, and not just the label: isVisible() is a node's own flag and
+        // stays true under a hidden ancestor, which is exactly how the handle
+        // came to be unreachable in the first place. #trafficSummary is the
+        // ancestor that actually gets toggled.
+        assertThat(summary.isVisible() && handle.isVisible() && handle.getWidth() > 0)
+                .as("the only way into the history is this line, so it has to be "
+                        + "on screen and laid out, not merely wired up")
+                .isTrue();
         assertThat(panel.isVisible())
                 .as("the card must look exactly as it did before the panel existed")
                 .isFalse();
