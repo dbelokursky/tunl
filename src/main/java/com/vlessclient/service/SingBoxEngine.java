@@ -176,8 +176,6 @@ public class SingBoxEngine {
         );
         Files.writeString(tempConfigFile, configJson);
         systemProxyTarget = extractSystemProxyTarget(configJson);
-        // The config points the core's cache file into this directory.
-        SingBoxConfigGenerator.ensureCacheDir();
 
         // A launch that throws leaves no process, so the monitor below never
         // runs and nothing else would remove the config we just wrote — and it

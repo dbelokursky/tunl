@@ -1025,6 +1025,10 @@ public class SingBoxConfigGenerator {
         // file would break the next user-mode system-proxy run.
         ObjectNode cacheFile = mapper.createObjectNode();
         cacheFile.put("enabled", true);
+        // Created here, not only by the engine: the smoke suites hand a
+        // generated config straight to a TUN launcher, and the core refuses
+        // to start when the directory its cache file points into is missing.
+        ensureCacheDir();
         cacheFile.put("path", cacheDir().resolve("sing-box-"
                 + settings.getProxyMode().name().toLowerCase(java.util.Locale.ROOT)
                 + ".db").toString());
@@ -1039,9 +1043,9 @@ public class SingBoxConfigGenerator {
     }
 
     /**
-     * Creates the cache directory the generated config points at. Called by
-     * the engine right before a start; the generator itself no longer touches
-     * the filesystem, so building the diagnostics bundle has no side effects.
+     * Creates the cache directory the generated config points at. Best
+     * effort: a failure is logged and the core reports the real error at
+     * start.
      */
     public static void ensureCacheDir() {
         Path cacheDir = cacheDir();
