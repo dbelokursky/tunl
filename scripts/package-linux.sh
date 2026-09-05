@@ -33,11 +33,28 @@ fi
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "${REPO_ROOT}"
 
-JAR_NAME="vless-client-1.0.0-SNAPSHOT.jar"
-if [[ ! -f "target/${JAR_NAME}" ]]; then
-    echo "[package-linux] missing target/${JAR_NAME} — run 'mvn package' first" >&2
+# Resolve the shaded jar by glob, not by name: the artifact version lives in
+# pom.xml, and a bump there must not strand the packagers. The shade plugin
+# leaves the unshaded original-vless-client-*.jar next to the shaded one; the
+# glob's prefix already skips it, and the filter says so out loud.
+shopt -s nullglob
+JAR_CANDIDATES=(target/vless-client-*.jar)
+shopt -u nullglob
+JARS=()
+for jar in ${JAR_CANDIDATES[@]+"${JAR_CANDIDATES[@]}"}; do
+    [[ "$(basename "${jar}")" == original-* ]] || JARS+=("${jar}")
+done
+if [[ ${#JARS[@]} -eq 0 ]]; then
+    echo "[package-linux] no target/vless-client-*.jar — run 'mvn package' first" >&2
+    exit 1
+elif [[ ${#JARS[@]} -gt 1 ]]; then
+    echo "[package-linux] expected exactly one target/vless-client-*.jar, found ${#JARS[@]}:" >&2
+    printf '  %s\n' "${JARS[@]}" >&2
+    echo "  Run 'mvn clean package' so only the current build's jar remains." >&2
     exit 1
 fi
+JAR_PATH="${JARS[0]}"
+JAR_NAME="$(basename "${JAR_PATH}")"
 
 # The module list is shared with the other packaging scripts through
 # scripts/runtime-modules.txt: one module per line, '#' starts a comment.
@@ -64,7 +81,7 @@ JLINK_OPTIONS="--strip-native-commands --strip-debug --no-man-pages --no-header-
 # leaves alongside it).
 rm -rf staging dist
 mkdir -p staging
-cp "target/${JAR_NAME}" staging/
+cp "${JAR_PATH}" staging/
 
 # Per-user data lives under XDG paths at runtime; the package itself installs
 # to /opt/tunl with a menu entry and launcher symlink.

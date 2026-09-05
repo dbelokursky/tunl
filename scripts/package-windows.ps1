@@ -44,10 +44,21 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptDir
 Set-Location $repoRoot
 
-$jarName = 'vless-client-1.0.0-SNAPSHOT.jar'
-if (-not (Test-Path "target/$jarName")) {
-    throw "[package-windows] missing target/$jarName -- run 'mvn package' first"
+# Resolve the shaded jar by glob, not by name: the artifact version lives in
+# pom.xml, and a bump there must not strand the packagers. The shade plugin
+# leaves the unshaded original-vless-client-*.jar next to the shaded one; the
+# filter's prefix already skips it, and the Where-Object says so out loud.
+$jars = @(Get-ChildItem -Path target -Filter 'vless-client-*.jar' -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -notlike 'original-*' })
+if ($jars.Count -eq 0) {
+    throw "[package-windows] no target/vless-client-*.jar -- run 'mvn package' first"
+} elseif ($jars.Count -gt 1) {
+    throw ("[package-windows] expected exactly one target/vless-client-*.jar, found $($jars.Count):`n" +
+        (($jars | ForEach-Object { "  $($_.FullName)" }) -join "`n") +
+        "`n  Run 'mvn clean package' so only the current build's jar remains.")
 }
+$jarPath = $jars[0].FullName
+$jarName = $jars[0].Name
 
 # The module list is shared with package-dmg.sh / package-linux.sh through
 # scripts/runtime-modules.txt: one module per line, '#' starts a comment.
@@ -74,7 +85,7 @@ $jlinkOptions = '--strip-native-commands --strip-debug --no-man-pages --no-heade
 # leaves alongside it).
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -Path staging, dist
 New-Item -ItemType Directory -Force -Path staging | Out-Null
-Copy-Item "target/$jarName" staging/
+Copy-Item $jarPath staging/
 
 # Per-user install: lands in %LOCALAPPDATA%\Programs without an admin
 # prompt, matching how the app manages everything else per-user.
