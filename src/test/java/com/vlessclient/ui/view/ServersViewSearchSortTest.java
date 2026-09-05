@@ -6,6 +6,7 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.LatencyTester;
 import com.vlessclient.service.TestConfigStores;
+import com.vlessclient.testing.UiTest;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
@@ -18,7 +19,6 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.ListView;
 import javafx.scene.control.TextField;
 import javafx.stage.Stage;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -30,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Search, sort, and what a selection does, for a list long enough that
  * scrolling is not an answer.
  */
+@UiTest
 public class ServersViewSearchSortTest extends ApplicationTest {
 
     @TempDir
@@ -46,15 +47,6 @@ public class ServersViewSearchSortTest extends ApplicationTest {
         public Optional<Result> lastResult(String serverId) {
             return Optional.ofNullable(canned.get(serverId));
         }
-    }
-
-    @BeforeAll
-    static void setupHeadless() {
-        System.setProperty("testfx.robot", "glass");
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("prism.order", "sw");
-        System.setProperty("prism.text", "t2k");
-        System.setProperty("java.awt.headless", "true");
     }
 
     @Override

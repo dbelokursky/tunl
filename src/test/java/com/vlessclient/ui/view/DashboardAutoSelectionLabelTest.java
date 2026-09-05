@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
-import com.vlessclient.app.UiTestServices;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.Protocol;
@@ -16,6 +15,7 @@ import com.vlessclient.service.ProxyGroupMonitor;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.service.outbound.OutboundTags;
+import com.vlessclient.testing.UiTest;
 import java.nio.file.Path;
 import java.util.List;
 import javafx.beans.property.ReadOnlyObjectProperty;
@@ -37,6 +37,7 @@ import org.testfx.framework.junit5.ApplicationTest;
  * server while the urltest group routed through whichever member won the
  * last probe. The card now follows the core's own answer.
  */
+@UiTest
 public class DashboardAutoSelectionLabelTest extends ApplicationTest {
 
     /** Engine whose connection state the test drives directly. */
@@ -86,12 +87,6 @@ public class DashboardAutoSelectionLabelTest extends ApplicationTest {
 
     @BeforeAll
     static void setupHeadless() {
-        System.setProperty("testfx.robot", "glass");
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("prism.order", "sw");
-        System.setProperty("prism.text", "t2k");
-        System.setProperty("java.awt.headless", "true");
-        UiTestServices.initialize();
         priorEngine = tryGet(SingBoxEngine.class);
         priorHealth = tryGet(TunnelHealthState.class);
         priorSettings = tryGet(AppSettings.class);

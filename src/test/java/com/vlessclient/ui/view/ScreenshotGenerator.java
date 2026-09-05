@@ -2,7 +2,6 @@ package com.vlessclient.ui.view;
 
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.app.ThemeCss;
-import com.vlessclient.app.UiTestServices;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.HealthCheckTarget;
 import com.vlessclient.model.Protocol;
@@ -14,6 +13,7 @@ import com.vlessclient.service.LatencyTester;
 import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TrafficMonitor;
+import com.vlessclient.testing.UiTest;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -32,7 +32,6 @@ import javafx.scene.image.WritableImage;
 import javafx.scene.transform.Scale;
 import javafx.stage.Stage;
 import javax.imageio.ImageIO;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.testfx.framework.junit5.ApplicationTest;
@@ -50,6 +49,7 @@ import org.testfx.framework.junit5.ApplicationTest;
  * "the README shows the old UI" is one command rather than an afternoon.</p>
  */
 @EnabledIfSystemProperty(named = "tunl.screenshots", matches = "true")
+@UiTest
 public class ScreenshotGenerator extends ApplicationTest {
 
     /** Retina: GitHub serves the README at CSS width, so render at 2x. */
@@ -61,16 +61,6 @@ public class ScreenshotGenerator extends ApplicationTest {
 
     private MainViewController mainController;
     private Parent windowRoot;
-
-    @BeforeAll
-    static void setupHeadless() {
-        System.setProperty("testfx.robot", "glass");
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("prism.order", "sw");
-        System.setProperty("prism.text", "t2k");
-        System.setProperty("java.awt.headless", "true");
-        UiTestServices.initialize();
-    }
 
     @Override
     public void start(Stage stage) throws Exception {

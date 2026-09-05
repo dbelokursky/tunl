@@ -2,7 +2,7 @@ package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ThemeCss;
-import com.vlessclient.app.UiTestServices;
+import com.vlessclient.testing.UiTest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -18,7 +18,6 @@ import javafx.scene.control.MenuButton;
 import javafx.scene.control.TextField;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
 
@@ -34,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * their originals, and a row that fits in one language can overflow in the
  * other.</p>
  */
+@UiTest
 public class ViewFitTest extends ApplicationTest {
 
     /** Window min 760 - sidebar 200 - content padding 48 = 512; a hair tighter. */
@@ -43,16 +43,6 @@ public class ViewFitTest extends ApplicationTest {
             "SettingsView", "ServersView", "RoutingView", "SubscriptionsView", "LogsView");
 
     private Stage stage;
-
-    @BeforeAll
-    static void setupHeadless() {
-        System.setProperty("testfx.robot", "glass");
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("prism.order", "sw");
-        System.setProperty("prism.text", "t2k");
-        System.setProperty("java.awt.headless", "true");
-        UiTestServices.initialize();
-    }
 
     @AfterEach
     void resetLocale() {

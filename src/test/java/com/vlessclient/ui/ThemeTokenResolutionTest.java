@@ -1,6 +1,7 @@
 package com.vlessclient.ui;
 
 import com.vlessclient.app.ThemeCss;
+import com.vlessclient.testing.UiTest;
 import javafx.css.PseudoClass;
 import javafx.scene.Node;
 import javafx.scene.Scene;
@@ -27,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * base.css carries the rules, the theme file carries only the token values,
  * and neither renders anything on its own.</p>
  */
+@UiTest
 public class ThemeTokenResolutionTest extends ApplicationTest {
 
     private static final PseudoClass HOVER = PseudoClass.getPseudoClass("hover");

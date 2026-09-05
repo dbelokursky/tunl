@@ -3,7 +3,7 @@ package com.vlessclient.ui.view;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vlessclient.app.I18n;
-import com.vlessclient.app.UiTestServices;
+import com.vlessclient.testing.UiTest;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -22,7 +22,6 @@ import javafx.scene.control.Labeled;
 import javafx.scene.control.TextInputControl;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
 
@@ -35,6 +34,7 @@ import org.testfx.framework.junit5.ApplicationTest;
  * binds. The view titles, the whole MCP block and the routing hints all
  * shipped that way.
  */
+@UiTest
 public class FxmlLocalizationTest extends ApplicationTest {
 
     private static final Pattern ATTRIBUTE =
@@ -62,16 +62,6 @@ public class FxmlLocalizationTest extends ApplicationTest {
             "/fxml/SettingsView.fxml", "/fxml/ServerFormView.fxml");
 
     private Stage stage;
-
-    @BeforeAll
-    static void setupHeadless() {
-        System.setProperty("testfx.robot", "glass");
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("prism.order", "sw");
-        System.setProperty("prism.text", "t2k");
-        System.setProperty("java.awt.headless", "true");
-        UiTestServices.initialize();
-    }
 
     @AfterAll
     static void restoreLocale() {

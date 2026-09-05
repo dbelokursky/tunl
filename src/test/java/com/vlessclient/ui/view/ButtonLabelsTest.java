@@ -2,13 +2,13 @@ package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ThemeCss;
+import com.vlessclient.testing.UiTest;
 import java.util.Locale;
 import javafx.scene.Group;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
 
@@ -22,19 +22,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * deliberate — a number here would only restate the one in the production
  * code, and would pass just as happily if both were wrong.</p>
  */
+@UiTest
 public class ButtonLabelsTest extends ApplicationTest {
 
     private Scene scene;
     private Group root;
-
-    @BeforeAll
-    static void setupHeadless() {
-        System.setProperty("testfx.robot", "glass");
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("prism.order", "sw");
-        System.setProperty("prism.text", "t2k");
-        System.setProperty("java.awt.headless", "true");
-    }
 
     @AfterEach
     void resetLocale() {

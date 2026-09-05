@@ -1,15 +1,14 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.ServiceLocator;
-import com.vlessclient.app.UiTestServices;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ProxyMode;
+import com.vlessclient.testing.UiTest;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Label;
 import javafx.stage.Stage;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
 
@@ -25,23 +24,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * proxied OS-wide. The dashboard now says so, and names the address to
  * configure by hand.</p>
  */
+@UiTest
 public class DashboardSystemProxyWarningTest extends ApplicationTest {
 
     private DashboardViewController controller;
-
-    @BeforeAll
-    static void setupHeadless() {
-        System.setProperty("testfx.robot", "glass");
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("prism.order", "sw");
-        System.setProperty("prism.text", "t2k");
-        System.setProperty("java.awt.headless", "true");
-        try {
-            UiTestServices.initialize();
-        } catch (Exception e) {
-            // Tolerate service initialization failures in headless CI.
-        }
-    }
 
     @Override
     public void start(Stage stage) throws Exception {

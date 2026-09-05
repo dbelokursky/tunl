@@ -4,12 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
-import com.vlessclient.app.UiTestServices;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.TunnelHealth;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TunnelHealthState;
+import com.vlessclient.testing.UiTest;
 import java.nio.file.Path;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
@@ -30,6 +30,7 @@ import org.testfx.framework.junit5.ApplicationTest;
  * probes back that up, and must go on offering Disconnect when they don't —
  * a dead tunnel is still one the user turns off, not one they retry.
  */
+@UiTest
 public class DashboardTunnelStatusTest extends ApplicationTest {
 
     /** Engine whose connection state the test drives directly. */
@@ -55,12 +56,6 @@ public class DashboardTunnelStatusTest extends ApplicationTest {
 
     @BeforeAll
     static void setupHeadless() {
-        System.setProperty("testfx.robot", "glass");
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("prism.order", "sw");
-        System.setProperty("prism.text", "t2k");
-        System.setProperty("java.awt.headless", "true");
-        UiTestServices.initialize();
         priorEngine = tryGet(SingBoxEngine.class);
         priorHealth = tryGet(TunnelHealthState.class);
         priorSettings = tryGet(AppSettings.class);

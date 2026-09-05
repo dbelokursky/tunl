@@ -2,7 +2,7 @@ package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ThemeCss;
-import com.vlessclient.app.UiTestServices;
+import com.vlessclient.testing.UiTest;
 import java.util.List;
 import java.util.Locale;
 import javafx.fxml.FXMLLoader;
@@ -11,7 +11,6 @@ import javafx.scene.Scene;
 import javafx.scene.control.Labeled;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
 
@@ -22,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * bundle from the start and simply were not connected to anything, so these
  * pin the wiring rather than the wording.
  */
+@UiTest
 public class ToolbarLocalizationTest extends ApplicationTest {
 
     /** view, control id, bundle key, and whether the add marker fronts it. */
@@ -41,16 +41,6 @@ public class ToolbarLocalizationTest extends ApplicationTest {
                     "dashboard.download.speed", false));
 
     private Stage stage;
-
-    @BeforeAll
-    static void setupHeadless() {
-        System.setProperty("testfx.robot", "glass");
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("prism.order", "sw");
-        System.setProperty("prism.text", "t2k");
-        System.setProperty("java.awt.headless", "true");
-        UiTestServices.initialize();
-    }
 
     @AfterEach
     void resetLocale() {

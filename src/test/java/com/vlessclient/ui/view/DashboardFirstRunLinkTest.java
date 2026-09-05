@@ -3,10 +3,10 @@ package com.vlessclient.ui.view;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vlessclient.app.ServiceLocator;
-import com.vlessclient.app.UiTestServices;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.testing.UiTest;
 import java.util.List;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
@@ -14,7 +14,6 @@ import javafx.scene.Scene;
 import javafx.scene.control.Hyperlink;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
 
@@ -24,19 +23,10 @@ import org.testfx.framework.junit5.ApplicationTest;
  * The hero card now links there, and only while there is nothing to connect
  * to.
  */
+@UiTest
 public class DashboardFirstRunLinkTest extends ApplicationTest {
 
     private static ServerConfig added;
-
-    @BeforeAll
-    static void setupHeadless() {
-        System.setProperty("testfx.robot", "glass");
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("prism.order", "sw");
-        System.setProperty("prism.text", "t2k");
-        System.setProperty("java.awt.headless", "true");
-        UiTestServices.initialize();
-    }
 
     @AfterAll
     static void cleanUp() {

@@ -2,7 +2,7 @@ package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ThemeCss;
-import com.vlessclient.app.UiTestServices;
+import com.vlessclient.testing.UiTest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -17,7 +17,6 @@ import javafx.scene.Scene;
 import javafx.scene.control.Labeled;
 import javafx.scene.layout.Region;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
@@ -41,6 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * save button, and one item in the nav column. Both themes too, since each
  * carries its own copy of every size rule.</p>
  */
+@UiTest
 public class ControlSizingTest extends ApplicationTest {
 
     /**
@@ -92,16 +92,6 @@ public class ControlSizingTest extends ApplicationTest {
         public void close() {
         }
     };
-
-    @BeforeAll
-    static void setupHeadless() {
-        System.setProperty("testfx.robot", "glass");
-        System.setProperty("testfx.headless", "true");
-        System.setProperty("prism.order", "sw");
-        System.setProperty("prism.text", "t2k");
-        System.setProperty("java.awt.headless", "true");
-        UiTestServices.initialize();
-    }
 
     @BeforeEach
     void collectCssWarnings() {
