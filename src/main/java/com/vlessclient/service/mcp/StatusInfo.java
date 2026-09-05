@@ -7,7 +7,7 @@ package com.vlessclient.service.mcp;
  *
  * @param state          the raw connection state ({@code DISCONNECTED},
  *                       {@code CONNECTING}, {@code CONNECTED}, {@code ERROR})
- * @param connected      convenience flag, {@code true} only when fully connected
+ * @param connected      whether the core is connected; does not prove traffic is reachable
  * @param activeServerId id of the server marked active, or {@code null}
  * @param activeServer   display name of the active server, or {@code null}
  * @param proxyMode      configured proxy mode ({@code system_proxy} / {@code tun})
@@ -15,6 +15,10 @@ package com.vlessclient.service.mcp;
  * @param httpPort       local HTTP proxy port
  * @param clashApiPort   Clash API port used for live traffic stats
  * @param error          last error message, or empty string when none
+ * @param health         reachability verdict, independent of the core state
+ * @param tunnelStatus   combined status shared with the dashboard and tray
+ * @param currentServerId core-reported routed server id, null when unknown or disconnected
+ * @param currentServer  core-reported routed server name, null when unknown or disconnected
  */
 public record StatusInfo(
         String state,
@@ -25,5 +29,17 @@ public record StatusInfo(
         int socksPort,
         int httpPort,
         int clashApiPort,
-        String error) {
+        String error,
+        String health,
+        String tunnelStatus,
+        String currentServerId,
+        String currentServer) {
+
+    /** Creates a legacy snapshot with no measured health or core-reported server. */
+    public StatusInfo(String state, boolean connected, String activeServerId, String activeServer,
+                      String proxyMode, int socksPort, int httpPort, int clashApiPort,
+                      String error) {
+        this(state, connected, activeServerId, activeServer, proxyMode, socksPort, httpPort,
+                clashApiPort, error, "UNMONITORED", state, null, null);
+    }
 }

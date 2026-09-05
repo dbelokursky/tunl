@@ -8,15 +8,20 @@ import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.RoutingRule;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.Subscription;
+import com.vlessclient.model.TunnelHealth;
+import com.vlessclient.model.TunnelStatus;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.FxExecutor;
+import com.vlessclient.service.ProxyGroupMonitor;
 import com.vlessclient.service.Redact;
 import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ShareLinkParser;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.SubscriptionService;
 import com.vlessclient.service.TrafficMonitor;
+import com.vlessclient.service.TunnelHealthState;
+import com.vlessclient.service.outbound.OutboundTags;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -49,6 +54,8 @@ public class DefaultAppControlService implements AppControlService {
     private final com.vlessclient.service.LatencyTester latencyTester;
     private final ShareLinkParser shareLinkParser;
     private volatile SingBoxEngine engine;
+    private final TunnelHealthState healthState;
+    private final ProxyGroupMonitor groupMonitor;
 
     /**
      * Creates the service wired to the concrete application services.
@@ -70,6 +77,23 @@ public class DefaultAppControlService implements AppControlService {
                                     com.vlessclient.service.LatencyTester latencyTester,
                                     ShareLinkParser shareLinkParser,
                                     SingBoxEngine engine) {
+        this(configStore, trafficMonitor, subscriptionService, routingService,
+                connectionService, latencyTester, shareLinkParser, engine, null, null);
+    }
+
+    /** Creates the facade with the shared health verdict and the core's reported server pick. */
+    public DefaultAppControlService(ConfigStore configStore,
+                                    TrafficMonitor trafficMonitor,
+                                    SubscriptionService subscriptionService,
+                                    RoutingService routingService,
+                                    ConnectionService connectionService,
+                                    com.vlessclient.service.LatencyTester latencyTester,
+                                    ShareLinkParser shareLinkParser,
+                                    SingBoxEngine engine,
+                                    TunnelHealthState healthState,
+                                    ProxyGroupMonitor groupMonitor) {
+        this.healthState = healthState;
+        this.groupMonitor = groupMonitor;
         this.configStore = configStore;
         this.trafficMonitor = trafficMonitor;
         this.subscriptionService = subscriptionService;
@@ -90,30 +114,34 @@ public class DefaultAppControlService implements AppControlService {
 
     @Override
     public StatusInfo getStatus() {
-        AppSettings settings = configStore.getSettings();
-        SingBoxEngine current = engine;
-
-        ConnectionState state = FxExecutor.get(() -> current != null
-                ? current.connectionStateProperty().get()
-                : ConnectionState.DISCONNECTED);
-        String error = FxExecutor.get(() ->
-                current != null ? current.errorMessageProperty().get() : "");
-
-        ServerConfig active = FxExecutor.get(() -> configStore.getServers().stream()
-                .filter(ServerConfig::isActive)
-                .findFirst()
-                .orElse(null));
-
-        return new StatusInfo(
-                state.name(),
-                state == ConnectionState.CONNECTED,
-                active != null ? active.getId() : null,
-                active != null ? active.getName() : null,
-                settings.getProxyMode().getValue(),
-                settings.getSocksPort(),
-                settings.getHttpPort(),
-                settings.getClashApiPort(),
-                error != null ? error : "");
+        // One FX snapshot: the core state, verdict and routed member must not
+        // come from different moments of a reconnect.
+        return FxExecutor.get(() -> {
+            AppSettings settings = configStore.getSettings();
+            SingBoxEngine current = engine;
+            ConnectionState state = current != null
+                    ? current.connectionStateProperty().get() : ConnectionState.DISCONNECTED;
+            String error = current != null ? current.errorMessageProperty().get() : "";
+            ServerConfig active = configStore.getServers().stream()
+                    .filter(ServerConfig::isActive).findFirst().orElse(null);
+            TunnelHealth health = state == ConnectionState.CONNECTED && healthState != null
+                    ? healthState.get() : TunnelHealth.UNMONITORED;
+            String tag = state == ConnectionState.CONNECTED && groupMonitor != null
+                    ? groupMonitor.currentMemberTagProperty().get() : null;
+            ServerConfig routed = tag == null ? null : configStore.getServers().stream()
+                    .filter(server -> tag.equals(OutboundTags.server(server)))
+                    .findFirst().orElse(null);
+            return new StatusInfo(
+                    state.name(), state == ConnectionState.CONNECTED,
+                    active != null ? active.getId() : null,
+                    active != null ? active.getName() : null,
+                    settings.getProxyMode().getValue(), settings.getSocksPort(),
+                    settings.getHttpPort(), settings.getClashApiPort(),
+                    error != null ? error : "", health.name(),
+                    TunnelStatus.of(state, health).name(),
+                    routed != null ? routed.getId() : null,
+                    routed != null ? routed.getName() : null);
+        });
     }
 
     @Override

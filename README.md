@@ -408,6 +408,11 @@ Browsable resources: `vless://status`, `vless://traffic`, `vless://servers`,
 `vless://routing`, `vless://settings`, `vless://logs/recent`. Live log streaming
 is available over SSE (`GET /mcp`, `notifications/message`).
 
+`get_status` keeps `state` / `connected` for the core's connection state and
+adds `health` and `tunnelStatus` for reachability. `activeServerId` / `activeServer`
+describe the saved selection; `currentServerId` / `currentServer` describe the
+last server reported by the core (null until known, or when disconnected).
+
 ---
 
 ## Troubleshooting

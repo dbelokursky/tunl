@@ -173,7 +173,8 @@ public class ServiceLocator {
         // at launch; re-reconciled whenever settings are saved.
         DefaultAppControlService control = new DefaultAppControlService(
                 configStore, trafficMonitor, subscriptionService, routingService,
-                connectionService, latencyTester, shareLinkParser, engine);
+                connectionService, latencyTester, shareLinkParser, engine,
+                get(TunnelHealthState.class), get(ProxyGroupMonitor.class));
         register(AppControlService.class, control);
         McpServerService mcpServerService = new McpServerService(configStore, control);
         register(McpServerService.class, mcpServerService);

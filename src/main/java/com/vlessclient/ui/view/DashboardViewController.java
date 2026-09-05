@@ -288,8 +288,8 @@ public class DashboardViewController implements ViewShownAware {
     }
 
     /**
-     * Follows the core's group pick while a tunnel is up in an automatic
-     * selection mode; a pinned server needs no polling to be named.
+     * Follows the core's group pick in every mode so UI and MCP can distinguish
+     * the configured selection from the server the running core actually uses.
      */
     private void syncGroupMonitor(ConnectionState state) {
         if (groupMonitor == null) {
@@ -297,7 +297,7 @@ public class DashboardViewController implements ViewShownAware {
         }
         if (state == ConnectionState.CONNECTED) {
             AppSettings settings = ServiceLocator.find(AppSettings.class).orElse(null);
-            if (settings != null && settings.getServerSelection().isAutomatic()) {
+            if (settings != null) {
                 groupMonitor.start(settings.getClashApiPort(), settings.getClashApiSecret());
             }
         } else if (state == ConnectionState.DISCONNECTED || state == ConnectionState.ERROR) {
