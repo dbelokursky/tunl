@@ -132,20 +132,20 @@
     -fx-background-color: -c-surface-sunken;
 }
 
+/* -c-text-secondary, not -c-text-muted: bold 11px is not "large text" by
+   WCAG, so muted's 2.91:1 on the light surface and 3.79:1 on the dark one
+   both fall short of 4.5:1. Secondary measures 5.93 and 6.02. The same swap
+   was made on .stats-title and the traffic readout for the same reason. */
 .section-header {
     -fx-font-size: 11px;
     -fx-font-weight: bold;
-    -fx-text-fill: -c-text-muted;
+    -fx-text-fill: -c-text-secondary;
     -fx-text-transform: uppercase;
     -fx-letter-spacing: 0.6;
     /* Top only. The 2 on the left used to push the header off the column it
        heads — inside the health card it sat 2px right of the status dots
        under it, and in Settings 2px right of every other label. */
     -fx-padding: 2 0 0 0;
-}
-
-.traffic-card {
-    -fx-min-height: 100;
 }
 
 .mode-combo {
@@ -263,9 +263,10 @@
     -fx-text-fill: -c-text-secondary;
 }
 
+/* See .section-header on why this is secondary and not muted. */
 .stats-title {
     -fx-font-size: 11px;
-    -fx-text-fill: -c-text-muted;
+    -fx-text-fill: -c-text-secondary;
     -fx-font-weight: bold;
     -fx-text-transform: uppercase;
     -fx-letter-spacing: 0.5;
@@ -825,12 +826,36 @@
     -fx-fill: -c-danger-fg;
 }
 
-/* ===== Speed Value (large) ===== */
+/* ===== Speed Value =====
+   The direction variants below are swapped in wholesale by
+   TrafficDisplayBinder (setAll, never add), so every rule here stays a
+   single-class selector and none of them depend on each other's order.
+   Grey is the resting state: the block starts at 0 B/s. -c-text-secondary
+   and not -c-text-muted, here and on every line of this readout: muted is
+   2.91:1 on the light card and 3.79:1 on the dark one, so it failed AA in
+   both themes at this size. Secondary measures 5.93 and 6.02. */
 .speed-value {
-    -fx-font-size: 20px;
+    -fx-font-size: 16px;
     -fx-font-weight: bold;
-    -fx-text-fill: -c-text;
+    -fx-text-fill: -c-text-secondary;
     -fx-font-family: "SF Pro Display", "Helvetica Neue", "System";
+}
+
+/* Colour is the liveness cue the retired traffic chart used to carry: a
+   direction moving bytes wears its accent, an idle one stays muted, so which
+   way data is flowing reads before any digit does. -c-warn-text rather than
+   -c-warn: the plain accent is #ef6c00, which clears 3:1 on white as a glyph
+   but not as 16px text. */
+.speed-value-up {
+    -fx-text-fill: -c-warn-text;
+}
+
+.speed-value-down {
+    -fx-text-fill: -c-info;
+}
+
+.speed-value-idle {
+    -fx-text-fill: -c-text-secondary;
 }
 
 /* ===== Stats Card Small ===== */
@@ -840,13 +865,19 @@
 
 /* ===== Upload/Download Icons ===== */
 /* The chevron SVGs come from Icons.chevronDouble*; the parent label's class
-   picks the direction color, same contextual pattern as .nav-button icons. */
+   picks the direction color, same contextual pattern as .nav-button icons.
+   The upload chevron takes -c-warn-text so it matches the number beside it
+   rather than sitting a shade brighter than its own value. */
 .stats-icon-upload .nav-icon-glyph {
-    -fx-fill: -c-warn;
+    -fx-fill: -c-warn-text;
 }
 
 .stats-icon-download .nav-icon-glyph {
     -fx-fill: -c-info;
+}
+
+.stats-icon-idle .nav-icon-glyph {
+    -fx-fill: -c-text-secondary;
 }
 
 /* ===== Latency Result ===== */
@@ -1021,12 +1052,14 @@
     -fx-text-fill: -c-banner-info-subtitle;
 }
 
-/* Session total under its speed readout in the traffic card. Muted and small:
+/* Session total under the speed readout in the hero card. Small and quiet:
    it is the cumulative figure, and the live speed above it is what the eye
-   should land on first. */
+   should land on first. Quiet stops at -c-text-secondary though — the
+   -c-text-muted this used to carry measures 2.91:1 on the light card, which
+   is not "understated", it is unreadable. */
 .session-total {
     -fx-font-size: 12px;
-    -fx-text-fill: -c-text-muted;
+    -fx-text-fill: -c-text-secondary;
 }
 
 /* ===== Content scroll wrapper ===== */

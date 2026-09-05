@@ -11,7 +11,6 @@
 <?import javafx.scene.layout.Region?>
 <?import javafx.scene.layout.Priority?>
 <?import javafx.scene.shape.Circle?>
-<?import com.vlessclient.ui.view.MirroredSparkline?>
 
 <VBox xmlns="http://javafx.com/javafx"
       xmlns:fx="http://javafx.com/fxml"
@@ -85,6 +84,33 @@
                 <Hyperlink fx:id="addServerLink" visible="false" managed="false"
                            onAction="#onAddServerLinkClicked"/>
             </VBox>
+
+            <!-- Traffic readout, merged in from the retired "Real-time
+                 traffic" section. The card's subtitle already says the tunnel
+                 is routing traffic; these are the numbers behind that
+                 sentence, so they belong in the same row rather than 200px
+                 further down.
+
+                 minWidth=-Infinity because the subtitle next to it is
+                 wrapText + hgrow with minWidth=0: without the pin, a long
+                 server name would push the numbers out of the card instead
+                 of wrapping itself. Hidden until a tunnel is up — there is no
+                 traffic to report while disconnected, and the row then looks
+                 exactly as it did before this block existed. -->
+            <VBox fx:id="trafficSummary" alignment="CENTER_RIGHT" spacing="1"
+                  minWidth="-Infinity" visible="false" managed="false">
+                <HBox alignment="CENTER_RIGHT" spacing="14">
+                    <HBox fx:id="uploadReadout" alignment="CENTER_LEFT" spacing="3">
+                        <Label fx:id="uploadCardIcon" styleClass="stats-icon-upload"/>
+                        <Label fx:id="uploadSpeedLabel" text="0 B/s" styleClass="speed-value"/>
+                    </HBox>
+                    <HBox fx:id="downloadReadout" alignment="CENTER_LEFT" spacing="3">
+                        <Label fx:id="downloadCardIcon" styleClass="stats-icon-download"/>
+                        <Label fx:id="downloadSpeedLabel" text="0 B/s" styleClass="speed-value"/>
+                    </HBox>
+                </HBox>
+                <Label fx:id="sessionTotalLabel" text="—" styleClass="session-total"/>
+            </VBox>
         </HBox>
 
         <!-- Row 2: mode + connect. The spacer pushes Connect to the right;
@@ -122,43 +148,6 @@
 
     <!-- Hidden legacy field used elsewhere; no longer rendered. -->
     <Label fx:id="serverNameLabel" text="" managed="false" visible="false"/>
-
-    <!-- Real-time traffic section -->
-    <Label fx:id="trafficSectionTitle" text="Real-time traffic" styleClass="section-header"/>
-
-    <!-- Mirrored duplex card: upload plots up from the shared dashed axis and
-         download plots down, so a curve travels the way its name says. The
-         chevron graphics are set from the controller (Icons.chevronDouble*). -->
-    <VBox styleClass="card, traffic-card" maxWidth="Infinity" spacing="6">
-        <!-- Rows, not overlays. These used to float in the corners of a
-             StackPane over the canvas, which meant nothing stopped a curve
-             from running underneath a number — it only happened to miss at
-             the sample values we looked at. Laying them out above and below
-             the chart makes the collision impossible rather than unlikely,
-             and costs the height of two label rows.
-
-             Each row still belongs to its own half: the sparkline is
-             mirrored, upload plots up and download down, so the legend, the
-             session total and the speed for one direction all read on the
-             same side of the axis as its curve. -->
-        <HBox alignment="CENTER_LEFT" spacing="8">
-            <Label fx:id="uploadCardIcon" styleClass="stats-icon-upload"/>
-            <Label fx:id="uploadCardTitle" text="Upload" styleClass="stats-title"/>
-            <Label fx:id="totalUploadLabel" text="—" styleClass="session-total"/>
-            <Region HBox.hgrow="ALWAYS" minWidth="8"/>
-            <Label fx:id="uploadSpeedLabel" text="0 B/s" styleClass="speed-value"/>
-        </HBox>
-
-        <MirroredSparkline fx:id="trafficSparkline" prefHeight="150"/>
-
-        <HBox alignment="CENTER_LEFT" spacing="8">
-            <Label fx:id="downloadCardIcon" styleClass="stats-icon-download"/>
-            <Label fx:id="downloadCardTitle" text="Download" styleClass="stats-title"/>
-            <Label fx:id="totalDownloadLabel" text="—" styleClass="session-total"/>
-            <Region HBox.hgrow="ALWAYS" minWidth="8"/>
-            <Label fx:id="downloadSpeedLabel" text="0 B/s" styleClass="speed-value"/>
-        </HBox>
-    </VBox>
 
     <!-- Service availability: reachability of key services through the tunnel -->
     <VBox fx:id="healthCard" styleClass="card" spacing="10"

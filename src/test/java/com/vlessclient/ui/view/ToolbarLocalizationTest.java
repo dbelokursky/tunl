@@ -35,10 +35,7 @@ public class ToolbarLocalizationTest extends ApplicationTest {
             new Action("SubscriptionsView", "refreshAllButton", "subscriptions.refresh.all", false),
             new Action("SubscriptionsView", "addSubscriptionButton",
                     "button.add.subscription", true),
-            new Action("LogsView", "autoScrollCheckBox", "logs.auto.scroll", false),
-            new Action("DashboardView", "uploadCardTitle", "dashboard.upload.speed", false),
-            new Action("DashboardView", "downloadCardTitle",
-                    "dashboard.download.speed", false));
+            new Action("LogsView", "autoScrollCheckBox", "logs.auto.scroll", false));
 
     private Stage stage;
 
