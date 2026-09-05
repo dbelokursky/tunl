@@ -110,8 +110,8 @@ jobs:
   # tried without cutting a release, and each installer is checked on the
   # runner that built it: the MSI is installed and uninstalled, the DEB is
   # installed, launched under Xvfb and removed, the DMG is mounted and its
-  # app bundle inspected. Windows also packages on PRs because its MSI smoke
-  # is the only one of those that runs before merge. Tagged releases build
+  # app bundle inspected. Windows and Linux amd64 also package on PRs so
+  # their install/uninstall smoke checks run before merge. Tagged releases build
   # and check their installers in release.yml through the same scripts.
 
   package-macos:
@@ -186,7 +186,7 @@ jobs:
           if-no-files-found: error
 
   package-linux:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Exercise the DEB maintainer scripts before merge as well as on main.
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 20
