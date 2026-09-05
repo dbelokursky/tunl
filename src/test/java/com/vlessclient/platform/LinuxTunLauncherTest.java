@@ -1,9 +1,12 @@
 package com.vlessclient.platform;
 
+import com.vlessclient.testing.Await;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
@@ -25,6 +28,22 @@ class LinuxTunLauncherTest {
         public CommandRunner.Result run(List<String> command) {
             calls.add(List.copyOf(command));
             return responder.apply(command);
+        }
+    }
+
+    /**
+     * Everything a test spawned: the wrapper shell and the fake core under it.
+     * Killed forcibly after each test, so a failed assertion cannot leave a
+     * "sleep 60" behind — the in-test kill -9 that used to do this ran only
+     * on the happy path.
+     */
+    private final List<ProcessHandle> spawned = new ArrayList<>();
+
+    @AfterEach
+    void reapSpawnedProcesses() {
+        for (ProcessHandle handle : spawned) {
+            handle.descendants().forEach(ProcessHandle::destroyForcibly);
+            handle.destroyForcibly();
         }
     }
 
@@ -97,18 +116,16 @@ class LinuxTunLauncherTest {
         String wrapper = LinuxTunLauncher.wrapperCommand(fakeCore, fakeCore, stop);
         Process sh = new ProcessBuilder("/bin/sh", "-c", wrapper)
                 .redirectErrorStream(true).start();
+        spawned.add(sh.toHandle());
 
         // Wait for the fake core to record its PID, then SIGTERM the wrapper.
-        long deadline = System.currentTimeMillis() + 5_000;
-        String pid = "";
-        while (System.currentTimeMillis() < deadline) {
-            pid = java.nio.file.Files.readString(pidFile).strip();
-            if (!pid.isEmpty()) {
-                break;
-            }
-            Thread.sleep(50);
-        }
-        assertThat(pid).as("fake core should have started").isNotEmpty();
+        long pid = Long.parseLong(Await.untilValue("the fake core to record its pid",
+                () -> readQuietly(pidFile), text -> !text.isEmpty(), Duration.ofSeconds(5)));
+        // A handle taken while the core is certainly alive carries its start
+        // time, so a later destroyForcibly cannot hit a recycled pid.
+        ProcessHandle core = ProcessHandle.of(pid)
+                .orElseThrow(() -> new AssertionError("fake core " + pid + " already gone"));
+        spawned.add(core);
 
         sh.destroy();   // SIGTERM, exactly like SingBoxEngine.forceStop
         assertThat(sh.waitFor(10, java.util.concurrent.TimeUnit.SECONDS))
@@ -120,20 +137,8 @@ class LinuxTunLauncherTest {
         // beat (briefly as a zombie until PID 1 reaps it). Poll with a
         // deadline instead of sampling once; the orphan bug this guards
         // against keeps the core alive indefinitely, not for milliseconds.
-        boolean alive = true;
-        long reapDeadline = System.currentTimeMillis() + 5_000;
-        while (System.currentTimeMillis() < reapDeadline) {
-            alive = new ProcessBuilder("kill", "-0", pid).start().waitFor() == 0;
-            if (!alive) {
-                break;
-            }
-            Thread.sleep(50);
-        }
-        if (alive) {
-            new ProcessBuilder("kill", "-9", pid).start().waitFor();
-        }
-        assertThat(alive).as("fake core (pid %s) must be reaped, not orphaned", pid)
-                .isFalse();
+        Await.until("fake core " + pid + " to be reaped, not orphaned",
+                () -> !core.isAlive(), Duration.ofSeconds(5));
     }
 
     @Test
@@ -145,5 +150,13 @@ class LinuxTunLauncherTest {
 
         assertThat(wrapper).contains("'/opt/a b/sing-box'");
         assertThat(wrapper).contains("'/tmp/it'\\''s.json'");
+    }
+
+    private static String readQuietly(Path file) {
+        try {
+            return java.nio.file.Files.readString(file).strip();
+        } catch (IOException e) {
+            return "";
+        }
     }
 }

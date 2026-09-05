@@ -5,7 +5,9 @@ import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.SingBoxEngine;
+import com.vlessclient.testing.Await;
 import com.vlessclient.testing.UiTest;
+import java.time.Duration;
 import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
@@ -85,10 +87,8 @@ public class DashboardConnectDelegationTest extends ApplicationTest {
         // The STARTED branch hops back to the FX thread to name the server; give
         // that runLater a chance to land before sampling the label.
         Label serverName = lookup("#serverNameLabel").query();
-        long deadline = System.currentTimeMillis() + 5_000;
-        while (!"Tokyo".equals(serverName.getText()) && System.currentTimeMillis() < deadline) {
-            Thread.sleep(25);
-        }
+        Await.until("the server name to reach the label",
+                () -> "Tokyo".equals(serverName.getText()), Duration.ofSeconds(5));
         assertThat(serverName.getText()).isEqualTo("Tokyo");
     }
 

@@ -2,7 +2,9 @@ package com.vlessclient.service;
 
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
+import com.vlessclient.testing.Await;
 import com.vlessclient.testing.FxToolkitExtension;
+import java.time.Duration;
 import javafx.application.Platform;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -115,15 +117,10 @@ class SingBoxEngineTest {
      */
     private void awaitConnectionState(SingBoxEngine engine,
                                       ConnectionState expected,
-                                      long timeoutMillis) throws Exception {
-        long deadline = System.currentTimeMillis() + timeoutMillis;
-        while (System.currentTimeMillis() < deadline) {
-            if (stateOnFxThread(engine) == expected) {
-                return;
-            }
-            Thread.sleep(25);
-        }
-        assertThat(stateOnFxThread(engine)).isEqualTo(expected);
+                                      long timeoutMillis) {
+        Await.untilValue("connection state " + expected,
+                () -> stateOnFxThread(engine), expected::equals,
+                Duration.ofMillis(timeoutMillis));
     }
 
     /**
@@ -134,7 +131,7 @@ class SingBoxEngineTest {
      * that follows would then race them. A latch-synchronized FX-thread read
      * happens-after the full set(), listeners included.
      */
-    private ConnectionState stateOnFxThread(SingBoxEngine engine) throws InterruptedException {
+    private ConnectionState stateOnFxThread(SingBoxEngine engine) {
         java.util.concurrent.atomic.AtomicReference<ConnectionState> seen =
                 new java.util.concurrent.atomic.AtomicReference<>();
         CountDownLatch latch = new CountDownLatch(1);
@@ -142,8 +139,27 @@ class SingBoxEngineTest {
             seen.set(engine.connectionStateProperty().get());
             latch.countDown();
         });
-        assertThat(latch.await(5, TimeUnit.SECONDS)).isTrue();
+        try {
+            assertThat(latch.await(5, TimeUnit.SECONDS)).isTrue();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("interrupted while sampling the state", e);
+        }
         return seen.get();
+    }
+
+    /** The engine watches each core from a daemon thread with this name and never exposes a join. */
+    private static final String MONITOR_THREAD = "singbox-process-monitor";
+
+    /**
+     * Waits for every monitor thread started since the snapshot to finish.
+     * The OS-proxy guard and the launcher clean-up both run in that
+     * thread's finally block, so once it is gone anything it was going to
+     * call has been called — which is what a "nothing was invoked"
+     * assertion needs, and what a fixed sleep only hoped for.
+     */
+    private static void awaitMonitorsFinished(Set<Thread> before) {
+        Await.untilThreadsFinished(MONITOR_THREAD, before, Duration.ofSeconds(10));
     }
 
     @Test
@@ -290,19 +306,21 @@ class SingBoxEngineTest {
         List<Throwable> monitorCrashes = new CopyOnWriteArrayList<>();
         Thread.UncaughtExceptionHandler prior = Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
-            if (t.getName().startsWith("singbox-process-monitor")) {
+            if (t.getName().startsWith(MONITOR_THREAD)) {
                 monitorCrashes.add(e);
             } else if (prior != null) {
                 prior.uncaughtException(t, e);
             }
         });
+        Set<Thread> monitorsBefore = Await.liveThreadsNamed(MONITOR_THREAD);
         try {
             for (int i = 0; i < 25; i++) {
                 engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
                 engine.stop();
             }
-            // Give straggler monitor threads a chance to run into the bug.
-            Thread.sleep(300);
+            // Every monitor this test started has to run to the end — the
+            // bug lived on that thread — before the crash list is read.
+            awaitMonitorsFinished(monitorsBefore);
             flushFxEvents();
         } finally {
             Thread.setDefaultUncaughtExceptionHandler(prior);
@@ -329,10 +347,8 @@ class SingBoxEngineTest {
         engine.stop();
 
         // The guard runs on the monitor thread once the process is dead.
-        long deadline = System.currentTimeMillis() + 5000;
-        while (guardCalls.isEmpty() && System.currentTimeMillis() < deadline) {
-            Thread.sleep(25);
-        }
+        Await.until("the system proxy guard to run",
+                () -> !guardCalls.isEmpty(), Duration.ofSeconds(5));
         assertThat(guardCalls).containsExactly("127.0.0.1:1081");
     }
 
@@ -346,10 +362,8 @@ class SingBoxEngineTest {
         engine.start(SET_SYSTEM_PROXY_CONFIG, ProxyMode.SYSTEM_PROXY);
 
         awaitConnectionState(engine, ConnectionState.ERROR, AWAIT_STATE_TIMEOUT_MS);
-        long deadline = System.currentTimeMillis() + 5000;
-        while (guardCalls.isEmpty() && System.currentTimeMillis() < deadline) {
-            Thread.sleep(25);
-        }
+        Await.until("the system proxy guard to run",
+                () -> !guardCalls.isEmpty(), Duration.ofSeconds(5));
         assertThat(guardCalls).containsExactly("127.0.0.1:1081");
     }
 
@@ -360,10 +374,11 @@ class SingBoxEngineTest {
         List<String> guardCalls = new CopyOnWriteArrayList<>();
         engine.setSystemProxyGuard((host, port) -> guardCalls.add(host + ":" + port));
 
+        Set<Thread> monitorsBefore = Await.liveThreadsNamed(MONITOR_THREAD);
         engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
         engine.stop();
 
-        Thread.sleep(300);
+        awaitMonitorsFinished(monitorsBefore);
         assertThat(guardCalls).isEmpty();
     }
 
@@ -557,10 +572,8 @@ class SingBoxEngineTest {
         awaitConnectionState(engine, ConnectionState.DISCONNECTED, AWAIT_STATE_TIMEOUT_MS);
 
         // Runs on the monitor thread once the wrapper is reaped.
-        long deadline = System.currentTimeMillis() + 5000;
-        while (launcher.cleanups.get() == 0 && System.currentTimeMillis() < deadline) {
-            Thread.sleep(25);
-        }
+        Await.until("the launcher clean-up to run",
+                () -> launcher.cleanups.get() > 0, Duration.ofSeconds(5));
         assertThat(launcher.cleanups.get()).isEqualTo(1);
     }
 
@@ -572,10 +585,11 @@ class SingBoxEngineTest {
         RecordingLauncher launcher = new RecordingLauncher(null, null);
         engine.setTunLauncher(launcher);
 
+        Set<Thread> monitorsBefore = Await.liveThreadsNamed(MONITOR_THREAD);
         engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
         engine.stop();
         awaitConnectionState(engine, ConnectionState.DISCONNECTED, AWAIT_STATE_TIMEOUT_MS);
-        Thread.sleep(300);
+        awaitMonitorsFinished(monitorsBefore);
 
         // Nothing was published, so nothing must be removed — and the fixed
         // published path may belong to a TUN session of another app instance.

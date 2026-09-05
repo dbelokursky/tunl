@@ -3,13 +3,15 @@ package com.vlessclient.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.sun.net.httpserver.HttpServer;
+import com.vlessclient.testing.Await;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
-import java.util.concurrent.TimeUnit;
+import java.time.Duration;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -98,14 +100,10 @@ class ProxyGroupMonitorTest {
     }
 
     /** The property lands on the FX thread when a toolkit is up, so wait for it. */
-    private void awaitTag(String expected) throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (System.nanoTime() < deadline) {
-            String current = monitor.currentMemberTagProperty().get();
-            if (expected == null ? current == null : expected.equals(current)) {
-                return;
-            }
-            Thread.sleep(20);
-        }
+    private void awaitTag(String expected) {
+        Await.untilValue("member tag " + expected,
+                () -> monitor.currentMemberTagProperty().get(),
+                current -> Objects.equals(expected, current),
+                Duration.ofSeconds(10));
     }
 }

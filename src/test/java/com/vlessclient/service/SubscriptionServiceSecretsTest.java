@@ -3,9 +3,11 @@ package com.vlessclient.service;
 import com.vlessclient.model.Subscription;
 import com.vlessclient.platform.InMemorySecretSealer;
 import com.vlessclient.platform.SecretSealer;
+import com.vlessclient.testing.Await;
 import java.net.http.HttpClient;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -129,10 +131,8 @@ class SubscriptionServiceSecretsTest {
         assertThat(sealer.entries()).hasSize(1);
 
         service.removeSubscription(sub.getId());
-        long deadline = System.currentTimeMillis() + 5_000;
-        while (!sealer.entries().isEmpty() && System.currentTimeMillis() < deadline) {
-            Thread.sleep(20);
-        }
+        Await.until("the sealed URL to be deleted", () -> sealer.entries().isEmpty(),
+                Duration.ofSeconds(5));
         assertThat(sealer.entries()).isEmpty();
     }
 }

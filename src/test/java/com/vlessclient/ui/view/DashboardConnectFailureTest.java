@@ -4,7 +4,9 @@ import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.SingBoxEngine;
+import com.vlessclient.testing.Await;
 import com.vlessclient.testing.UiTest;
+import java.time.Duration;
 import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
@@ -74,10 +76,8 @@ public class DashboardConnectFailureTest extends ApplicationTest {
         Platform.runLater(controller::toggleConnection);
 
         Label status = lookup("#statusLabel").query();
-        long deadline = System.currentTimeMillis() + 10_000;
-        while (!status.getText().contains(BOOM) && System.currentTimeMillis() < deadline) {
-            Thread.sleep(25);
-        }
+        Await.until("the failure to reach the status line",
+                () -> status.getText().contains(BOOM), Duration.ofSeconds(10));
 
         assertThat(status.getText())
                 .as("without the catch the status line keeps its previous text "

@@ -1,11 +1,17 @@
 package com.vlessclient.platform;
 
+import com.vlessclient.testing.Await;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -19,6 +25,22 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @EnabledOnOs({OS.MAC, OS.LINUX})
 class MacTunLauncherTest {
+
+    /**
+     * Everything a test spawned: the wrapper shell and the fake core under it.
+     * Killed forcibly after each test, so a failed assertion cannot leave a
+     * "sleep 60" behind — the in-test kill -9 that used to do this ran only
+     * on the happy path.
+     */
+    private final List<ProcessHandle> spawned = new ArrayList<>();
+
+    @AfterEach
+    void reapSpawnedProcesses() {
+        for (ProcessHandle handle : spawned) {
+            handle.descendants().forEach(ProcessHandle::destroyForcibly);
+            handle.destroyForcibly();
+        }
+    }
 
     @Test
     void sudoWrapper_runsUnderSudoAndWatchesStopFileAndParent() {
@@ -82,17 +104,15 @@ class MacTunLauncherTest {
         String wrapper = MacTunLauncher.osascriptWrapperCommand(fakeCore, fakeCore, stop);
         Process sh = new ProcessBuilder("/bin/sh", "-c", wrapper)
                 .redirectErrorStream(true).start();
+        spawned.add(sh.toHandle());
 
-        long deadline = System.currentTimeMillis() + 5_000;
-        String pid = "";
-        while (System.currentTimeMillis() < deadline) {
-            pid = Files.readString(pidFile).strip();
-            if (!pid.isEmpty()) {
-                break;
-            }
-            Thread.sleep(50);
-        }
-        assertThat(pid).as("fake core should have started").isNotEmpty();
+        long pid = Long.parseLong(Await.untilValue("the fake core to record its pid",
+                () -> readQuietly(pidFile), text -> !text.isEmpty(), Duration.ofSeconds(5)));
+        // A handle taken while the core is certainly alive carries its start
+        // time, so a later destroyForcibly cannot hit a recycled pid.
+        ProcessHandle core = ProcessHandle.of(pid)
+                .orElseThrow(() -> new AssertionError("fake core " + pid + " already gone"));
+        spawned.add(core);
 
         sh.destroy();   // SIGTERM, exactly like SingBoxEngine.forceStop
         assertThat(sh.waitFor(10, TimeUnit.SECONDS))
@@ -100,19 +120,15 @@ class MacTunLauncherTest {
 
         // The child must be reaped, not orphaned. Its death is asynchronous to
         // the wrapper's exit, so poll with a deadline.
-        boolean alive = true;
-        long reapDeadline = System.currentTimeMillis() + 5_000;
-        while (System.currentTimeMillis() < reapDeadline) {
-            alive = new ProcessBuilder("kill", "-0", pid).start().waitFor() == 0;
-            if (!alive) {
-                break;
-            }
-            Thread.sleep(50);
+        Await.until("fake core " + pid + " to be reaped, not orphaned",
+                () -> !core.isAlive(), Duration.ofSeconds(5));
+    }
+
+    private static String readQuietly(Path file) {
+        try {
+            return Files.readString(file).strip();
+        } catch (IOException e) {
+            return "";
         }
-        if (alive) {
-            new ProcessBuilder("kill", "-9", pid).start().waitFor();
-        }
-        assertThat(alive).as("fake core (pid %s) must be reaped, not orphaned", pid)
-                .isFalse();
     }
 }
