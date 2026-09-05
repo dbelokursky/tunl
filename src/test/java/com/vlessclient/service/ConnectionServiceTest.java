@@ -68,6 +68,8 @@ class ConnectionServiceTest {
         volatile boolean running;
         volatile IOException failStartWith;
         volatile boolean refuseAsAlreadyRunning;
+        CountDownLatch awaiting;
+        CountDownLatch releaseAwait;
 
         RecordingEngine(Path binary) {
             super(binary);
@@ -101,6 +103,16 @@ class ConnectionServiceTest {
         @Override
         public boolean awaitStopped(Duration timeout) {
             calls.add("await");
+            if (awaiting != null) {
+                awaiting.countDown();
+                try {
+                    if (!releaseAwait.await(5, TimeUnit.SECONDS)) {
+                        throw new AssertionError("awaitStopped was not released");
+                    }
+                } catch (InterruptedException e) {
+                    throw new AssertionError(e);
+                }
+            }
             return !running;
         }
     }
@@ -112,6 +124,37 @@ class ConnectionServiceTest {
 
     private RecordingEngine engine() {
         return new RecordingEngine(tempDir.resolve("sing-box"));
+    }
+
+    @Test
+    void cancellationWhileWaitingForTheOldCorePreventsANewStart() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        RecordingEngine engine = engine();
+        engine.awaiting = new CountDownLatch(1);
+        engine.releaseAwait = new CountDownLatch(1);
+        ConnectionService service = service(engine);
+        AtomicReference<ConnectionService.ConnectAttempt> result = new AtomicReference<>();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread connect = Thread.startVirtualThread(() -> {
+            try {
+                result.set(service.connect());
+            } catch (Throwable e) {
+                failure.set(e);
+            }
+        });
+        try {
+            assertThat(engine.awaiting.await(5, TimeUnit.SECONDS)).isTrue();
+            service.getRecoveryService().cancel();
+        } finally {
+            engine.releaseAwait.countDown();
+            connect.join(5000);
+            service.disconnect();
+            service.getRecoveryService().close();
+        }
+        assertThat(connect.isAlive()).isFalse();
+        assertThat(failure.get()).isNull();
+        assertThat(result.get().outcome()).isEqualTo(ConnectionService.Outcome.CANCELLED);
+        assertThat(engine.calls).doesNotContain("start");
     }
 
     // ===== what the generator is given =====
