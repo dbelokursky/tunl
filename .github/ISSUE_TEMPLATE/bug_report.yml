@@ -13,7 +13,7 @@ body:
     attributes:
       label: Tunl version
       description: Settings → About. Say `dev-latest` and the commit if you run the prerelease.
-      placeholder: 1.13.22
+      placeholder: 1.14.0
     validations:
       required: true
   - type: dropdown
