@@ -1,8 +1,9 @@
 <#
 .SYNOPSIS
     Windows counterpart to bundle-singbox.sh: downloads and bundles sing-box.exe
-    for windows-amd64 into the Maven build output. Invoked by the
-    exec-maven-plugin during the generate-resources phase on Windows build hosts.
+    for the build host's architecture into the Maven build output. Invoked by
+    the exec-maven-plugin during the generate-resources phase on Windows build
+    hosts.
 
 .PARAMETER OutDir
     Output directory (e.g. target/classes/native).
@@ -53,7 +54,16 @@ if ($propsVersion -ne $Version) {
         "$propsFile says '$propsVersion'. Run 'mvn clean' -- the Maven property cache is stale.")
 }
 
-$arch = 'amd64'
+# The build host decides which binary gets bundled, as in bundle-singbox.sh:
+# its own OS and its own architecture. singbox.properties pins a checksum
+# only for the architectures a release ships, so a host it does not list
+# stops at the checksum lookup below instead of bundling unverified bytes.
+$osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+switch ("$osArch") {
+    'X64'   { $arch = 'amd64' }
+    'Arm64' { $arch = 'arm64' }
+    default { throw "[bundle-singbox] unsupported windows arch: $osArch" }
+}
 $targetDir = Join-Path $OutDir "windows-$arch"
 $targetBinary = Join-Path $targetDir 'sing-box.exe'
 $stampFile = Join-Path $targetDir '.singbox-version'
@@ -122,17 +132,23 @@ if ($actual -ne $expected.ToLower()) {
 New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
 Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $targetBinary, $stampFile
 
-# Extract just sing-box.exe out of the nested sing-box-<version>-windows-amd64/
+# Extract just sing-box.exe out of the nested sing-box-<version>-windows-<arch>/
 # directory (the .sh bundler's --strip-components=1 equivalent). Use .NET
-# ZipFile instead of Expand-Archive, which isn't on every CI PowerShell.
+# ZipFile instead of Expand-Archive, which isn't on every CI PowerShell. The
+# extract directory is scratch: the cache keeps the verified zip, not an
+# unpacked copy of it, so it is removed again whether or not the copy worked.
 $extractDir = Join-Path $cacheDir 'extract'
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -LiteralPath $extractDir
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-[System.IO.Compression.ZipFile]::ExtractToDirectory($zip, $extractDir)
-$exe = Get-ChildItem -Path $extractDir -Recurse -Filter 'sing-box.exe' | Select-Object -First 1
-if (-not $exe) {
-    throw "[bundle-singbox] sing-box.exe not found inside $zip"
+try {
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($zip, $extractDir)
+    $exe = Get-ChildItem -Path $extractDir -Recurse -Filter 'sing-box.exe' | Select-Object -First 1
+    if (-not $exe) {
+        throw "[bundle-singbox] sing-box.exe not found inside $zip"
+    }
+    Copy-Item -Force -LiteralPath $exe.FullName -Destination $targetBinary
+} finally {
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -LiteralPath $extractDir
 }
-Copy-Item -Force -LiteralPath $exe.FullName -Destination $targetBinary
 Set-Content -LiteralPath $stampFile -Value $Version -NoNewline
 Write-Host "[bundle-singbox] bundled $targetBinary ($Version)"
