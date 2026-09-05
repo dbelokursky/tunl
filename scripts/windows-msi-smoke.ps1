@@ -22,6 +22,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
 $msiMatches = @(Resolve-Path -Path $MsiPath)
 if ($msiMatches.Count -ne 1) {
     throw "[windows-msi-smoke] expected one MSI matching '$MsiPath', found $($msiMatches.Count)"

@@ -43,11 +43,28 @@ fi
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "${REPO_ROOT}"
 
-JAR_NAME="vless-client-1.0.0-SNAPSHOT.jar"
-if [[ ! -f "target/${JAR_NAME}" ]]; then
-    echo "[package-dmg] missing target/${JAR_NAME} — run 'mvn package' first" >&2
+# Resolve the shaded jar by glob, not by name: the artifact version lives in
+# pom.xml, and a bump there must not strand the packagers. The shade plugin
+# leaves the unshaded original-vless-client-*.jar next to the shaded one; the
+# glob's prefix already skips it, and the filter says so out loud.
+shopt -s nullglob
+JAR_CANDIDATES=(target/vless-client-*.jar)
+shopt -u nullglob
+JARS=()
+for jar in ${JAR_CANDIDATES[@]+"${JAR_CANDIDATES[@]}"}; do
+    [[ "$(basename "${jar}")" == original-* ]] || JARS+=("${jar}")
+done
+if [[ ${#JARS[@]} -eq 0 ]]; then
+    echo "[package-dmg] no target/vless-client-*.jar — run 'mvn package' first" >&2
+    exit 1
+elif [[ ${#JARS[@]} -gt 1 ]]; then
+    echo "[package-dmg] expected exactly one target/vless-client-*.jar, found ${#JARS[@]}:" >&2
+    printf '  %s\n' "${JARS[@]}" >&2
+    echo "  Run 'mvn clean package' so only the current build's jar remains." >&2
     exit 1
 fi
+JAR_PATH="${JARS[0]}"
+JAR_NAME="$(basename "${JAR_PATH}")"
 
 # The module list is shared with the other packaging scripts through
 # scripts/runtime-modules.txt: one module per line, '#' starts a comment.
@@ -58,23 +75,21 @@ if [[ -z "${RUNTIME_MODULES}" ]]; then
     exit 1
 fi
 
-# Without --add-modules jpackage links every module that exports an API, so
-# the installer carries a ~290 MB runtime for an app that uses a dozen of
-# them. --jlink-options REPLACES jpackage's defaults rather than adding to
-# them, so the four it would have passed are repeated here.
-#
-# Deliberately WITHOUT --compress: every installer is itself a compressed
-# archive, and a pre-compressed lib/modules is one the DMG's zlib, the MSI's
-# cabinet and the .deb's zstd can no longer squeeze. Measured on the same jar:
-# the DMG went 86.6 MB -> 91.8 MB with --compress=zip-6, and the amd64 .deb
-# 78.8 MB -> 86.9 MB. Compression only helps a runtime that ships loose.
-JLINK_OPTIONS="--strip-native-commands --strip-debug --no-man-pages --no-header-files"
+# The jlink options are shared the same way through scripts/jlink-options.txt
+# (one option per line, '#' starts a comment); the reasoning behind each
+# option lives there. Joined with spaces: --jlink-options takes one string.
+JLINK_OPTIONS="$(awk '{ sub(/#.*/, ""); gsub(/^[[:space:]]+|[[:space:]]+$/, ""); if ($0 != "") { printf "%s%s", sep, $0; sep = " " } }' \
+    "${REPO_ROOT}/scripts/jlink-options.txt")"
+if [[ -z "${JLINK_OPTIONS}" ]]; then
+    echo "[package-dmg] scripts/jlink-options.txt lists no options" >&2
+    exit 1
+fi
 
 # Stage just the shaded jar (not the original-*.jar the shade plugin
 # leaves alongside it).
 rm -rf staging dist
 mkdir -p staging
-cp "target/${JAR_NAME}" staging/
+cp "${JAR_PATH}" staging/
 
 # Optional signing args, appended only when an identity is configured, so the
 # default (unsigned) invocation is byte-for-byte unchanged.

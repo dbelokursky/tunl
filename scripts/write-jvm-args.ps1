@@ -8,9 +8,15 @@
     Output file path (e.g. target/jvm-args.txt).
 
 .NOTES
-    The macOS Dock and Apple application-name options don't exist on Windows --
-    and an unknown -Xdock:... option makes the JVM refuse to start -- so only the
-    shared log-level option carries over.
+    Writes the two options every platform shares -- the DEBUG log level and
+    the --enable-native-access grant JavaFX needs on JDK 24+ (JEP 472) -- and
+    nothing else, so a dev run on Windows gets exactly the shared part of what
+    write-jvm-args.sh gives macOS and Linux. The macOS Dock and Apple
+    application-name options stay in the .sh: an unknown -Xdock:... option
+    makes the JVM refuse to start here. Its Linux-only
+    -Djava.awt.headless=false is a Unix concern -- AWT defaults to headless
+    only where it has to look for a DISPLAY, never on Windows -- so it is not
+    mirrored either.
 #>
 [CmdletBinding()]
 param(
@@ -18,6 +24,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
 
 $dir = Split-Path -Parent $OutFile
 if ($dir) {

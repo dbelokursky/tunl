@@ -1,0 +1,22 @@
+# jlink options for the packaged runtime, read by the three packaging scripts
+# (package-dmg.sh, package-linux.sh, package-windows.ps1) so macOS, Windows
+# and Linux can never link their runtimes differently. The module list is
+# the other half of that contract: scripts/runtime-modules.txt.
+#
+# --jlink-options REPLACES jpackage's defaults rather than adding to them, so
+# the four it would have passed on its own are repeated here. Dropping one
+# does not fall back to the default; it silently ships a bigger runtime.
+#
+# Deliberately WITHOUT --compress: every installer is itself a compressed
+# archive, and a pre-compressed lib/modules is one the DMG's zlib, the MSI's
+# cabinet and the .deb's zstd can no longer squeeze. Measured on the same jar:
+# the DMG went 86.6 MB -> 91.8 MB with --compress=zip-6, and the amd64 .deb
+# 78.8 MB -> 86.9 MB. Compression only helps a runtime that ships loose.
+#
+# One option per line (an option and its value stay on the same line);
+# everything after a '#' is a comment.
+
+--strip-native-commands   # no bin/java: the jpackage launcher embeds the JVM
+--strip-debug
+--no-man-pages
+--no-header-files
