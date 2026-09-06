@@ -1,6 +1,7 @@
 package com.vlessclient.service.mcp;
 
 import com.vlessclient.app.AppVersion;
+import com.vlessclient.app.I18n;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.Redact;
@@ -245,6 +246,8 @@ public class McpServerService {
         server.addTool(new SelectServerTool(control));
         server.addTool(new MeasureLatencyTool(control));
         server.addTool(new RefreshSubscriptionTool(control));
+        server.addTool(new LambdaTool("retry_saving", I18n.get("persistence.retry.description"),
+                true, schema(), args -> control.retrySaving()));
 
         // Config-mutation tools.
         addMutationTools(server);

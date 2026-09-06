@@ -28,6 +28,11 @@ class FakeAppControlService implements AppControlService {
             "prefer_ipv4", "utun99", "info", true, true, 55555, true);
 
     @Override
+    public String retrySaving() {
+        return "Saved";
+    }
+
+    @Override
     public StatusInfo getStatus() {
         return status;
     }

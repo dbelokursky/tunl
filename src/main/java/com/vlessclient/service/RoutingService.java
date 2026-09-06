@@ -36,9 +36,15 @@ public class RoutingService {
     private final Path dataDir;
     private final ObjectMapper objectMapper;
     private RoutingConfig config;
+    private final PersistenceState persistence;
 
     public RoutingService() {
         this(resolveDataDir());
+    }
+
+    /** Creates routing persistence with the application's shared write-failure state. */
+    public RoutingService(PersistenceState persistence) {
+        this(resolveDataDir(), persistence);
     }
 
     /**
@@ -91,6 +97,11 @@ public class RoutingService {
     }
 
     RoutingService(Path dataDir) {
+        this(dataDir, new PersistenceState());
+    }
+
+    RoutingService(Path dataDir, PersistenceState persistence) {
+        this.persistence = persistence;
         this.dataDir = dataDir;
         this.objectMapper = JsonMapper.builder()
                 .enable(SerializationFeature.INDENT_OUTPUT)
@@ -116,10 +127,16 @@ public class RoutingService {
             // fingerprint the user's traffic, and a crash mid-write used to be
             // able to truncate them.
             SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(config));
+            persistence.saved(ROUTING_FILE);
             log.info("Saved routing config to {}", file);
         } catch (IOException e) {
             log.error("Failed to save routing config to {}", file, e);
+            persistence.failed(ROUTING_FILE, this::retryConfig);
         }
+    }
+
+    private synchronized void retryConfig() {
+        saveConfig(config);
     }
 
     public synchronized void addRule(RoutingRule rule) {

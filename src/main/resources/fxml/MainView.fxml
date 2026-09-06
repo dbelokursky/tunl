@@ -5,6 +5,7 @@
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.Separator?>
 <?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.StackPane?>
 <?import javafx.scene.layout.VBox?>
 <?import javafx.scene.layout.Region?>
@@ -14,6 +15,16 @@
             xmlns:fx="http://javafx.com/fxml"
             fx:controller="com.vlessclient.ui.view.MainViewController"
             styleClass="root-pane">
+
+    <top>
+        <HBox fx:id="persistenceBanner" spacing="12" alignment="CENTER_LEFT"
+              visible="false" managed="false" styleClass="reconnect-banner">
+            <padding><Insets top="10" right="16" bottom="10" left="16"/></padding>
+            <Label fx:id="persistenceMessage" wrapText="true" maxWidth="Infinity"
+                   HBox.hgrow="ALWAYS"/>
+            <Button fx:id="retrySavingButton" onAction="#onRetrySaving" minWidth="-Infinity"/>
+        </HBox>
+    </top>
 
     <left>
         <!-- 212, not 200: a nav button gets the width less this VBox's 8+8 of

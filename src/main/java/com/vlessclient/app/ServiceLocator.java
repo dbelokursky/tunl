@@ -148,7 +148,7 @@ public class ServiceLocator {
         // menu bar can tell "the core started" apart from "traffic gets out".
         register(TunnelHealthState.class, new TunnelHealthState());
 
-        RoutingService routingService = new RoutingService();
+        RoutingService routingService = new RoutingService(configStore.getPersistenceState());
         register(RoutingService.class, routingService);
 
         // Moving the server list off this machine, and assembling a bug
