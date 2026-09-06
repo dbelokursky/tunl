@@ -21,7 +21,7 @@ live traffic stats, share-link import, subscriptions, routing rules and a
 tray/menu-bar icon.
 
 <p align="center">
-  <img src="docs/screenshots/dashboard.png" width="900" alt="Tunl dashboard: connected through Amsterdam, live traffic graph"/>
+  <img src="docs/screenshots/dashboard.png" width="900" alt="Tunl dashboard: connected through Amsterdam, upload and download speeds in the status card"/>
 </p>
 
 ---
@@ -231,7 +231,14 @@ so resolution follows the same split as the traffic.
 
 ### Monitoring
 
-The **Dashboard** shows live stats: upload/download speed and totals.
+The **Dashboard** shows live stats in the status card: upload and download
+speed, and the session total beside them. Clicking that total opens the last
+30 days as one bar per day, with the busiest servers behind them and this
+month's figure — kept locally and cleared only from the **Clear** link there,
+since nothing in it expires on its own. Those totals are what this client
+sampled, not your provider's accounting; a subscription's own quota is on the
+**Subscriptions** tab.
+
 **Logs** streams sing-box logs with a level filter (how much the core writes
 is **Settings → Core log level**); the download button saves the core log,
 and **Save diagnostics** writes a zip for bug reports with credentials, URLs,
