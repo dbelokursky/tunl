@@ -773,8 +773,10 @@ public class SubscriptionService {
             envelope.set("subscriptions",
                     objectMapper.valueToTree(serializableSubscriptions()));
             SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(envelope));
+            configStore.getPersistenceState().saved(SUBSCRIPTIONS_FILE);
         } catch (IOException e) {
             log.error("Failed to save subscriptions to {}", file, e);
+            configStore.getPersistenceState().failed(SUBSCRIPTIONS_FILE, this::saveSubscriptions);
         }
     }
 

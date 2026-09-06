@@ -402,7 +402,13 @@ claude mcp add --transport http tunl http://127.0.0.1:55555/mcp \
 |----------|-------|
 | Read     | `get_status`, `get_traffic`, `list_servers`, `get_logs`, `list_subscriptions`, `get_routing`, `get_settings` |
 | Actions  | `connect`, `disconnect`, `select_server`, `measure_latency`, `refresh_subscription` |
-| Config   | `add_server`, `update_server`, `delete_server`, `set_proxy_mode`, `set_setting`, `add_routing_rule`, `remove_routing_rule` |
+| Config   | `add_server`, `update_server`, `delete_server`, `set_proxy_mode`, `set_setting`, `add_routing_rule`, `remove_routing_rule`, `retry_saving` |
+
+
+If a configuration write fails, a persistent banner identifies unsaved changes.
+Use **Retry saving** after fixing disk space or permissions. MCP mutations report
+the failure; `retry_saving` saves pending in-memory changes without repeating
+the original operation. Unsaved changes are lost if the app exits.
 
 Browsable resources: `vless://status`, `vless://traffic`, `vless://servers`,
 `vless://routing`, `vless://settings`, `vless://logs/recent`. Live log streaming

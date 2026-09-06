@@ -13,6 +13,9 @@ import java.util.List;
  */
 public interface AppControlService {
 
+    /** Retries failed configuration writes, reporting any remaining failure. */
+    String retrySaving() throws McpToolException;
+
     /**
      * Returns the current connection status.
      *

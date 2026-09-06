@@ -1,5 +1,6 @@
 package com.vlessclient.service.mcp;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.CoreLogLevel;
@@ -110,6 +111,21 @@ public class DefaultAppControlService implements AppControlService {
      */
     public void setEngine(SingBoxEngine engine) {
         this.engine = engine;
+    }
+
+    @Override
+    public String retrySaving() throws McpToolException {
+        configStore.getPersistenceState().retry();
+        ensureSaved();
+        return I18n.get("persistence.saved");
+    }
+
+    private void ensureSaved() throws McpToolException {
+        List<String> failed = configStore.getPersistenceState().failedFiles();
+        if (!failed.isEmpty()) {
+            throw new McpToolException(
+                    I18n.get("persistence.mcp.failed", String.join(", ", failed)));
+        }
     }
 
     @Override
@@ -266,6 +282,7 @@ public class DefaultAppControlService implements AppControlService {
         // The connect flow itself belongs to ConnectionService — including
         // passing every candidate to the generator, which is what keeps
         // automatic selection working on this path.
+        ensureSaved();
         ConnectionService.ConnectAttempt attempt;
         try {
             attempt = connectionService.connect(effectiveMode);
@@ -299,6 +316,7 @@ public class DefaultAppControlService implements AppControlService {
         ServerConfig s = configStore.getServerById(serverId)
                 .orElseThrow(() -> new McpToolException("No server with id: " + serverId));
         configStore.setActiveServer(serverId);
+        ensureSaved();
         return new ServerSummary(s.getId(), s.getName(),
                 s.getProtocol() != null ? s.getProtocol().getValue() : null,
                 s.getAddress(), s.getPort(), true);
@@ -344,6 +362,7 @@ public class DefaultAppControlService implements AppControlService {
             throw new McpToolException("No subscription with id: " + subscriptionId);
         }
         subscriptionService.refreshSubscription(subscriptionId);
+        ensureSaved();
         return "Refresh triggered for subscription '" + sub.get().getName() + "'.";
     }
 
@@ -355,6 +374,7 @@ public class DefaultAppControlService implements AppControlService {
         }
         config.setActive(false);
         configStore.addServer(config);
+        ensureSaved();
         return summaryOf(config);
     }
 
@@ -376,6 +396,7 @@ public class DefaultAppControlService implements AppControlService {
             }
         }
         configStore.updateServer(updated);
+        ensureSaved();
         return summaryOf(updated);
     }
 
@@ -387,6 +408,7 @@ public class DefaultAppControlService implements AppControlService {
         ServerConfig existing = configStore.getServerById(id)
                 .orElseThrow(() -> new McpToolException("No server with id: " + id));
         configStore.removeServer(id);
+        ensureSaved();
         return "Deleted server '" + existing.getName() + "'.";
     }
 
@@ -401,6 +423,7 @@ public class DefaultAppControlService implements AppControlService {
             settings.setProxyMode(parsed);
             configStore.saveSettings(settings);
         });
+        ensureSaved();
         return getSettings();
     }
 
@@ -423,6 +446,7 @@ public class DefaultAppControlService implements AppControlService {
         if (rejected[0] != null) {
             throw rejected[0];
         }
+        ensureSaved();
         return getSettings();
     }
 
@@ -465,6 +489,7 @@ public class DefaultAppControlService implements AppControlService {
         }
         RoutingRule rule = new RoutingRule(parseRuleType(type), value, parseRuleAction(action));
         routingService.addRule(rule);
+        ensureSaved();
         return getRouting();
     }
 
@@ -476,6 +501,7 @@ public class DefaultAppControlService implements AppControlService {
             throw new McpToolException("No routing rule with id: " + ruleId);
         }
         routingService.removeRule(ruleId);
+        ensureSaved();
         return getRouting();
     }
 

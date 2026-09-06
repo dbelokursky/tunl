@@ -90,4 +90,40 @@ public class MainViewTest extends ApplicationTest {
         interact(button::fire);
         WaitForAsyncUtils.waitForFxEvents();
     }
+
+    @Test
+    void failedSaveShowsAFittingBannerAndRetryClearsIt() {
+        var persistence = com.vlessclient.app.ServiceLocator
+                .get(com.vlessclient.service.ConfigStore.class).getPersistenceState();
+        java.util.concurrent.atomic.AtomicBoolean retried = new java.util.concurrent.atomic.AtomicBoolean();
+        try {
+            interact(() -> persistence.failed("test.json", () -> {
+                retried.set(true);
+                persistence.saved("test.json");
+            }));
+            assertThat(lookup("#persistenceBanner").tryQuery()).isPresent();
+            javafx.scene.layout.HBox banner = lookup("#persistenceBanner").queryAs(
+                    javafx.scene.layout.HBox.class);
+            Button retry = lookup("#retrySavingButton").queryButton();
+            javafx.scene.control.Label message = lookup("#persistenceMessage").queryAs(
+                    javafx.scene.control.Label.class);
+            interact(() -> {
+                banner.getScene().getRoot().applyCss();
+                banner.getScene().getRoot().layout();
+                assertThat(banner.isVisible()).isTrue();
+                assertThat(banner.isManaged()).isTrue();
+                assertThat(message.getBoundsInParent().getMaxX())
+                        .isLessThanOrEqualTo(retry.getBoundsInParent().getMinX());
+                assertThat(retry.getBoundsInParent().getMaxX()).isLessThanOrEqualTo(banner.getWidth());
+                assertThat(message.textProperty().isBound()).isTrue();
+                retry.fire();
+            });
+            com.vlessclient.testing.Await.until("successful retry hides the banner",
+                    () -> com.vlessclient.service.FxExecutor.get(() -> !banner.isVisible()),
+                    java.time.Duration.ofSeconds(5));
+            assertThat(retried).isTrue();
+        } finally {
+            interact(() -> persistence.saved("test.json"));
+        }
+    }
 }

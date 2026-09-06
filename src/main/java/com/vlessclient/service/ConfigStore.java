@@ -57,6 +57,7 @@ public class ConfigStore {
     private final ObservableList<ServerConfig> servers;
     private final SecretSealer sealer;
     private AppSettings settings;
+    private final PersistenceState persistence = new PersistenceState();
 
     /**
      * The last value sealed under each secret key, and the tag it produced.
@@ -374,6 +375,11 @@ public class ConfigStore {
                 .findFirst();
     }
 
+    /** Shared write-failure state for UI feedback and MCP error reporting. */
+    public PersistenceState getPersistenceState() {
+        return persistence;
+    }
+
     public AppSettings getSettings() {
         return settings;
     }
@@ -405,9 +411,15 @@ public class ConfigStore {
         Path file = dataDir.resolve(SETTINGS_FILE);
         try {
             SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(settings));
+            persistence.saved(SETTINGS_FILE);
         } catch (IOException e) {
             log.error("Failed to save settings to {}", file, e);
+            persistence.failed(SETTINGS_FILE, this::retrySettings);
         }
+    }
+
+    private synchronized void retrySettings() {
+        saveSettings(settings);
     }
 
     /** Package-private so tests can count how often a change hits the disk. */
@@ -418,8 +430,10 @@ public class ConfigStore {
             envelope.put("config_version", SERVERS_CONFIG_VERSION);
             envelope.set("servers", objectMapper.valueToTree(serializableServers()));
             SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(envelope));
+            persistence.saved(SERVERS_FILE);
         } catch (IOException e) {
             log.error("Failed to save servers to {}", file, e);
+            persistence.failed(SERVERS_FILE, this::saveServers);
         }
     }
 

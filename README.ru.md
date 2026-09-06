@@ -407,7 +407,14 @@ claude mcp add --transport http tunl http://127.0.0.1:55555/mcp \
 |-----------|-------------|
 | Чтение    | `get_status`, `get_traffic`, `list_servers`, `get_logs`, `list_subscriptions`, `get_routing`, `get_settings` |
 | Действия  | `connect`, `disconnect`, `select_server`, `measure_latency`, `refresh_subscription` |
-| Конфигурация | `add_server`, `update_server`, `delete_server`, `set_proxy_mode`, `set_setting`, `add_routing_rule`, `remove_routing_rule` |
+| Конфигурация | `add_server`, `update_server`, `delete_server`, `set_proxy_mode`, `set_setting`, `add_routing_rule`, `remove_routing_rule`, `retry_saving` |
+
+Если запись конфигурации не удалась, постоянный баннер предупреждает о
+несохранённых изменениях. После освобождения места или исправления прав нажмите
+**Повторить сохранение**. MCP сообщает об ошибке; `retry_saving` сохраняет
+изменения из памяти без повторного выполнения исходной операции. При выходе
+из приложения несохранённые изменения будут потеряны.
+
 
 Ресурсы для просмотра: `vless://status`, `vless://traffic`, `vless://servers`,
 `vless://routing`, `vless://settings`, `vless://logs/recent`. Живой стрим логов

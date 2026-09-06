@@ -1,16 +1,22 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
+import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.service.ConfigStore;
+import com.vlessclient.service.PersistenceState;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.Label;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
@@ -29,6 +35,10 @@ public class MainViewController {
     @FXML private BorderPane rootNode;
     @FXML private StackPane contentArea;
     @FXML private VBox sidebar;
+    @FXML private HBox persistenceBanner;
+    @FXML private Label persistenceMessage;
+    @FXML private Button retrySavingButton;
+    private PersistenceState persistence;
 
     @FXML private Button btnDashboard;
     @FXML private Button btnServers;
@@ -50,6 +60,7 @@ public class MainViewController {
     public void initialize() {
         installSidebarIcons();
         bindSidebarLabels();
+        bindPersistenceBanner();
         showDashboard();
 
         if (rootNode != null) {
@@ -60,6 +71,31 @@ public class MainViewController {
                 }
             });
         }
+    }
+
+    private void bindPersistenceBanner() {
+        persistenceMessage.textProperty().bind(I18n.binding("persistence.unsaved"));
+        retrySavingButton.textProperty().bind(I18n.binding("persistence.retry"));
+        ServiceLocator.find(ConfigStore.class).ifPresent(store -> {
+            persistence = store.getPersistenceState();
+            persistenceBanner.visibleProperty().bind(persistence.unsavedProperty());
+            persistenceBanner.managedProperty().bind(persistenceBanner.visibleProperty());
+        });
+    }
+
+    @FXML
+    private void onRetrySaving() {
+        if (persistence == null) {
+            return;
+        }
+        retrySavingButton.setDisable(true);
+        Thread.startVirtualThread(() -> {
+            try {
+                persistence.retry();
+            } finally {
+                Platform.runLater(() -> retrySavingButton.setDisable(false));
+            }
+        });
     }
 
     /**
