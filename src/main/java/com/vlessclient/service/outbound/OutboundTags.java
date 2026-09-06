@@ -13,7 +13,9 @@ import com.vlessclient.model.ServerConfig;
  *
  * <p>{@link #PROXY} is the fixed entry point. Everything downstream references
  * it and nothing downstream cares what kind of node carries it — today a
- * selector group, historically a single outbound. That indirection is what lets
+ * selector group, historically a single outbound. Manual connections replace
+ * this template tag and its references with a per-process key before launch,
+ * so a cached selection cannot override the configured default. That indirection lets
  * proxy groups exist without touching route, DNS or rule-sets at all.</p>
  */
 public final class OutboundTags {

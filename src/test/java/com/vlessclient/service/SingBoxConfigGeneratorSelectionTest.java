@@ -45,15 +45,15 @@ class SingBoxConfigGeneratorSelectionTest {
     }
 
     @Test
-    void singleModePinsTheActiveServerOnly() throws Exception {
+    void singleModeIncludesCandidatesButDefaultsToTheActiveServer() throws Exception {
         List<ServerConfig> servers = List.of(server("A"), server("B"), server("C"));
         settings.setServerSelection(ServerSelection.SINGLE);
 
         JsonNode group = group(servers, servers.get(1));
 
         assertThat(group.get("type").asString()).isEqualTo("selector");
-        assertThat(group.get("outbounds")).hasSize(1);
-        assertThat(group.get("outbounds").get(0).asString())
+        assertThat(group.get("outbounds")).hasSize(3);
+        assertThat(group.get("default").asString())
                 .isEqualTo(OutboundTags.server(servers.get(1)));
         // No probing when the user picked the server.
         assertThat(group.has("url")).isFalse();

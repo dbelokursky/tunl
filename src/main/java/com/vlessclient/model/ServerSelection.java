@@ -20,7 +20,7 @@ import java.util.Locale;
  */
 public enum ServerSelection {
 
-    /** The active server, and only it. A {@code selector} over one member. */
+    /** The active server, chosen manually through a {@code selector} over the candidates. */
     SINGLE("single", "selector"),
 
     /**

@@ -110,8 +110,7 @@ public class SingBoxConfigGenerator {
      * generate time rather than stored, so a subscription refresh cannot leave
      * a stale member behind.</p>
      *
-     * @param candidates every server the group may use; ignored unless the
-     *                   selection mode is automatic
+     * @param candidates every server the group may use, including manual switches
      * @param active     the pinned server, and the fallback when a mode needs
      *                   one specific server
      * @param settings   app settings, including the selection mode
@@ -135,7 +134,7 @@ public class SingBoxConfigGenerator {
         // top-level endpoints entry. It carries its own server tag and the
         // proxy group references it, exactly like an outbound member — a
         // selector may point at an endpoint (verified against the real core).
-        List<ServerConfig> members = groupMembers(candidates, active, settings);
+        List<ServerConfig> members = groupMembers(candidates, active);
         ArrayNode endpoints = mapper.createArrayNode();
         for (ServerConfig member : members) {
             if (member.getProtocol() == Protocol.WIREGUARD) {
@@ -145,7 +144,7 @@ public class SingBoxConfigGenerator {
         if (!endpoints.isEmpty()) {
             root.set("endpoints", endpoints);
         }
-        root.set("outbounds", buildOutbounds(members, settings.getServerSelection()));
+        root.set("outbounds", buildOutbounds(members, settings.getServerSelection(), active));
 
         if (routingConfig != null) {
             ObjectNode route = buildRoute(routingConfig);
@@ -160,19 +159,16 @@ public class SingBoxConfigGenerator {
             root.set("route", route);
         }
 
-        // Endpoints don't participate in default-outbound selection: without
-        // an explicit route.final the first outbound ("direct" for WireGuard)
-        // would silently swallow all traffic. buildRoute already sets final,
-        // so this only fills the no-RoutingConfig paths.
-        if (!endpoints.isEmpty()) {
-            ObjectNode route = (ObjectNode) root.get("route");
-            if (route == null) {
-                route = mapper.createObjectNode();
-                root.set("route", route);
-            }
-            if (!route.has("final")) {
-                route.put("final", OutboundTags.PROXY);
-            }
+        // Always enter through the group, even without user routing rules.
+        // Otherwise the first outbound bypasses the selector and API switches
+        // change the reported pick without changing where traffic goes.
+        ObjectNode route = (ObjectNode) root.get("route");
+        if (route == null) {
+            route = mapper.createObjectNode();
+            root.set("route", route);
+        }
+        if (!route.has("final")) {
+            route.put("final", OutboundTags.PROXY);
         }
 
         root.set("experimental", buildExperimental(settings));
@@ -648,8 +644,9 @@ public class SingBoxConfigGenerator {
     /**
      * The servers the group may use, decided here rather than stored.
      *
-     * <p>In an automatic mode that is every configured server; pinned, it is
-     * just the active one. Deriving it per connect is what keeps a
+     * <p>Every mode includes the configured candidates; a manual selector pins
+     * its default to the active server and permits later API switches.
+     * Deriving it per connect is what keeps a
      * subscription refresh from leaving a stale member behind, since there is
      * no membership list to go stale.</p>
      *
@@ -658,9 +655,8 @@ public class SingBoxConfigGenerator {
      * and refusing to connect over a mode toggle would be worse than ignoring
      * it.</p>
      */
-    private List<ServerConfig> groupMembers(List<ServerConfig> candidates, ServerConfig active,
-                                            AppSettings settings) {
-        if (!settings.getServerSelection().isAutomatic() || candidates == null) {
+    private List<ServerConfig> groupMembers(List<ServerConfig> candidates, ServerConfig active) {
+        if (candidates == null) {
             return List.of(active);
         }
         // De-duplicate by id: the same server must not appear twice in a
@@ -682,7 +678,8 @@ public class SingBoxConfigGenerator {
      * and rule-sets resolve the same name whether one server is pinned or the
      * core is choosing.</p>
      */
-    private ArrayNode buildOutbounds(List<ServerConfig> members, ServerSelection selection) {
+    private ArrayNode buildOutbounds(List<ServerConfig> members, ServerSelection selection,
+                                     ServerConfig active) {
         ArrayNode outbounds = mapper.createArrayNode();
         ArrayNode memberTags = mapper.createArrayNode();
 
@@ -696,7 +693,7 @@ public class SingBoxConfigGenerator {
             }
         }
 
-        outbounds.add(buildProxyGroup(selection, memberTags));
+        outbounds.add(buildProxyGroup(selection, memberTags, active));
 
         ObjectNode direct = mapper.createObjectNode();
         direct.put("type", "direct");
@@ -711,7 +708,8 @@ public class SingBoxConfigGenerator {
      * interval; without them sing-box would never re-measure and the mode
      * would silently behave like a plain selector.
      */
-    private ObjectNode buildProxyGroup(ServerSelection selection, ArrayNode memberTags) {
+    private ObjectNode buildProxyGroup(ServerSelection selection, ArrayNode memberTags,
+                                       ServerConfig active) {
         ObjectNode group = mapper.createObjectNode();
         group.put("type", selection.singBoxType());
         group.put("tag", OutboundTags.PROXY);
@@ -724,6 +722,8 @@ public class SingBoxConfigGenerator {
             // meaningfully faster, so traffic does not hop between servers
             // whose latencies are within noise of each other.
             group.put("tolerance", PROBE_TOLERANCE_MS);
+        } else {
+            group.put("default", OutboundTags.server(active));
         }
         return group;
     }
