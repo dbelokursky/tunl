@@ -5,6 +5,7 @@ import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.service.outbound.OutboundTags;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
@@ -51,6 +52,8 @@ public class ConnectionService {
     public enum Outcome {
         /** The core was launched. */
         STARTED,
+        /** The running core selected a different server without restarting. */
+        SWITCHED,
         /** No sing-box binary is available yet, so there is nothing to launch. */
         NO_ENGINE,
         /** Nothing is selected to connect to. */
@@ -90,6 +93,8 @@ public class ConnectionService {
     private final TunnelRecoveryService recovery;
     private final ChangeListener<ConnectionState> recoveryListener;
     private volatile ProxyMode requestedMode;
+    private volatile LiveSelector liveSelector;
+    private ProxyMode runningMode;
 
 
     /**
@@ -166,7 +171,7 @@ public class ConnectionService {
      * Connects to the active server.
      *
      * <p>Every configured server is passed to the generator as a candidate; the
-     * generator uses them only when the selection mode is automatic. Any
+     * generator includes them in the manual or automatic group. Any
      * previous core is waited out first, because {@code start} refuses while one
      * is alive — that is what makes the reconnect paths (server switch, health
      * auto-reconnect) work.</p>
@@ -216,7 +221,16 @@ public class ConnectionService {
             return new ConnectAttempt(Outcome.CANCELLED, active);
         }
         try {
-            current.start(configJson, mode);
+            LiveSelector prepared = new LiveSelector(configJson);
+            LiveSelector previous = liveSelector;
+            liveSelector = prepared;
+            try {
+                current.start(prepared.config(), mode);
+                runningMode = mode;
+            } catch (IOException | IllegalStateException e) {
+                liveSelector = previous;
+                throw e;
+            }
         } catch (IllegalStateException e) {
             log.warn("sing-box already running: {}", e.getMessage());
             return new ConnectAttempt(Outcome.ALREADY_RUNNING, active);
@@ -238,6 +252,7 @@ public class ConnectionService {
     }
 
     private void stopCurrent() {
+        liveSelector = null;
         SingBoxEngine current = engine;
         if (current != null) {
             log.info("Disconnecting");
@@ -262,6 +277,54 @@ public class ConnectionService {
         synchronized (operations) {
             stopCurrent();
             return connectInternal(modeOverride, () -> recovery.isWanted(request));
+        }
+    }
+
+    /** The group tag used by the current process, for live status queries. */
+    public String getProxyGroupTag() {
+        LiveSelector current = liveSelector;
+        return current != null ? current.groupTag() : OutboundTags.PROXY;
+    }
+
+    /**
+     * Applies a manual server selection through the core API when the loaded
+     * configuration still matches; otherwise restarts with the latest config.
+     *
+     * @return the selected server and whether it was switched or restarted
+     * @throws IOException if the fallback start fails
+     */
+    public ConnectAttempt switchToActiveServer() throws IOException {
+        requireOffFxThread("switchToActiveServer");
+        long request = recovery.connectionRequested();
+        synchronized (operations) {
+            if (!recovery.isWanted(request)) {
+                return new ConnectAttempt(Outcome.CANCELLED, null);
+            }
+            List<ServerConfig> candidates = FxExecutor.get(
+                    () -> List.copyOf(configStore.getServers()));
+            ServerConfig active = candidates.stream().filter(ServerConfig::isActive)
+                    .findFirst().orElse(null);
+            if (active == null) {
+                return new ConnectAttempt(Outcome.NO_ACTIVE_SERVER, null);
+            }
+            AppSettings settings = configStore.getSettings();
+            ProxyMode mode = requestedMode != null ? requestedMode : settings.getProxyMode();
+            String generated = configGenerator.generate(candidates, active,
+                    settings, safeRoutingConfig());
+            LiveSelector selector = liveSelector;
+            if (isRunning() && runningMode == mode && selector != null
+                    && selector.accepts(generated)
+                    && selector.select(OutboundTags.server(active))) {
+                if (!recovery.isWanted(request)) {
+                    return new ConnectAttempt(Outcome.CANCELLED, active);
+                }
+                return new ConnectAttempt(Outcome.SWITCHED, active);
+            }
+            if (!recovery.isWanted(request)) {
+                return new ConnectAttempt(Outcome.CANCELLED, active);
+            }
+            stopCurrent();
+            return connectInternal(requestedMode, () -> recovery.isWanted(request));
         }
     }
 

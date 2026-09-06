@@ -330,7 +330,9 @@ public class DashboardViewController implements ViewShownAware {
         if (state == ConnectionState.CONNECTED) {
             AppSettings settings = ServiceLocator.find(AppSettings.class).orElse(null);
             if (settings != null) {
-                groupMonitor.start(settings.getClashApiPort(), settings.getClashApiSecret());
+                ConnectionService service = connectionService();
+                groupMonitor.start(settings.getClashApiPort(), settings.getClashApiSecret(),
+                        service != null ? service.getProxyGroupTag() : OutboundTags.PROXY);
             }
         } else if (state == ConnectionState.DISCONNECTED || state == ConnectionState.ERROR) {
             groupMonitor.stop();
@@ -745,9 +747,14 @@ public class DashboardViewController implements ViewShownAware {
 
     /** Runs a connect (or reconnect) off the FX thread and reports the result. */
     private void runConnect(ConnectionService service, boolean restart) {
+        runConnect(service, restart, false);
+    }
+
+    private void runConnect(ConnectionService service, boolean restart, boolean switchServer) {
         try {
             ConnectionService.ConnectAttempt attempt =
-                    restart ? service.reconnect(null) : service.connect(null);
+                    switchServer ? service.switchToActiveServer()
+                            : restart ? service.reconnect(null) : service.connect(null);
             switch (attempt.outcome()) {
                 case NO_ACTIVE_SERVER -> Platform.runLater(() -> {
                     log.warn("No active server selected");
@@ -822,9 +829,8 @@ public class DashboardViewController implements ViewShownAware {
      * <p>Hangs off the server-list change event, so it covers both switch
      * paths (list and tray) — they both go through
      * {@code ConfigStore.setActiveServer}, which re-sets the elements and
-     * therefore fires a change. The gap before reconnecting lets the old
-     * process exit first, mirroring {@code HealthCheckCoordinator}'s
-     * auto-reconnect.</p>
+     * therefore fires a change. The service uses the core selector API when
+     * only the selected member changed, and restarts for configuration changes.</p>
      */
     private void reconnectIfActiveServerChanged() {
         if (singBoxEngine == null
@@ -836,13 +842,14 @@ public class DashboardViewController implements ViewShownAware {
                 || nowActive.getId().equals(activeServer.getId())) {
             return;
         }
-        log.info("Active server changed while connected ({} -> {}); restarting tunnel",
+        log.info("Active server changed while connected ({} -> {}); applying selection",
                 activeServer.getName(), nowActive.getName());
-        // One restart on one thread: the service stops the old core and waits
-        // for it to exit before starting the new one, which is exact rather
-        // than a timed guess — and rules out the two racing threads a separate
-        // disconnect() plus connect() used to spawn.
-        reconnect();
+        ConnectionService service = connectionService();
+        if (service != null) {
+            activeServer = nowActive;
+            connectButton.setDisable(true);
+            Thread.startVirtualThread(() -> runConnect(service, true, true));
+        }
     }
 
     // ===== Service availability / auto-reconnect =====

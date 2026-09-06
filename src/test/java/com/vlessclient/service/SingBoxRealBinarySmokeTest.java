@@ -136,6 +136,8 @@ class SingBoxRealBinarySmokeTest {
                 String label = routing.getBypassCountries().isEmpty()
                         ? "custom-rules" : "country-bypass";
                 assertCheckPasses(config, label + "/" + mode);
+                assertCheckPasses(new LiveSelector(config).config(),
+                        "runtime-selector/" + label + "/" + mode);
             }
         }
     }
@@ -237,6 +239,139 @@ class SingBoxRealBinarySmokeTest {
      * TrafficMonitor builds (200) — proving another local process can't read
      * the stream. Covers security-review L7.
      */
+    @Test
+    void liveSelectorChangesTrafficWithoutRestartAndDoesNotRestoreAStaleCachedPick()
+            throws Exception {
+        try (SocksResponder a = new SocksResponder("A");
+             SocksResponder b = new SocksResponder("B")) {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(ProxyMode.SYSTEM_PROXY);
+            settings.setSystemProxyAutoConfig(false);
+            settings.setHttpPort(freePort());
+            settings.setSocksPort(freePort());
+            settings.setClashApiPort(freePort());
+            settings.setClashApiSecret("selector-smoke-secret");
+            ServerConfig first = serverFor(Protocol.VLESS);
+            first.setId("first");
+            ServerConfig second = serverFor(Protocol.VLESS);
+            second.setId("second");
+            var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+            var config = (tools.jackson.databind.node.ObjectNode) mapper.readTree(
+                    generator.generate(List.of(first, second), first, settings, null));
+            for (var outbound : config.path("outbounds")) {
+                if ("vless".equals(outbound.path("type").asString())) {
+                    String tag = outbound.path("tag").asString();
+                    var object = (tools.jackson.databind.node.ObjectNode) outbound;
+                    object.removeAll();
+                    object.put("tag", tag).put("type", "socks").put("version", "5")
+                            .put("server", "127.0.0.1").put("server_port",
+                                    tag.equals("srv-first") ? a.port() : b.port());
+                }
+            }
+            Path cache = Files.createTempFile("selector-cache-", ".db");
+            Files.delete(cache);
+            ((tools.jackson.databind.node.ObjectNode) config.path("experimental")
+                    .path("cache_file")).put("path", cache.toString());
+            String generated = mapper.writeValueAsString(config);
+            // Keep the same cache across runs. The first run stores B; the
+            // second must still honor the explicitly selected default A.
+            try {
+                for (int run = 0; run < 2; run++) {
+                    LiveSelector selector = new LiveSelector(generated);
+                    Path file = Files.createTempFile("selector-run-", ".json");
+                    Path logs = Files.createTempFile("selector-run-", ".log");
+                    Files.writeString(file, selector.config());
+                    Process process = new ProcessBuilder(binary.toString(), "run", "-c",
+                            file.toString()).redirectErrorStream(true)
+                            .redirectOutput(logs.toFile()).start();
+                    try {
+                        awaitPort(settings.getClashApiPort(), process);
+                        long pid = process.pid();
+                        assertThat(selectorTraffic(settings.getHttpPort())).isEqualTo("A");
+                        assertThat(selector.select("srv-second")).isTrue();
+                        assertThat(selectorTraffic(settings.getHttpPort())).isEqualTo("B");
+                        assertThat(process.isAlive()).isTrue();
+                        assertThat(process.pid()).isEqualTo(pid);
+                    } catch (Throwable e) {
+                        throw new AssertionError(Files.readString(logs), e);
+                    } finally {
+                        process.destroy();
+                        if (!process.waitFor(5, TimeUnit.SECONDS)) {
+                            process.destroyForcibly().waitFor(5, TimeUnit.SECONDS);
+                        }
+                        Files.deleteIfExists(file);
+                        Files.deleteIfExists(logs);
+                    }
+                }
+            } finally {
+                Files.deleteIfExists(cache);
+            }
+        }
+    }
+
+    private static String selectorTraffic(int port) throws Exception {
+        try (HttpClient client = HttpClient.newBuilder()
+                .proxy(ProxySelector.of(new InetSocketAddress("127.0.0.1", port))).build()) {
+            return client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:12345/"))
+                    .timeout(Duration.ofSeconds(5)).GET().build(),
+                    HttpResponse.BodyHandlers.ofString()).body();
+        }
+    }
+
+    /** Loopback SOCKS peers answer HTTP themselves; no external destination is contacted. */
+    private static final class SocksResponder implements AutoCloseable {
+        private final ServerSocket listener;
+        private final Thread worker;
+
+        SocksResponder(String label) throws IOException {
+            listener = new ServerSocket(0, 10, java.net.InetAddress.getByName("127.0.0.1"));
+            worker = Thread.ofVirtual().start(() -> {
+                while (!listener.isClosed()) {
+                    try (Socket socket = listener.accept()) {
+                        socket.setSoTimeout(5000);
+                        var in = new java.io.DataInputStream(socket.getInputStream());
+                        var out = socket.getOutputStream();
+                        if (in.readUnsignedByte() != 5) {
+                            throw new IOException("Not SOCKS5");
+                        }
+                        in.readNBytes(in.readUnsignedByte());
+                        out.write(new byte[]{5, 0});
+                        out.flush();
+                        in.readNBytes(3);
+                        int addressType = in.readUnsignedByte();
+                        int length = addressType == 1 ? 4 : addressType == 4 ? 16
+                                : in.readUnsignedByte();
+                        in.readNBytes(length + 2);
+                        out.write(new byte[]{5, 0, 0, 1, 127, 0, 0, 1, 0, 0});
+                        out.flush();
+                        var reader = new java.io.BufferedReader(
+                                new java.io.InputStreamReader(in, StandardCharsets.US_ASCII));
+                        String line;
+                        while ((line = reader.readLine()) != null && !line.isEmpty()) {
+                            // Consume the proxied HTTP request before replying.
+                        }
+                        out.write(("HTTP/1.1 200 OK\r\nContent-Length: 1\r\n"
+                                + "Connection: close\r\n\r\n" + label)
+                                .getBytes(StandardCharsets.US_ASCII));
+                        out.flush();
+                    } catch (IOException e) {
+                        if (!listener.isClosed()) {
+                            throw new java.io.UncheckedIOException(e);
+                        }
+                    }
+                }
+            });
+        }
+
+        int port() { return listener.getLocalPort(); }
+
+        @Override public void close() throws Exception {
+            listener.close();
+            worker.join(6000);
+            assertThat(worker.isAlive()).isFalse();
+        }
+    }
+
     @Test
     void securedClashApiRejectsUnauthenticatedTraffic() throws Exception {
         int clashPort = freePort();

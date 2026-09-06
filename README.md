@@ -421,6 +421,11 @@ last server reported by the core (null until known, or when disconnected).
 
 ---
 
+Manual server selection uses the running core's selector API when its loaded
+configuration still matches. New connections use the selected server; existing
+connections may finish on the previous one. Changes to profiles, routes or
+settings, or an unavailable API, fall back to restarting the core.
+
 ## Troubleshooting
 
 **macOS: "app was blocked" / "Apple could not verify"**

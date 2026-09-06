@@ -26,8 +26,8 @@ import tools.jackson.databind.json.JsonMapper;
  * the last probe: the card claimed one destination and the tunnel used
  * another. Only the core knows the group's current pick, through the Clash
  * API's {@code GET /proxies/{tag}} answer ({@code "now"}), so this polls it
- * while the tunnel is up and publishes the member's tag as an FX property. A
- * pinned server is a group of one, so the answer is right in every mode.</p>
+ * while the tunnel is up and publishes the member's tag as an FX property. The
+ * answer also follows manual API switches without a process restart.</p>
  */
 public class ProxyGroupMonitor {
 
@@ -75,12 +75,18 @@ public class ProxyGroupMonitor {
      * @param secret the API token, blank when the config has none
      */
     public void start(int port, String secret) {
+        start(port, secret, OutboundTags.PROXY);
+    }
+
+    /** Starts polling the named group of the current core process. */
+    public void start(int port, String secret, String groupTag) {
         synchronized (lifecycleLock) {
             if (poller != null) {
                 return;
             }
             String token = secret == null ? "" : secret;
-            poller = Thread.ofVirtual().name("proxy-group-monitor").start(() -> poll(port, token));
+            poller = Thread.ofVirtual().name("proxy-group-monitor")
+                    .start(() -> poll(port, token, groupTag));
         }
     }
 
@@ -103,13 +109,13 @@ public class ProxyGroupMonitor {
         publish(null);
     }
 
-    private void poll(int port, String secret) {
+    private void poll(int port, String secret, String groupTag) {
         try {
             while (!Thread.currentThread().isInterrupted()) {
                 // Only a definite answer is published: a failed read (the API
                 // still coming up, a transient error) keeps the last pick
                 // rather than flickering the card back to "unknown".
-                currentMember(port, secret, OutboundTags.PROXY).ifPresent(this::publish);
+                currentMember(port, secret, groupTag).ifPresent(this::publish);
                 Thread.sleep(POLL_INTERVAL);
             }
         } catch (InterruptedException e) {

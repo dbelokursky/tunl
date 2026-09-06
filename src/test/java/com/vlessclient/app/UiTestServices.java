@@ -138,7 +138,7 @@ public final class UiTestServices {
     private static final class NoNetworkProxyGroupMonitor extends ProxyGroupMonitor {
 
         @Override
-        public void start(int port, String secret) {
+        public void start(int port, String secret, String groupTag) {
             // Never poll the loopback API from a UI test.
         }
     }
@@ -263,6 +263,11 @@ public final class UiTestServices {
 
         @Override
         public ConnectAttempt reconnect(com.vlessclient.model.ProxyMode modeOverride) {
+            return new ConnectAttempt(Outcome.NO_ENGINE, null);
+        }
+
+        @Override
+        public ConnectAttempt switchToActiveServer() {
             return new ConnectAttempt(Outcome.NO_ENGINE, null);
         }
     }

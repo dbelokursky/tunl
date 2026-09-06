@@ -65,7 +65,7 @@ public class DashboardAutoSelectionLabelTest extends ApplicationTest {
         }
 
         @Override
-        public void start(int port, String secret) {
+        public void start(int port, String secret, String groupTag) {
             // The test is the only writer.
         }
 

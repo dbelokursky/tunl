@@ -425,19 +425,19 @@ class SingBoxConfigGeneratorRoutingTest {
     }
 
     @Test
-    void noRoutingConfig_noRouteSection() throws Exception {
+    void noRoutingConfig_stillRoutesThroughTheSelector() throws Exception {
         String json = generator.generate(createVlessServer(), defaultSettings);
         JsonNode root = parse(json);
 
-        assertThat(root.has("route")).isFalse();
+        assertThat(root.path("route").path("final").asString()).isEqualTo("proxy");
     }
 
     @Test
-    void nullRoutingConfig_noRouteSection() throws Exception {
+    void nullRoutingConfig_stillRoutesThroughTheSelector() throws Exception {
         String json = generator.generate(createVlessServer(), defaultSettings, null);
         JsonNode root = parse(json);
 
-        assertThat(root.has("route")).isFalse();
+        assertThat(root.path("route").path("final").asString()).isEqualTo("proxy");
     }
 
     @Test
