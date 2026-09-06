@@ -212,6 +212,10 @@ carries a `subscription-userinfo` header ("12.3 GB of 100 GB used · expires
 …"). Links of protocols Tunl does not support (TUIC, AnyTLS, …) are left out
 without marking the subscription failed.
 
+<p align="center">
+  <img src="docs/screenshots/subscriptions.png" width="900" alt="Subscriptions tab: two providers with the quota each reports and its expiry date"/>
+</p>
+
 ### Routing
 
 <p align="center">
@@ -238,6 +242,10 @@ month's figure — kept locally and cleared only from the **Clear** link there,
 since nothing in it expires on its own. Those totals are what this client
 sampled, not your provider's accounting; a subscription's own quota is on the
 **Subscriptions** tab.
+
+<p align="center">
+  <img src="docs/screenshots/traffic-history.png" width="900" alt="The traffic panel opened: 30 daily bars, the busiest servers and this month's total"/>
+</p>
 
 **Logs** streams sing-box logs with a level filter (how much the core writes
 is **Settings → Core log level**); the download button saves the core log,
@@ -442,6 +450,12 @@ That's Gatekeeper and an unsigned build — walk through the
 **macOS: the app is blocked again after an update**
 Expected until builds are signed — every new binary goes through Gatekeeper
 afresh. Same procedure.
+
+**A banner says changes have not been saved**
+A configuration write failed — usually a full disk or a data directory that
+lost its permissions. The app keeps the change in memory and leaves the banner
+up; fix the cause and press **Retry saving**. Quitting before it succeeds
+loses the change, not the whole file.
 
 **Connect button is disabled**
 No active server — on the Servers tab click a server so it gets the
