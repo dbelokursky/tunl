@@ -1094,6 +1094,77 @@
     -fx-background-radius: 2;
 }
 
+/* The click target. transparent rather than no background at all: a Region
+   with a null fill is not picked by the mouse, so an empty day -- two pixels
+   of bar inside a 46px column -- would be unreachable. */
+.traffic-history-column {
+    -fx-background-color: transparent;
+    -fx-background-radius: 3;
+}
+
+.traffic-history-column:hover {
+    -fx-background-color: -c-surface-sunken;
+}
+
+/* Custom pseudo-class, set from TrafficHistorySection: the style classes on
+   the bar inside are rewritten on every refresh and cannot hold state. */
+.traffic-history-column:selected {
+    -fx-background-color: -c-info-tint;
+}
+
+/* ===== Traffic history: one day's detail =====
+   Floats over the chart as an unmanaged node, so it is styled as its own
+   surface rather than inheriting the card it covers. */
+.traffic-history-popover {
+    -fx-background-color: -c-surface;
+    -fx-background-radius: 8;
+    -fx-border-color: -c-border-strong;
+    -fx-border-radius: 8;
+    -fx-border-width: 1;
+    -fx-padding: 10 12 10 12;
+    -fx-min-width: 210;
+    -fx-max-width: 260;
+    -fx-effect: dropshadow(gaussian, -c-shadow-elevated, 8, 0, 0, 2);
+}
+
+/* A square turned 45 degrees with only its two lower edges drawn: the filled
+   upper half sits over the card's bottom border and erases it there. */
+.traffic-history-popover-caret {
+    -fx-background-color: -c-surface;
+    -fx-border-color: -c-border-strong;
+    -fx-border-width: 0 1 1 0;
+}
+
+.traffic-history-popover-heading {
+    -fx-text-fill: -c-text;
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
+    -fx-padding: 0 0 4 0;
+}
+
+.traffic-history-popover-label {
+    -fx-text-fill: -c-text-secondary;
+    -fx-font-size: 11px;
+}
+
+.traffic-history-popover-value {
+    -fx-text-fill: -c-text-body;
+    -fx-font-size: 11px;
+}
+
+.traffic-history-popover-total {
+    -fx-text-fill: -c-text;
+    -fx-font-size: 12px;
+    -fx-font-weight: bold;
+}
+
+.traffic-history-popover-separator {
+    -fx-background-color: -c-border;
+    -fx-min-height: 1;
+    -fx-pref-height: 1;
+    -fx-max-height: 1;
+}
+
 /* ===== Content scroll wrapper ===== */
 .content-scroll {
     -fx-background-color: transparent;

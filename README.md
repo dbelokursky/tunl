@@ -239,7 +239,10 @@ The **Dashboard** shows live stats in the status card: upload and download
 speed, and the session total beside them. Clicking that total opens the last
 30 days as one bar per day, with the busiest servers behind them and this
 month's figure — kept locally and cleared only from the **Clear** link there,
-since nothing in it expires on its own. Those totals are what this client
+since nothing in it expires on its own. Clicking one of those bars opens the
+day behind it: the total, the two directions and the servers that carried it;
+← and → step to the neighbouring days and Escape closes the card. Those
+totals are what this client
 sampled, not your provider's accounting; a subscription's own quota is on the
 **Subscriptions** tab.
 

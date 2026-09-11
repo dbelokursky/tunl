@@ -305,11 +305,40 @@ public class TrafficHistoryStore {
      * @return servers ordered by total bytes, busiest first
      */
     public synchronized List<ServerTotal> topServers(int limit, int days) {
-        Map<String, long[]> totals = new LinkedHashMap<>();
-        Map<String, String> names = new LinkedHashMap<>();
+        List<String> keys = new ArrayList<>();
         LocalDate today = LocalDate.now(clock);
         for (int i = days - 1; i >= 0; i--) {
-            String key = today.minusDays(i).format(DateTimeFormatter.ISO_LOCAL_DATE);
+            keys.add(today.minusDays(i).format(DateTimeFormatter.ISO_LOCAL_DATE));
+        }
+        return aggregate(keys, limit);
+    }
+
+    /**
+     * One day's traffic split by the server that carried it, busiest first.
+     *
+     * <p>The window methods above answer "how much lately"; this answers
+     * "what happened on that day", which is the only question a single bar in
+     * the chart can be asked. Unlimited by design: a day has as many rows as
+     * it has servers, which is a handful, and folding one of three away would
+     * lose the very comparison the caller opened the day for.</p>
+     *
+     * @param date the day to break down
+     * @return servers ordered by total bytes, or empty for a day with no
+     *     traffic — which is most days, and is not an error
+     */
+    public synchronized List<ServerTotal> serversForDay(LocalDate date) {
+        return aggregate(List.of(date.format(DateTimeFormatter.ISO_LOCAL_DATE)),
+                Integer.MAX_VALUE);
+    }
+
+    /**
+     * Sums the given days per server. Split out because a window and a single
+     * day differ only in how many keys they walk.
+     */
+    private List<ServerTotal> aggregate(List<String> isoDates, int limit) {
+        Map<String, long[]> totals = new LinkedHashMap<>();
+        Map<String, String> names = new LinkedHashMap<>();
+        for (String key : isoDates) {
             TrafficHistory.Day day = byDate.get(key);
             if (day == null) {
                 continue;

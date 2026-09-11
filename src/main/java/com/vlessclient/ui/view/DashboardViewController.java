@@ -46,6 +46,7 @@ import javafx.scene.control.Tooltip;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
@@ -77,6 +78,7 @@ public class DashboardViewController implements ViewShownAware {
     @FXML private Label trafficHistoryServers;
     @FXML private Hyperlink trafficHistoryReset;
     @FXML private HBox trafficHistoryBars;
+    @FXML private StackPane trafficHistoryBarsHost;
     @FXML private Label trafficHistoryRange;
     @FXML private Label trafficHistoryMonth;
     @FXML private Label uploadCardIcon;
@@ -246,7 +248,8 @@ public class DashboardViewController implements ViewShownAware {
         trafficHistory = new TrafficHistorySection(historyStore,
                 new TrafficHistorySection.Controls(trafficHistoryPanel, sessionTotalLabel,
                         trafficHistoryTitle, trafficHistoryServers, trafficHistoryReset,
-                        trafficHistoryBars, trafficHistoryRange, trafficHistoryMonth),
+                        trafficHistoryBars, trafficHistoryRange, trafficHistoryMonth,
+                        trafficHistoryBarsHost),
                 this::persistTrafficHistoryExpanded);
         trafficHistory.init(ServiceLocator.find(AppSettings.class)
                 .map(AppSettings::isTrafficHistoryExpanded).orElse(false));

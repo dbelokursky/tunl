@@ -195,4 +195,30 @@ class TrafficHistoryStoreTest {
                 .extracting(TrafficHistoryStore.ServerTotal::serverId)
                 .isEqualTo("unknown");
     }
+
+    @Test
+    void aDayIsBrokenDownByServerWithoutTheDaysAroundIt(@TempDir Path dir) {
+        TestClock clock = clockAt("2026-09-05T10:00:00Z");
+        TrafficHistoryStore store = new TrafficHistoryStore(dir, clock);
+
+        store.record(server("a", "Amsterdam 01"), 1_000, 1_000);
+        clock.advance(Duration.ofDays(1));
+        store.record(server("a", "Amsterdam 01"), 0, 5_000);
+        store.record(server("b", "Frankfurt 02"), 2_000, 4_000);
+
+        List<TrafficHistoryStore.ServerTotal> day =
+                store.serversForDay(LocalDate.of(2026, 9, 6));
+
+        assertThat(day).extracting(TrafficHistoryStore.ServerTotal::serverName)
+                .as("busiest first, as the window view already orders them")
+                .containsExactly("Frankfurt 02", "Amsterdam 01");
+        assertThat(day.get(1).total())
+                .as("the 2 KB Amsterdam carried the day before must not leak in -- "
+                        + "a bar stands for one day and so must its breakdown")
+                .isEqualTo(5_000);
+        assertThat(store.serversForDay(LocalDate.of(2026, 9, 7)))
+                .as("a quiet day is empty rather than absent; twenty-five of the "
+                        + "thirty bars in the panel are this day")
+                .isEmpty();
+    }
 }
