@@ -166,9 +166,22 @@
                            onAction="#onResetTrafficHistoryClicked"/>
             </HBox>
 
-            <HBox fx:id="trafficHistoryBars" styleClass="traffic-history-bars"
-                  alignment="BOTTOM_LEFT" spacing="3"
-                  minHeight="46" prefHeight="46" maxHeight="46"/>
+            <!-- The bars live inside a StackPane so the day popover can be an
+                 unmanaged child of it. Coordinates then start at the bar row
+                 itself, a negative layoutY floats the card above the chart,
+                 and none of it reaches the layout pass — which is what keeps
+                 opening a day from moving a single pixel of the card.
+
+                 maxWidth/maxHeight=Infinity on the HBox because a StackPane
+                 sizes each child to its own maximum, and the computed default
+                 would leave the row at its pref width with the bars bunched
+                 on the left. -->
+            <StackPane fx:id="trafficHistoryBarsHost" alignment="BOTTOM_LEFT"
+                       minHeight="46" prefHeight="46" maxHeight="46">
+                <HBox fx:id="trafficHistoryBars" styleClass="traffic-history-bars"
+                      alignment="BOTTOM_LEFT" spacing="3"
+                      maxWidth="Infinity" maxHeight="Infinity"/>
+            </StackPane>
 
             <HBox alignment="CENTER_LEFT" spacing="8">
                 <Label fx:id="trafficHistoryRange" styleClass="session-total"/>

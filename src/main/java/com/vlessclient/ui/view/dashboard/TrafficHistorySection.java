@@ -3,6 +3,7 @@ package com.vlessclient.ui.view.dashboard;
 import com.vlessclient.app.I18n;
 import com.vlessclient.service.TrafficHistoryStore;
 import com.vlessclient.service.TrafficMonitor;
+import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.time.format.FormatStyle;
@@ -13,12 +14,21 @@ import java.util.stream.Collectors;
 import javafx.animation.Animation;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
+import javafx.css.PseudoClass;
+import javafx.event.EventHandler;
+import javafx.event.EventTarget;
+import javafx.geometry.Pos;
+import javafx.scene.Node;
+import javafx.scene.Scene;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
 import javafx.scene.control.Tooltip;
+import javafx.scene.input.KeyEvent;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.util.Duration;
 
@@ -31,6 +41,11 @@ import javafx.util.Duration;
  * nothing; this earns its space differently — daily bars share one scale and
  * one window, so their heights are comparable to each other in a way the old
  * auto-scaling speed curve never was.</p>
+ *
+ * <p>Hovering a day gives its date and total; clicking one opens
+ * {@link TrafficDayPopover} with the split the tooltip has no room for. The
+ * click target is a full-height column rather than the bar, because a day with
+ * no traffic draws two pixels and two pixels cannot be hit.</p>
  *
  * <p>The clear control lives here rather than in Settings because nothing in
  * the history expires on its own: the panel that shows the record is the
@@ -56,9 +71,18 @@ public final class TrafficHistorySection {
     /** How often today's bar catches up while the panel is open. */
     private static final Duration REFRESH_PERIOD = Duration.seconds(30);
 
+    /**
+     * Marks the open day's column. A pseudo-class rather than a style class
+     * because {@link #refresh()} rebuilds each bar's style classes with
+     * {@code setAll}, and a selection stored there would erase itself every
+     * thirty seconds.
+     */
+    private static final PseudoClass SELECTED = PseudoClass.getPseudoClass("selected");
+
     /** The controls the panel drives, as injected into the FXML controller. */
     public record Controls(VBox panel, Label sessionTotal, Label title, Label servers,
-                           Hyperlink reset, HBox bars, Label range, Label month) { }
+                           Hyperlink reset, HBox bars, Label range, Label month,
+                           StackPane barsHost) { }
 
     private final TrafficHistoryStore store;
     private final Controls controls;
@@ -67,7 +91,14 @@ public final class TrafficHistorySection {
     private final Consumer<Boolean> persistExpanded;
 
     private final List<Region> barNodes = new ArrayList<>();
+    private final List<StackPane> columnNodes = new ArrayList<>();
+    private final List<Tooltip> barTooltips = new ArrayList<>();
     private Timeline refreshTimer;
+
+    private TrafficDayPopover popover;
+    private int selectedIndex = -1;
+    private EventHandler<MouseEvent> dismissOnOutsideClick;
+    private EventHandler<KeyEvent> dayKeys;
 
     /**
      * Creates the section over its controls.
@@ -94,14 +125,48 @@ public final class TrafficHistorySection {
         controls.title().textProperty().bind(I18n.binding("dashboard.traffic.history.title"));
         controls.reset().textProperty().bind(I18n.binding("dashboard.traffic.history.reset"));
 
+        popover = new TrafficDayPopover(controls.barsHost());
+
         for (int i = 0; i < WINDOW_DAYS; i++) {
             Region bar = new Region();
             bar.getStyleClass().add("traffic-history-bar");
             bar.setMaxWidth(Double.MAX_VALUE);
-            HBox.setHgrow(bar, Priority.ALWAYS);
             barNodes.add(bar);
+
+            // The column, not the bar, is what the pointer meets: it spans the
+            // full height of the row, so a day with two pixels of bar is as
+            // easy to hit as the busiest one. A Region is only pickable where
+            // it paints, hence both the transparent background the style
+            // class gives it and pickOnBounds.
+            StackPane column = new StackPane(bar);
+            column.setAlignment(Pos.BOTTOM_CENTER);
+            column.getStyleClass().add("traffic-history-column");
+            column.setPickOnBounds(true);
+            column.setMinWidth(0);
+            HBox.setHgrow(column, Priority.ALWAYS);
+
+            Tooltip tooltip = new Tooltip();
+            // Installed once. Tooltip.install adds its handlers on every call,
+            // so re-installing from refresh() would stack a new set every
+            // thirty seconds for as long as the panel stayed open.
+            Tooltip.install(column, tooltip);
+            barTooltips.add(tooltip);
+
+            final int index = i;
+            column.setOnMouseClicked(event -> {
+                if (selectedIndex == index) {
+                    closeDay();
+                } else {
+                    openDay(index);
+                }
+            });
+            columnNodes.add(column);
         }
-        controls.bars().getChildren().setAll(barNodes);
+        controls.bars().getChildren().setAll(columnNodes);
+
+        // An unmanaged popover keeps whatever position it was given, so a
+        // window resize would leave it pointing at the wrong day.
+        controls.bars().widthProperty().addListener((obs, oldVal, newVal) -> reposition());
 
         // A language switch has to redraw the byte figures and the dates.
         I18n.localeProperty().addListener((obs, oldVal, newVal) -> refresh());
@@ -144,8 +209,8 @@ public final class TrafficHistorySection {
             bar.setMaxHeight(height);
             bar.getStyleClass().setAll(i == barNodes.size() - 1
                     ? "traffic-history-bar-today" : "traffic-history-bar");
-            Tooltip.install(bar, new Tooltip(day.date().format(dayFormat)
-                    + " — " + TrafficMonitor.formatBytes(day.total())));
+            barTooltips.get(i).setText(day.date().format(dayFormat)
+                    + " — " + TrafficMonitor.formatBytes(day.total()));
         }
 
         long windowTotal = days.stream().mapToLong(TrafficHistoryStore.DayTotal::total).sum();
@@ -161,6 +226,13 @@ public final class TrafficHistorySection {
                         : server.serverName())
                         + " — " + TrafficMonitor.formatBytes(server.total()))
                 .collect(Collectors.joining(" · ")));
+
+        // The open day is re-read from the same list: today's bar is still
+        // growing, and a card left showing the figures from thirty seconds ago
+        // contradicts the bar it is pointing at.
+        if (selectedIndex >= 0) {
+            showDay(selectedIndex, days);
+        }
     }
 
     /**
@@ -173,8 +245,122 @@ public final class TrafficHistorySection {
         if (store == null || !confirm.getAsBoolean()) {
             return;
         }
+        closeDay();
         store.reset();
         refresh();
+    }
+
+    /**
+     * The day whose detail card is open, if any.
+     *
+     * @return the open day, or null when no day is open
+     */
+    public LocalDate openDate() {
+        return popover == null ? null : popover.shownDate();
+    }
+
+    private void openDay(int index) {
+        if (store == null) {
+            return;
+        }
+        showDay(index, store.lastDays(WINDOW_DAYS));
+        listenForDismissal();
+    }
+
+    private void showDay(int index, List<TrafficHistoryStore.DayTotal> days) {
+        TrafficHistoryStore.DayTotal day = days.get(index);
+        selectedIndex = index;
+        markSelection();
+        popover.showFor(day.date(), day, store.serversForDay(day.date()),
+                columnNodes.get(index));
+    }
+
+    private void closeDay() {
+        selectedIndex = -1;
+        markSelection();
+        if (popover != null) {
+            popover.hide();
+        }
+        stopListeningForDismissal();
+    }
+
+    private void markSelection() {
+        for (int i = 0; i < columnNodes.size(); i++) {
+            columnNodes.get(i).pseudoClassStateChanged(SELECTED, i == selectedIndex);
+        }
+    }
+
+    private void reposition() {
+        if (selectedIndex >= 0 && store != null) {
+            showDay(selectedIndex, store.lastDays(WINDOW_DAYS));
+        }
+    }
+
+    /**
+     * Escape and a click anywhere else close the day; the arrows walk to the
+     * neighbouring one, which is the comparison the popover is covering while
+     * it is open.
+     *
+     * <p>The filters exist only while a day is open, for the same reason the
+     * refresh timer exists only while the panel is: a closed feature must cost
+     * nothing.</p>
+     */
+    private void listenForDismissal() {
+        Scene scene = controls.panel().getScene();
+        if (scene == null || dismissOnOutsideClick != null) {
+            return;
+        }
+        dismissOnOutsideClick = event -> {
+            if (!isOwnNode(event.getTarget())) {
+                closeDay();
+            }
+        };
+        dayKeys = event -> {
+            if (selectedIndex < 0) {
+                return;
+            }
+            switch (event.getCode()) {
+                case ESCAPE -> {
+                    closeDay();
+                    event.consume();
+                }
+                case LEFT -> step(selectedIndex - 1, event);
+                case RIGHT -> step(selectedIndex + 1, event);
+                default -> { }
+            }
+        };
+        scene.addEventFilter(MouseEvent.MOUSE_PRESSED, dismissOnOutsideClick);
+        scene.addEventFilter(KeyEvent.KEY_PRESSED, dayKeys);
+    }
+
+    private void step(int index, KeyEvent event) {
+        if (index >= 0 && index < columnNodes.size()) {
+            openDay(index);
+            event.consume();
+        }
+    }
+
+    private void stopListeningForDismissal() {
+        Scene scene = controls.panel().getScene();
+        if (scene != null && dismissOnOutsideClick != null) {
+            scene.removeEventFilter(MouseEvent.MOUSE_PRESSED, dismissOnOutsideClick);
+            scene.removeEventFilter(KeyEvent.KEY_PRESSED, dayKeys);
+        }
+        dismissOnOutsideClick = null;
+        dayKeys = null;
+    }
+
+    /** True when the event landed on the popover itself or on a day column. */
+    private boolean isOwnNode(EventTarget target) {
+        if (!(target instanceof Node node)) {
+            return false;
+        }
+        for (Node current = node; current != null; current = current.getParent()) {
+            if (popover.owns(current) || columnNodes.contains(current)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void setExpanded(boolean expanded, boolean persist) {
@@ -185,6 +371,9 @@ public final class TrafficHistorySection {
             refresh();
             startTimer();
         } else {
+            // A popover floating over a panel that is no longer there would
+            // outlive its own chart.
+            closeDay();
             stopTimer();
         }
         if (persist && persistExpanded != null) {
