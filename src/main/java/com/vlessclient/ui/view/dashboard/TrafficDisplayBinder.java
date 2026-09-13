@@ -6,12 +6,14 @@ import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.service.DaemonThreads;
 import com.vlessclient.service.TrafficMonitor;
+import com.vlessclient.ui.view.OnScreen;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
+import javafx.beans.value.ObservableValue;
 import javafx.scene.Node;
 import javafx.scene.control.Label;
 import javafx.scene.control.Tooltip;
@@ -89,6 +91,20 @@ public final class TrafficDisplayBinder {
     private boolean connected;
 
     /**
+     * Whether the readout is in a scene whose window is showing, or null when
+     * there is no node to follow.
+     *
+     * <p>Samples land once a second for as long as a tunnel is up, and every
+     * label they change asks for a layout. A layout request that reaches the
+     * scene root asks JavaFX for a pulse whether or not the window is showing,
+     * so a readout repainted in the tray bought a pulse on the main thread and
+     * a quarter second of pulse-timer ticks every second, to draw nothing. Off
+     * screen the samples are only remembered, and the readout is repainted
+     * when it comes back.</p>
+     */
+    private ObservableValue<Boolean> onScreen;
+
+    /**
      * Serialises start and stop off the FX thread.
      *
      * <p>{@code TrafficMonitor.stop()} joins its streaming thread for up to two
@@ -162,23 +178,62 @@ public final class TrafficDisplayBinder {
      * {@link TrafficMonitor} is available.
      */
     public void bindLabels() {
-        trafficMonitor.uploadSpeedProperty().addListener((obs, oldVal, newVal) ->
-                paint(upload, newVal.longValue(), "speed-value-up", "stats-icon-upload"));
+        Node anchor = trafficSummary != null ? trafficSummary : sessionTotalLabel;
+        if (anchor != null) {
+            onScreen = OnScreen.of(anchor);
+            onScreen.addListener((obs, wasOnScreen, isOnScreen) -> {
+                if (isOnScreen) {
+                    repaint();
+                }
+            });
+        }
 
-        trafficMonitor.downloadSpeedProperty().addListener((obs, oldVal, newVal) ->
-                paint(download, newVal.longValue(), "speed-value-down", "stats-icon-download"));
+        trafficMonitor.uploadSpeedProperty().addListener((obs, oldVal, newVal) -> {
+            if (isOnScreen()) {
+                paint(upload, newVal.longValue(), "speed-value-up", "stats-icon-upload");
+            }
+        });
+
+        trafficMonitor.downloadSpeedProperty().addListener((obs, oldVal, newVal) -> {
+            if (isOnScreen()) {
+                paint(download, newVal.longValue(), "speed-value-down", "stats-icon-download");
+            }
+        });
 
         trafficMonitor.totalUploadProperty().addListener((obs, oldVal, newVal) -> {
             lastTotalUpload = newVal.longValue();
-            renderSessionTotal();
+            if (isOnScreen()) {
+                renderSessionTotal();
+            }
         });
 
         trafficMonitor.totalDownloadProperty().addListener((obs, oldVal, newVal) -> {
             lastTotalDownload = newVal.longValue();
-            renderSessionTotal();
+            if (isOnScreen()) {
+                renderSessionTotal();
+            }
         });
 
         I18n.localeProperty().addListener((obs, oldVal, newVal) -> renderSessionTotal());
+    }
+
+    /**
+     * Draws what the samples said while the readout was off screen: the
+     * current speeds and, with a tunnel up, the session total. Without one the
+     * total line carries the idle summary, which samples do not touch.
+     */
+    private void repaint() {
+        paint(upload, trafficMonitor.uploadSpeedProperty().get(),
+                "speed-value-up", "stats-icon-upload");
+        paint(download, trafficMonitor.downloadSpeedProperty().get(),
+                "speed-value-down", "stats-icon-download");
+        if (connected) {
+            renderSessionTotal();
+        }
+    }
+
+    private boolean isOnScreen() {
+        return onScreen == null || onScreen.getValue();
     }
 
     /**

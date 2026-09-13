@@ -11,12 +11,13 @@ import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.service.TunnelRecoveryService;
+import com.vlessclient.ui.view.FxTimer;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
@@ -27,7 +28,6 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.Circle;
-import javafx.util.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -79,7 +79,10 @@ public final class HealthCheckCoordinator {
     private final Consumer<AppSettings> settingsSaver;
 
     // Probe scheduling and rendering remain FX-owned; recovery lives in the service.
-    private PauseTransition periodicCheckDelay;
+    // The wait between probes is an FxTimer rather than a PauseTransition: it
+    // lasts as long as the tunnel does, window hidden to the tray included, and
+    // a playing animation keeps JavaFX pulsing at the display refresh rate.
+    private FxTimer.Cancellable periodicCheck;
     private final AtomicBoolean healthCheckInFlight = new AtomicBoolean();
     private final AtomicInteger healthGeneration = new AtomicInteger();
     // Whether this connection has produced a verdict yet. Gates the CHECKING
@@ -323,6 +326,10 @@ public final class HealthCheckCoordinator {
      * from now, so the tunnel keeps being monitored while connected rather than
      * only at connect time. No-op when the feature is disabled or the tunnel is
      * no longer up.
+     *
+     * <p>The probes go on while the window is hidden to the tray: the menu-bar
+     * icon and auto-reconnect act on their verdicts, and neither is on screen
+     * with the dashboard.</p>
      */
     private void schedulePeriodicCheck(AppSettings settings) {
         cancelPeriodicCheck();
@@ -334,18 +341,18 @@ public final class HealthCheckCoordinator {
             return;
         }
         int seconds = Math.max(1, settings.getHealthCheckIntervalSeconds());
-        periodicCheckDelay = new PauseTransition(Duration.seconds(seconds));
-        periodicCheckDelay.setOnFinished(e -> {
-            periodicCheckDelay = null;
+        periodicCheck = FxTimer.after(Duration.ofSeconds(seconds), () -> {
+            periodicCheck = null;
             runReachabilityCheck();
         });
-        periodicCheckDelay.play();
     }
 
     private void cancelPeriodicCheck() {
-        if (periodicCheckDelay != null) {
-            periodicCheckDelay.stop();
-            periodicCheckDelay = null;
+        if (periodicCheck != null) {
+            // Final on the FX thread: a probe the timer has already handed to
+            // it is dropped too, as a stopped PauseTransition's was.
+            periodicCheck.cancel();
+            periodicCheck = null;
         }
     }
 
