@@ -21,6 +21,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import javafx.application.Platform;
@@ -105,6 +106,12 @@ public class ServersViewController {
     private Supplier<String> clipboardText = () -> Clipboard.getSystemClipboard().getString();
 
     /**
+     * Where the file import gets its file: a file chooser, except in a test,
+     * since headless JavaFX cannot show one.
+     */
+    private Function<Window, File> importFileChooser = ServersViewController::chooseImportFile;
+
+    /**
      * How the list is ordered. {@link #CONFIGURED} is the stored order, kept as
      * the default because it is the one the user arranged and the only one they
      * can predict.
@@ -169,6 +176,11 @@ public class ServersViewController {
     /** Replaces the clipboard the import reads; for tests, which have none. */
     void setClipboardText(Supplier<String> source) {
         this.clipboardText = source;
+    }
+
+    /** Replaces the chooser the file import asks; for tests, which cannot show one. */
+    void setImportFileChooser(Function<Window, File> chooser) {
+        this.importFileChooser = chooser;
     }
 
     /** Returns the service, or null when it is not registered. */
@@ -436,11 +448,15 @@ public class ServersViewController {
                 log.info("Imported server: {}", server.getName());
             } catch (IllegalArgumentException e) {
                 // Bad input: the parser's message is the explanation, and a
-                // stack trace for a typo would only bury real errors.
-                log.warn("Could not import share link: {}", e.getMessage());
+                // stack trace for a typo would only bury real errors. Scrubbed,
+                // because the text is a link and a message may quote it back.
+                log.warn("Could not import share link: {}", Redact.urlsIn(e.getMessage()));
                 showImportError(e);
             } catch (RuntimeException e) {
-                log.error("Failed to import server", e);
+                // Not the exception itself: its trace prints the message as it
+                // is. toString() keeps the type, which is what sets an
+                // unexpected failure apart from bad input.
+                log.error("Failed to import server: {}", Redact.urlsIn(e.toString()));
                 showImportError(e);
             }
         });
@@ -635,13 +651,7 @@ public class ServersViewController {
         if (backup == null) {
             return;
         }
-        FileChooser chooser = new FileChooser();
-        chooser.setTitle(I18n.get("servers.backup.import.title"));
-        chooser.getExtensionFilters().addAll(
-                new FileChooser.ExtensionFilter(I18n.get("servers.backup.filter.json"), "*.json"),
-                new FileChooser.ExtensionFilter(I18n.get("servers.backup.filter.links"), "*.txt"),
-                new FileChooser.ExtensionFilter(I18n.get("servers.backup.filter.all"), "*.*"));
-        File file = chooser.showOpenDialog(ownerWindow());
+        File file = importFileChooser.apply(ownerWindow());
         if (file == null) {
             return;
         }
@@ -655,7 +665,11 @@ public class ServersViewController {
             done.initOwner(ownerWindow());
             done.showAndWait();
         } catch (IOException | RuntimeException e) {
-            log.error("Failed to import servers", e);
+            // Not the exception itself: its trace prints the message as it
+            // is, and a link list with no readable line fails with the first
+            // skipped line's reason. toString() keeps the type, half of what an
+            // IOException says (NoSuchFileException's message is only the path).
+            log.error("Failed to import servers: {}", Redact.urlsIn(e.toString()));
             Alert alert = new Alert(Alert.AlertType.ERROR);
             alert.setTitle(I18n.get("servers.import.error.title"));
             alert.setHeaderText(I18n.get("servers.backup.import.failed"));
@@ -663,6 +677,17 @@ public class ServersViewController {
             alert.initOwner(ownerWindow());
             alert.showAndWait();
         }
+    }
+
+    /** Asks for the file to restore from: a backup, or a list of share links. */
+    private static File chooseImportFile(Window owner) {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle(I18n.get("servers.backup.import.title"));
+        chooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter(I18n.get("servers.backup.filter.json"), "*.json"),
+                new FileChooser.ExtensionFilter(I18n.get("servers.backup.filter.links"), "*.txt"),
+                new FileChooser.ExtensionFilter(I18n.get("servers.backup.filter.all"), "*.*"));
+        return chooser.showOpenDialog(owner);
     }
 
     /**

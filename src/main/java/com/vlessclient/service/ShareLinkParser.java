@@ -4,6 +4,7 @@ import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
@@ -78,6 +79,33 @@ public class ShareLinkParser {
     }
 
     /**
+     * The failure for a link whose {@code http://} form will not parse.
+     *
+     * <p>Built from the reason alone. The JDK's message ends with the whole
+     * input, which here is {@code http://<uuid-or-password>@host…}, so passing
+     * it on put the credential into the exception, and from there into
+     * {@code tunl.log} and the import dialogs. Scrubbing URLs out afterwards
+     * cannot stand in for this: the character that makes a link malformed, a
+     * space or a quote, is exactly where a URL scanner stops, and the part of a
+     * password after it was left behind. For the same reason {@code e} is not
+     * attached as the cause, whose message a logged stack trace prints.</p>
+     *
+     * @param protocol     the protocol as the message names it
+     * @param e            the parse failure of the rewritten link
+     * @param schemeLength the length of the scheme and {@code ://} the rewrite
+     *                     replaced, so the position counts from the start of
+     *                     the link as given
+     * @return the exception to throw
+     */
+    private static IllegalArgumentException invalidUri(String protocol, URISyntaxException e,
+                                                       int schemeLength) {
+        String where = e.getIndex() < 0 ? ""
+                : " at index " + (e.getIndex() - "http://".length() + schemeLength);
+        return new IllegalArgumentException(
+                "Invalid " + protocol + " URI format: " + e.getReason() + where);
+    }
+
+    /**
      * A link that is well-formed but uses a protocol this client does not
      * implement.
      *
@@ -134,9 +162,9 @@ public class ShareLinkParser {
         }
         URI parsed;
         try {
-            parsed = URI.create(httpUri);
-        } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("Invalid VLESS URI format: " + e.getMessage());
+            parsed = new URI(httpUri);
+        } catch (URISyntaxException e) {
+            throw invalidUri("VLESS", e, "vless://".length());
         }
 
         String userInfo = parsed.getUserInfo();
@@ -203,7 +231,9 @@ public class ShareLinkParser {
         try {
             node = OBJECT_MAPPER.readTree(json);
         } catch (JacksonException e) {
-            throw new IllegalArgumentException("Invalid vmess JSON: " + e.getMessage());
+            // Without Jackson's message: it quotes the token it could not read,
+            // and in a payload whose id lost its quotes that token is the UUID.
+            throw new IllegalArgumentException("Invalid vmess JSON");
         }
 
         ServerConfig config = new ServerConfig();
@@ -293,9 +323,9 @@ public class ShareLinkParser {
 
         URI parsed;
         try {
-            parsed = URI.create(httpUri);
-        } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("Invalid Trojan URI format: " + e.getMessage());
+            parsed = new URI(httpUri);
+        } catch (URISyntaxException e) {
+            throw invalidUri("Trojan", e, "trojan://".length());
         }
 
         String password = parsed.getUserInfo();
@@ -479,9 +509,9 @@ public class ShareLinkParser {
 
         URI parsed;
         try {
-            parsed = URI.create(httpUri);
-        } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("Invalid Hysteria2 URI format: " + e.getMessage());
+            parsed = new URI(httpUri);
+        } catch (URISyntaxException e) {
+            throw invalidUri("Hysteria2", e, schemeEnd + 3);
         }
 
         String password = parsed.getUserInfo();
