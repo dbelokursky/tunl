@@ -1,0 +1,29 @@
+# JVM options for the packaged launcher, read by the three packaging scripts
+# (package-dmg.sh, package-linux.sh, package-windows.ps1), by write-jvm-args.*
+# for development runs and by the three installer smoke checks, so the heap a
+# user's Tunl gets is the heap a developer sees and the one CI verifies.
+# Per-build values (-Dapp.version) and per-platform ones
+# (-Djava.awt.headless=false on Linux) stay in the scripts.
+#
+# Without these the JVM sizes the heap from physical memory: an initial heap of
+# 1/64 and a maximum of 1/4 of RAM, 576 MB and 9 GB on a 36 GB Mac. G1 returns
+# committed memory only after a full GC or at the end of a concurrent mark, and
+# under steady allocation it grows back to the initial size. Measured on
+# 2026-09-13 after two days of uptime: the heap held all 576 MB for about 60 MB
+# of live data, 685 MB of a 1.2 GB footprint; a forced full GC shrank it to
+# 272 MB, and 27 minutes later it was back at 576 MB.
+#
+# A small fixed minimum on its own is a trap. Once live data passes the level
+# at which G1 starts marking (45 % of the heap), a busy app runs a concurrent
+# cycle every couple of seconds: replaying the app's allocation profile at
+# 30 MB/s, -Xms32m and -Xms128m both did, about 100 cycles in four minutes.
+# MinHeapFreeRatio keeps the heap above that level however far the live data
+# grows, which a fixed -Xms cannot.
+#
+# One option per line (an option and its value stay on the same line);
+# everything after a '#' is a comment.
+
+-Xms64m                          # start small; the heap grows when the app needs it
+-Xmx512m                         # about eight times today's live data, and a ceiling for a leak
+-XX:MinHeapFreeRatio=60          # after each mark keep 60 % free: heap >= 2.5x live, no marking storms
+-XX:G1PeriodicGCInterval=60000   # a minute without any GC runs a concurrent cycle that gives memory back

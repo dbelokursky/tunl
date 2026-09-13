@@ -75,6 +75,17 @@ shopt -u nullglob
 grep -qF -- "-Dapp.version=${EXPECTED_VERSION}" "${LAUNCHER_CFG}" \
     || fail "Tunl.cfg does not carry -Dapp.version=${EXPECTED_VERSION}"
 
+# Every option in scripts/java-options.txt must reach the launcher: a
+# packaging change that lost them would ship the RAM-sized default heap again,
+# and nothing else here would notice.
+JAVA_OPTIONS_FILE="$(dirname "$0")/java-options.txt"
+[[ -s "${JAVA_OPTIONS_FILE}" ]] || fail "missing ${JAVA_OPTIONS_FILE}"
+while IFS= read -r option; do
+    grep -qxF -- "java-options=${option}" "${LAUNCHER_CFG}" \
+        || fail "Tunl.cfg does not carry ${option} from scripts/java-options.txt"
+done < <(awk '{ sub(/#.*/, ""); gsub(/^[[:space:]]+|[[:space:]]+$/, ""); if ($0 != "") print }' \
+    "${JAVA_OPTIONS_FILE}")
+
 bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "${INFO_PLIST}")"
 [[ "${bundle_version}" == "${EXPECTED_BUNDLE_VERSION}" ]] \
     || fail "CFBundleVersion is '${bundle_version}', expected '${EXPECTED_BUNDLE_VERSION}'"

@@ -80,6 +80,17 @@ if (-not $jlinkOptions) {
     throw '[package-windows] scripts/jlink-options.txt lists no options'
 }
 
+# The launcher's JVM options (heap sizing) are shared the same way through
+# scripts/java-options.txt, one option per line; each becomes its own
+# --java-options, which is how jpackage writes one line of Tunl.cfg per option.
+$javaOptions = @(Get-Content 'scripts/java-options.txt' |
+    ForEach-Object { ($_ -replace '#.*', '').Trim() } |
+    Where-Object { $_ } |
+    ForEach-Object { '--java-options'; $_ })
+if (-not $javaOptions) {
+    throw '[package-windows] scripts/java-options.txt lists no options'
+}
+
 # Stage just the shaded jar (not the original-*.jar the shade plugin
 # leaves alongside it).
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -Path staging, dist
@@ -104,6 +115,7 @@ Copy-Item $jarPath staging/
     --win-per-user-install `
     --java-options "-Dapp.version=$Version" `
     --java-options "--enable-native-access=ALL-UNNAMED" `
+    $javaOptions `
     --add-modules $runtimeModules `
     --jlink-options $jlinkOptions
 if ($LASTEXITCODE -ne 0) {

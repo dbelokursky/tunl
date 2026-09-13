@@ -85,6 +85,19 @@ if [[ -z "${JLINK_OPTIONS}" ]]; then
     exit 1
 fi
 
+# The launcher's JVM options (heap sizing) are shared the same way through
+# scripts/java-options.txt, one option per line; each becomes its own
+# --java-options, which is how jpackage writes one line of Tunl.cfg per option.
+JAVA_OPTIONS=()
+while IFS= read -r option; do
+    JAVA_OPTIONS+=(--java-options "${option}")
+done < <(awk '{ sub(/#.*/, ""); gsub(/^[[:space:]]+|[[:space:]]+$/, ""); if ($0 != "") print }' \
+    "${REPO_ROOT}/scripts/java-options.txt")
+if [[ ${#JAVA_OPTIONS[@]} -eq 0 ]]; then
+    echo "[package-dmg] scripts/java-options.txt lists no options" >&2
+    exit 1
+fi
+
 # Stage just the shaded jar (not the original-*.jar the shade plugin
 # leaves alongside it).
 rm -rf staging dist
@@ -113,6 +126,7 @@ jpackage \
     --mac-package-name "Tunl" \
     --java-options "-Dapp.version=${VERSION}" \
     --java-options "--enable-native-access=ALL-UNNAMED" \
+    "${JAVA_OPTIONS[@]}" \
     --add-modules "${RUNTIME_MODULES}" \
     --jlink-options "${JLINK_OPTIONS}" \
     "${SIGN_ARGS[@]+"${SIGN_ARGS[@]}"}" \
