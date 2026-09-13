@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,7 +40,9 @@ import tools.jackson.databind.node.ObjectNode;
  * before writing it.</p>
  *
  * <p>Import also accepts a plain-text list of share links, one per line, so
- * the file another client exported is usable here without conversion.</p>
+ * the file another client exported is usable here without conversion. The
+ * same parsing takes links out of pasted text for the Servers view's clipboard
+ * import; see {@link #importShareLinks}.</p>
  */
 public class ServerBackupService {
 
@@ -150,6 +153,48 @@ public class ServerBackupService {
         return apply(parsed, skipped);
     }
 
+    /**
+     * Imports the share links in a block of free text, such as the clipboard.
+     *
+     * <p>The links go through the same parsing, redacted skip reporting and
+     * single batched save as the share-link form of {@link #importFile}. Only
+     * the reading of the text differs, because what a messenger puts on the
+     * clipboard is not a tidy one-link-per-line file:</p>
+     *
+     * <ul>
+     *   <li>Links are separated by any whitespace, not only by line breaks. A
+     *       chat routinely puts two links on one line, and read as one line
+     *       the second link becomes part of the first one's name, credential
+     *       included.</li>
+     *   <li>Words that are not links ("here are your servers:") are ignored
+     *       rather than reported as skipped: nobody meant them as a server.
+     *       Anything with a {@code ://} counts as a link, so a subscription
+     *       URL is reported as skipped instead of vanishing.</li>
+     *   <li>Finding nothing usable is an answer, not an error: nothing is
+     *       added and the stored list is not touched.</li>
+     * </ul>
+     *
+     * <p>A raw space inside a link ends it. A well-formed link has none, since
+     * the name in its fragment is percent-encoded, so this can only shorten
+     * the name of a link that was malformed already.</p>
+     *
+     * @param text the text to read; null reads as empty
+     * @return what was added, and the links that were skipped
+     */
+    public ImportResult importShareLinks(String text) {
+        List<String> links = text == null ? List.of()
+                : Arrays.stream(text.strip().split("\\s+"))
+                        .filter(token -> token.contains("://"))
+                        .toList();
+        List<Skip> skipped = new ArrayList<>();
+        List<ServerConfig> parsed = parseShareLinks(links, skipped);
+        if (parsed.isEmpty()) {
+            log.info("Imported no servers from text: {} link(s) skipped", skipped.size());
+            return new ImportResult(0, 0, skipped);
+        }
+        return apply(parsed, skipped);
+    }
+
     /** Reads the file as UTF-8 text, refusing anything oversized or binary. */
     private static String readText(Path file) throws IOException {
         long size = Files.size(file);
@@ -206,8 +251,16 @@ public class ServerBackupService {
      * the other thirty over it helps nobody.
      */
     private List<ServerConfig> parseShareLinks(String text, List<Skip> skipped) {
+        return parseShareLinks(Arrays.asList(text.split("\\R")), skipped);
+    }
+
+    /**
+     * Parses each entry as one share link: a file's lines and the links picked
+     * out of pasted text alike. Blank entries and {@code #} comments are passed
+     * over; an entry that does not parse becomes a skip.
+     */
+    private List<ServerConfig> parseShareLinks(List<String> lines, List<Skip> skipped) {
         List<ServerConfig> parsed = new ArrayList<>();
-        String[] lines = text.split("\\R");
         for (String raw : lines) {
             String line = raw.strip();
             if (line.isEmpty() || line.startsWith("#")) {
