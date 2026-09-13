@@ -126,6 +126,76 @@ class ConnectionServiceTest {
         return new RecordingEngine(tempDir.resolve("sing-box"));
     }
 
+    /** Refuses every start the way the real check does, with a reason built from the config. */
+    private static final class RefusingEngine extends SingBoxEngine {
+
+        private final java.util.function.Function<String, String> reasonFor;
+
+        RefusingEngine(Path binary, java.util.function.Function<String, String> reasonFor) {
+            super(binary);
+            this.reasonFor = reasonFor;
+        }
+
+        @Override
+        public void start(String configJson, ProxyMode proxyMode) throws IOException {
+            throw new ConfigRejectedException(reasonFor.apply(configJson));
+        }
+    }
+
+    /** The position the core would quote for this server's outbound. */
+    private static int outboundIndex(String configJson, String serverId) {
+        var outbounds = tools.jackson.databind.json.JsonMapper.builder().build()
+                .readTree(configJson).path("outbounds");
+        String tag = com.vlessclient.service.outbound.OutboundTags.server(serverId);
+        for (int i = 0; i < outbounds.size(); i++) {
+            if (tag.equals(outbounds.path(i).path("tag").asString(""))) {
+                return i;
+            }
+        }
+        throw new AssertionError("no outbound tagged " + tag + " in " + configJson);
+    }
+
+    @Test
+    void aRefusalNamesTheServerBehindTheOutboundTheCoreQuotes() {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(server("srv-2", "Frankfurt"));
+        ConnectionService service = service(new RefusingEngine(tempDir.resolve("sing-box"),
+                config -> "initialize outbound[" + outboundIndex(config, "srv-2")
+                        + "]: unsupported flow: xtls-rprx-direct"));
+
+        // Frankfurt is not even the active server: every server is in the
+        // configuration, so its broken entry blocks connecting to Tokyo too.
+        assertThatThrownBy(service::connect)
+                .isInstanceOf(ConfigRejectedException.class)
+                .hasMessage("sing-box rejected the settings of server \"Frankfurt\": "
+                        + "unsupported flow: xtls-rprx-direct");
+    }
+
+    @Test
+    void aDecodeErrorQuotingAnOutboundPositionIsNamedToo() {
+        store.addServer(server("srv-1", "Tokyo"));
+        ConnectionService service = service(new RefusingEngine(tempDir.resolve("sing-box"),
+                config -> "outbounds[" + outboundIndex(config, "srv-1")
+                        + "].transport: unknown transport type: xhttp"));
+
+        assertThatThrownBy(service::connect)
+                .isInstanceOf(ConfigRejectedException.class)
+                .hasMessage("sing-box rejected the settings of server \"Tokyo\": "
+                        + "transport: unknown transport type: xhttp");
+    }
+
+    @Test
+    void aRefusalThatQuotesNoServerKeepsTheCoresWords() {
+        store.addServer(server("srv-1", "Tokyo"));
+        ConnectionService service = service(new RefusingEngine(tempDir.resolve("sing-box"),
+                config -> "missing route.default_domain_resolver"));
+
+        assertThatThrownBy(service::connect)
+                .isInstanceOf(ConfigRejectedException.class)
+                .hasMessage("sing-box rejected the configuration: "
+                        + "missing route.default_domain_resolver");
+    }
+
     @Test
     void cancellationWhileWaitingForTheOldCorePreventsANewStart() throws Exception {
         store.addServer(server("srv-1", "Tokyo"));
