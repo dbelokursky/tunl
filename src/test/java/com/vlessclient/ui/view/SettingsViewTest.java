@@ -1,5 +1,6 @@
 package com.vlessclient.ui.view;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.app.ThemeCss;
 import com.vlessclient.model.CoreLogLevel;
@@ -9,8 +10,10 @@ import com.vlessclient.testing.UiTest;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
+import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.stage.Stage;
@@ -49,6 +52,20 @@ public class SettingsViewTest extends ApplicationTest {
         assertThat(combo.getValue())
                 .isEqualTo(ServiceLocator.get(ConfigStore.class).getSettings().getCoreLogLevel());
         assertThat(lookup("#coreLogLevelHint").tryQuery()).isPresent();
+    }
+
+    /**
+     * Clearing the traffic history moved here from the dashboard, so this card
+     * is now the only way to remove a record that never expires on its own.
+     */
+    @Test
+    void theTrafficHistoryCardCarriesTheClearAction() {
+        Button clear = lookup("#clearTrafficHistoryButton").query();
+        Label summary = lookup("#trafficHistorySummary").query();
+
+        assertThat(clear.getText()).isEqualTo(I18n.get("settings.traffic.history.clear"));
+        assertThat(clear.getGraphic()).as("the trash glyph beside the label").isNotNull();
+        assertThat(summary.getText()).as("the card always says what is recorded").isNotBlank();
     }
 
     /**

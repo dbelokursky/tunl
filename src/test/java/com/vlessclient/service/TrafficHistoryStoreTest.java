@@ -221,4 +221,46 @@ class TrafficHistoryStoreTest {
                         + "thirty bars in the panel are this day")
                 .isEmpty();
     }
+
+    @Test
+    void theWholeRecordIsTotalledFromItsFirstDay(@TempDir Path dir) {
+        TestClock clock = clockAt("2026-07-30T12:00:00Z");
+        TrafficHistoryStore store = new TrafficHistoryStore(dir, clock);
+        assertThat(store.firstRecordedDate()).as("nothing recorded yet").isEmpty();
+        assertThat(store.totalRecorded()).isZero();
+
+        store.record(server("a", "Amsterdam 01"), 1_000, 2_000);
+        clock.advance(Duration.ofDays(45));
+        store.record(server("b", "Frankfurt 02"), 3_000, 4_000);
+        assertThat(store.awaitIdle(10_000)).isTrue();
+
+        assertThat(store.firstRecordedDate()).contains(LocalDate.of(2026, 7, 30));
+        assertThat(store.totalRecorded())
+                .as("Settings clears the whole record, so it reports the whole record -- "
+                        + "not the thirty days the dashboard panel draws")
+                .isEqualTo(10_000);
+
+        store.reset();
+
+        assertThat(store.firstRecordedDate()).isEmpty();
+        assertThat(store.totalRecorded()).isZero();
+    }
+
+    @Test
+    void aDayKeyThatIsNotADateDoesNotMoveWhereTheRecordStarts(@TempDir Path dir)
+            throws IOException {
+        // "2026-00-00" sorts ahead of every real day, so it is the key the
+        // lookup meets first -- and LocalDate refuses month zero.
+        Files.writeString(dir.resolve("traffic-history.json"), """
+                {"version": 1, "days": [
+                  {"date": "2026-00-00",
+                   "servers": [{"serverId": "a", "upload": 1, "download": 1}]},
+                  {"date": "2026-09-01",
+                   "servers": [{"serverId": "a", "upload": 5, "download": 5}]}
+                ]}""", StandardCharsets.UTF_8);
+
+        TrafficHistoryStore store = new TrafficHistoryStore(dir, clockAt("2026-09-05T10:00:00Z"));
+
+        assertThat(store.firstRecordedDate()).contains(LocalDate.of(2026, 9, 1));
+    }
 }

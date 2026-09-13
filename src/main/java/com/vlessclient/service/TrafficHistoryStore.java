@@ -11,11 +11,13 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -46,8 +48,8 @@ import tools.jackson.databind.json.JsonMapper;
  * so a year is a few tens of kilobytes, and the file is emptied only by
  * {@link #reset()}. That makes it a durable record of when the user ran a
  * tunnel and through which exit, which is why it is written owner-only through
- * {@link SecureFiles} like the rest of the config, and why the UI that shows
- * it also has to offer clearing it.</p>
+ * {@link SecureFiles} like the rest of the config, and why the app has to
+ * offer clearing it (Settings, Traffic history).</p>
  */
 public class TrafficHistoryStore {
 
@@ -295,6 +297,43 @@ public class TrafficHistoryStore {
             }
         }
         return total;
+    }
+
+    /**
+     * Everything the record holds, from its first day to today.
+     *
+     * <p>The dashboard panel totals a thirty-day window and a month. This is
+     * the figure Settings shows beside the control that clears the record,
+     * because clearing removes all of it and not only what the panel draws.</p>
+     *
+     * @return upload plus download across every recorded day
+     */
+    public synchronized long totalRecorded() {
+        long total = 0;
+        for (TrafficHistory.Day day : byDate.values()) {
+            for (TrafficHistory.ServerUsage usage : day.getServers()) {
+                total += usage.getUpload() + usage.getDownload();
+            }
+        }
+        return total;
+    }
+
+    /**
+     * The day the record starts.
+     *
+     * @return the oldest recorded day, or empty when nothing is recorded
+     */
+    public synchronized Optional<LocalDate> firstRecordedDate() {
+        for (String isoDate : byDate.keySet()) {
+            try {
+                return Optional.of(LocalDate.parse(isoDate));
+            } catch (DateTimeParseException e) {
+                // load() keeps any non-blank key, so a hand-edited file can hold
+                // one that is not a date; the record starts at the first that is.
+                log.debug("Skipping a history day that is not a date: {}", isoDate);
+            }
+        }
+        return Optional.empty();
     }
 
     /**

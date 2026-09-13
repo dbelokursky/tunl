@@ -191,6 +191,37 @@
             </HBox>
         </VBox>
 
+        <!-- Traffic history: the record behind the dashboard's history panel,
+             and the only place it can be cleared. It used to be a Clear link
+             in that panel, where the pointer already works; see
+             TrafficHistorySettingsSection. The summary is written by the
+             section, so it carries no placeholder text. -->
+        <VBox spacing="12" styleClass="card">
+            <Label fx:id="trafficHistoryLabel" text="Traffic history"
+                   styleClass="form-section-title"/>
+
+            <HBox spacing="12" alignment="CENTER_LEFT">
+                <Label fx:id="trafficHistoryRecordedLabel" text="Recorded" styleClass="form-label"
+                       prefWidth="210"/>
+                <!-- Wraps rather than ellipsizes: a Russian date beside the
+                     210 gutter is the widest thing in the card at the 500px
+                     ViewFitTest pins. -->
+                <Label fx:id="trafficHistorySummary" styleClass="stats-value"
+                       style="-fx-font-size: 13px;" wrapText="true"
+                       maxWidth="Infinity" HBox.hgrow="ALWAYS"/>
+            </HBox>
+
+            <Label fx:id="trafficHistoryHint" styleClass="hint-label" wrapText="true"
+                   maxWidth="Infinity"/>
+
+            <!-- Alone and right-aligned, like the update row in About: the
+                 action sits under the facts it acts on. -->
+            <HBox alignment="CENTER_RIGHT" spacing="10">
+                <Button fx:id="clearTrafficHistoryButton" text="Clear history…"
+                        styleClass="secondary-button" minWidth="-Infinity"/>
+            </HBox>
+        </VBox>
+
         <!-- About Section -->
         <VBox spacing="12" styleClass="card">
             <Label fx:id="aboutLabel" text="About" styleClass="form-section-title"/>

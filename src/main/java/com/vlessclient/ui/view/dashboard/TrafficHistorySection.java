@@ -20,7 +20,6 @@ import javafx.event.EventTarget;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.Scene;
-import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.KeyEvent;
@@ -33,8 +32,8 @@ import javafx.scene.layout.VBox;
 import javafx.util.Duration;
 
 /**
- * The dashboard's traffic-history panel: thirty daily bars, the busiest
- * servers behind them, and the only control that clears the record.
+ * The dashboard's traffic-history panel: thirty daily bars and the busiest
+ * servers behind them.
  *
  * <p>Collapsed by default and opened by clicking the session total in the
  * status row. The hero card had a 150px chart removed from it for saying
@@ -47,9 +46,12 @@ import javafx.util.Duration;
  * click target is a full-height column rather than the bar, because a day with
  * no traffic draws two pixels and two pixels cannot be hit.</p>
  *
- * <p>The clear control lives here rather than in Settings because nothing in
- * the history expires on its own: the panel that shows the record is the
- * place that has to offer removing it.</p>
+ * <p>The panel only reads the record. Clearing it is
+ * {@link com.vlessclient.ui.view.settings.TrafficHistorySettingsSection}'s
+ * job: the Clear link that used to end this header shared a corner with the
+ * server line and today's bar, where the pointer already works, and one stray
+ * click there plus Enter on the dialog wiped a record that never expires on
+ * its own.</p>
  */
 public final class TrafficHistorySection {
 
@@ -81,8 +83,7 @@ public final class TrafficHistorySection {
 
     /** The controls the panel drives, as injected into the FXML controller. */
     public record Controls(VBox panel, Label sessionTotal, Label title, Label servers,
-                           Hyperlink reset, HBox bars, Label range, Label month,
-                           StackPane barsHost) { }
+                           HBox bars, Label range, Label month, StackPane barsHost) { }
 
     private final TrafficHistoryStore store;
     private final Controls controls;
@@ -103,7 +104,7 @@ public final class TrafficHistorySection {
     /**
      * Creates the section over its controls.
      *
-     * @param store the history to read and clear, or null when unavailable
+     * @param store the history to read, or null when unavailable
      * @param controls the injected nodes
      * @param persistExpanded called with the new state whenever the panel is
      *     opened or closed
@@ -123,7 +124,6 @@ public final class TrafficHistorySection {
      */
     public void init(boolean expanded) {
         controls.title().textProperty().bind(I18n.binding("dashboard.traffic.history.title"));
-        controls.reset().textProperty().bind(I18n.binding("dashboard.traffic.history.reset"));
 
         popover = new TrafficDayPopover(controls.barsHost());
 
@@ -233,21 +233,6 @@ public final class TrafficHistorySection {
         if (selectedIndex >= 0) {
             showDay(selectedIndex, days);
         }
-    }
-
-    /**
-     * Clears the record after confirming, because nothing here expires on its
-     * own and there is no undo.
-     *
-     * @param confirm asks the user; the history is cleared only on true
-     */
-    public void reset(java.util.function.BooleanSupplier confirm) {
-        if (store == null || !confirm.getAsBoolean()) {
-            return;
-        }
-        closeDay();
-        store.reset();
-        refresh();
     }
 
     /**

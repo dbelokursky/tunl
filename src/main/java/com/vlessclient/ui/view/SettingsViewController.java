@@ -9,7 +9,9 @@ import com.vlessclient.model.ProxyMode;
 import com.vlessclient.platform.Autostart;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ThemeManager;
+import com.vlessclient.service.TrafficHistoryStore;
 import com.vlessclient.service.mcp.McpServerService;
+import com.vlessclient.ui.view.settings.TrafficHistorySettingsSection;
 import com.vlessclient.ui.view.settings.UpdatesSection;
 import java.io.IOException;
 import java.util.Locale;
@@ -91,6 +93,12 @@ public class SettingsViewController implements ViewShownAware {
 
     @FXML private Button appUpdateButton;
 
+    @FXML private Label trafficHistoryLabel;
+    @FXML private Label trafficHistoryRecordedLabel;
+    @FXML private Label trafficHistorySummary;
+    @FXML private Label trafficHistoryHint;
+    @FXML private Button clearTrafficHistoryButton;
+
     @FXML private Label mcpSectionTitle;
     @FXML private Label mcpHintLabel;
     @FXML private Label mcpPortLabel;
@@ -107,6 +115,7 @@ public class SettingsViewController implements ViewShownAware {
     private ThemeManager themeManager;
     private Autostart autostart;
     private UpdatesSection updatesSection;
+    private TrafficHistorySettingsSection trafficHistorySection;
     private McpServerService mcpServerService;
     private boolean updatingMcpControls;
     private boolean suppressLaunchAtLoginListener;
@@ -114,7 +123,8 @@ public class SettingsViewController implements ViewShownAware {
     /**
      * Resolves the settings-related services and builds every section of the
      * Settings view (theme, language, connection, health check, proxy mode,
-     * advanced, about/updates), then binds the localized labels.
+     * advanced, traffic history, about/updates), then binds the localized
+     * labels.
      */
     @FXML
     public void initialize() {
@@ -154,6 +164,7 @@ public class SettingsViewController implements ViewShownAware {
         initSystemProxyAutoConfig(settings);
         initAdvancedSettings(settings);
         initMcpSettings(settings);
+        initTrafficHistorySection();
         initAboutSection();
         bindLabels();
     }
@@ -432,6 +443,20 @@ public class SettingsViewController implements ViewShownAware {
     }
 
     /**
+     * Hands the Traffic history card to its section. The store is optional
+     * like every collaborator here: without one the card says nothing is
+     * recorded and its button stays off.
+     */
+    private void initTrafficHistorySection() {
+        trafficHistorySection = new TrafficHistorySettingsSection(
+                ServiceLocator.find(TrafficHistoryStore.class).orElse(null),
+                new TrafficHistorySettingsSection.Controls(
+                        trafficHistorySummary, clearTrafficHistoryButton),
+                TrafficHistorySettingsSection::confirmWithDialog);
+        trafficHistorySection.init();
+    }
+
+    /**
      * Hands the About block's two version rows and the Updates header over to
      * {@link UpdatesSection}, which drives the controls listed here. The app
      * version is set there too, since what the row says depends on what the
@@ -451,6 +476,9 @@ public class SettingsViewController implements ViewShownAware {
     public void onViewShown() {
         if (updatesSection != null) {
             updatesSection.refreshOnOpen();
+        }
+        if (trafficHistorySection != null) {
+            trafficHistorySection.refresh();
         }
     }
 
@@ -508,6 +536,11 @@ public class SettingsViewController implements ViewShownAware {
         mcpCommandLabel.textProperty().bind(I18n.binding("settings.mcp.command.label"));
         ButtonLabels.bindStatic(mcpCopyButton, "settings.mcp.copy");
         ButtonLabels.bindStatic(mcpRegenButton, "settings.mcp.regenerate");
+        trafficHistoryLabel.textProperty().bind(I18n.binding("settings.traffic.history"));
+        trafficHistoryRecordedLabel.textProperty()
+                .bind(I18n.binding("settings.traffic.history.recorded"));
+        trafficHistoryHint.textProperty().bind(I18n.binding("settings.traffic.history.hint"));
+        ButtonLabels.bindStatic(clearTrafficHistoryButton, "settings.traffic.history.clear");
     }
 
     private void refreshLabels() {

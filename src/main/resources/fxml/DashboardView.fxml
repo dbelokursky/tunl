@@ -155,15 +155,17 @@
              exactly what it was before this existed until someone asks for
              more. The bars are built in TrafficHistorySection: 30 of them,
              one per day, and a fixed count is what lets them be plain Regions
-             in an HBox rather than another canvas. -->
+             in an HBox rather than another canvas.
+
+             Read-only on purpose: clearing the record is in Settings. A Clear
+             link at the end of this header sat where the pointer already
+             works, and was one stray click from wiping the record. -->
         <VBox fx:id="trafficHistoryPanel" styleClass="traffic-history" spacing="8"
               visible="false" managed="false">
             <HBox alignment="CENTER_LEFT" spacing="10">
                 <Label fx:id="trafficHistoryTitle" text="Last 30 days" styleClass="stats-title"/>
                 <Region HBox.hgrow="ALWAYS"/>
                 <Label fx:id="trafficHistoryServers" styleClass="session-total"/>
-                <Hyperlink fx:id="trafficHistoryReset"
-                           onAction="#onResetTrafficHistoryClicked"/>
             </HBox>
 
             <!-- The bars live inside a StackPane so the day popover can be an

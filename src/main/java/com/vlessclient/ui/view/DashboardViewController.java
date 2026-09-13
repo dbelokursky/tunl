@@ -37,7 +37,6 @@ import javafx.beans.property.SimpleObjectProperty;
 import javafx.fxml.FXML;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
-import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
@@ -76,7 +75,6 @@ public class DashboardViewController implements ViewShownAware {
     @FXML private VBox trafficHistoryPanel;
     @FXML private Label trafficHistoryTitle;
     @FXML private Label trafficHistoryServers;
-    @FXML private Hyperlink trafficHistoryReset;
     @FXML private HBox trafficHistoryBars;
     @FXML private StackPane trafficHistoryBarsHost;
     @FXML private Label trafficHistoryRange;
@@ -247,9 +245,8 @@ public class DashboardViewController implements ViewShownAware {
 
         trafficHistory = new TrafficHistorySection(historyStore,
                 new TrafficHistorySection.Controls(trafficHistoryPanel, sessionTotalLabel,
-                        trafficHistoryTitle, trafficHistoryServers, trafficHistoryReset,
-                        trafficHistoryBars, trafficHistoryRange, trafficHistoryMonth,
-                        trafficHistoryBarsHost),
+                        trafficHistoryTitle, trafficHistoryServers, trafficHistoryBars,
+                        trafficHistoryRange, trafficHistoryMonth, trafficHistoryBarsHost),
                 this::persistTrafficHistoryExpanded);
         trafficHistory.init(ServiceLocator.find(AppSettings.class)
                 .map(AppSettings::isTrafficHistoryExpanded).orElse(false));
@@ -616,6 +613,12 @@ public class DashboardViewController implements ViewShownAware {
      */
     @Override
     public void onViewShown() {
+        // Settings clears the traffic history while this view sits in the
+        // cache, built and hidden, so coming back is the first chance to
+        // notice. Both halves: the panel, and the month line that opens it.
+        trafficHistory.refresh();
+        trafficDisplay.refreshIdleSummary();
+
         AppSettings settings = ServiceLocator.find(AppSettings.class).orElse(null);
         if (settings == null) {
             log.warn("Could not re-read settings on view show");
@@ -883,25 +886,6 @@ public class DashboardViewController implements ViewShownAware {
     @FXML
     private void onSessionTotalClicked() {
         trafficHistory.toggle();
-    }
-
-    @FXML
-    private void onResetTrafficHistoryClicked() {
-        trafficHistory.reset(this::confirmTrafficHistoryReset);
-        // Clearing the record can empty the line that opened this panel.
-        trafficDisplay.refreshIdleSummary();
-    }
-
-    /**
-     * Nothing in the history expires on its own, so clearing it is the only
-     * way it ever goes away — and there is no undo. That is worth a dialog.
-     */
-    private boolean confirmTrafficHistoryReset() {
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
-        confirm.setTitle(I18n.get("dashboard.traffic.history.reset.title"));
-        confirm.setHeaderText(I18n.get("dashboard.traffic.history.reset.confirm"));
-        confirm.setContentText(I18n.get("dashboard.traffic.history.reset.content"));
-        return confirm.showAndWait().filter(button -> button == ButtonType.OK).isPresent();
     }
 
     /**
