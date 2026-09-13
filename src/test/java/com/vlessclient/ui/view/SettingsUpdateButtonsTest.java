@@ -208,10 +208,9 @@ public class SettingsUpdateButtonsTest extends ApplicationTest {
                 scene.getStylesheets().addAll(ThemeCss.of(theme));
                 stage.setScene(scene);
                 stage.show();
-                // Before anything is looked up: the view hangs off a
-                // ScrollPane, whose skin builds the viewport that holds it
-                // during the first CSS pass. show() only forces that pass on a
-                // stage that was not already showing, and this runs twice.
+                // Before anything is looked up or measured: this runs twice,
+                // so the second time the stage is already showing, and CSS and
+                // layout are applied here rather than left to show().
                 root.applyCss();
                 root.layout();
 

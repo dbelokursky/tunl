@@ -59,9 +59,10 @@ public class PageGutterTest extends ApplicationTest {
     }
 
     /**
-     * The page root, and the content inside it when the root is a scroll pane
-     * — Settings is one, and its gutter was on the box inside, where looking
-     * at the root alone would never have found it.
+     * The page root, and the content inside it when the root is a scroll pane:
+     * a gutter on the box inside is one that looking at the root alone would
+     * never find. Settings used to be built that way, and that is where its
+     * gutter hid.
      */
     private List<Region> load(String page) {
         final List<Region> holder = new ArrayList<>();
