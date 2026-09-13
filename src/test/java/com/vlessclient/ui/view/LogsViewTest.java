@@ -1,6 +1,7 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.testing.UiTest;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
 import javafx.collections.ObservableList;
@@ -14,7 +15,9 @@ import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.TextField;
 import javafx.scene.control.skin.VirtualFlow;
+import javafx.scene.layout.StackPane;
 import javafx.stage.Stage;
+import javafx.util.Callback;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
 import org.testfx.util.WaitForAsyncUtils;
@@ -29,12 +32,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 @UiTest
 public class LogsViewTest extends ApplicationTest {
 
+    private Stage stage;
+
     @Override
     public void start(Stage stage) throws Exception {
+        this.stage = stage;
         FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/LogsView.fxml"));
         Parent root = loader.load();
         stage.setScene(new Scene(root, 800, 600));
         stage.show();
+        // The primary stage is shared by every test class in the fork. A class
+        // that sized it explicitly (DashboardLayoutTest does) leaves those bounds
+        // to be reapplied on the next show(), under a scroll this class asserts
+        // on. sizeToScene() on the shown window fits it to this scene and drops
+        // the explicit bounds, so this class inherits none and passes none on:
+        // setting a size here instead broke the 500 px fit tests that follow.
+        stage.sizeToScene();
     }
 
     @Test
@@ -116,6 +129,228 @@ public class LogsViewTest extends ApplicationTest {
         assertThat(after.item()).isSameAs(before.item());
         assertThat(after.offset()).isCloseTo(
                 before.offset(), org.assertj.core.data.Offset.offset(0.5));
+    }
+
+    /**
+     * MainViewController caches views and swaps them out of the scene. With the
+     * ring buffer full, every line shifts every row, so a cached list that kept
+     * its rows rebuilt all of them on each line for as long as the app ran.
+     */
+    @Test
+    void rowsAreNotRebuiltWhileTheViewIsNavigatedAway() {
+        ListView<String> list = lookup("#logListView").query();
+        ObservableList<String> source = sourceOf(list);
+        fillRingBuffer(source);
+        AtomicInteger rowUpdates = countRowUpdates(list);
+        String selected = source.get(990);
+        interact(() -> list.getSelectionModel().select(990));
+
+        Scene scene = list.getScene();
+        Parent view = scene.getRoot();
+        interact(() -> scene.setRoot(new StackPane()));
+        WaitForAsyncUtils.waitForFxEvents();
+        rowUpdates.set(0);
+
+        appendTrimming(source, 20);
+        assertThat(rowUpdates).hasValue(0);
+
+        // Back on screen it follows the tail again, as auto-scroll promises,
+        // and the row the user had selected is still selected.
+        interact(() -> scene.setRoot(view));
+        WaitForAsyncUtils.waitForFxEvents();
+        assertThat(lastVisibleIndex(list)).isEqualTo(list.getItems().size() - 1);
+        assertThat(list.getSelectionModel().getSelectedItems()).containsExactly(selected);
+    }
+
+    /** Closing the window to the tray hides the stage and leaves the scene on it. */
+    @Test
+    void rowsAreNotRebuiltWhileTheWindowIsHidden() {
+        ListView<String> list = lookup("#logListView").query();
+        ObservableList<String> source = sourceOf(list);
+        fillRingBuffer(source);
+        AtomicInteger rowUpdates = countRowUpdates(list);
+
+        interact(() -> stage.hide());
+        WaitForAsyncUtils.waitForFxEvents();
+        rowUpdates.set(0);
+
+        appendTrimming(source, 20);
+        assertThat(rowUpdates).hasValue(0);
+
+        interact(() -> stage.show());
+        WaitForAsyncUtils.waitForFxEvents();
+        assertThat(lastVisibleIndex(list)).isEqualTo(list.getItems().size() - 1);
+    }
+
+    @Test
+    void aReaderWithAutoScrollOffComesBackToTheSameLine() {
+        ListView<String> list = lookup("#logListView").query();
+        CheckBox autoScroll = lookup("#autoScrollCheckBox").query();
+        ObservableList<String> source = sourceOf(list);
+        fillRingBuffer(source);
+        interact(() -> {
+            list.scrollTo(500);
+            autoScroll.setSelected(false);
+        });
+        WaitForAsyncUtils.waitForFxEvents();
+        ViewportAnchor before = firstVisibleAnchor(list);
+
+        Scene scene = list.getScene();
+        Parent view = scene.getRoot();
+        interact(() -> scene.setRoot(new StackPane()));
+        WaitForAsyncUtils.waitForFxEvents();
+        appendTrimming(source, 20);
+        interact(() -> scene.setRoot(view));
+        WaitForAsyncUtils.waitForFxEvents();
+
+        ViewportAnchor after = firstVisibleAnchor(list);
+        assertThat(after.item()).isSameAs(before.item());
+        assertThat(after.offset()).isCloseTo(
+                before.offset(), org.assertj.core.data.Offset.offset(0.5));
+    }
+
+    /**
+     * A window can come back with other bounds than it left with; on the
+     * Windows runner the list landed seven rows short of the tail. A scroll
+     * issued against the viewport it had before showing must still end there.
+     */
+    @Test
+    void theTailIsShownWhenTheWindowComesBackAtAnotherSize() {
+        ListView<String> list = lookup("#logListView").query();
+        ObservableList<String> source = sourceOf(list);
+        fillRingBuffer(source);
+
+        interact(() -> stage.hide());
+        WaitForAsyncUtils.waitForFxEvents();
+        appendTrimming(source, 20);
+        try {
+            interact(() -> {
+                stage.setHeight(stage.getHeight() - 150);
+                stage.show();
+            });
+            WaitForAsyncUtils.waitForFxEvents();
+
+            assertThat(lastVisibleIndex(list)).isEqualTo(list.getItems().size() - 1);
+        } finally {
+            // An explicit height would follow the shared stage into the next class.
+            interact(() -> stage.sizeToScene());
+        }
+    }
+
+    /**
+     * Window.show() lays the scene out before it tells anyone the window is
+     * showing, so the list is measured against the empty stand-in first and a
+     * restore queued right after would scroll a flow that holds no rows.
+     */
+    @Test
+    void aReaderWithAutoScrollOffComesBackToTheSameLineAfterTheWindowWasHidden() {
+        ListView<String> list = lookup("#logListView").query();
+        CheckBox autoScroll = lookup("#autoScrollCheckBox").query();
+        ObservableList<String> source = sourceOf(list);
+        fillRingBuffer(source);
+        interact(() -> {
+            list.scrollTo(500);
+            autoScroll.setSelected(false);
+        });
+        WaitForAsyncUtils.waitForFxEvents();
+        ViewportAnchor before = firstVisibleAnchor(list);
+
+        interact(() -> stage.hide());
+        WaitForAsyncUtils.waitForFxEvents();
+        appendTrimming(source, 20);
+        interact(() -> stage.show());
+        WaitForAsyncUtils.waitForFxEvents();
+
+        ViewportAnchor after = firstVisibleAnchor(list);
+        assertThat(after.item()).isSameAs(before.item());
+        assertThat(after.offset()).isCloseTo(
+                before.offset(), org.assertj.core.data.Offset.offset(0.5));
+    }
+
+    /** Away long enough for the line to be trimmed: the oldest lines are where it was. */
+    @Test
+    void aReaderWhoseLineWasTrimmedAwayComesBackToTheOldestLine() {
+        ListView<String> list = lookup("#logListView").query();
+        CheckBox autoScroll = lookup("#autoScrollCheckBox").query();
+        ObservableList<String> source = sourceOf(list);
+        fillRingBuffer(source);
+        interact(() -> {
+            list.scrollTo(500);
+            autoScroll.setSelected(false);
+        });
+        WaitForAsyncUtils.waitForFxEvents();
+
+        Scene scene = list.getScene();
+        Parent view = scene.getRoot();
+        interact(() -> scene.setRoot(new StackPane()));
+        WaitForAsyncUtils.waitForFxEvents();
+        appendTrimming(source, 1000);
+        interact(() -> scene.setRoot(view));
+        WaitForAsyncUtils.waitForFxEvents();
+
+        assertThat(firstVisibleIndex(list)).isZero();
+    }
+
+    /** The engine keeps 1000 lines; a long-running instance always has them. */
+    private void fillRingBuffer(ObservableList<String> source) {
+        interact(() -> source.setAll(IntStream.range(0, 1000)
+                .mapToObj(i -> logLine(i))
+                .toList()));
+        WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    /** Lines arriving at a full buffer: each one added drops the oldest. */
+    private void appendTrimming(ObservableList<String> source, int count) {
+        interact(() -> {
+            for (int line = 0; line < count; line++) {
+                source.add(logLine(1000 + line));
+                source.removeFirst();
+            }
+        });
+        WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    /** Counts every row that is handed a different line, through the real cells. */
+    private AtomicInteger countRowUpdates(ListView<String> list) {
+        AtomicInteger updates = new AtomicInteger();
+        interact(() -> {
+            Callback<ListView<String>, ListCell<String>> rows = list.getCellFactory();
+            list.setCellFactory(view -> {
+                ListCell<String> cell = rows.call(view);
+                cell.itemProperty().addListener((obs, was, is) -> updates.incrementAndGet());
+                return cell;
+            });
+            list.layout();
+        });
+        WaitForAsyncUtils.waitForFxEvents();
+        assertThat(updates.get()).as("rows rendered while on screen").isPositive();
+        return updates;
+    }
+
+    @SuppressWarnings("unchecked")
+    private int firstVisibleIndex(ListView<String> list) {
+        AtomicInteger index = new AtomicInteger(-1);
+        interact(() -> {
+            list.layout();
+            VirtualFlow<ListCell<String>> flow =
+                    (VirtualFlow<ListCell<String>>) list.lookup(".virtual-flow");
+            ListCell<String> cell = flow == null ? null : flow.getFirstVisibleCell();
+            index.set(cell == null ? -1 : cell.getIndex());
+        });
+        return index.get();
+    }
+
+    @SuppressWarnings("unchecked")
+    private int lastVisibleIndex(ListView<String> list) {
+        AtomicInteger index = new AtomicInteger(-1);
+        interact(() -> {
+            list.layout();
+            VirtualFlow<ListCell<String>> flow =
+                    (VirtualFlow<ListCell<String>>) list.lookup(".virtual-flow");
+            ListCell<String> cell = flow == null ? null : flow.getLastVisibleCell();
+            index.set(cell == null ? -1 : cell.getIndex());
+        });
+        return index.get();
     }
 
     @SuppressWarnings("unchecked")

@@ -65,6 +65,11 @@ truth read by `pom.xml`, `scripts/bundle-singbox.*` and `SingBoxInstaller`.
   those three mistakes has produced a green test that checked nothing.
 - Threading rules are enforced rather than documented: `ConnectionService`
   throws when `connect`/`disconnect` run on the FX thread.
+- Memory is measured headlessly too: `MemoryProbe` (gated like
+  `ScreenshotGenerator`, `-Dtunl.memprobe=true`) reports allocation, GC and
+  footprint of a connected main view. JVM flags reach the forked JVM only via
+  `JAVA_TOOL_OPTIONS`: surefire's `argLine` comes from a project property, so
+  `-DargLine` on the command line is silently ignored.
 
 ## Identifiers that must not change
 

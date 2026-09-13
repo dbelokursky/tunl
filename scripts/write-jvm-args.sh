@@ -39,4 +39,10 @@ else
 --enable-native-access=ALL-UNNAMED
 ARGFILE
 fi
+
+# The launcher options shared with the packaging scripts through
+# scripts/java-options.txt, so a development run gets the heap a packaged app
+# gets. An argfile has no comments, so they are stripped here.
+awk '{ sub(/#.*/, ""); gsub(/^[[:space:]]+|[[:space:]]+$/, ""); if ($0 != "") print }' \
+    "$(dirname "$0")/java-options.txt" >> "${OUT}"
 echo "[write-jvm-args] wrote ${OUT}"

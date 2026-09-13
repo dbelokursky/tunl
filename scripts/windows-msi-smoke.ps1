@@ -76,6 +76,22 @@ try {
         throw "[windows-msi-smoke] Tunl.cfg does not contain app.version=$ExpectedVersion"
     }
 
+    # Every option in scripts/java-options.txt must reach the launcher: a
+    # packaging change that lost them would ship the RAM-sized default heap
+    # again, and nothing else here would notice.
+    $cfgLines = @(Get-Content $config | ForEach-Object { $_.TrimEnd() })
+    $javaOptions = @(Get-Content (Join-Path $PSScriptRoot 'java-options.txt') |
+        ForEach-Object { ($_ -replace '#.*', '').Trim() } |
+        Where-Object { $_ })
+    if ($javaOptions.Count -eq 0) {
+        throw '[windows-msi-smoke] scripts/java-options.txt lists no options'
+    }
+    foreach ($option in $javaOptions) {
+        if (-not ($cfgLines -ccontains "java-options=$option")) {
+            throw "[windows-msi-smoke] Tunl.cfg does not carry $option from scripts/java-options.txt"
+        }
+    }
+
     $jar = $jars[0].FullName
     $jarEntries = & jar tf $jar
     if ($LASTEXITCODE -ne 0 -or

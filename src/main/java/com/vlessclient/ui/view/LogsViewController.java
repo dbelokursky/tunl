@@ -11,9 +11,15 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.List;
+import java.util.Set;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import javafx.application.Platform;
+import javafx.beans.value.ObservableValue;
 import javafx.collections.FXCollections;
 import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
@@ -60,6 +66,9 @@ public class LogsViewController {
 
     private static final Logger log = LoggerFactory.getLogger(LogsViewController.class);
 
+    /** What the list shows while it is off screen; see followLiveLog. */
+    private static final ObservableList<String> NO_LINES = FXCollections.emptyObservableList();
+
     @FXML private Label titleLabel;
     @FXML private ComboBox<String> logLevelFilter;
     @FXML private TextField searchField;
@@ -71,6 +80,12 @@ public class LogsViewController {
 
     private ObservableList<String> sourceLogLines;
     private FilteredList<String> filteredLogLines;
+    /** Whether the list is in a scene whose window is showing; see followLiveLog. */
+    private ObservableValue<Boolean> listOnScreen;
+    /** Where a reader with auto-scroll off was when the list went off screen. */
+    private ViewportAnchor parkedAnchor;
+    /** The rows selected when the list went off screen. */
+    private List<String> parkedSelection = List.of();
     private ViewportAnchor pendingViewportAnchor;
     private boolean viewportRestoreScheduled;
     private boolean filterChangeInProgress;
@@ -143,6 +158,8 @@ public class LogsViewController {
 
         logListView.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
         logListView.setCellFactory(lv -> new LogLineCell(lv));
+        listOnScreen = OnScreen.of(logListView);
+        listOnScreen.addListener((obs, wasOnScreen, isOnScreen) -> followLiveLog(isOnScreen));
 
         // A queued restore belongs to the viewport position that existed when
         // a log line arrived. If the user navigates before it runs, their new
@@ -190,6 +207,22 @@ public class LogsViewController {
         logLevelFilter.valueProperty().addListener((obs, oldVal, newVal) -> applyFilter());
         searchField.textProperty().addListener((obs, oldVal, newVal) -> applyFilter());
 
+        // Following the tail has to survive a resize as well. A window shown
+        // again at other bounds, or made taller while the log is open, changes
+        // the viewport after the last scroll, and the flow keeps its place from
+        // the top: the newest lines sat below the fold until the next arrived.
+        // The new height arrives in the middle of a layout pass, before the flow
+        // has laid its cells out in it, so the scroll waits for that pass to end.
+        logListView.heightProperty().addListener((obs, oldHeight, newHeight) -> {
+            if (followsTail()) {
+                Platform.runLater(() -> {
+                    if (followsTail()) {
+                        logListView.scrollTo(filteredLogLines.size() - 1);
+                    }
+                });
+            }
+        });
+
         // Re-enabling auto-scroll should immediately snap to the tail.
         autoScrollCheckBox.selectedProperty().addListener((obs, was, isOn) -> {
             discardPendingViewportRestore();
@@ -202,7 +235,9 @@ public class LogsViewController {
             // setPredicate() reports the whole FilteredList as a replacement
             // from index zero. It is a user-requested refilter, not a ring-
             // buffer trim, and applyFilter() applies its own viewport policy.
-            if (filterChangeInProgress) {
+            // Off screen there is no viewport to keep: followLiveLog() puts the
+            // list back in place when it is shown again.
+            if (filterChangeInProgress || !listOnScreen.getValue()) {
                 return;
             }
             if (filteredLogLines.isEmpty()) {
@@ -221,6 +256,84 @@ public class LogsViewController {
             // exact pixel offset, then restore them after the list mutation.
             queueViewportRestore(change);
         });
+    }
+
+    /**
+     * Keeps rows only while someone can see them.
+     *
+     * <p>The view is cached, so the list outlives navigating away, and closing
+     * the window to the tray only hides the stage. Every cell listens to the
+     * item list regardless: once the ring buffer is full, each core log line
+     * drops the oldest one, shifts every index and rebuilds the text of every
+     * row, on a list nobody is looking at. On an instance measured after two
+     * days that was nine tenths of all the memory the app allocated.</p>
+     *
+     * <p>Off screen the list is handed an empty item list, which the cells and
+     * the selection model move their listeners to at once. Taking the skin away
+     * instead is not enough: the cells it built stay subscribed until the
+     * garbage collector finds them, and a cell old enough to have been promoted
+     * can go on rebuilding for days. The reader's selection and place are put
+     * back when the list returns.</p>
+     *
+     * @param onScreen whether the list is now in a scene whose window is showing
+     */
+    private void followLiveLog(boolean onScreen) {
+        if (!onScreen) {
+            if (logListView.getItems() == filteredLogLines) {
+                parkedAnchor = autoScrollCheckBox.isSelected() ? null : firstVisibleAnchor();
+                parkedSelection = new ArrayList<>(
+                        logListView.getSelectionModel().getSelectedItems());
+                discardPendingViewportRestore();
+                logListView.setItems(NO_LINES);
+            }
+            return;
+        }
+        if (logListView.getItems() == filteredLogLines) {
+            return;
+        }
+        logListView.setItems(filteredLogLines);
+        // Apply the real row count now: a scroll issued before the next pulse
+        // would otherwise be measured against the empty stand-in's.
+        logListView.layout();
+        reselect(parkedSelection);
+        parkedSelection = List.of();
+        ViewportAnchor anchor = parkedAnchor;
+        parkedAnchor = null;
+        if (filteredLogLines.isEmpty()) {
+            return;
+        }
+        if (autoScrollCheckBox.isSelected()) {
+            logListView.scrollTo(filteredLogLines.size() - 1);
+        } else if (anchor != null) {
+            // The line the reader was on may have been trimmed away meanwhile;
+            // the oldest remaining lines are then where it used to be.
+            int index = indexOfIdentity(anchor.item());
+            if (index >= 0) {
+                queueViewportRestore(new ViewportAnchor(anchor.item(), index, anchor.offset()));
+            } else {
+                logListView.scrollTo(0);
+            }
+        }
+    }
+
+    /** Whether the list is on screen, has lines, and is meant to show the newest. */
+    private boolean followsTail() {
+        return autoScrollCheckBox.isSelected() && listOnScreen.getValue()
+                && !filteredLogLines.isEmpty();
+    }
+
+    /** Selects again the parked rows still in the buffer, matched by identity. */
+    private void reselect(List<String> lines) {
+        if (lines.isEmpty()) {
+            return;
+        }
+        Set<String> wanted = Collections.newSetFromMap(new IdentityHashMap<>());
+        wanted.addAll(lines);
+        for (int i = 0; i < filteredLogLines.size(); i++) {
+            if (wanted.contains(filteredLogLines.get(i))) {
+                logListView.getSelectionModel().select(i);
+            }
+        }
     }
 
     /**
@@ -301,6 +414,9 @@ public class LogsViewController {
         if (index < 0) {
             index = Math.min(anchor.index(), filteredLogLines.size() - 1);
         }
+        // Apply an item count the flow has not laid out yet; scrollToTop clamps
+        // against the count it last saw.
+        logListView.layout();
         flow.scrollToTop(index);
         flow.layout();
 
