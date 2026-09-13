@@ -9,14 +9,16 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.FormatStyle;
 import java.util.Locale;
 import java.util.Optional;
-import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.WeakChangeListener;
+import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
+import javafx.stage.Window;
 
 /**
  * The Traffic history card in Settings: how much the record holds, since
@@ -45,7 +47,7 @@ public final class TrafficHistorySettingsSection {
 
     private final TrafficHistoryStore store;
     private final Controls controls;
-    private final BooleanSupplier confirm;
+    private final Predicate<Window> confirm;
 
     /**
      * Creates the section; nothing is wired until {@link #init()} runs.
@@ -53,10 +55,11 @@ public final class TrafficHistorySettingsSection {
      * @param store the history to report and clear, or null when unavailable
      * @param controls the injected nodes
      * @param confirm asks the user before clearing, which happens only on
-     *     true; a parameter so a test can answer without a modal dialog
+     *     true, and is handed the window the Clear button is in for its dialog
+     *     to belong to; a parameter so a test can answer without a modal dialog
      */
     public TrafficHistorySettingsSection(TrafficHistoryStore store, Controls controls,
-                                         BooleanSupplier confirm) {
+                                         Predicate<Window> confirm) {
         this.store = store;
         this.controls = controls;
         this.confirm = confirm;
@@ -99,21 +102,30 @@ public final class TrafficHistorySettingsSection {
     }
 
     private void clear() {
-        if (store == null || !confirm.getAsBoolean()) {
+        if (store == null || !confirm.test(ownerWindow())) {
             return;
         }
         store.reset();
         refresh();
     }
 
+    /** The window the Clear button is in, or null while the card is in none. */
+    private Window ownerWindow() {
+        Scene scene = controls.clearButton().getScene();
+        return scene == null ? null : scene.getWindow();
+    }
+
     /**
      * The confirmation the Settings view hands in: a modal dialog, which is
-     * why it is a static method passed as a supplier rather than something the
+     * why it is a static method passed as a function rather than something the
      * button calls directly.
      *
+     * @param owner the window the dialog belongs to. JavaFX gives a dialog the
+     *     stylesheets of its owner's scene and no others, so without an owner
+     *     it came up in stock light Modena over the dark theme
      * @return true when the user chose to clear the record
      */
-    public static boolean confirmWithDialog() {
+    public static boolean confirmWithDialog(Window owner) {
         ButtonType clear = new ButtonType(I18n.get("settings.traffic.history.clear.action"),
                 ButtonBar.ButtonData.OK_DONE);
         ButtonType cancel = new ButtonType(I18n.get("button.cancel"),
@@ -133,6 +145,7 @@ public final class TrafficHistorySettingsSection {
         if (dialog.getDialogPane().lookupButton(cancel) instanceof Button keeping) {
             keeping.setDefaultButton(true);
         }
+        dialog.initOwner(owner);
         return dialog.showAndWait().filter(button -> button == clear).isPresent();
     }
 }

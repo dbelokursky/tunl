@@ -16,6 +16,7 @@ import javafx.application.Platform;
 import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
 import javafx.geometry.Pos;
+import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
@@ -29,6 +30,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+import javafx.stage.Window;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -125,6 +127,9 @@ public class SubscriptionsViewController {
 
     /** Runs a service call off the FX thread and reports a failure in a dialog. */
     private void runOffFxThread(Runnable action, String failureHeaderKey) {
+        // Taken while the view is on screen: the failure can land after the
+        // user has gone to another page, which takes this view out of the window.
+        Window owner = ownerWindow();
         Thread.startVirtualThread(() -> {
             try {
                 action.run();
@@ -136,6 +141,7 @@ public class SubscriptionsViewController {
                     alert.setTitle(I18n.get("dialog.error"));
                     alert.setHeaderText(I18n.get(failureHeaderKey));
                     alert.setContentText(e.getMessage());
+                    alert.initOwner(owner);
                     alert.showAndWait();
                 });
             }
@@ -168,11 +174,9 @@ public class SubscriptionsViewController {
         // MITM-injectable, but some providers only offer http, so this shows
         // the risk while the URL is http and never stops the user.
         Label httpWarning = new Label(I18n.get("subscriptions.http.warning"));
+        httpWarning.getStyleClass().add("subscription-http-warning");
         httpWarning.setWrapText(true);
         httpWarning.setMaxWidth(350);
-        // Literal amber: the dialog is not inside the themed scene graph, so a
-        // looked-up -c-warn colour could fail to resolve.
-        httpWarning.setStyle("-fx-text-fill: #ef6c00; -fx-font-size: 11px;");
         httpWarning.setVisible(false);
         httpWarning.setManaged(false);
         urlField.textProperty().addListener((obs, oldVal, newVal) -> {
@@ -192,6 +196,7 @@ public class SubscriptionsViewController {
 
         dialog.getDialogPane().setContent(grid);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        dialog.initOwner(ownerWindow());
 
         Platform.runLater(nameField::requestFocus);
 
@@ -205,6 +210,7 @@ public class SubscriptionsViewController {
             Alert alert = new Alert(Alert.AlertType.WARNING);
             alert.setTitle(I18n.get("subscriptions.invalid.input"));
             alert.setHeaderText(I18n.get("subscriptions.name.url.required"));
+            alert.initOwner(ownerWindow());
             alert.showAndWait();
             return Optional.empty();
         }
@@ -232,12 +238,19 @@ public class SubscriptionsViewController {
         confirm.setHeaderText(I18n.get("subscriptions.delete.confirm", sub.getName()));
         confirm.setContentText(I18n.get("subscriptions.delete.content",
                 String.valueOf(sub.getServerIds().size())));
+        confirm.initOwner(ownerWindow());
 
         Optional<ButtonType> result = confirm.showAndWait();
         if (result.isPresent() && result.get() == ButtonType.OK) {
             subscriptionService.removeSubscription(sub.getId());
             log.info("Deleted subscription: {}", sub.getName());
         }
+    }
+
+    /** The window the dialogs belong to, or null before the view is shown. */
+    private Window ownerWindow() {
+        Scene scene = subscriptionListView.getScene();
+        return scene == null ? null : scene.getWindow();
     }
 
     /**
