@@ -309,4 +309,38 @@ class ServerBackupServiceTest {
                 .doesNotContain("secret-token-123"));
         assertThat(store.getServers()).isEmpty();
     }
+
+    @Test
+    void aListOfOnlyMalformedLinksFailsWithoutQuotingOne() throws IOException {
+        Path file = tempDir.resolve("links.txt");
+        Files.writeString(file, "trojan://alpha7 omega9@198.51.100.8:8443#Broken\n",
+                StandardCharsets.UTF_8);
+
+        // The first skip's reason becomes this message, which the view logs
+        // and shows. That reason came from java.net.URI, quoting the link.
+        assertThatThrownBy(() -> backup.importFile(file))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Illegal character in authority")
+                .hasMessageNotContaining("alpha7")
+                .hasMessageNotContaining("omega9");
+    }
+
+    @Test
+    void aSkipReasonNeverQuotesTheLinkEvenWhenTheParserDoes() {
+        ShareLinkParser quoting = new ShareLinkParser() {
+            @Override
+            public ServerConfig parse(String uri) {
+                throw new IllegalArgumentException("Cannot read " + uri);
+            }
+        };
+
+        ServerBackupService.ImportResult result =
+                new ServerBackupService(store, quoting).importShareLinks(PASTED_NL);
+
+        // The reason is printed beside the redacted entry in the import
+        // report, which is the dialog people screenshot into bug reports.
+        assertThat(result.skipped()).singleElement().satisfies(skip -> assertThat(skip.reason())
+                .doesNotContain("11111111-2222-3333-4444-555555555555")
+                .isEqualTo("Cannot read vless://198.51.100.7:443/…"));
+    }
 }

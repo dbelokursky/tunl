@@ -270,8 +270,11 @@ public class ServerBackupService {
                 parsed.add(shareLinkParser.parse(line));
             } catch (RuntimeException e) {
                 // The line is a credential-bearing URL; report it redacted so
-                // the message is safe to paste into a bug report.
-                skipped.add(new Skip(Redact.url(line), e.getMessage()));
+                // the message is safe to paste into a bug report. The reason
+                // too, since a parser message can quote the line: it is shown
+                // in the import report, and a file with no readable line fails
+                // with the first one.
+                skipped.add(new Skip(Redact.url(line), Redact.urlsIn(e.getMessage())));
             }
         }
         return parsed;
