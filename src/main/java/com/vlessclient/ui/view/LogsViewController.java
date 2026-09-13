@@ -207,6 +207,22 @@ public class LogsViewController {
         logLevelFilter.valueProperty().addListener((obs, oldVal, newVal) -> applyFilter());
         searchField.textProperty().addListener((obs, oldVal, newVal) -> applyFilter());
 
+        // Following the tail has to survive a resize as well. A window shown
+        // again at other bounds, or made taller while the log is open, changes
+        // the viewport after the last scroll, and the flow keeps its place from
+        // the top: the newest lines sat below the fold until the next arrived.
+        // The new height arrives in the middle of a layout pass, before the flow
+        // has laid its cells out in it, so the scroll waits for that pass to end.
+        logListView.heightProperty().addListener((obs, oldHeight, newHeight) -> {
+            if (followsTail()) {
+                Platform.runLater(() -> {
+                    if (followsTail()) {
+                        logListView.scrollTo(filteredLogLines.size() - 1);
+                    }
+                });
+            }
+        });
+
         // Re-enabling auto-scroll should immediately snap to the tail.
         autoScrollCheckBox.selectedProperty().addListener((obs, was, isOn) -> {
             discardPendingViewportRestore();
@@ -276,9 +292,8 @@ public class LogsViewController {
             return;
         }
         logListView.setItems(filteredLogLines);
-        // Showing a hidden window can lay the scene out before its listeners
-        // hear about it, so the flow may still count the empty stand-in's rows;
-        // a scroll issued before the next pulse would land at the end of none.
+        // Apply the real row count now: a scroll issued before the next pulse
+        // would otherwise be measured against the empty stand-in's.
         logListView.layout();
         reselect(parkedSelection);
         parkedSelection = List.of();
@@ -299,6 +314,12 @@ public class LogsViewController {
                 logListView.scrollTo(0);
             }
         }
+    }
+
+    /** Whether the list is on screen, has lines, and is meant to show the newest. */
+    private boolean followsTail() {
+        return autoScrollCheckBox.isSelected() && listOnScreen.getValue()
+                && !filteredLogLines.isEmpty();
     }
 
     /** Selects again the parked rows still in the buffer, matched by identity. */

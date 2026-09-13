@@ -41,6 +41,13 @@ public class LogsViewTest extends ApplicationTest {
         Parent root = loader.load();
         stage.setScene(new Scene(root, 800, 600));
         stage.show();
+        // The primary stage is shared by every test class in the fork. A class
+        // that sized it explicitly (DashboardLayoutTest does) leaves those bounds
+        // to be reapplied on the next show(), under a scroll this class asserts
+        // on. sizeToScene() on the shown window fits it to this scene and drops
+        // the explicit bounds, so this class inherits none and passes none on:
+        // setting a size here instead broke the 500 px fit tests that follow.
+        stage.sizeToScene();
     }
 
     @Test
@@ -200,6 +207,34 @@ public class LogsViewTest extends ApplicationTest {
         assertThat(after.item()).isSameAs(before.item());
         assertThat(after.offset()).isCloseTo(
                 before.offset(), org.assertj.core.data.Offset.offset(0.5));
+    }
+
+    /**
+     * A window can come back with other bounds than it left with; on the
+     * Windows runner the list landed seven rows short of the tail. A scroll
+     * issued against the viewport it had before showing must still end there.
+     */
+    @Test
+    void theTailIsShownWhenTheWindowComesBackAtAnotherSize() {
+        ListView<String> list = lookup("#logListView").query();
+        ObservableList<String> source = sourceOf(list);
+        fillRingBuffer(source);
+
+        interact(() -> stage.hide());
+        WaitForAsyncUtils.waitForFxEvents();
+        appendTrimming(source, 20);
+        try {
+            interact(() -> {
+                stage.setHeight(stage.getHeight() - 150);
+                stage.show();
+            });
+            WaitForAsyncUtils.waitForFxEvents();
+
+            assertThat(lastVisibleIndex(list)).isEqualTo(list.getItems().size() - 1);
+        } finally {
+            // An explicit height would follow the shared stage into the next class.
+            interact(() -> stage.sizeToScene());
+        }
     }
 
     /**
