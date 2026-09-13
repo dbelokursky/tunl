@@ -112,6 +112,37 @@ class SingBoxRealBinarySmokeTest {
         }
     }
 
+    /**
+     * The production check against the real core: what it lets through, and
+     * what it refuses in the core's own words. A subscription can still carry
+     * Xray's retired {@code xtls-rprx-direct} flow; the core refuses to build
+     * it, and before the check that refusal came after the TUN prompt.
+     */
+    @Test
+    void productionCheckPassesGeneratedConfigsAndQuotesTheCoresRefusal() throws Exception {
+        SingBoxConfigCheck check = new SingBoxConfigCheck(Duration.ofSeconds(30));
+        AppSettings settings = new AppSettings();
+        settings.setProxyMode(ProxyMode.TUN);
+        Path accepted = Files.createTempFile("smoke-check-ok-", ".json");
+        Path refused = Files.createTempFile("smoke-check-refused-", ".json");
+        try {
+            Files.writeString(accepted, generator.generate(serverFor(Protocol.VLESS), settings));
+            assertThat(check.rejection(binary, accepted)).isEmpty();
+
+            ServerConfig legacy = serverFor(Protocol.VLESS);
+            legacy.setFlow("xtls-rprx-direct");
+            Files.writeString(refused, generator.generate(legacy, settings));
+            assertThat(check.rejection(binary, refused)).hasValueSatisfying(reason ->
+                    assertThat(reason)
+                            .contains("unsupported flow: xtls-rprx-direct")
+                            .doesNotContain("FATAL")
+                            .doesNotContain(refused.toString()));
+        } finally {
+            Files.deleteIfExists(accepted);
+            Files.deleteIfExists(refused);
+        }
+    }
+
     @Test
     void checkAcceptsRoutingConfigs() throws Exception {
         // Custom rules + user bypass list.

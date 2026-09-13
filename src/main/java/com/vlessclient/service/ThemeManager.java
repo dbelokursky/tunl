@@ -1,7 +1,6 @@
 package com.vlessclient.service;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
+import com.vlessclient.platform.MacAppearance;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.Executors;
@@ -22,12 +21,13 @@ import org.slf4j.LoggerFactory;
  * watcher polls the OS appearance and re-applies the stylesheet when the user
  * toggles macOS between Light and Dark.</p>
  *
- * <p>Detection reads the {@code AppleInterfaceStyle} default via a fresh
- * subprocess each poll. This was chosen deliberately over the JavaFX
+ * <p>Each poll reads the {@code AppleInterfaceStyle} default in-process through
+ * {@link MacAppearance}, rather than starting a {@code defaults} process every
+ * few seconds. Reading the default was chosen deliberately over the JavaFX
  * {@code Platform.getPreferences().colorScheme} property, which does not report
  * macOS appearance changes on the JavaFX runtime this app bundles (its
- * listener never fires and its initial value is unreliable). A fresh
- * {@code defaults} read, by contrast, always reflects the current setting.</p>
+ * listener never fires and its initial value is unreliable). The default, by
+ * contrast, always reflects the current setting.</p>
  */
 public class ThemeManager {
 
@@ -208,32 +208,10 @@ public class ThemeManager {
 
     /**
      * Detects macOS dark mode by reading the {@code AppleInterfaceStyle}
-     * default. Returns true if dark mode is active. A fresh subprocess is used
-     * each call so the value always reflects the current OS setting.
+     * default. Returns true if dark mode is active, false on other platforms.
+     * Every call reads the current value, so the watcher sees the user switch.
      */
     static boolean isSystemDarkMode() {
-        try {
-            ProcessBuilder pb = new ProcessBuilder(
-                    "defaults", "read", "-g", "AppleInterfaceStyle");
-            pb.redirectErrorStream(true);
-            Process process = pb.start();
-
-            String output;
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream()))) {
-                output = reader.readLine();
-            }
-
-            boolean exited = process.waitFor(2, TimeUnit.SECONDS);
-            if (!exited) {
-                process.destroyForcibly();
-                return false;
-            }
-
-            return "Dark".equalsIgnoreCase(output != null ? output.trim() : "");
-        } catch (Exception e) {
-            log.debug("Could not detect system dark mode, defaulting to light", e);
-            return false;
-        }
+        return MacAppearance.isDark();
     }
 }

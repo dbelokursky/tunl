@@ -7,6 +7,7 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.CountryResolver;
 import com.vlessclient.service.LatencyTester;
+import com.vlessclient.service.Redact;
 import com.vlessclient.service.ServerBackupService;
 import com.vlessclient.service.ShareLinkExporter;
 import com.vlessclient.service.ShareLinkParser;
@@ -21,6 +22,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.collections.ObservableList;
@@ -43,10 +45,13 @@ import javafx.scene.control.MenuItem;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TextInputControl;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyCodeCombination;
+import javafx.scene.input.KeyCombination;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.HBox;
@@ -70,10 +75,15 @@ public class ServersViewController {
 
     private static final Logger log = LoggerFactory.getLogger(ServersViewController.class);
 
+    /** Cmd+V on macOS, Ctrl+V elsewhere: the platform's paste. */
+    private static final KeyCombination PASTE =
+            new KeyCodeCombination(KeyCode.V, KeyCombination.SHORTCUT_DOWN);
+
+    @FXML private VBox rootNode;
     @FXML private Label titleLabel;
     @FXML private ListView<ServerConfig> serverListView;
     @FXML private Button addServerButton;
-    @FXML private Button importLinkButton;
+    @FXML private MenuButton importMenuButton;
     @FXML private MenuButton backupMenuButton;
     @FXML private VBox emptyState;
     @FXML private Label emptyStateTitle;
@@ -87,6 +97,12 @@ public class ServersViewController {
     private FilteredList<ServerConfig> filtered;
     private SortedList<ServerConfig> sorted;
     private LatencyTester latencyTester;
+
+    /**
+     * Where the clipboard import reads its text: the system clipboard, except
+     * in a test, since headless JavaFX has none to fill.
+     */
+    private Supplier<String> clipboardText = () -> Clipboard.getSystemClipboard().getString();
 
     /**
      * How the list is ordered. {@link #CONFIGURED} is the stored order, kept as
@@ -136,14 +152,23 @@ public class ServersViewController {
         setUpSort();
         setUpMeasureButton();
         setUpBackupMenu();
-        ButtonLabels.bindStatic(importLinkButton, "button.import.link");
+        setUpImportMenu();
         ButtonLabels.bindAddAction(addServerButton, "button.add.server");
+        // On the whole view rather than the list alone, so the shortcut also
+        // works from the header controls, including while the list is hidden
+        // behind the empty state and cannot take focus.
+        rootNode.addEventHandler(KeyEvent.KEY_PRESSED, this::onPasteShortcut);
 
         servers.addListener((javafx.collections.ListChangeListener<ServerConfig>) change -> {
             updateEmptyState(servers);
         });
 
         updateEmptyState(servers);
+    }
+
+    /** Replaces the clipboard the import reads; for tests, which have none. */
+    void setClipboardText(Supplier<String> source) {
+        this.clipboardText = source;
     }
 
     /** Returns the service, or null when it is not registered. */
@@ -384,7 +409,6 @@ public class ServersViewController {
      * a choice the text itself already answers — a {@code .conf} always has an
      * {@code [Interface]} section, and a share link never does.</p>
      */
-    @FXML
     private void onImportLinkClicked() {
         Dialog<String> dialog = new Dialog<>();
         dialog.setTitle(I18n.get("dialog.import.link"));
@@ -428,6 +452,116 @@ public class ServersViewController {
         alert.setHeaderText(I18n.get("servers.import.error.header"));
         alert.setContentText(e.getMessage());
         alert.showAndWait();
+    }
+
+    /**
+     * Builds the import menu: the clipboard, and the dialog for a link or a
+     * {@code .conf} typed in by hand. The items are created here, like the
+     * backup menu's, so their labels follow a language switch.
+     */
+    private void setUpImportMenu() {
+        ButtonLabels.bindStatic(importMenuButton, "servers.import");
+        MenuItem clipboardItem = new MenuItem();
+        clipboardItem.setId("importClipboardItem");
+        clipboardItem.textProperty().bind(I18n.binding("servers.import.clipboard"));
+        clipboardItem.setOnAction(event -> importFromClipboard());
+        MenuItem linkItem = new MenuItem();
+        linkItem.setId("importLinkItem");
+        linkItem.textProperty().bind(I18n.binding("servers.import.link"));
+        linkItem.setOnAction(event -> onImportLinkClicked());
+        importMenuButton.getItems().setAll(clipboardItem, linkItem);
+    }
+
+    /**
+     * The paste shortcut anywhere in this view imports from the clipboard,
+     * except in a text input, where a paste belongs to the input. The search
+     * field consumes the key before it gets here; the check keeps that true of
+     * any text input rather than resting on how each one handles the key.
+     */
+    private void onPasteShortcut(KeyEvent event) {
+        if (PASTE.match(event) && !(event.getTarget() instanceof TextInputControl)) {
+            event.consume();
+            importFromClipboard();
+        }
+    }
+
+    /**
+     * Imports the share links on the clipboard and reports what came of it.
+     *
+     * <p>The clipboard is read here and nowhere else: never when the window
+     * gains focus, never on a timer. What a user copied is theirs, and it is
+     * as often a password as a link. For the same reason nothing that was on
+     * it is logged; the import logs counts only. The links go through the same
+     * parsing, skip reporting and single batched save as a link list imported
+     * from a file.</p>
+     */
+    private void importFromClipboard() {
+        ServerBackupService backup = optionalService(ServerBackupService.class);
+        if (backup == null) {
+            return;
+        }
+        ServerBackupService.ImportResult result;
+        try {
+            result = backup.importShareLinks(clipboardText.get());
+        } catch (RuntimeException e) {
+            // Scrubbed: a message from anywhere below may quote a link.
+            log.error("Failed to import from the clipboard: {}",
+                    Redact.urlsIn(String.valueOf(e.getMessage())));
+            showImportError(e);
+            return;
+        }
+        showClipboardImport(result);
+    }
+
+    /**
+     * Reports a clipboard import in the dialog an import from a file ends
+     * with. When nothing came in it says why, because the usual causes need
+     * different next steps: the clipboard held no links at all; it held a
+     * subscription URL, which belongs on the Subscriptions page (no import here
+     * fetches a URL, the link dialog included); or its links were broken.
+     *
+     * <p>Shown without waiting, since nothing depends on it being closed.</p>
+     */
+    private void showClipboardImport(ServerBackupService.ImportResult result) {
+        int imported = result.added() + result.updated();
+        int skipped = result.skipped().size();
+        Alert report = new Alert(Alert.AlertType.INFORMATION);
+        report.initOwner(ownerWindow());
+        if (imported == 0) {
+            report.setTitle(I18n.get("servers.import.clipboard"));
+            report.setHeaderText(I18n.get("servers.import.clipboard.nothing"));
+            report.setContentText(nothingImportedReason(result));
+        } else if (skipped == 0) {
+            report.setTitle(I18n.get("servers.backup.import.done.title"));
+            report.setHeaderText(I18n.get("servers.import.clipboard.done", imported));
+        } else {
+            report.setTitle(I18n.get("servers.backup.import.done.title"));
+            report.setHeaderText(I18n.get("servers.import.clipboard.partial", imported, skipped));
+            report.setContentText(skippedList(result));
+        }
+        report.show();
+    }
+
+    /** Why a clipboard import brought nothing in, in words the user can act on. */
+    private static String nothingImportedReason(ServerBackupService.ImportResult result) {
+        if (result.skipped().isEmpty()) {
+            return I18n.get("servers.import.clipboard.no.links");
+        }
+        if (result.skipped().stream().allMatch(ServersViewController::isWebAddress)) {
+            return I18n.get("servers.import.clipboard.subscription");
+        }
+        return skippedList(result);
+    }
+
+    /**
+     * Whether a skipped entry was an http or https address, which to a list of
+     * servers means a subscription URL. Skips are reported through
+     * {@link Redact#url}, which keeps the scheme, so the scheme is all this
+     * reads.
+     */
+    private static boolean isWebAddress(ServerBackupService.Skip skip) {
+        String entry = skip.entry().toLowerCase(Locale.ROOT);
+        return entry.startsWith("http://") || entry.startsWith("https://");
     }
 
     /**
@@ -533,18 +667,27 @@ public class ServersViewController {
 
     /**
      * The body of the import report: where it came from, and — when entries
-     * were dropped — which ones and why. Capped at five, because a stale
-     * thirty-line link list would otherwise fill the screen with a dialog the
-     * user cannot scroll.
+     * were dropped — which ones and why.
      */
     private static String importSummary(String fileName, ServerBackupService.ImportResult result) {
         StringBuilder text = new StringBuilder(
                 I18n.get("servers.backup.import.done.content", fileName));
         if (!result.skipped().isEmpty()) {
-            text.append("\n\n").append(I18n.get("servers.backup.import.skipped.list"));
-            result.skipped().stream().limit(5).forEach(skip -> text.append('\n')
-                    .append(skip.entry()).append(" — ").append(skip.reason()));
+            text.append("\n\n").append(skippedList(result));
         }
+        return text.toString();
+    }
+
+    /**
+     * The entries an import dropped and why, under a "Skipped:" heading, for a
+     * file and the clipboard alike. Capped at five, because a stale thirty-line
+     * link list would otherwise fill the screen with a dialog the user cannot
+     * scroll.
+     */
+    private static String skippedList(ServerBackupService.ImportResult result) {
+        StringBuilder text = new StringBuilder(I18n.get("servers.backup.import.skipped.list"));
+        result.skipped().stream().limit(5).forEach(skip -> text.append('\n')
+                .append(skip.entry()).append(" — ").append(skip.reason()));
         return text.toString();
     }
 

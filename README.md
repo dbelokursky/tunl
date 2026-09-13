@@ -125,10 +125,12 @@ not where it stores things.
 
 ## First connection
 
-1. **Add a server.** **Servers** tab → **Import Link** → paste the
-   `vless://…` / `vmess://…` / `trojan://…` / `ss://…` / `hysteria2://…`
-   link from your provider, or a whole WireGuard `.conf` — the form fills
-   itself. (Or **Add Server** and fill the form manually; a third way is the
+1. **Add a server.** Copy the `vless://…` / `vmess://…` / `trojan://…` /
+   `ss://…` / `hysteria2://…` link from your provider (one or several), then
+   on the **Servers** tab choose **Import** → **Import from clipboard**, or
+   press `⌘V` / `Ctrl+V` in the server list. **Import** → **Import a link or
+   WireGuard .conf…** takes a link typed by hand or a whole WireGuard `.conf`.
+   (Or **Add Server** and fill the form manually; a third way is the
    **Subscriptions** tab with a subscription URL — the server list will keep
    itself in sync.) On a fresh install the Dashboard card links straight to
    the Servers view.
@@ -308,6 +310,7 @@ discarded, so the bundled binary always wins.
 |--------|---------------------------------------------------------------|
 | `⌘⇧C`  | Connect / Disconnect                                          |
 | `⌘N`   | Add server                                                    |
+| `⌘V`   | Import share links from the clipboard (on the Servers tab)    |
 | `⌘1`   | Dashboard                                                     |
 | `⌘2`   | Servers                                                       |
 | `⌘3`   | Subscriptions                                                 |
