@@ -15,6 +15,7 @@
 <VBox xmlns="http://javafx.com/javafx"
       xmlns:fx="http://javafx.com/fxml"
       fx:controller="com.vlessclient.ui.view.ServersViewController"
+      fx:id="rootNode"
       spacing="16">
 
     <!-- Header -->
@@ -26,8 +27,13 @@
              overflow the 500px viewport in Russian. Its items are built by
              the controller so their labels follow the locale. -->
         <MenuButton fx:id="backupMenuButton" text="Backup" styleClass="secondary-button"/>
-        <Button fx:id="importLinkButton" text="Import Link" styleClass="secondary-button"
-                onAction="#onImportLinkClicked"/>
+        <!-- Share links in: straight from the clipboard, or typed into the
+             link dialog. A menu for the same reason as Backup: at 500px the
+             Russian header was already short of room for these three, so the
+             clipboard could not have a button of its own, and the Russian
+             "Import" is narrower than the "Import Link" button this replaced.
+             Its items are built by the controller too. -->
+        <MenuButton fx:id="importMenuButton" text="Import" styleClass="secondary-button"/>
         <Button fx:id="addServerButton" text="+ Add Server" styleClass="primary-button"
                 onAction="#onAddServerClicked"/>
     </HBox>

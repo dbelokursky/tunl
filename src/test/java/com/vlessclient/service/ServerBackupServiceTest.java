@@ -233,4 +233,80 @@ class ServerBackupServiceTest {
         assertThat(store.getServers().get(0).getId()).isNotBlank();
         assertThat(store.getServers().get(0).getUuid()).isEqualTo("legacy-uuid");
     }
+
+    private static final String PASTED_NL =
+            "vless://11111111-2222-3333-4444-555555555555@198.51.100.7:443?type=tcp#NL";
+
+    @Test
+    void pastedLinksAreSplitOnAnyWhitespaceNotOnlyLineBreaks() {
+        ServerBackupService.ImportResult result = backup.importShareLinks(PASTED_NL
+                + "  trojan://trojan-password@198.51.100.8:8443#DE\r\n\n\t"
+                + "hysteria2://hy2-password@198.51.100.9:443#FI\n");
+
+        assertThat(result.added()).isEqualTo(3);
+        assertThat(result.skipped()).isEmpty();
+        // Read as lines, the first line is one vless link whose name is
+        // everything after its '#': the whole trojan link, password included.
+        assertThat(store.getServers())
+                .extracting(ServerConfig::getName).containsExactly("NL", "DE", "FI");
+    }
+
+    @Test
+    void wordsAroundPastedLinksAreNeitherServersNorSkips() {
+        ServerBackupService.ImportResult result = backup.importShareLinks(
+                "Here are your servers:\n" + PASTED_NL + "\nEnjoy!");
+
+        assertThat(result.added()).isEqualTo(1);
+        assertThat(result.skipped())
+                .as("nobody meant \"Enjoy!\" as a server; reporting it skipped is noise")
+                .isEmpty();
+    }
+
+    @Test
+    void aBrokenPastedLinkIsSkippedWithoutItsCredential() {
+        ServerBackupService.ImportResult result = backup.importShareLinks(
+                PASTED_NL + " quux://leaked-credential@bad.example.com:443#broken");
+
+        assertThat(result.added()).isEqualTo(1);
+        assertThat(result.skipped()).singleElement().satisfies(skip -> assertThat(skip.entry())
+                .startsWith("quux://")
+                .doesNotContain("leaked-credential"));
+    }
+
+    @Test
+    void pastedTextWithNothingUsableLeavesTheListAlone() throws IOException {
+        store.addServer(server("Netherlands 01", Protocol.VLESS, "vless-secret-uuid"));
+        Path saved = store.getDataDir().resolve("servers.json");
+        String before = Files.readString(saved, StandardCharsets.UTF_8);
+
+        ServerBackupService.ImportResult empty = backup.importShareLinks(null);
+        ServerBackupService.ImportResult prose = backup.importShareLinks("see you at 10");
+        ServerBackupService.ImportResult broken = backup.importShareLinks("vless://no-uuid-here");
+
+        assertThat(empty.added()).isZero();
+        assertThat(empty.skipped()).isEmpty();
+        assertThat(prose.added()).isZero();
+        assertThat(prose.skipped()).isEmpty();
+        assertThat(broken.added()).isZero();
+        assertThat(broken.skipped()).hasSize(1);
+        assertThat(store.getServers()).hasSize(1);
+        assertThat(Files.readString(saved, StandardCharsets.UTF_8)).isEqualTo(before);
+    }
+
+    /**
+     * No import here fetches a URL (the link dialog rejects one as an
+     * unsupported scheme), so a subscription URL is skipped like any other
+     * link that is not a server: under its scheme and host, without the token.
+     */
+    @Test
+    void aPastedSubscriptionUrlIsSkippedNotFetched() {
+        ServerBackupService.ImportResult result =
+                backup.importShareLinks("https://sub.example.com/link/secret-token-123");
+
+        assertThat(result.added()).isZero();
+        assertThat(result.skipped()).singleElement().satisfies(skip -> assertThat(skip.entry())
+                .startsWith("https://sub.example.com")
+                .doesNotContain("secret-token-123"));
+        assertThat(store.getServers()).isEmpty();
+    }
 }
