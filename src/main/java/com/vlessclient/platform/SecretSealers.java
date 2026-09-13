@@ -10,9 +10,10 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Factory and shared plumbing for {@link SecretSealer} backends: the macOS
- * Keychain ({@code security}), Windows DPAPI (PowerShell), and the Linux
- * Secret Service ({@code secret-tool}), with a no-op fallback when nothing is
- * available. Secrets are always passed over stdin/stdout, never in argv.
+ * Keychain ({@code security}), Windows DPAPI (in-process, through
+ * {@code crypt32}), and the Linux Secret Service ({@code secret-tool}), with a
+ * no-op fallback when nothing is available. Whenever a backend runs a command,
+ * secrets travel over stdin/stdout, never in argv.
  */
 public final class SecretSealers {
 
