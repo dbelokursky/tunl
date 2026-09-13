@@ -13,13 +13,17 @@ import com.vlessclient.service.TestConfigStores;
 import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.service.TunnelRecoveryService;
 import org.junit.jupiter.api.AfterEach;
+import com.vlessclient.testing.Await;
+import com.vlessclient.testing.FxPulses;
 import com.vlessclient.testing.FxToolkitExtension;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
@@ -117,6 +121,23 @@ class HealthCheckCoordinatorTest {
 
         int calls() {
             return calls;
+        }
+    }
+
+    /** Answers every probe with the same result and counts them. */
+    private static final class CountingChecker extends ServiceReachabilityChecker {
+        private final AtomicInteger calls = new AtomicInteger();
+        private final List<ProbeResult> results;
+
+        CountingChecker(List<ProbeResult> results) {
+            this.results = results;
+        }
+
+        @Override
+        public CompletableFuture<List<ProbeResult>> checkAll(
+                List<HealthCheckTarget> targets, int httpProxyPort) {
+            calls.incrementAndGet();
+            return CompletableFuture.completedFuture(results);
         }
     }
 
@@ -507,5 +528,54 @@ class HealthCheckCoordinatorTest {
         assertThat(healthState.get())
                 .as("switching the checks off must not leave the user amber forever")
                 .isEqualTo(TunnelHealth.UNMONITORED);
+    }
+
+    // ===== the wait between probes =====
+
+    /**
+     * The wait lasts as long as the tunnel does, window hidden to the tray
+     * included. A PauseTransition waiting it out kept JavaFX pulsing at the
+     * display refresh rate the whole time while drawing nothing.
+     */
+    @Test
+    void theWaitForTheNextProbePlaysNoAnimation() throws Exception {
+        AppSettings settings = healthSettings(false, new HealthCheckTarget("a", "https://a"));
+        settings.setHealthCheckIntervalSeconds(1);
+        CountingChecker checker = new CountingChecker(List.of(probe("a", true)));
+        HealthCheckCoordinator coordinator = coordinatorWith(checker);
+        int animationsBefore = FxPulses.runningAnimations();
+
+        try {
+            connectAndCheck(coordinator);
+            assertThat(checker.calls).hasValue(1);
+            assertThat(FxPulses.runningAnimations())
+                    .as("waiting for the next probe must leave the pulse timer free to pause")
+                    .isEqualTo(animationsBefore);
+
+            Await.until("the periodic re-check", () -> checker.calls.get() >= 2,
+                    Duration.ofSeconds(5));
+        } finally {
+            disconnect(coordinator);
+        }
+    }
+
+    @Test
+    void disconnectingDropsTheScheduledProbe() throws Exception {
+        AppSettings settings = healthSettings(false, new HealthCheckTarget("a", "https://a"));
+        settings.setHealthCheckIntervalSeconds(1);
+        CountingChecker checker = new CountingChecker(List.of(probe("a", true)));
+        HealthCheckCoordinator coordinator = coordinatorWith(checker);
+
+        connectAndCheck(coordinator);
+        disconnect(coordinator);
+        Thread.sleep(1_500);
+        flushFxEvents();
+
+        assertThat(checker.calls).as("no probe once the tunnel is down").hasValue(1);
+    }
+
+    private void disconnect(HealthCheckCoordinator coordinator) throws InterruptedException {
+        engine.state.set(ConnectionState.DISCONNECTED);
+        onFxAndWait(() -> coordinator.onConnectionStateChanged(ConnectionState.DISCONNECTED));
     }
 }

@@ -3,6 +3,9 @@ package com.vlessclient.ui.view.dashboard;
 import com.vlessclient.app.I18n;
 import com.vlessclient.service.TrafficHistoryStore;
 import com.vlessclient.service.TrafficMonitor;
+import com.vlessclient.ui.view.FxTimer;
+import com.vlessclient.ui.view.OnScreen;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
@@ -11,9 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
-import javafx.animation.Animation;
-import javafx.animation.KeyFrame;
-import javafx.animation.Timeline;
+import javafx.beans.value.ObservableValue;
 import javafx.css.PseudoClass;
 import javafx.event.EventHandler;
 import javafx.event.EventTarget;
@@ -29,7 +30,6 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
-import javafx.util.Duration;
 
 /**
  * The dashboard's traffic-history panel: thirty daily bars and the busiest
@@ -70,8 +70,8 @@ public final class TrafficHistorySection {
      */
     private static final double BAR_MIN_HEIGHT = 2;
 
-    /** How often today's bar catches up while the panel is open. */
-    private static final Duration REFRESH_PERIOD = Duration.seconds(30);
+    /** How often today's bar catches up while the panel is open and on screen. */
+    private static final Duration REFRESH_PERIOD = Duration.ofSeconds(30);
 
     /**
      * Marks the open day's column. A pseudo-class rather than a style class
@@ -94,7 +94,11 @@ public final class TrafficHistorySection {
     private final List<Region> barNodes = new ArrayList<>();
     private final List<StackPane> columnNodes = new ArrayList<>();
     private final List<Tooltip> barTooltips = new ArrayList<>();
-    private Timeline refreshTimer;
+    /** Polls today's bar; exists only while the panel is open and on screen. */
+    private FxTimer.Cancellable refreshTimer;
+
+    /** Whether the panel is in a scene whose window is showing. */
+    private ObservableValue<Boolean> onScreen;
 
     private TrafficDayPopover popover;
     private int selectedIndex = -1;
@@ -171,6 +175,11 @@ public final class TrafficHistorySection {
         // A language switch has to redraw the byte figures and the dates.
         I18n.localeProperty().addListener((obs, oldVal, newVal) -> refresh());
 
+        // The view is cached and the window closes to the tray; in both cases
+        // the panel keeps its nodes while nobody can see them.
+        onScreen = OnScreen.of(controls.panel());
+        onScreen.addListener((obs, wasOnScreen, isOnScreen) -> followScreen());
+
         setExpanded(store != null && expanded, false);
     }
 
@@ -181,10 +190,11 @@ public final class TrafficHistorySection {
 
     /**
      * Re-reads the history and repaints. Cheap enough to call on any state
-     * change: it walks thirty days of a few rows each.
+     * change: it walks thirty days of a few rows each. A panel that is closed
+     * or off screen is skipped, and read again when it is next seen.
      */
     public void refresh() {
-        if (store == null || !controls.panel().isVisible()) {
+        if (store == null || !controls.panel().isVisible() || !isOnScreen()) {
             return;
         }
         List<TrafficHistoryStore.DayTotal> days = store.lastDays(WINDOW_DAYS);
@@ -287,8 +297,8 @@ public final class TrafficHistorySection {
      * it is open.
      *
      * <p>The filters exist only while a day is open, for the same reason the
-     * refresh timer exists only while the panel is: a closed feature must cost
-     * nothing.</p>
+     * refresh timer exists only while the panel is on screen: a feature nobody
+     * is looking at must cost nothing.</p>
      */
     private void listenForDismissal() {
         Scene scene = controls.panel().getScene();
@@ -352,15 +362,12 @@ public final class TrafficHistorySection {
         controls.panel().setVisible(expanded);
         controls.panel().setManaged(expanded);
         controls.sessionTotal().setDisable(false);
-        if (expanded) {
-            refresh();
-            startTimer();
-        } else {
+        if (!expanded) {
             // A popover floating over a panel that is no longer there would
             // outlive its own chart.
             closeDay();
-            stopTimer();
         }
+        followScreen();
         if (persist && persistExpanded != null) {
             persistExpanded.accept(expanded);
         }
@@ -368,20 +375,32 @@ public final class TrafficHistorySection {
 
     /**
      * Today's bar grows while the panel is open, so it is polled rather than
-     * left to go stale until the panel is reopened. The timer exists only
-     * while the panel is visible: a collapsed panel must cost nothing.
+     * left to go stale until the panel is reopened, but only while someone can
+     * see it. Collapsed, cached behind another page or hidden with the window
+     * in the tray, the panel costs nothing, and it is read again the moment it
+     * is back.
+     *
+     * <p>The poll is an {@link FxTimer}, not a {@code Timeline}: an animation
+     * playing for as long as the panel was open kept JavaFX pulsing at the
+     * display refresh rate to deliver one update every thirty seconds.</p>
      */
-    private void startTimer() {
-        if (refreshTimer == null) {
-            refreshTimer = new Timeline(new KeyFrame(REFRESH_PERIOD, event -> refresh()));
-            refreshTimer.setCycleCount(Animation.INDEFINITE);
+    private void followScreen() {
+        stopTimer();
+        if (!controls.panel().isVisible() || !isOnScreen()) {
+            return;
         }
-        refreshTimer.playFromStart();
+        refresh();
+        refreshTimer = FxTimer.every(REFRESH_PERIOD, this::refresh);
+    }
+
+    private boolean isOnScreen() {
+        return onScreen != null && onScreen.getValue();
     }
 
     private void stopTimer() {
         if (refreshTimer != null) {
-            refreshTimer.stop();
+            refreshTimer.cancel();
+            refreshTimer = null;
         }
     }
 }
