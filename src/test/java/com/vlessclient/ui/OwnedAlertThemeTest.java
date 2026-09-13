@@ -1,22 +1,18 @@
 package com.vlessclient.ui;
 
 import com.vlessclient.app.ThemeCss;
+import com.vlessclient.testing.Contrast;
 import com.vlessclient.testing.UiTest;
-import java.util.List;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.DialogPane;
 import javafx.scene.control.Label;
-import javafx.scene.layout.BackgroundFill;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
-import javafx.scene.paint.LinearGradient;
 import javafx.scene.paint.Paint;
-import javafx.scene.paint.RadialGradient;
-import javafx.scene.paint.Stop;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -45,9 +41,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 @UiTest
 public class OwnedAlertThemeTest extends ApplicationTest {
 
-    /** WCAG AA for body text, the bar base.css already measures text against. */
-    private static final double READABLE = 4.5;
-
     private Stage owner;
     private Alert alert;
 
@@ -71,7 +64,7 @@ public class OwnedAlertThemeTest extends ApplicationTest {
         DialogPane pane = showOwnedAlert(theme);
 
         Label content = (Label) pane.lookup(".content.label");
-        assertReadable(theme, "the content text", content.getTextFill(), backdrop(pane));
+        assertReadable(theme, "the content text", content.getTextFill(), Contrast.backdrop(pane));
     }
 
     /**
@@ -85,12 +78,14 @@ public class OwnedAlertThemeTest extends ApplicationTest {
         DialogPane pane = showOwnedAlert(theme);
 
         Region band = (Region) pane.lookup(".header-panel");
-        assertThat(isDark(backdrop(band)))
+        Color bandFill = Contrast.backdrop(band);
+        Color paneFill = Contrast.backdrop(pane);
+        assertThat(Contrast.isDark(bandFill))
                 .withFailMessage("%s: the header band is %s on a %s pane, so it kept Modena's "
-                        + "colours instead of the theme's", theme, backdrop(band), backdrop(pane))
-                .isEqualTo(isDark(backdrop(pane)));
+                        + "colours instead of the theme's", theme, bandFill, paneFill)
+                .isEqualTo(Contrast.isDark(paneFill));
         Label header = (Label) band.lookup(".label");
-        assertReadable(theme, "the header text", header.getTextFill(), backdrop(band));
+        assertReadable(theme, "the header text", header.getTextFill(), bandFill);
     }
 
     @ParameterizedTest
@@ -101,7 +96,7 @@ public class OwnedAlertThemeTest extends ApplicationTest {
         for (ButtonType type : pane.getButtonTypes()) {
             Button button = (Button) pane.lookupButton(type);
             assertReadable(theme, "the " + type.getText() + " button",
-                    button.getTextFill(), backdrop(button));
+                    button.getTextFill(), Contrast.backdrop(button));
         }
     }
 
@@ -124,65 +119,11 @@ public class OwnedAlertThemeTest extends ApplicationTest {
     }
 
     private static void assertReadable(String theme, String what, Paint text, Color backdrop) {
-        Color fill = flat(text);
-        double ratio = contrast(fill, backdrop);
+        Color fill = Contrast.flat(text);
+        double ratio = Contrast.ratio(fill, backdrop);
         assertThat(ratio)
                 .withFailMessage("%s: %s is %s on %s, %.2f:1, short of the %.1f:1 text needs",
-                        theme, what, fill, backdrop, ratio, READABLE)
-                .isGreaterThanOrEqualTo(READABLE);
-    }
-
-    /** What a region's text is read against: the fill painted last, on top. */
-    private static Color backdrop(Region region) {
-        List<BackgroundFill> fills = region.getBackground().getFills();
-        return flat(fills.get(fills.size() - 1).getFill());
-    }
-
-    /**
-     * A paint as one colour. Modena fills its header band and buttons with a
-     * gentle two-stop gradient, and the mean of the stops is the colour the eye
-     * reads there.
-     */
-    private static Color flat(Paint paint) {
-        return switch (paint) {
-            case Color colour -> colour;
-            case LinearGradient gradient -> mean(gradient.getStops());
-            case RadialGradient gradient -> mean(gradient.getStops());
-            default -> throw new AssertionError("no single colour in " + paint);
-        };
-    }
-
-    private static Color mean(List<Stop> stops) {
-        double red = 0;
-        double green = 0;
-        double blue = 0;
-        for (Stop stop : stops) {
-            red += stop.getColor().getRed();
-            green += stop.getColor().getGreen();
-            blue += stop.getColor().getBlue();
-        }
-        return Color.color(red / stops.size(), green / stops.size(), blue / stops.size());
-    }
-
-    /** Nearer black than white, measured the way text contrast is. */
-    private static boolean isDark(Color colour) {
-        return contrast(colour, Color.WHITE) > contrast(colour, Color.BLACK);
-    }
-
-    /** The WCAG 2 contrast ratio. */
-    private static double contrast(Color first, Color second) {
-        double lighter = Math.max(luminance(first), luminance(second));
-        double darker = Math.min(luminance(first), luminance(second));
-        return (lighter + 0.05) / (darker + 0.05);
-    }
-
-    /** WCAG 2 relative luminance. */
-    private static double luminance(Color colour) {
-        return 0.2126 * linear(colour.getRed()) + 0.7152 * linear(colour.getGreen())
-                + 0.0722 * linear(colour.getBlue());
-    }
-
-    private static double linear(double channel) {
-        return channel <= 0.03928 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4);
+                        theme, what, fill, backdrop, ratio, Contrast.READABLE)
+                .isGreaterThanOrEqualTo(Contrast.READABLE);
     }
 }

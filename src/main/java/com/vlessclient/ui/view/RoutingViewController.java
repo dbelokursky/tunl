@@ -13,6 +13,7 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
 import javafx.geometry.Pos;
+import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
@@ -28,6 +29,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+import javafx.stage.Window;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -293,6 +295,7 @@ public class RoutingViewController {
 
         dialog.getDialogPane().setContent(grid);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        dialog.initOwner(ownerWindow());
 
         Platform.runLater(valueField::requestFocus);
 
@@ -304,6 +307,7 @@ public class RoutingViewController {
                 alert.setTitle(I18n.get("routing.rule.invalid.title"));
                 alert.setHeaderText(
                         I18n.get("error.field.required", I18n.get("routing.rule.value")));
+                alert.initOwner(ownerWindow());
                 alert.showAndWait();
                 return;
             }
@@ -326,12 +330,19 @@ public class RoutingViewController {
         confirm.setHeaderText(I18n.get("routing.rule.delete.header",
                 rule.getType() + " " + rule.getValue()));
         confirm.setContentText(I18n.get("servers.delete.warning"));
+        confirm.initOwner(ownerWindow());
 
         java.util.Optional<ButtonType> result = confirm.showAndWait();
         if (result.isPresent() && result.get() == ButtonType.OK) {
             routingService.removeRule(rule.getId());
             loadRules();
         }
+    }
+
+    /** The window the dialogs belong to, or null before the view is shown. */
+    private Window ownerWindow() {
+        Scene scene = rulesListView.getScene();
+        return scene == null ? null : scene.getWindow();
     }
 
     private void loadRules() {

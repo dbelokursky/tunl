@@ -1324,6 +1324,14 @@
     -fx-text-fill: -c-danger-fg;
 }
 
+/* Subscription dialog: the warning under a plaintext http URL. -c-warn-text
+   rather than -c-warn, the reconnect banner's pair: as 11px text on the light
+   pane the amber read 3.1:1, short of the 4.5:1 small text needs. */
+.subscription-http-warning {
+    -fx-font-size: 11px;
+    -fx-text-fill: -c-warn-text;
+}
+
 /* Country flags: a hairline keeps light bands from bleeding into the row. */
 .flag-border {
     -fx-stroke: -c-border-strong;
