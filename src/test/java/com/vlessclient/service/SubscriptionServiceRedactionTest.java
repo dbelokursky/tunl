@@ -4,7 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import tools.jackson.databind.json.JsonMapper;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.sun.net.httpserver.HttpServer;
+import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.Subscription;
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -16,6 +21,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -126,5 +132,49 @@ class SubscriptionServiceRedactionTest {
         assertThat(service.getSubscriptions().get(0).getLastError())
                 .contains("Illegal character in query")
                 .doesNotContain(TOKEN);
+    }
+
+    /**
+     * Not the token this time but a server's credential: every line of a
+     * subscription is a share link, and one the parser rejects was logged with
+     * the parser's message, which can quote the line back.
+     */
+    @Test
+    @DisplayName("a line the parser rejects is logged without the link it quotes")
+    void parseContent_scrubsTheRejectedLineOutOfTheDebugLog() {
+        String credential = "0b7e5f2a-4c1d-4e8f-9a3b-6d2c1e0f9a8b";
+        String link = "vless://" + credential + "@gateway.example:443?type=tcp#Quoted";
+        SubscriptionService service = new SubscriptionService(
+                new ConfigStore(tempDir), parserQuotingEveryLink(), tempDir,
+                HttpClient.newHttpClient());
+
+        Logger serviceLog = (Logger) LoggerFactory.getLogger(SubscriptionService.class);
+        Level level = serviceLog.getLevel();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        serviceLog.addAppender(appender);
+        // Debug is the level a user is asked to switch on for a bug report.
+        serviceLog.setLevel(Level.DEBUG);
+        try {
+            service.parseContent(link + "\n");
+        } finally {
+            serviceLog.setLevel(level);
+            serviceLog.detachAppender(appender);
+        }
+
+        assertThat(appender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .allSatisfy(message -> assertThat(message).doesNotContain(credential))
+                .contains("Skipping unparseable line: Cannot read vless://gateway.example:443/…");
+    }
+
+    /** A parser that rejects every line with a message quoting it, as a JDK one would. */
+    private static ShareLinkParser parserQuotingEveryLink() {
+        return new ShareLinkParser() {
+            @Override
+            public ServerConfig parse(String uri) {
+                throw new IllegalArgumentException("Cannot read " + uri);
+            }
+        };
     }
 }
