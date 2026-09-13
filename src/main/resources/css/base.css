@@ -400,6 +400,13 @@
     -fx-fill: -c-text;
 }
 
+/* A glyph on a secondary button (the trash on Settings' Clear history) takes
+   the label's colour, so icon and text read as one control in both themes
+   instead of a fixed grey mark beside themed text. */
+.secondary-button .nav-icon-glyph {
+    -fx-fill: -c-button-secondary-fg;
+}
+
 .danger-button {
     -fx-background-color: -c-danger-tint;
     -fx-text-fill: -c-danger-fg;

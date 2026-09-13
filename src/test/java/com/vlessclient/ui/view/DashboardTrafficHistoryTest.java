@@ -14,6 +14,7 @@ import java.time.Clock;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
+import javafx.scene.control.ButtonBase;
 import javafx.scene.control.Label;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
@@ -188,6 +189,23 @@ public class DashboardTrafficHistoryTest extends ApplicationTest {
 
         clickSessionTotal();
         assertThat(ServiceLocator.get(AppSettings.class).isTrafficHistoryExpanded()).isFalse();
+    }
+
+    /**
+     * Clearing lives in Settings now. The Clear link sat in the corner the
+     * pointer already works in -- beside the server line, above today's bar --
+     * and a stray click there plus a reflexive Enter on the dialog wiped a
+     * record that never expires on its own.
+     */
+    @Test
+    void thePanelOffersNothingThatDeletesTheRecord() {
+        clickSessionTotal();
+
+        Region panel = lookup("#trafficHistoryPanel").query();
+        assertThat(panel.lookupAll("*"))
+                .as("the panel reads the history; deleting it is a Settings action")
+                .filteredOn(ButtonBase.class::isInstance)
+                .isEmpty();
     }
 
     private static ServerConfig server() {
