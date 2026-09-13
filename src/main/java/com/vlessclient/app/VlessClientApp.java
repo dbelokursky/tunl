@@ -552,8 +552,11 @@ public class VlessClientApp extends Application {
 
     private void loadAppIcon(Stage stage) {
         // Register multiple resolutions so the OS can pick the best fit for
-        // the window title bar, Dock, and Cmd+Tab switcher.
-        int[] sizes = {16, 32, 64, 128, 256, 512, 1024};
+        // the window title bar, Dock, and Cmd+Tab switcher. Stops at 512: each
+        // Image keeps its decoded pixels for the life of the stage, and the
+        // 1024 px one alone was 4 MB of heap no window manager asks for (the
+        // macOS Dock icon is set on its own, in setDockIcon).
+        int[] sizes = {16, 32, 64, 128, 256, 512};
         int loaded = 0;
         for (int size : sizes) {
             String path = "/icons/app-icon-" + size + ".png";
