@@ -1,5 +1,6 @@
 package com.vlessclient.service;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
@@ -10,10 +11,14 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.function.BooleanSupplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Owns the tunnel lifecycle: resolve the active server and its candidates,
@@ -227,6 +232,9 @@ public class ConnectionService {
             try {
                 current.start(prepared.config(), mode);
                 runningMode = mode;
+            } catch (ConfigRejectedException e) {
+                liveSelector = previous;
+                throw withServerName(e, prepared.config(), candidates);
             } catch (IOException | IllegalStateException e) {
                 liveSelector = previous;
                 throw e;
@@ -335,6 +343,51 @@ public class ConnectionService {
             }
             stopCurrent();
             return connectInternal(requestedMode, allowed).started();
+        }
+    }
+
+    /** An outbound as the core quotes it: "initialize outbound[3]: " or "outbounds[3].". */
+    private static final Pattern OUTBOUND_POSITION =
+            Pattern.compile("(?:initialize )?outbounds?\\[(\\d+)\\](?::\\s*|\\.)");
+
+    /**
+     * Names the server behind the outbound a refusal quotes. The core counts
+     * outbounds by position, which tells nobody which of forty subscription
+     * servers is broken; and every server is part of the configuration, so one
+     * broken entry blocks connecting to all of them.
+     *
+     * @param rejected   the refusal as the engine reported it
+     * @param configJson the configuration the core refused
+     * @param servers    the servers that configuration was built from
+     * @return a refusal naming the server, or {@code rejected} when the quoted
+     *     outbound belongs to no server
+     */
+    private static ConfigRejectedException withServerName(ConfigRejectedException rejected,
+                                                          String configJson,
+                                                          List<ServerConfig> servers) {
+        Matcher position = OUTBOUND_POSITION.matcher(rejected.reason());
+        if (!position.find()) {
+            return rejected;
+        }
+        String tag = outboundTag(configJson, position.group(1));
+        String detail = rejected.reason().substring(position.end());
+        return servers.stream()
+                .filter(server -> OutboundTags.server(server).equals(tag))
+                .findFirst()
+                .map(server -> new ConfigRejectedException(
+                        I18n.get("engine.config.rejected.server", server.getName(), detail),
+                        rejected.reason()))
+                .orElse(rejected);
+    }
+
+    /** The tag of the outbound at {@code index}, or an empty string when there is none. */
+    private static String outboundTag(String configJson, String index) {
+        try {
+            return JsonMapper.builder().build().readTree(configJson)
+                    .path("outbounds").path(Integer.parseInt(index))
+                    .path("tag").asString("");
+        } catch (JacksonException | NumberFormatException e) {
+            return "";
         }
     }
 

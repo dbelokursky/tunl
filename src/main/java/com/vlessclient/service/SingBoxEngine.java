@@ -80,6 +80,8 @@ public class SingBoxEngine {
     private volatile SystemProxyTarget systemProxyTarget;
     private SystemProxyGuard systemProxyGuard = SystemProxyGuard.current();
     private TunLauncher tunLauncher = TunLauncher.current();
+    private SingBoxConfigCheck configCheck =
+            new SingBoxConfigCheck(SingBoxConfigCheck.DEFAULT_TIMEOUT);
 
     /** Listen endpoint of the inbound that carries {@code set_system_proxy}. */
     record SystemProxyTarget(String host, int port) {
@@ -123,9 +125,15 @@ public class SingBoxEngine {
      * on Windows), since creating a TUN device requires administrator
      * rights.</p>
      *
+     * <p>Before either launch, {@code sing-box check} validates the written file
+     * ({@code SingBoxConfigCheck}): a configuration the core refuses is never
+     * launched, so no elevation prompt appears for it.</p>
+     *
      * @param configJson the sing-box configuration in JSON format
      * @param proxyMode  the proxy mode determining how sing-box is started
-     * @throws IOException          if the config file cannot be written or the process cannot start
+     * @throws IOException          if the config file cannot be written, the core refuses it
+     *                              ({@link ConfigRejectedException}), or the process cannot
+     *                              start
      * @throws IllegalStateException if sing-box is already running
      */
     public void start(String configJson, ProxyMode proxyMode) throws IOException {
@@ -141,7 +149,9 @@ public class SingBoxEngine {
      * Starts sing-box with the given configuration JSON using SYSTEM_PROXY mode.
      *
      * @param configJson the sing-box configuration in JSON format
-     * @throws IOException          if the config file cannot be written or the process cannot start
+     * @throws IOException          if the config file cannot be written, the core refuses it
+     *                              ({@link ConfigRejectedException}), or the process cannot
+     *                              start
      * @throws IllegalStateException if sing-box is already running
      */
     public void start(String configJson) throws IOException {
@@ -175,6 +185,19 @@ public class SingBoxEngine {
                 ".json"
         );
         Files.writeString(tempConfigFile, configJson);
+
+        // Ask the core first: a configuration it refuses has to fail here,
+        // before a TUN start raises the administrator or UAC prompt for nothing.
+        try {
+            String refusal = configCheck.rejection(singBoxBinary, tempConfigFile).orElse(null);
+            if (refusal != null) {
+                throw new ConfigRejectedException(refusal);
+            }
+        } catch (IOException | RuntimeException e) {
+            cleanupConfigFile();
+            publishNotStarted();
+            throw e;
+        }
         systemProxyTarget = extractSystemProxyTarget(configJson);
 
         // A launch that throws leaves no process, so the monitor below never
@@ -193,6 +216,7 @@ public class SingBoxEngine {
                 // startWithPrivileges may have published its copy before failing.
                 tunLauncher.cleanupSession();
             }
+            publishNotStarted();
             throw e;
         }
 
@@ -576,6 +600,21 @@ public class SingBoxEngine {
     /** Test seam: replaces the privileged TUN launcher. */
     void setTunLauncher(TunLauncher launcher) {
         this.tunLauncher = launcher;
+    }
+
+    /** Test seam: replaces the check the core runs before every launch. */
+    void setConfigCheck(SingBoxConfigCheck check) {
+        this.configCheck = check;
+    }
+
+    /**
+     * Takes back the CONNECTING a start published once nothing was launched.
+     * Left in place, the status keeps saying "Connecting" and the dashboard's
+     * Connect button stops a connection that never began. It is queued while
+     * the lifecycle lock is held, so the next start's CONNECTING lands after it.
+     */
+    private void publishNotStarted() {
+        Platform.runLater(() -> connectionState.set(ConnectionState.DISCONNECTED));
     }
 
     /**

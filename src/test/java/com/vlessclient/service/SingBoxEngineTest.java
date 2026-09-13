@@ -45,7 +45,8 @@ class SingBoxEngineTest {
 
     /**
      * Creates an executable shell script at the given path that prints a "started"
-     * line and sleeps for the given number of seconds.
+     * line and sleeps for the given number of seconds. Its {@code check} exits 0
+     * at once, the way the real core accepts a configuration before every start.
      */
     private Path createFakeSingBox(Path dir, String name, int sleepSeconds) throws Exception {
         if (WINDOWS) {
@@ -55,30 +56,63 @@ class SingBoxEngineTest {
             // ProcessBuilder starts it.
             return writeScript(dir, name,
                     "@echo off\r\n"
+                    + "if \"%1\"==\"check\" exit /b 0\r\n"
                     + "echo sing-box started\r\n"
                     + "timeout /t " + sleepSeconds + " /nobreak > NUL\r\n");
         }
         return writeScript(dir, name,
                 "#!/bin/sh\n"
+                + "[ \"$1\" = check ] && exit 0\n"
                 + "echo 'sing-box started'\n"
                 + "sleep " + sleepSeconds + "\n");
     }
 
     /**
      * Creates an executable shell script that exits immediately with code 1,
-     * simulating a crashed sing-box.
+     * simulating a crashed sing-box. Its {@code check} passes: the crash belongs
+     * to the running core, not to a refused configuration.
      */
     private Path createCrashingSingBox(Path dir, String name) throws Exception {
         if (WINDOWS) {
             return writeScript(dir, name,
                     "@echo off\r\n"
+                    + "if \"%1\"==\"check\" exit /b 0\r\n"
                     + "echo sing-box crashing\r\n"
                     + "exit /b 1\r\n");
         }
         return writeScript(dir, name,
                 "#!/bin/sh\n"
+                + "[ \"$1\" = check ] && exit 0\n"
                 + "echo 'sing-box crashing'\n"
                 + "exit 1\n");
+    }
+
+    /**
+     * A core that refuses every configuration the way sing-box does: a
+     * deprecation ERROR line, then the FATAL line carrying the reason, exit 1.
+     * Run regardless, it would print "started" and keep going.
+     */
+    private Path createRefusingSingBox(Path dir, String name, String reason) throws Exception {
+        if (WINDOWS) {
+            return writeScript(dir, name,
+                    "@echo off\r\n"
+                    + "if not \"%1\"==\"check\" goto run\r\n"
+                    + "echo ERROR[0000] a deprecation warning\r\n"
+                    + "echo FATAL[0000] " + reason + "\r\n"
+                    + "exit /b 1\r\n"
+                    + ":run\r\n"
+                    + "echo sing-box started\r\n"
+                    + "timeout /t 30 /nobreak > NUL\r\n");
+        }
+        return writeScript(dir, name,
+                "#!/bin/sh\n"
+                + "if [ \"$1\" = check ]; then\n"
+                + "  echo 'ERROR[0000] a deprecation warning'\n"
+                + "  echo 'FATAL[0000] " + reason + "'\n"
+                + "  exit 1\n"
+                + "fi\n"
+                + "echo 'sing-box started'\n"
+                + "sleep 30\n");
     }
 
     private static final boolean WINDOWS =
@@ -523,9 +557,11 @@ class SingBoxEngineTest {
     // the generated config there. Nothing else can clean that up: it is not a
     // per-session temp name, and it outlives the process that read it.
 
-    /** Records cleanupSession() calls; optionally fails the launch. */
+    /** Records launch() and cleanupSession() calls; optionally fails the launch. */
     private static final class RecordingLauncher
             implements com.vlessclient.platform.TunLauncher {
+        private final java.util.concurrent.atomic.AtomicInteger launches =
+                new java.util.concurrent.atomic.AtomicInteger();
         private final java.util.concurrent.atomic.AtomicInteger cleanups =
                 new java.util.concurrent.atomic.AtomicInteger();
         private final Path wrapper;
@@ -538,6 +574,7 @@ class SingBoxEngineTest {
 
         @Override
         public Launched launch(Path binary, Path configFile) throws java.io.IOException {
+            launches.incrementAndGet();
             if (wrapper == null) {
                 throw new java.io.IOException("elevation refused");
             }
@@ -616,6 +653,87 @@ class SingBoxEngineTest {
                         + "survive a failed connect")
                 .isEmpty();
         assertThat(launcher.cleanups.get()).isEqualTo(1);
+    }
+
+    // ===== the core checks the configuration before anything is launched =====
+
+    @Test
+    void aConfigurationTheCoreRefusesIsNeverLaunchedOrLeftOnDisk(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        SingBoxEngine engine = new SingBoxEngine(createRefusingSingBox(tmp, "sing-box",
+                "initialize outbound[1]: unsupported flow: xtls-rprx-direct"));
+        String marker = "cfg-marker-" + System.nanoTime();
+        String config = "{\"marker\":\"" + marker + "\",\"log\":{\"level\":\"info\"}}";
+
+        assertThatThrownBy(() -> engine.start(config, ProxyMode.SYSTEM_PROXY))
+                .isInstanceOf(ConfigRejectedException.class)
+                .hasMessage("sing-box rejected the configuration: "
+                        + "initialize outbound[1]: unsupported flow: xtls-rprx-direct");
+        flushFxEvents();
+
+        assertThat(engine.isRunning()).isFalse();
+        assertThat(stateOnFxThread(engine)).isEqualTo(ConnectionState.DISCONNECTED);
+        assertThat(leftoverConfigsContaining(marker))
+                .as("the refused configuration still carries credentials")
+                .isEmpty();
+    }
+
+    @Test
+    void aRefusedTunConfigurationNeverReachesTheLauncherOrItsPrompt(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        SingBoxEngine engine = new SingBoxEngine(createRefusingSingBox(tmp, "sing-box",
+                "outbounds[0].transport: unknown transport type: xhttp"));
+        RecordingLauncher launcher = new RecordingLauncher(null, null);
+        engine.setTunLauncher(launcher);
+
+        assertThatThrownBy(() -> engine.start(DUMMY_CONFIG, ProxyMode.TUN))
+                .isInstanceOf(ConfigRejectedException.class);
+
+        assertThat(launcher.launches.get())
+                .as("no administrator or UAC prompt for a configuration the core refuses")
+                .isZero();
+        assertThat(launcher.cleanups.get())
+                .as("nothing was published, and the fixed path may be another instance's")
+                .isZero();
+    }
+
+    @Test
+    void aLaunchThatFailsDoesNotLeaveTheEngineConnecting(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+        // Throws from launch(), the way a declined elevation prompt does.
+        engine.setTunLauncher(new RecordingLauncher(null, null));
+
+        assertThatThrownBy(() -> engine.start(DUMMY_CONFIG, ProxyMode.TUN))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessage("elevation refused");
+        flushFxEvents();
+
+        assertThat(stateOnFxThread(engine))
+                .as("CONNECTING keeps the status spinning and turns Connect into Disconnect")
+                .isEqualTo(ConnectionState.DISCONNECTED);
+    }
+
+    // Unix only: a Windows .cmd cannot sleep reliably on the redirected stdin
+    // ProcessBuilder hands it (see awaitStoppedTimesOutWhileRunningThenSucceedsAfterStop).
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void aCheckThatCannotFinishDoesNotKeepTheCoreFromStarting(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        Path hangingCheck = writeScript(tmp, "sing-box",
+                "#!/bin/sh\n"
+                + "[ \"$1\" = check ] && exec sleep 30\n"
+                + "echo 'sing-box started'\n"
+                + "sleep 30\n");
+        SingBoxEngine engine = new SingBoxEngine(hangingCheck);
+        engine.setConfigCheck(new SingBoxConfigCheck(Duration.ofMillis(300)));
+
+        engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+        try {
+            assertThat(engine.isRunning()).isTrue();
+        } finally {
+            engine.stop();
+        }
     }
 
     /** Temp configs still on disk whose contents carry the given marker. */
