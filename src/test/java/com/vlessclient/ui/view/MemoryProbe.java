@@ -11,6 +11,7 @@ import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TrafficHistoryStore;
 import com.vlessclient.service.TrafficMonitor;
+import com.vlessclient.testing.FxPulses;
 import com.vlessclient.testing.UiTest;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -47,9 +48,11 @@ import org.testfx.framework.junit5.ApplicationTest;
 
 /**
  * Measures what a connected dashboard costs a long-running instance: bytes
- * allocated and CPU per thread, scene pulses, GC activity, heap pools and the
- * process footprint, first with the window shown and then with it hidden the
- * way closing it to the tray hides it.
+ * allocated and CPU per thread, pulses and the animations that keep them
+ * coming, GC activity, heap pools and the process footprint, first with the
+ * window shown and then with it hidden the way closing it to the tray hides
+ * it. Scene pulses stop with the window; toolkit pulses do not, and they are
+ * what a hidden window still costs.
  *
  * <p>Not part of the suite:</p>
  *
@@ -84,6 +87,7 @@ public class MemoryProbe extends ApplicationTest {
     private static final long PHASE_SECONDS = Long.getLong("tunl.memprobe.seconds", 60);
 
     private final AtomicLong scenePulses = new AtomicLong();
+    private FxPulses.Counter toolkitPulses;
     private volatile boolean feeding = true;
     private volatile long fxThreadId = -1;
     private Stage stage;
@@ -123,6 +127,7 @@ public class MemoryProbe extends ApplicationTest {
         Scene scene = new Scene(root, WINDOW_WIDTH, WINDOW_HEIGHT);
         scene.getStylesheets().setAll(ThemeCss.of("light"));
         scene.addPostLayoutPulseListener(scenePulses::incrementAndGet);
+        toolkitPulses = FxPulses.countPulses();
         stage.setScene(scene);
         stage.show();
     }
@@ -337,7 +342,7 @@ public class MemoryProbe extends ApplicationTest {
 
     private record Sample(long nanos, long fxAlloc, long rendererAlloc, long totalAlloc,
                           long fxCpu, long rendererCpu, long processCpu,
-                          Map<String, long[]> gc, long pulses) {
+                          Map<String, long[]> gc, long pulses, long toolkitPulses) {
     }
 
     private Sample sample() {
@@ -355,7 +360,7 @@ public class MemoryProbe extends ApplicationTest {
                 threads.getTotalThreadAllocatedBytes(),
                 threads.getThreadCpuTime(fxThreadId),
                 renderer < 0 ? 0 : threads.getThreadCpuTime(renderer),
-                os.getProcessCpuTime(), gc, scenePulses.get());
+                os.getProcessCpuTime(), gc, scenePulses.get(), toolkitPulses.pulses());
     }
 
     private String measurePhase(String name, long phaseSeconds) {
@@ -376,13 +381,16 @@ public class MemoryProbe extends ApplicationTest {
                 "== %s (%.0f s)%n"
                         + "  alloc MB/s   fx=%.3f renderer=%.3f other=%.3f total=%.3f%n"
                         + "  cpu %%        fx=%.2f renderer=%.2f process=%.2f%n"
-                        + "  scene pulses/s=%.1f  gc:%s%n"
+                        + "  pulses/s     scene=%.1f toolkit=%.1f; animations running: %d%n"
+                        + "  gc:%s%n"
                         + "  %s%n  %s%n",
                 name, seconds, fx, renderer, total - fx - renderer, total,
                 percent(b.fxCpu() - a.fxCpu(), b.nanos() - a.nanos()),
                 percent(b.rendererCpu() - a.rendererCpu(), b.nanos() - a.nanos()),
                 percent(b.processCpu() - a.processCpu(), b.nanos() - a.nanos()),
-                (b.pulses() - a.pulses()) / seconds, gc, memoryLine(), footprint());
+                (b.pulses() - a.pulses()) / seconds,
+                (b.toolkitPulses() - a.toolkitPulses()) / seconds,
+                FxPulses.runningAnimations(), gc, memoryLine(), footprint());
     }
 
     private static long rendererThreadId() {
