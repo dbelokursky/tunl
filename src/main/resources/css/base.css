@@ -696,10 +696,37 @@
    34px so every field in a form matches, which is right for a TextField and
    crops a TextArea to a sliver of its first line — the MCP command came out
    as a horizontal slice through the middle of its glyphs. -1 is
-   USE_COMPUTED_SIZE: let prefRowCount decide instead. */
+   USE_COMPUTED_SIZE: the control's own height, which for a FittedTextArea is
+   the height of its wrapped text.
+
+   The inset moves inside. A TextArea is a scroll pane around a .content
+   region that is padded too, so .form-field's padding on the control wore the
+   inset twice: the text sat 24px in, where a TextField's sits 13px in, on a
+   second box in a different grey. */
 .text-area.form-field {
+    -fx-padding: 0;
     -fx-min-height: -1;
     -fx-pref-height: -1;
+}
+
+.text-area.form-field > .scroll-pane {
+    -fx-padding: 0;
+}
+
+/* The field's own background and border are the box; .content only insets
+   the text, by the 12 (inside the 1px border) a TextField's text sits in. */
+.text-area.form-field .content,
+.text-area.form-field:focused .content {
+    -fx-background-color: transparent;
+    -fx-padding: 8 12;
+}
+
+/* Cleared by name, because the content no longer covers it: inside a
+   .form-scroll pane, `.form-scroll .viewport` reaches this viewport too and
+   showed the window colour through the box, as it did in Settings while that
+   page was a scroll pane. */
+.text-area.form-field > .scroll-pane > .viewport {
+    -fx-background-color: transparent;
 }
 
 .form-field:focused {
