@@ -624,10 +624,11 @@
 .form-scroll {
     -fx-background-color: -c-window-bg;
     -fx-border-color: transparent;
-    /* Settings is the only page inside a scroll pane of its own, and modena
-       gives one a border and a padding: a transparent colour still reserves
-       1px a side, and the padding another. Both zeroed, or this page's content
-       sits further in than every other view's. */
+    /* Worn by the server form's scroll pane, and by no page: MainView scrolls
+       every page in ContentScrollPane. Modena gives a scroll pane a border and
+       a padding: a transparent colour still reserves 1px a side, and the
+       padding another. Both zeroed, so the form's own padding is its only
+       inset. */
     -fx-border-width: 0;
     -fx-padding: 0;
 }

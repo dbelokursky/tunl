@@ -166,6 +166,13 @@ public class ControlSizingTest extends ApplicationTest {
                         if (!(node instanceof Region region) || !isOnScreen(node)) {
                             continue;
                         }
+                        // A TextArea wears .form-field for its look, not its
+                        // height: base.css hands .text-area.form-field back to
+                        // prefRowCount, since a multi-line field cropped to 34
+                        // showed a slice through its first line.
+                        if (node instanceof javafx.scene.control.TextArea) {
+                            continue;
+                        }
                         String sized = SIZED.stream()
                                 .filter(node.getStyleClass()::contains).findFirst().orElse(null);
                         if (sized == null || region.getHeight() <= 0) {
