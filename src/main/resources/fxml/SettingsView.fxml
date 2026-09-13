@@ -12,252 +12,252 @@
 <?import javafx.scene.layout.VBox?>
 <?import javafx.scene.layout.Region?>
 <?import javafx.scene.shape.Circle?>
-<?import javafx.scene.control.ScrollPane?>
 
-<ScrollPane xmlns="http://javafx.com/javafx"
-            xmlns:fx="http://javafx.com/fxml"
-            fx:controller="com.vlessclient.ui.view.SettingsViewController"
-            fitToWidth="true" styleClass="form-scroll">
-    <!-- No padding of its own: MainView's content area already insets every
-         page by 24, and the 16 this added on top made the Settings cards jump
-         inward against the Servers list and every other view. -->
-    <VBox spacing="20" styleClass="form-content">
+<VBox xmlns="http://javafx.com/javafx"
+      xmlns:fx="http://javafx.com/fxml"
+      fx:controller="com.vlessclient.ui.view.SettingsViewController"
+      spacing="20" styleClass="form-content">
+    <!-- A plain box, not a ScrollPane: MainViewController mounts every page in
+         ContentScrollPane, and a scroll pane of this view's own nested inside
+         it drew a second vertical bar beside the wrapper's. No padding of its
+         own either: MainView's content area already insets every page by 24,
+         and the 16 this added on top made the Settings cards jump inward
+         against the Servers list and every other view. -->
 
-        <!-- Title -->
-        <Label fx:id="titleLabel" text="Settings" styleClass="view-title"/>
+    <!-- Title -->
+    <Label fx:id="titleLabel" text="Settings" styleClass="view-title"/>
 
-        <!-- Appearance Section -->
-        <VBox spacing="12" styleClass="card">
-            <Label fx:id="appearanceLabel" text="Appearance" styleClass="form-section-title"/>
+    <!-- Appearance Section -->
+    <VBox spacing="12" styleClass="card">
+        <Label fx:id="appearanceLabel" text="Appearance" styleClass="form-section-title"/>
 
-            <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="themeLabel" text="Theme" styleClass="form-label" prefWidth="210"/>
-                <ComboBox fx:id="themeCombo" styleClass="form-field" prefWidth="300"/>
-            </HBox>
+        <HBox spacing="12" alignment="CENTER_LEFT">
+            <Label fx:id="themeLabel" text="Theme" styleClass="form-label" prefWidth="210"/>
+            <ComboBox fx:id="themeCombo" styleClass="form-field" prefWidth="300"/>
+        </HBox>
 
-            <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="languageLabel" text="Language" styleClass="form-label" prefWidth="210"/>
-                <ComboBox fx:id="languageCombo" styleClass="form-field" prefWidth="300"/>
-            </HBox>
-        </VBox>
-
-        <!-- Connection Section -->
-        <VBox spacing="12" styleClass="card">
-            <Label fx:id="connectionLabel" text="Connection" styleClass="form-section-title"/>
-
-            <CheckBox fx:id="autoConnectCheck" text="Auto-connect on startup" styleClass="form-checkbox"/>
-
-            <CheckBox fx:id="launchAtLoginCheck" text="Launch at login" styleClass="form-checkbox"/>
-
-            <Separator styleClass="sidebar-separator"/>
-
-            <Label fx:id="proxyPortsLabel" text="Proxy Ports" styleClass="form-label"/>
-
-            <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="socksPortLabel" text="SOCKS Port" styleClass="form-label" prefWidth="210"/>
-                <TextField fx:id="socksPortField" styleClass="form-field" prefWidth="110"
-                           promptText="1080"/>
-            </HBox>
-
-            <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="httpPortLabel" text="HTTP Port" styleClass="form-label" prefWidth="210"/>
-                <TextField fx:id="httpPortField" styleClass="form-field" prefWidth="110"
-                           promptText="1081"/>
-            </HBox>
-
-            <Separator styleClass="sidebar-separator"/>
-
-            <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="coreLogLevelLabel" text="Core log level" styleClass="form-label"
-                       prefWidth="210"/>
-                <ComboBox fx:id="coreLogLevelCombo" styleClass="form-field" prefWidth="300"/>
-            </HBox>
-
-            <Label fx:id="coreLogLevelHint" styleClass="hint-label" wrapText="true"
-                   maxWidth="Infinity"/>
-
-            <Separator styleClass="sidebar-separator"/>
-
-            <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="proxyModeLabel" text="Proxy Mode" styleClass="form-label" prefWidth="210"/>
-                <ComboBox fx:id="proxyModeCombo" styleClass="form-field" prefWidth="300"/>
-            </HBox>
-
-            <CheckBox fx:id="systemProxyAutoConfigCheck" text="Set system proxy automatically"
-                      styleClass="form-checkbox"/>
-        </VBox>
-
-        <!-- Health Check Section -->
-        <VBox spacing="12" styleClass="card">
-            <Label fx:id="healthCheckLabel" text="Health Check" styleClass="form-section-title"/>
-
-            <CheckBox fx:id="healthCheckEnabledCheck" text="Enable health check"
-                      styleClass="form-checkbox"/>
-
-            <CheckBox fx:id="healthCheckAutoReconnectCheck" text="Auto-reconnect when unreachable"
-                      styleClass="form-checkbox"/>
-
-            <Separator styleClass="sidebar-separator"/>
-
-            <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="healthCheckIntervalLabel" text="Check interval (sec)"
-                       styleClass="form-label" prefWidth="210"/>
-                <TextField fx:id="healthCheckIntervalField" styleClass="form-field" prefWidth="110"
-                           promptText="5"/>
-            </HBox>
-
-            <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="healthCheckReconnectDelayLabel" text="Reconnect delay (sec)"
-                       styleClass="form-label" prefWidth="210"/>
-                <TextField fx:id="healthCheckReconnectDelayField" styleClass="form-field" prefWidth="110"
-                           promptText="10"/>
-            </HBox>
-        </VBox>
-
-        <!-- Advanced Section -->
-        <VBox spacing="12" styleClass="card">
-            <Label fx:id="advancedLabel" text="Advanced" styleClass="form-section-title"/>
-
-            <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="proxyDnsLabel" text="Proxy DNS" styleClass="form-label" prefWidth="210"/>
-                <TextField fx:id="proxyDnsField" styleClass="form-field" prefWidth="300"
-                           promptText="https://1.1.1.1/dns-query"/>
-            </HBox>
-
-            <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="directDnsLabel" text="Direct DNS" styleClass="form-label" prefWidth="210"/>
-                <TextField fx:id="directDnsField" styleClass="form-field" prefWidth="300"
-                           promptText="https://223.5.5.5/dns-query"/>
-            </HBox>
-
-            <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="tunInterfaceNameLabel" text="TUN Interface Name"
-                       styleClass="form-label" prefWidth="210"/>
-                <TextField fx:id="tunInterfaceNameField" styleClass="form-field" prefWidth="300"
-                           promptText="utun99"/>
-            </HBox>
-
-            <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="tunIpv4Label" text="TUN IPv4 Address"
-                       styleClass="form-label" prefWidth="210"/>
-                <TextField fx:id="tunIpv4Field" styleClass="form-field" prefWidth="300"
-                           promptText="172.19.0.1/30"/>
-            </HBox>
-
-            <CheckBox fx:id="tunIpv6Check" text="Route IPv6 through the tunnel"
-                      styleClass="form-checkbox"/>
-            <Label fx:id="tunIpv6Hint" styleClass="hint-label" wrapText="true" maxWidth="520"
-                   text="Off, IPv6 traffic bypasses the VPN on dual-stack networks. Applies in TUN mode."/>
-
-            <CheckBox fx:id="storeSecretsCheck" text="Store credentials in the system keychain"
-                      styleClass="form-checkbox"/>
-        </VBox>
-
-        <!-- Agent Control (MCP) Section -->
-        <VBox spacing="12" styleClass="card">
-            <Label fx:id="mcpSectionTitle" text="Agent Control (MCP)" styleClass="form-section-title"/>
-
-            <Label fx:id="mcpHintLabel" text="Expose a local, loopback-only MCP server so AI agents can read status/logs and manage the client. Guarded by a bearer token."
-                   styleClass="status-subtitle" wrapText="true" maxWidth="520"/>
-
-            <CheckBox fx:id="mcpEnabledCheck" text="Enable MCP server" styleClass="form-checkbox"/>
-
-            <HBox spacing="12" alignment="CENTER_LEFT">
-                <!-- 210 and 110: the label gutter and the numeric-field width
-                     every other label+field row in this view uses. At 120/120
-                     this row's field started 90px left of all of them. -->
-                <Label fx:id="mcpPortLabel" text="Port" styleClass="form-label" prefWidth="210"/>
-                <TextField fx:id="mcpPortField" styleClass="form-field" prefWidth="110"
-                           promptText="55555"/>
-                <Label fx:id="mcpStatusLabel" text="" styleClass="stats-value"
-                       style="-fx-font-size: 12px;"/>
-            </HBox>
-
-            <CheckBox fx:id="mcpAllowMutationsCheck"
-                      text="Allow configuration changes (connect, edit servers, routing)"
-                      styleClass="form-checkbox"/>
-
-            <Separator styleClass="sidebar-separator"/>
-
-            <Label fx:id="mcpCommandLabel" text="Add to Claude Code (copy &amp; run):" styleClass="form-label"/>
-            <TextArea fx:id="mcpCommandArea" editable="false" wrapText="true" prefRowCount="3"
-                      styleClass="form-field"/>
-
-            <HBox spacing="12" alignment="CENTER_LEFT">
-                <Button fx:id="mcpCopyButton" text="Copy command" styleClass="secondary-button"
-                        onAction="#onCopyMcpCommand"/>
-                <Button fx:id="mcpRegenButton" text="Regenerate token" styleClass="secondary-button"
-                        onAction="#onRegenerateMcpToken"/>
-            </HBox>
-        </VBox>
-
-        <!-- Traffic history: the record behind the dashboard's history panel,
-             and the only place it can be cleared. It used to be a Clear link
-             in that panel, where the pointer already works; see
-             TrafficHistorySettingsSection. The summary is written by the
-             section, so it carries no placeholder text. -->
-        <VBox spacing="12" styleClass="card">
-            <Label fx:id="trafficHistoryLabel" text="Traffic history"
-                   styleClass="form-section-title"/>
-
-            <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="trafficHistoryRecordedLabel" text="Recorded" styleClass="form-label"
-                       prefWidth="210"/>
-                <!-- Wraps rather than ellipsizes: a Russian date beside the
-                     210 gutter is the widest thing in the card at the 500px
-                     ViewFitTest pins. -->
-                <Label fx:id="trafficHistorySummary" styleClass="stats-value"
-                       style="-fx-font-size: 13px;" wrapText="true"
-                       maxWidth="Infinity" HBox.hgrow="ALWAYS"/>
-            </HBox>
-
-            <Label fx:id="trafficHistoryHint" styleClass="hint-label" wrapText="true"
-                   maxWidth="Infinity"/>
-
-            <!-- Alone and right-aligned, like the update row in About: the
-                 action sits under the facts it acts on. -->
-            <HBox alignment="CENTER_RIGHT" spacing="10">
-                <Button fx:id="clearTrafficHistoryButton" text="Clear history…"
-                        styleClass="secondary-button" minWidth="-Infinity"/>
-            </HBox>
-        </VBox>
-
-        <!-- About Section -->
-        <VBox spacing="12" styleClass="card">
-            <Label fx:id="aboutLabel" text="About" styleClass="form-section-title"/>
-
-            <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="appVersionLabel" text="App Version" styleClass="form-label" prefWidth="210"/>
-                <Label fx:id="appVersionValue" text="1.0.0" styleClass="stats-value"
-                       style="-fx-font-size: 13px;"/>
-            </HBox>
-
-            <HBox spacing="12" alignment="CENTER_LEFT">
-                <Label fx:id="singboxVersionLabel" text="sing-box Version" styleClass="form-label"
-                       prefWidth="210"/>
-                <Label fx:id="singboxVersionValue" text="Unknown" styleClass="stats-value"
-                       style="-fx-font-size: 13px;"/>
-            </HBox>
-
-            <!-- Required by the country database's CC BY 4.0 licence: the
-                 attribution has to be visible in the product, not only in the
-                 repository. -->
-            <Label fx:id="geoAttributionLabel" styleClass="hint-label"
-                   wrapText="true" maxWidth="Infinity"/>
-
-            <!-- The update actions, and nothing else. There is no heading and
-                 no divider above them: both version rows already say what is
-                 happening to them, so a section called "Updates" separated by
-                 a rule was announcing a section that had become two buttons. -->
-            <HBox alignment="CENTER_RIGHT" spacing="10">
-                <!-- Present only while an update is staged and waiting, so the
-                     row is a single button in every other state. -->
-                <Button fx:id="appUpdateButton" text="Restart now" visible="false"
-                        managed="false" styleClass="secondary-button"/>
-                <Button fx:id="checkUpdatesButton" text="Check for updates"
-                        styleClass="secondary-button"/>
-            </HBox>
-        </VBox>
-
+        <HBox spacing="12" alignment="CENTER_LEFT">
+            <Label fx:id="languageLabel" text="Language" styleClass="form-label" prefWidth="210"/>
+            <ComboBox fx:id="languageCombo" styleClass="form-field" prefWidth="300"/>
+        </HBox>
     </VBox>
-</ScrollPane>
+
+    <!-- Connection Section -->
+    <VBox spacing="12" styleClass="card">
+        <Label fx:id="connectionLabel" text="Connection" styleClass="form-section-title"/>
+
+        <CheckBox fx:id="autoConnectCheck" text="Auto-connect on startup" styleClass="form-checkbox"/>
+
+        <CheckBox fx:id="launchAtLoginCheck" text="Launch at login" styleClass="form-checkbox"/>
+
+        <Separator styleClass="sidebar-separator"/>
+
+        <Label fx:id="proxyPortsLabel" text="Proxy Ports" styleClass="form-label"/>
+
+        <HBox spacing="12" alignment="CENTER_LEFT">
+            <Label fx:id="socksPortLabel" text="SOCKS Port" styleClass="form-label" prefWidth="210"/>
+            <TextField fx:id="socksPortField" styleClass="form-field" prefWidth="110"
+                       promptText="1080"/>
+        </HBox>
+
+        <HBox spacing="12" alignment="CENTER_LEFT">
+            <Label fx:id="httpPortLabel" text="HTTP Port" styleClass="form-label" prefWidth="210"/>
+            <TextField fx:id="httpPortField" styleClass="form-field" prefWidth="110"
+                       promptText="1081"/>
+        </HBox>
+
+        <Separator styleClass="sidebar-separator"/>
+
+        <HBox spacing="12" alignment="CENTER_LEFT">
+            <Label fx:id="coreLogLevelLabel" text="Core log level" styleClass="form-label"
+                   prefWidth="210"/>
+            <ComboBox fx:id="coreLogLevelCombo" styleClass="form-field" prefWidth="300"/>
+        </HBox>
+
+        <Label fx:id="coreLogLevelHint" styleClass="hint-label" wrapText="true"
+               maxWidth="Infinity"/>
+
+        <Separator styleClass="sidebar-separator"/>
+
+        <HBox spacing="12" alignment="CENTER_LEFT">
+            <Label fx:id="proxyModeLabel" text="Proxy Mode" styleClass="form-label" prefWidth="210"/>
+            <ComboBox fx:id="proxyModeCombo" styleClass="form-field" prefWidth="300"/>
+        </HBox>
+
+        <CheckBox fx:id="systemProxyAutoConfigCheck" text="Set system proxy automatically"
+                  styleClass="form-checkbox"/>
+    </VBox>
+
+    <!-- Health Check Section -->
+    <VBox spacing="12" styleClass="card">
+        <Label fx:id="healthCheckLabel" text="Health Check" styleClass="form-section-title"/>
+
+        <CheckBox fx:id="healthCheckEnabledCheck" text="Enable health check"
+                  styleClass="form-checkbox"/>
+
+        <CheckBox fx:id="healthCheckAutoReconnectCheck" text="Auto-reconnect when unreachable"
+                  styleClass="form-checkbox"/>
+
+        <Separator styleClass="sidebar-separator"/>
+
+        <HBox spacing="12" alignment="CENTER_LEFT">
+            <Label fx:id="healthCheckIntervalLabel" text="Check interval (sec)"
+                   styleClass="form-label" prefWidth="210"/>
+            <TextField fx:id="healthCheckIntervalField" styleClass="form-field" prefWidth="110"
+                       promptText="5"/>
+        </HBox>
+
+        <HBox spacing="12" alignment="CENTER_LEFT">
+            <Label fx:id="healthCheckReconnectDelayLabel" text="Reconnect delay (sec)"
+                   styleClass="form-label" prefWidth="210"/>
+            <TextField fx:id="healthCheckReconnectDelayField" styleClass="form-field" prefWidth="110"
+                       promptText="10"/>
+        </HBox>
+    </VBox>
+
+    <!-- Advanced Section -->
+    <VBox spacing="12" styleClass="card">
+        <Label fx:id="advancedLabel" text="Advanced" styleClass="form-section-title"/>
+
+        <HBox spacing="12" alignment="CENTER_LEFT">
+            <Label fx:id="proxyDnsLabel" text="Proxy DNS" styleClass="form-label" prefWidth="210"/>
+            <TextField fx:id="proxyDnsField" styleClass="form-field" prefWidth="300"
+                       promptText="https://1.1.1.1/dns-query"/>
+        </HBox>
+
+        <HBox spacing="12" alignment="CENTER_LEFT">
+            <Label fx:id="directDnsLabel" text="Direct DNS" styleClass="form-label" prefWidth="210"/>
+            <TextField fx:id="directDnsField" styleClass="form-field" prefWidth="300"
+                       promptText="https://223.5.5.5/dns-query"/>
+        </HBox>
+
+        <HBox spacing="12" alignment="CENTER_LEFT">
+            <Label fx:id="tunInterfaceNameLabel" text="TUN Interface Name"
+                   styleClass="form-label" prefWidth="210"/>
+            <TextField fx:id="tunInterfaceNameField" styleClass="form-field" prefWidth="300"
+                       promptText="utun99"/>
+        </HBox>
+
+        <HBox spacing="12" alignment="CENTER_LEFT">
+            <Label fx:id="tunIpv4Label" text="TUN IPv4 Address"
+                   styleClass="form-label" prefWidth="210"/>
+            <TextField fx:id="tunIpv4Field" styleClass="form-field" prefWidth="300"
+                       promptText="172.19.0.1/30"/>
+        </HBox>
+
+        <CheckBox fx:id="tunIpv6Check" text="Route IPv6 through the tunnel"
+                  styleClass="form-checkbox"/>
+        <Label fx:id="tunIpv6Hint" styleClass="hint-label" wrapText="true" maxWidth="520"
+               text="Off, IPv6 traffic bypasses the VPN on dual-stack networks. Applies in TUN mode."/>
+
+        <CheckBox fx:id="storeSecretsCheck" text="Store credentials in the system keychain"
+                  styleClass="form-checkbox"/>
+    </VBox>
+
+    <!-- Agent Control (MCP) Section -->
+    <VBox spacing="12" styleClass="card">
+        <Label fx:id="mcpSectionTitle" text="Agent Control (MCP)" styleClass="form-section-title"/>
+
+        <Label fx:id="mcpHintLabel" text="Expose a local, loopback-only MCP server so AI agents can read status/logs and manage the client. Guarded by a bearer token."
+               styleClass="status-subtitle" wrapText="true" maxWidth="520"/>
+
+        <CheckBox fx:id="mcpEnabledCheck" text="Enable MCP server" styleClass="form-checkbox"/>
+
+        <HBox spacing="12" alignment="CENTER_LEFT">
+            <!-- 210 and 110: the label gutter and the numeric-field width
+                 every other label+field row in this view uses. At 120/120
+                 this row's field started 90px left of all of them. -->
+            <Label fx:id="mcpPortLabel" text="Port" styleClass="form-label" prefWidth="210"/>
+            <TextField fx:id="mcpPortField" styleClass="form-field" prefWidth="110"
+                       promptText="55555"/>
+            <Label fx:id="mcpStatusLabel" text="" styleClass="stats-value"
+                   style="-fx-font-size: 12px;"/>
+        </HBox>
+
+        <CheckBox fx:id="mcpAllowMutationsCheck"
+                  text="Allow configuration changes (connect, edit servers, routing)"
+                  styleClass="form-checkbox"/>
+
+        <Separator styleClass="sidebar-separator"/>
+
+        <Label fx:id="mcpCommandLabel" text="Add to Claude Code (copy &amp; run):" styleClass="form-label"/>
+        <TextArea fx:id="mcpCommandArea" editable="false" wrapText="true" prefRowCount="3"
+                  styleClass="form-field"/>
+
+        <HBox spacing="12" alignment="CENTER_LEFT">
+            <Button fx:id="mcpCopyButton" text="Copy command" styleClass="secondary-button"
+                    onAction="#onCopyMcpCommand"/>
+            <Button fx:id="mcpRegenButton" text="Regenerate token" styleClass="secondary-button"
+                    onAction="#onRegenerateMcpToken"/>
+        </HBox>
+    </VBox>
+
+    <!-- Traffic history: the record behind the dashboard's history panel,
+         and the only place it can be cleared. It used to be a Clear link
+         in that panel, where the pointer already works; see
+         TrafficHistorySettingsSection. The summary is written by the
+         section, so it carries no placeholder text. -->
+    <VBox spacing="12" styleClass="card">
+        <Label fx:id="trafficHistoryLabel" text="Traffic history"
+               styleClass="form-section-title"/>
+
+        <HBox spacing="12" alignment="CENTER_LEFT">
+            <Label fx:id="trafficHistoryRecordedLabel" text="Recorded" styleClass="form-label"
+                   prefWidth="210"/>
+            <!-- Wraps rather than ellipsizes: a Russian date beside the
+                 210 gutter is the widest thing in the card at the 500px
+                 ViewFitTest pins. -->
+            <Label fx:id="trafficHistorySummary" styleClass="stats-value"
+                   style="-fx-font-size: 13px;" wrapText="true"
+                   maxWidth="Infinity" HBox.hgrow="ALWAYS"/>
+        </HBox>
+
+        <Label fx:id="trafficHistoryHint" styleClass="hint-label" wrapText="true"
+               maxWidth="Infinity"/>
+
+        <!-- Alone and right-aligned, like the update row in About: the
+             action sits under the facts it acts on. -->
+        <HBox alignment="CENTER_RIGHT" spacing="10">
+            <Button fx:id="clearTrafficHistoryButton" text="Clear history…"
+                    styleClass="secondary-button" minWidth="-Infinity"/>
+        </HBox>
+    </VBox>
+
+    <!-- About Section -->
+    <VBox spacing="12" styleClass="card">
+        <Label fx:id="aboutLabel" text="About" styleClass="form-section-title"/>
+
+        <HBox spacing="12" alignment="CENTER_LEFT">
+            <Label fx:id="appVersionLabel" text="App Version" styleClass="form-label" prefWidth="210"/>
+            <Label fx:id="appVersionValue" text="1.0.0" styleClass="stats-value"
+                   style="-fx-font-size: 13px;"/>
+        </HBox>
+
+        <HBox spacing="12" alignment="CENTER_LEFT">
+            <Label fx:id="singboxVersionLabel" text="sing-box Version" styleClass="form-label"
+                   prefWidth="210"/>
+            <Label fx:id="singboxVersionValue" text="Unknown" styleClass="stats-value"
+                   style="-fx-font-size: 13px;"/>
+        </HBox>
+
+        <!-- Required by the country database's CC BY 4.0 licence: the
+             attribution has to be visible in the product, not only in the
+             repository. -->
+        <Label fx:id="geoAttributionLabel" styleClass="hint-label"
+               wrapText="true" maxWidth="Infinity"/>
+
+        <!-- The update actions, and nothing else. There is no heading and
+             no divider above them: both version rows already say what is
+             happening to them, so a section called "Updates" separated by
+             a rule was announcing a section that had become two buttons. -->
+        <HBox alignment="CENTER_RIGHT" spacing="10">
+            <!-- Present only while an update is staged and waiting, so the
+                 row is a single button in every other state. -->
+            <Button fx:id="appUpdateButton" text="Restart now" visible="false"
+                    managed="false" styleClass="secondary-button"/>
+            <Button fx:id="checkUpdatesButton" text="Check for updates"
+                    styleClass="secondary-button"/>
+        </HBox>
+    </VBox>
+
+</VBox>
