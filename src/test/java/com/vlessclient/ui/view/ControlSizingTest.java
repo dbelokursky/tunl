@@ -61,6 +61,15 @@ public class ControlSizingTest extends ApplicationTest {
     private static final int CONTENT_WIDTH = 888;
 
     /**
+     * The server form is a dialog rather than a page, and ServersViewController
+     * opens it at this size. Measured at the window's content width instead,
+     * each half of its two-column rows had nearly twice the room the dialog
+     * gives it, so a label could clip in the dialog and pass here.
+     */
+    private static final int DIALOG_WIDTH = 520;
+    private static final int DIALOG_HEIGHT = 650;
+
+    /**
      * The classes that carry the app's ordinary control height. Deliberate
      * exceptions are simply not listed: .connect-button is the hero action at
      * 44, .nav-button is a 50-high sidebar row, .mode-combo is the compact
@@ -332,8 +341,12 @@ public class ControlSizingTest extends ApplicationTest {
                 // pins measure themselves the moment their button joins a
                 // scene, and a scene with no stylesheet yet measures them in
                 // the wrong font and keeps that number.
-                width = view.equals("MainView") ? WINDOW_WIDTH : CONTENT_WIDTH;
-                height = 740;
+                width = switch (view) {
+                    case "MainView" -> WINDOW_WIDTH;
+                    case "ServerFormView" -> DIALOG_WIDTH;
+                    default -> CONTENT_WIDTH;
+                };
+                height = view.equals("ServerFormView") ? DIALOG_HEIGHT : 740;
                 // Never shown. A scene only needs a root and its stylesheets
                 // to apply CSS and lay out, and putting one on a stage ties the
                 // test to the screen it runs on: a headless runner whose screen
