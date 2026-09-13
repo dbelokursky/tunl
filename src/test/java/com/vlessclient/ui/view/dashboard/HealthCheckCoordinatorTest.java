@@ -27,9 +27,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
+import javafx.scene.Node;
+import javafx.scene.Scene;
+import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
+import javafx.stage.Stage;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -163,26 +168,43 @@ class HealthCheckCoordinatorTest {
                 priorStore != null ? priorStore : TestConfigStores.at(tempDir));
     }
 
+    /**
+     * The card draws only while it is on screen, so every test gets it laid
+     * out as DashboardView.fxml has it, in a window that is showing.
+     */
     @BeforeEach
-    void freshNodes() {
+    void freshNodes() throws InterruptedException {
         healthCard = new VBox();
         summaryLabel = new Label("—");
         statusList = new VBox();
         banner = new HBox();
         bannerLabel = new Label();
+        banner.getChildren().setAll(bannerLabel);
+        healthCard.getChildren().setAll(summaryLabel, statusList, banner);
         engine = new FakeEngine();
         healthState = new TunnelHealthState();
+        onFxAndWait(() -> {
+            window = new Stage();
+            window.setScene(new Scene(healthCard, 400, 300));
+            window.show();
+        });
     }
 
     /** Replaced by the reconnect tests; a no-op everywhere else. */
     private Runnable reconnectAction = () -> { };
     private TunnelRecoveryService recovery;
+    private Stage window;
 
     @AfterEach
     void stopRecovery() {
         if (recovery != null) {
             recovery.close();
         }
+    }
+
+    @AfterEach
+    void closeWindow() throws InterruptedException {
+        onFxAndWait(window::hide);
     }
 
     private HealthCheckCoordinator coordinatorWith(ServiceReachabilityChecker checker) {
@@ -528,6 +550,141 @@ class HealthCheckCoordinatorTest {
         assertThat(healthState.get())
                 .as("switching the checks off must not leave the user amber forever")
                 .isEqualTo(TunnelHealth.UNMONITORED);
+    }
+
+    // ===== drawing the card =====
+
+    /**
+     * A probe comes round every few seconds for as long as the tunnel is up,
+     * and each one used to build every row again, a new tooltip included: a
+     * popup window with a scene of its own, per service per probe.
+     */
+    @Test
+    void aReProbeUpdatesTheRowsInPlace() throws Exception {
+        healthSettings(false,
+                new HealthCheckTarget("a", "https://a"), new HealthCheckTarget("b", "https://b"));
+        FakeChecker checker = new FakeChecker();
+        checker.results = List.of(probe("a", true), probe("b", true));
+        HealthCheckCoordinator coordinator = coordinatorWith(checker);
+        connectAndCheck(coordinator);
+        List<Node> rows = List.copyOf(statusList.getChildren());
+        List<Tooltip> tooltips = removeButtons().stream().map(Button::getTooltip).toList();
+
+        checker.results = List.of(probe("a", true), probe("b", false));
+        onFxAndWait(coordinator::recheck);
+        flushFxEvents();
+
+        assertThat(resultTexts())
+                .as("precondition: the second probe is drawn")
+                .containsExactly("12 ms", I18n.get("dashboard.health.unreachable"));
+        assertThat(statusList.getChildren())
+                .as("the rows the first probe built, updated")
+                .containsExactlyElementsOf(rows);
+        assertThat(removeButtons().stream().map(Button::getTooltip).toList())
+                .as("their tooltips, not new ones")
+                .containsExactlyElementsOf(tooltips);
+    }
+
+    /**
+     * Rows outlive the services they were built for, so a remove button has to
+     * act on the service its row shows now, not the one it was built with.
+     */
+    @Test
+    void aReusedRowRemovesTheServiceItShowsNow() throws Exception {
+        AppSettings settings = healthSettings(false,
+                new HealthCheckTarget("a", "https://a"), new HealthCheckTarget("b", "https://b"));
+        ServiceLocator.register(ConfigStore.class,
+                TestConfigStores.at(tempDir.resolve("reused-rows-store")));
+        HealthCheckCoordinator coordinator = coordinatorWith(new EchoChecker());
+        connectAndCheck(coordinator);
+
+        onFxAndWait(() -> removeButtons().get(0).fire());
+        flushFxEvents();
+        assertThat(settings.getHealthCheckTargets())
+                .extracting(HealthCheckTarget::getUrl)
+                .containsExactly("https://b");
+        assertThat(rowNames()).containsExactly("b");
+
+        onFxAndWait(() -> removeButtons().get(0).fire());
+        flushFxEvents();
+        assertThat(settings.getHealthCheckTargets()).isEmpty();
+        assertThat(statusList.getChildren()).isEmpty();
+    }
+
+    /**
+     * The dashboard is cached, so another page takes the card out of the scene
+     * while the probes go on. Their verdicts still reach the rest of the app;
+     * the card shows the latest of them once it is back.
+     */
+    @Test
+    void aCardOffScreenShowsTheLatestProbeOnceItIsBack() throws Exception {
+        healthSettings(false, new HealthCheckTarget("a", "https://a"));
+        FakeChecker checker = new FakeChecker();
+        checker.results = List.of(probe("a", true));
+        HealthCheckCoordinator coordinator = coordinatorWith(checker);
+        connectAndCheck(coordinator);
+
+        onFxAndWait(() -> window.getScene().setRoot(new VBox()));
+        checker.results = List.of(probe("a", false));
+        onFxAndWait(coordinator::recheck);
+        flushFxEvents();
+
+        assertThat(healthState.get())
+                .as("the verdict is published with the card off screen")
+                .isEqualTo(TunnelHealth.BROKEN);
+        assertThat(summaryLabel.getText())
+                .as("but not drawn")
+                .isEqualTo(I18n.get("dashboard.health.all.reachable"));
+        assertThat(resultTexts()).containsExactly("12 ms");
+
+        onFxAndWait(() -> window.getScene().setRoot(healthCard));
+
+        assertThat(summaryLabel.getText())
+                .isEqualTo(I18n.get("dashboard.health.all.unreachable"));
+        assertThat(resultTexts()).containsExactly(I18n.get("dashboard.health.unreachable"));
+    }
+
+    /** Answers for exactly the targets it is asked about, every one reachable. */
+    private static final class EchoChecker extends ServiceReachabilityChecker {
+        @Override
+        public CompletableFuture<List<ProbeResult>> checkAll(
+                List<HealthCheckTarget> targets, int httpProxyPort) {
+            return CompletableFuture.completedFuture(targets.stream()
+                    .map(target -> probe(target.getName(), true))
+                    .toList());
+        }
+    }
+
+    /** The service each row names, top to bottom. */
+    private List<String> rowNames() {
+        return rowLabels().stream()
+                .filter(label -> label.getStyleClass().contains("service-name"))
+                .map(Label::getText)
+                .toList();
+    }
+
+    /** What each row says about its service, top to bottom. */
+    private List<String> resultTexts() {
+        return rowLabels().stream()
+                .filter(label -> !label.getStyleClass().contains("service-name"))
+                .map(Label::getText)
+                .toList();
+    }
+
+    private List<Label> rowLabels() {
+        return statusList.getChildren().stream()
+                .flatMap(row -> ((HBox) row).getChildren().stream())
+                .filter(Label.class::isInstance)
+                .map(Label.class::cast)
+                .toList();
+    }
+
+    private List<Button> removeButtons() {
+        return statusList.getChildren().stream()
+                .flatMap(row -> ((HBox) row).getChildren().stream())
+                .filter(Button.class::isInstance)
+                .map(Button.class::cast)
+                .toList();
     }
 
     // ===== the wait between probes =====

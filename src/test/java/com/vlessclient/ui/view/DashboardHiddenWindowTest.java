@@ -2,15 +2,18 @@ package com.vlessclient.ui.view;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.HealthCheckTarget;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.model.TunnelHealth;
 import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TrafficHistoryStore;
 import com.vlessclient.service.TrafficMonitor;
+import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.testing.Await;
 import com.vlessclient.testing.FxPulses;
 import com.vlessclient.testing.UiTest;
@@ -24,11 +27,15 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
+import javafx.collections.ListChangeListener;
 import javafx.fxml.FXMLLoader;
+import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
+import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -55,10 +62,14 @@ public class DashboardHiddenWindowTest extends ApplicationTest {
     private FakeEngine engine;
     private CountingChecker checker;
     private TrafficHistoryStore store;
+    private TunnelHealthState health;
     private int animationsBeforeDashboard;
     private Region historyPanel;
     private Label historyServers;
     private Label uploadSpeed;
+    private Label healthSummary;
+    private VBox serviceRows;
+    private Button recheckButton;
 
     /** An engine whose connection state the test sets directly. */
     private static final class FakeEngine extends SingBoxEngine {
@@ -75,17 +86,19 @@ public class DashboardHiddenWindowTest extends ApplicationTest {
         }
     }
 
-    /** Answers every probe as reachable and counts them. */
+    /** Answers every probe, reachable until a test says otherwise, and counts them. */
     private static final class CountingChecker extends ServiceReachabilityChecker {
         private final AtomicInteger calls = new AtomicInteger();
+        private volatile boolean reachable = true;
 
         @Override
         public CompletableFuture<List<ProbeResult>> checkAll(
                 List<HealthCheckTarget> targets, int httpProxyPort) {
             calls.incrementAndGet();
+            boolean answer = reachable;
             return CompletableFuture.completedFuture(targets.stream()
                     .map(target -> new ProbeResult(target.getName(), target.getUrl(),
-                            true, 12, "HTTP 204"))
+                            answer, answer ? 12 : -1, answer ? "HTTP 204" : "timeout"))
                     .toList());
         }
     }
@@ -114,6 +127,8 @@ public class DashboardHiddenWindowTest extends ApplicationTest {
         ServiceLocator.register(ServiceReachabilityChecker.class, checker);
         engine = new FakeEngine();
         ServiceLocator.register(SingBoxEngine.class, engine);
+        // The instance the dashboard publishes its verdicts to.
+        health = ServiceLocator.get(TunnelHealthState.class);
 
         FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/DashboardView.fxml"));
         Parent root = loader.load();
@@ -122,6 +137,9 @@ public class DashboardHiddenWindowTest extends ApplicationTest {
         historyPanel = (Region) root.lookup("#trafficHistoryPanel");
         historyServers = (Label) root.lookup("#trafficHistoryServers");
         uploadSpeed = (Label) root.lookup("#uploadSpeedLabel");
+        healthSummary = (Label) root.lookup("#healthSummaryLabel");
+        serviceRows = (VBox) root.lookup("#serviceStatusList");
+        recheckButton = (Button) root.lookup("#recheckButton");
     }
 
     /**
@@ -160,6 +178,86 @@ public class DashboardHiddenWindowTest extends ApplicationTest {
         // The tray icon and auto-reconnect act on these verdicts.
         Await.until("two more probes with the window hidden",
                 () -> checker.calls.get() >= probesWhenHidden + 2, Duration.ofSeconds(6));
+    }
+
+    /**
+     * Each probe used to redraw the card, in the tray too: its rows built
+     * again and its summary set twice, every change a layout request and so a
+     * pulse. Re-check runs the probe the timer runs, which fits twenty probes
+     * into a second instead of twenty seconds of waiting.
+     */
+    @Test
+    void aConnectedDashboardInTheTrayProbesWithoutDrawingTheCard() throws Exception {
+        connect();
+        assertThat(serviceRows.getChildren())
+                .as("precondition: the card lists the services it probes")
+                .isNotEmpty();
+        interact(stage::hide);
+        // Past the pulses hiding the window asks for itself.
+        Thread.sleep(500);
+        AtomicInteger cardChanges = new AtomicInteger();
+        interact(() -> {
+            healthSummary.textProperty().addListener(
+                    (obs, oldText, newText) -> cardChanges.incrementAndGet());
+            // Rows built again change the list; rows redrawn in place change
+            // their labels.
+            serviceRows.getChildren().addListener(
+                    (ListChangeListener<Node>) change -> cardChanges.incrementAndGet());
+            serviceRows.lookupAll("Label").forEach(label -> ((Label) label).textProperty()
+                    .addListener((obs, oldText, newText) -> cardChanges.incrementAndGet()));
+        });
+        int probesBefore = checker.calls.get();
+
+        long pulses;
+        try (FxPulses.Counter counter = FxPulses.countPulses()) {
+            for (int i = 0; i < 20; i++) {
+                interact(recheckButton::fire);
+                WaitForAsyncUtils.waitForFxEvents();
+                Thread.sleep(50);
+            }
+            pulses = counter.pulses();
+        }
+
+        assertThat(checker.calls.get() - probesBefore)
+                .as("precondition: every re-check probed")
+                .isEqualTo(20);
+        assertThat(cardChanges)
+                .as("changes to the card while twenty probes ran with the window in the tray,"
+                        + " which cost %d pulses", pulses)
+                .hasValue(0);
+        assertThat(pulses)
+                .as("pulses while twenty probes ran for a dashboard in the tray")
+                .isLessThanOrEqualTo(2);
+    }
+
+    /**
+     * Re-check stands in for the timer here, whose interval stays at a minute:
+     * a periodic probe landing while the window is shown again would redraw
+     * the card by itself and hide a card that does not catch up.
+     */
+    @Test
+    void theHealthCardCatchesUpWhenTheWindowComesBack() {
+        connect();
+        String shownBeforeHiding = healthSummary.getText();
+        assertThat(shownBeforeHiding)
+                .as("precondition: every service answered")
+                .isEqualTo(I18n.get("dashboard.health.all.reachable"));
+
+        interact(stage::hide);
+        checker.reachable = false;
+        interact(recheckButton::fire);
+        WaitForAsyncUtils.waitForFxEvents();
+        assertThat(health.get())
+                .as("precondition: the probe in the tray reached its verdict")
+                .isEqualTo(TunnelHealth.BROKEN);
+        assertThat(healthSummary.getText())
+                .as("a verdict reached in the tray is published, not drawn")
+                .isEqualTo(shownBeforeHiding);
+
+        interact(stage::show);
+        assertThat(healthSummary.getText())
+                .as("the card shows the latest verdict the moment it is back on screen")
+                .isEqualTo(I18n.get("dashboard.health.all.unreachable"));
     }
 
     @Test
