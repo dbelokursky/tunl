@@ -108,8 +108,11 @@
         </HBox>
 
         <HBox spacing="12" alignment="CENTER_LEFT">
+            <!-- Wraps rather than ellipsizes: in Russian this is the one label
+                 that outgrows the 210 gutter, needing about 243px under the
+                 DejaVu Sans the Linux CI renders it in. -->
             <Label fx:id="healthCheckReconnectDelayLabel" text="Reconnect delay (sec)"
-                   styleClass="form-label" prefWidth="210"/>
+                   styleClass="form-label" prefWidth="210" wrapText="true"/>
             <TextField fx:id="healthCheckReconnectDelayField" styleClass="form-field" prefWidth="110"
                        promptText="10"/>
         </HBox>
