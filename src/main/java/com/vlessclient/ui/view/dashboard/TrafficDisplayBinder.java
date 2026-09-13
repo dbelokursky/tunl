@@ -73,6 +73,14 @@ public final class TrafficDisplayBinder {
     private long lastTotalDownload;
 
     /**
+     * The per-direction split behind the session total: one instance whose text
+     * follows the samples. A Tooltip is a popup window with a scene of its own,
+     * and both totals changing on every sample meant two new ones a second for
+     * as long as a tunnel stayed up.
+     */
+    private Tooltip sessionSplit;
+
+    /**
      * Whether a tunnel is up, tracked rather than read back off a node.
      * {@code Node.isVisible()} is that node's own flag and says nothing about
      * whether an ancestor is hidden, so asking the speeds row whether it is on
@@ -209,9 +217,13 @@ public final class TrafficDisplayBinder {
         long total = lastTotalUpload + lastTotalDownload;
         sessionTotalLabel.setText(
                 I18n.get("dashboard.traffic.session", TrafficMonitor.formatBytes(total)));
-        sessionTotalLabel.setTooltip(new Tooltip(I18n.get("dashboard.traffic.session.split",
+        if (sessionSplit == null) {
+            sessionSplit = new Tooltip();
+            sessionTotalLabel.setTooltip(sessionSplit);
+        }
+        sessionSplit.setText(I18n.get("dashboard.traffic.session.split",
                 TrafficMonitor.formatBytes(lastTotalUpload),
-                TrafficMonitor.formatBytes(lastTotalDownload))));
+                TrafficMonitor.formatBytes(lastTotalDownload)));
     }
 
     /**
