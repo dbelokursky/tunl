@@ -70,6 +70,12 @@ truth read by `pom.xml`, `scripts/bundle-singbox.*` and `SingBoxInstaller`.
   footprint of a connected main view. JVM flags reach the forked JVM only via
   `JAVA_TOOL_OPTIONS`: surefire's `argLine` comes from a project property, so
   `-DargLine` on the command line is silently ignored.
+- Idle cost is tested too. JavaFX pulses at the display refresh rate while any
+  animation plays, and a layout request costs a pulse, hidden window or not; so
+  waits of seconds go through `FxTimer` (never `Timeline`/`PauseTransition`) and
+  drawing in a cached view or a hidden stage is gated on `OnScreen`. `FxPulses`
+  reads running animations and toolkit pulses; `DashboardHiddenWindowTest`
+  fails when a connected dashboard in the tray animates or pulses.
 
 ## Identifiers that must not change
 

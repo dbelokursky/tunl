@@ -10,9 +10,11 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TrafficHistoryStore;
+import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.testing.Await;
 import com.vlessclient.testing.FxPulses;
 import com.vlessclient.testing.UiTest;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -40,9 +42,11 @@ import org.testfx.util.WaitForAsyncUtils;
  * while work that exists to draw has to stop, and catch up once the window is
  * back.
  *
- * <p>Stopping is measured where it costs. JavaFX pauses its pulse timer only
- * while no animation is running, so one transition left playing kept a hidden
- * app waking at the display refresh rate for as long as the tunnel stayed up.</p>
+ * <p>Stopping is measured where it costs. While any animation plays, JavaFX
+ * pulses at the display refresh rate whether or not a window is showing, and
+ * without one every layout request still costs a pulse: one transition left
+ * playing kept a hidden app pulsing sixty times a second, and a readout
+ * repainted for every traffic sample bought a pulse per sample.</p>
  */
 @UiTest
 public class DashboardHiddenWindowTest extends ApplicationTest {
@@ -54,6 +58,7 @@ public class DashboardHiddenWindowTest extends ApplicationTest {
     private int animationsBeforeDashboard;
     private Region historyPanel;
     private Label historyServers;
+    private Label uploadSpeed;
 
     /** An engine whose connection state the test sets directly. */
     private static final class FakeEngine extends SingBoxEngine {
@@ -95,7 +100,7 @@ public class DashboardHiddenWindowTest extends ApplicationTest {
         settings.setHealthCheckEnabled(true);
         settings.setHealthCheckAutoReconnect(false);
         // Long enough that a transition waiting it out would still be playing
-        // when the assertions look.
+        // when the assertions look, and that no probe lands inside a pulse count.
         settings.setHealthCheckIntervalSeconds(60);
         settings.setTrafficHistoryExpanded(true);
         ServiceLocator.register(AppSettings.class, settings);
@@ -116,6 +121,7 @@ public class DashboardHiddenWindowTest extends ApplicationTest {
         stage.show();
         historyPanel = (Region) root.lookup("#trafficHistoryPanel");
         historyServers = (Label) root.lookup("#trafficHistoryServers");
+        uploadSpeed = (Label) root.lookup("#uploadSpeedLabel");
     }
 
     /**
@@ -172,12 +178,69 @@ public class DashboardHiddenWindowTest extends ApplicationTest {
                 .contains("Frankfurt 02");
     }
 
+    @Test
+    void theSpeedsCatchUpWhenTheWindowComesBack() throws Exception {
+        connect();
+        String shownBeforeHiding = uploadSpeed.getText();
+        String latest = TrafficMonitor.formatSpeed(123_456);
+        assertThat(shownBeforeHiding).as("precondition").isNotEqualTo(latest);
+
+        interact(stage::hide);
+        pushTrafficSample(123_456, 654_321);
+        assertThat(uploadSpeed.getText())
+                .as("a sample arriving in the tray is remembered, not drawn")
+                .isEqualTo(shownBeforeHiding);
+
+        interact(stage::show);
+        assertThat(uploadSpeed.getText())
+                .as("the readout shows the latest sample the moment it is back on screen")
+                .isEqualTo(latest);
+    }
+
+    /**
+     * The tests above, counted as what they cost. Every label the readout
+     * changes asks for a layout, and a layout request that reaches the scene
+     * root asks the toolkit for a pulse whether or not the window is showing.
+     */
+    @Test
+    void aConnectedDashboardInTheTrayStopsPulsingWhileTrafficFlows() throws Exception {
+        connect();
+        interact(stage::hide);
+        // Past the pulses hiding the window asks for itself.
+        Thread.sleep(500);
+
+        long pulses;
+        try (FxPulses.Counter counter = FxPulses.countPulses()) {
+            // A readout repainted per sample costs a pulse per sample: about
+            // thirty here, where the core would send one a second.
+            for (int i = 0; i < 30; i++) {
+                pushTrafficSample(20_000 + i, 70_000 + i);
+                Thread.sleep(50);
+            }
+            pulses = counter.pulses();
+        }
+
+        assertThat(pulses)
+                .as("pulses while thirty samples arrived for a dashboard in the tray")
+                .isLessThanOrEqualTo(2);
+    }
+
     private void connect() {
         interact(() -> engine.state.set(ConnectionState.CONNECTED));
         Await.until("the first health probe", () -> checker.calls.get() >= 1,
                 Duration.ofSeconds(5));
         // The probe answers at once; the verdict, and with it the wait for the
         // next probe, arrives through runLater.
+        WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    /** One {@code /traffic} line as the core streams it, through the monitor's own parser. */
+    private static void pushTrafficSample(long up, long down) throws Exception {
+        Method processLine = TrafficMonitor.class.getDeclaredMethod(
+                "processTrafficLine", String.class);
+        processLine.setAccessible(true);
+        processLine.invoke(ServiceLocator.get(TrafficMonitor.class),
+                "{\"up\":" + up + ",\"down\":" + down + "}");
         WaitForAsyncUtils.waitForFxEvents();
     }
 
