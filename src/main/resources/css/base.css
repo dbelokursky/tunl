@@ -1001,6 +1001,105 @@
     -fx-background-radius: 4;
 }
 
+/* ===== Dialogs =====
+   An owned Alert is a window of its own: Dialog.initOwner hands its scene the
+   owner scene's stylesheets, and its DialogPane is that scene's root, so .root
+   above paints it and the theme's tokens resolve on it. Modena meanwhile
+   derives everything left unstated from its own light -fx-background, which
+   in the dark theme put every owned alert's message in #333 on the near-black
+   pane (1.32:1), under a light header band and beside a blue OK button. Each
+   part is stated here instead, after .root, which these rules override on the
+   same node.
+
+   -fx-background is pointed at the pane as well, because Modena derives the
+   rest from it: the text colour of anything a dialog leaves unstyled, and the
+   viewport behind a text area's rounded corners, which showed as light wedges
+   in the import dialog. */
+.dialog-pane {
+    -fx-background-color: -c-surface;
+    -fx-background: -c-surface;
+}
+
+/* A sunken band with a hairline under it, the relation the sidebar has to the
+   page. */
+.dialog-pane:header .header-panel {
+    -fx-background-color: -c-border, -c-surface-sunken;
+    -fx-background-insets: 0, 0 0 1 0;
+}
+
+.dialog-pane:header .header-panel .label {
+    -fx-text-fill: -c-text;
+}
+
+/* The icon is Modena's image, which no token can recolour, and it sits on a
+   white plate drawn for a light band: on the dark one every icon read as a
+   sticker. An inner shadow in the band's own colour covers the plate's rim
+   and leaves the shape, in both themes. */
+.dialog-pane:header .header-panel .graphic-container > .image-view {
+    -fx-effect: innershadow(gaussian, -c-surface-sunken, 5, 1.0, 0, 0);
+}
+
+/* -c-text-body, a step quieter than the header above it; in light it is the
+   same #333 the stock dialog used. */
+.dialog-pane > .content.label {
+    -fx-text-fill: -c-text-body;
+}
+
+/* The pane builds its buttons itself, so they cannot wear .primary-button or
+   .secondary-button: the default one takes the primary recipe, the others the
+   secondary. */
+.dialog-pane > .button-bar > .container > .button {
+    -fx-background-color: -c-surface;
+    -fx-text-fill: -c-button-secondary-fg;
+    -fx-background-radius: 8;
+    -fx-border-color: -c-border-strong;
+    -fx-border-radius: 8;
+    -fx-padding: 6 20;
+    -fx-cursor: hand;
+    -fx-min-height: 34;
+    -fx-pref-height: 34;
+}
+
+.dialog-pane > .button-bar > .container > .button:hover {
+    -fx-background-color: -c-surface-sunken;
+    -fx-border-color: -c-text-muted;
+}
+
+.dialog-pane > .button-bar > .container > .button:pressed {
+    -fx-background-color: -c-surface-sunken;
+}
+
+.dialog-pane > .button-bar > .container > .button:default {
+    -fx-background-color: -c-accent;
+    -fx-text-fill: -c-on-accent;
+    -fx-font-weight: bold;
+    -fx-border-color: transparent;
+}
+
+.dialog-pane > .button-bar > .container > .button:default:hover {
+    -fx-background-color: -c-accent-hover;
+}
+
+.dialog-pane > .button-bar > .container > .button:default:pressed {
+    -fx-background-color: -c-accent-press;
+}
+
+/* Modena draws keyboard focus into the background layers the rules above
+   replace, and a dialog is where the keyboard gets used: Enter, Escape, Tab.
+   The ring is a second border outside the button, so the fill and hover rules
+   never have to know about it. Stated after them: at equal specificity the
+   later rule is what keeps the ring on a hovered button. */
+.dialog-pane > .button-bar > .container > .button:focused {
+    -fx-border-color: -c-border-strong, -c-accent-fg;
+    -fx-border-width: 1, 2;
+    -fx-border-insets: 0, -3;
+    -fx-border-radius: 8, 11;
+}
+
+.dialog-pane > .button-bar > .container > .button:default:focused {
+    -fx-border-color: transparent, -c-accent-fg;
+}
+
 /* ===== sing-box missing banner ===== */
 .singbox-missing-banner {
     -fx-background-color: -c-banner-warn-bg;
