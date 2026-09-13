@@ -387,6 +387,7 @@ public class ServersViewController {
         confirm.setTitle(I18n.get("dialog.delete.server"));
         confirm.setHeaderText(I18n.get("servers.delete.many.header", targets.size()));
         confirm.setContentText(I18n.get("servers.delete.warning"));
+        confirm.initOwner(ownerWindow());
         if (confirm.showAndWait().filter(button -> button == ButtonType.OK).isPresent()) {
             // Clear first: otherwise the selection model reshuffles onto
             // surviving rows as each removal lands.
@@ -436,7 +437,7 @@ public class ServersViewController {
         dialog.getDialogPane().setContent(input);
         dialog.setResultConverter(button -> button == ButtonType.OK ? input.getText() : null);
 
-        applyTheme(dialog);
+        dialog.initOwner(ownerWindow());
 
         dialog.showAndWait().ifPresent(text -> {
             if (text == null || text.isBlank()) {
@@ -467,6 +468,7 @@ public class ServersViewController {
         alert.setTitle(I18n.get("servers.import.error.title"));
         alert.setHeaderText(I18n.get("servers.import.error.header"));
         alert.setContentText(e.getMessage());
+        alert.initOwner(ownerWindow());
         alert.showAndWait();
     }
 
@@ -781,15 +783,6 @@ public class ServersViewController {
         return ServiceLocator.get(ShareLinkParser.class).parse(text);
     }
 
-    private void applyTheme(Dialog<?> dialog) {
-        try {
-            dialog.getDialogPane().getStylesheets()
-                    .addAll(ServiceLocator.get(ThemeManager.class).currentStylesheets());
-        } catch (IllegalArgumentException e) {
-            log.debug("ThemeManager unavailable; import dialog uses default styling");
-        }
-    }
-
     private void openServerForm(ServerConfig existingServer) {
         try {
             FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/ServerFormView.fxml"));
@@ -845,6 +838,7 @@ public class ServersViewController {
         confirm.setTitle(I18n.get("dialog.delete.server"));
         confirm.setHeaderText(I18n.get("servers.delete.header", server.getName()));
         confirm.setContentText(I18n.get("servers.delete.warning"));
+        confirm.initOwner(ownerWindow());
 
         Optional<ButtonType> result = confirm.showAndWait();
         if (result.isPresent() && result.get() == ButtonType.OK) {
@@ -872,6 +866,7 @@ public class ServersViewController {
             alert.setTitle(I18n.get("servers.export.error.title"));
             alert.setHeaderText(I18n.get("servers.export.error.header"));
             alert.setContentText(e.getMessage());
+            alert.initOwner(ownerWindow());
             alert.showAndWait();
         }
     }

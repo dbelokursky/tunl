@@ -35,6 +35,7 @@ import javafx.application.Platform;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.fxml.FXML;
+import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
@@ -49,6 +50,7 @@ import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
+import javafx.stage.Window;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -679,10 +681,17 @@ public class DashboardViewController implements ViewShownAware {
             alert.setTitle(I18n.get("dialog.error"));
             alert.setHeaderText(header);
             alert.setContentText(message);
+            alert.initOwner(ownerWindow());
             alert.showAndWait();
         } catch (Exception e) {
             log.error("Failed to show error dialog", e);
         }
+    }
+
+    /** The window the dialogs belong to, or null while the dashboard is in none. */
+    private Window ownerWindow() {
+        Scene scene = connectButton.getScene();
+        return scene == null ? null : scene.getWindow();
     }
 
 
@@ -864,7 +873,9 @@ public class DashboardViewController implements ViewShownAware {
 
     @FXML
     private void onAddTargetClicked() {
-        new AddHealthTargetDialog().showAndWait().ifPresent(healthChecks::addTarget);
+        AddHealthTargetDialog dialog = new AddHealthTargetDialog();
+        dialog.initOwner(ownerWindow());
+        dialog.showAndWait().ifPresent(healthChecks::addTarget);
     }
 
     @FXML

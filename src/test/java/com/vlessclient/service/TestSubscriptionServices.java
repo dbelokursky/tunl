@@ -5,6 +5,8 @@ import java.io.UncheckedIOException;
 import java.net.http.HttpClient;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * {@link SubscriptionService} doubles for tests that live outside this
@@ -24,15 +26,29 @@ public final class TestSubscriptionServices {
      * {@code SecretSealers.forCurrentPlatform()}.
      */
     public static SubscriptionService quiet(Path dataDir) {
+        return new Quiet(storeUnder(dataDir), dataDir);
+    }
+
+    /**
+     * A quiet service whose every add fails, once {@code release} opens. A
+     * provider that never answers fails when its timeout runs out, and the
+     * view hears about it from another thread whenever that is: the latch
+     * lets a test choose the moment.
+     */
+    public static SubscriptionService failing(Path dataDir, CountDownLatch release) {
+        return new Failing(storeUnder(dataDir), dataDir, release);
+    }
+
+    private static ConfigStore storeUnder(Path dataDir) {
         try {
             Files.createDirectories(dataDir);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        return new Quiet(TestConfigStores.at(dataDir.resolve("config")), dataDir);
+        return TestConfigStores.at(dataDir.resolve("config"));
     }
 
-    private static final class Quiet extends SubscriptionService {
+    private static class Quiet extends SubscriptionService {
 
         private Quiet(ConfigStore store, Path dataDir) {
             super(store, new ShareLinkParser(), dataDir, HttpClient.newHttpClient());
@@ -51,6 +67,26 @@ public final class TestSubscriptionServices {
         @Override
         public void startAutoRefresh() {
             // Never schedule HTTP work from a test.
+        }
+    }
+
+    private static final class Failing extends Quiet {
+
+        private final CountDownLatch release;
+
+        private Failing(ConfigStore store, Path dataDir, CountDownLatch release) {
+            super(store, dataDir);
+            this.release = release;
+        }
+
+        @Override
+        public void addSubscription(String name, String url) {
+            try {
+                release.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            throw new IllegalStateException(url + " did not answer");
         }
     }
 }
