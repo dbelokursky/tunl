@@ -15,6 +15,7 @@ import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Labeled;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.layout.Region;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -198,6 +199,33 @@ public class ControlSizingTest extends ApplicationTest {
                 .isEmpty();
     }
 
+    /**
+     * Both checks see only what {@link #isOnScreen} lets through, so that has
+     * to be pinned where getting it wrong is silent. The server form is that
+     * view: all of its fields sit inside a scroll pane, and while the filter
+     * stopped at the pane's viewport not one of them was measured and both
+     * checks passed. The fields of the sections a VLESS server hides have to
+     * stay out just as firmly, or they would read as clipped.
+     */
+    @Test
+    void bothChecksMeasureExactlyTheFieldsTheServerFormShows() {
+        Scene scene = load("ServerFormView");
+        List<String> measured = new ArrayList<>();
+        interact(() -> {
+            for (Node node : scene.getRoot().lookupAll(".form-field")) {
+                if (isOnScreen(node)) {
+                    measured.add(node.getId());
+                }
+            }
+        });
+
+        assertThat(measured)
+                .as("the ServerFormView fields the sizing checks measure")
+                .containsExactlyInAnyOrder("protocolCombo", "nameField", "addressField",
+                        "portField", "uuidField", "encryptionCombo", "flowCombo",
+                        "transportTypeCombo");
+    }
+
     private void collectClipped(String view, String theme, Locale locale, Parent root,
                                 List<String> clipped) {
         for (Node node : root.lookupAll("*")) {
@@ -218,18 +246,34 @@ public class ControlSizingTest extends ApplicationTest {
     }
 
     /**
-     * Visible and managed all the way up. A node's own flags say nothing about
-     * its parents, and the collapsed banners and the form's protocol sections
-     * keep children that report themselves visible while never being laid out:
-     * they sit at a width of zero and would read as clipped.
+     * Visible all the way up, and managed all the way up except for a scroll
+     * pane's viewport.
+     *
+     * <p>A node's own flags say nothing about its parents, and the collapsed
+     * banners and the form's protocol sections keep children that report
+     * themselves visible while never being given room: laid out inside a
+     * section of no size, they shrink to their minimum width — 26px for a form
+     * field — and would read as clipped.</p>
+     *
+     * <p>ScrollPaneSkin unmanages its viewport as well, but only so that the
+     * content's layout requests stop there; it sizes the viewport itself.
+     * Reading that flag like one the app set skipped everything inside a
+     * scroll pane. It has to be the viewport itself rather than any unmanaged
+     * node a skin owns: a ComboBox's skin parks its popup list among its own
+     * children, unmanaged and visible, and never lays it out there.</p>
      */
     private static boolean isOnScreen(Node node) {
         for (Node n = node; n != null; n = n.getParent()) {
-            if (!n.isVisible() || !n.isManaged()) {
+            if (!n.isVisible() || (!n.isManaged() && !isScrollViewport(n))) {
                 return false;
             }
         }
         return true;
+    }
+
+    private static boolean isScrollViewport(Node node) {
+        return node.getParent() instanceof ScrollPane
+                && node.getStyleClass().contains("viewport");
     }
 
     /**
