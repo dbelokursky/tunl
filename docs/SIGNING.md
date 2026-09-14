@@ -99,10 +99,11 @@ Windows:
 signtool verify /pa dist\tunl_*.msi
 ```
 
-Release jobs upload only to a GitHub draft. The workflow makes that draft
-public after the four installers, their updater `.sig` files, and the package
-manager metadata match the expected manifest. A signing or upload failure
-therefore cannot expose a partial release to users.
+Release jobs only upload into the tag's one draft release, which a single job
+creates. The workflow makes that draft public, by its id, after checking it is
+the tag's only release and the four installers, their updater `.sig` files, and
+the package manager metadata match the expected manifest. A signing or upload
+failure therefore cannot expose a partial release to users.
 
 ## Release signing key (for the in-app updater)
 

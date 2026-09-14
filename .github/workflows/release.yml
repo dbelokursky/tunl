@@ -2,6 +2,19 @@ name: Release
 on:
   push:
     tags: ['v*']
+# Runs for one tag queue rather than overlap (a tag deleted and pushed again
+# while its first run is still going). Two overlapping runs would share the
+# tag's draft, overwrite each other's installers with --clobber, and could
+# publish installers that do not match their signatures and checksums. A
+# running release is never cancelled, but its publish-release refuses a tag
+# that no longer names the tag object and commit the run started from, so the
+# earlier run ends without publishing, and the later run, starting then,
+# adopts its draft, rebuilds and publishes it. Only a push that lands after the
+# release went public stops at "already released". A run still waiting in the
+# queue gives way to a newer push of the same tag.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 permissions:
   contents: read
 env:
@@ -9,24 +22,30 @@ env:
   # the whole workflow, the same one build.yml tests on.
   JAVA_VERSION: '25'
 # No job here pushes, so every checkout passes persist-credentials: false:
-# the token would otherwise sit in .git/config for every later step and for
-# the third-party release action, which uploads with the token it is handed.
+# the token would otherwise sit in .git/config for every later step of the job.
 jobs:
-  # Derive the release's title and body from the pushed annotated tag's message
-  # (subject line -> title, message body -> notes) so a release is fully written
-  # the moment the tag lands. softprops/action-gh-release does not read the tag
-  # itself, so we extract it once here and every release job below passes these
-  # outputs as name/body — idempotent, since each job sets the same values.
-  # Platform jobs upload into a draft. Only publish-release makes it public,
-  # after signatures and the complete asset manifest have been verified.
-  # Extraction goes through the GitHub API; see the step comment for why git
-  # cannot be trusted for this.
+  # prepare-release derives the release's title and body from the pushed
+  # annotated tag's message (subject line -> title, message body -> notes) so a
+  # release is fully written the moment the tag lands, and refuses a tag whose
+  # commit is not green on main. Extraction goes through the GitHub API; see
+  # the step comment for why git cannot be trusted for this.
+  #
+  # create-draft then makes the tag's one draft release (or adopts it on a
+  # re-run, writing the tag's title and notes onto it) and hands its id on.
+  # The platform jobs, sign-release and update-packaging only upload into that
+  # draft with gh; only publish-release makes it public, by id, after checking
+  # the draft is the only release object on the tag and holds exactly the
+  # expected assets, and that the tag still names the tag object and commit
+  # this run started from. One job creates because in v1.19.0 two jobs ran a
+  # check-then-create release action at the same moment: both found no
+  # release, both created one, and a second, empty draft was left on the tag.
   prepare-release:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       title: ${{ steps.tag.outputs.title }}
       notes: ${{ steps.tag.outputs.notes }}
+      tag_object: ${{ steps.tag.outputs.tag_object }}
     steps:
       - id: tag
         name: Read title and notes from the annotated tag object
@@ -70,8 +89,12 @@ jobs:
             exit 1
           fi
 
+          # The title and notes belong to this tag object alone: publish-release
+          # compares it with the tag again, so a tag pushed again while this run
+          # was going does not go out with this run's notes.
           {
             printf 'title=%s\n' "$title"
+            printf 'tag_object=%s\n' "$obj_sha"
             printf 'notes<<NOTES_EOF_28f1\n%s\nNOTES_EOF_28f1\n' "$notes"
           } >> "$GITHUB_OUTPUT"
 
@@ -118,8 +141,119 @@ jobs:
           fi
           echo "Tag ${GITHUB_REF_NAME} is ${sha}, on main, with all four required checks green."
 
-  release-macos:
+  # The only job that creates a release. Everything after it uploads into the
+  # draft whose id it outputs, so no two jobs can race to create one.
+  create-draft:
     needs: prepare-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.draft.outputs.release_id }}
+    steps:
+      - id: draft
+        name: Create or adopt the tag's draft release
+        # A re-run of this run, or an earlier failed run for the same tag, has
+        # already made the draft: adopt it rather than add a second one. The
+        # release list (paginated; a contents: write token sees drafts) is the
+        # only view that shows every release object on the tag, but it lags a
+        # few seconds behind writes, so an empty list is double-checked with
+        # gh release view, which also finds drafts, before anything is created.
+        # gh also says "release not found" when its draft lookup failed rather
+        # than came back empty, so a draft made seconds earlier can still be
+        # missed; no other run for this tag can be making one (see concurrency
+        # above), and publish-release refuses a tag with two release objects.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TITLE: ${{ needs.prepare-release.outputs.title }}
+          NOTES: ${{ needs.prepare-release.outputs.notes }}
+        run: |
+          set -euo pipefail
+          # One "id<TAB>draft<TAB>asset count" line per release object on the tag.
+          # $ENV is jq's, not the shell's (gh's --jq takes no --arg).
+          # shellcheck disable=SC2016
+          if ! rows="$(gh api --paginate "repos/${GH_REPO}/releases?per_page=100" \
+              --jq '.[] | select(.tag_name == $ENV.GITHUB_REF_NAME)
+                    | [.id, .draft, (.assets | length)] | @tsv')"; then
+            echo "::error::Could not list the releases of ${GH_REPO}."
+            exit 1
+          fi
+          count=0
+          if [ -n "$rows" ]; then
+            count="$(printf '%s\n' "$rows" | wc -l | tr -d ' ')"
+          fi
+
+          id=""
+          if [ "$count" -ge 2 ]; then
+            echo "::error::${GITHUB_REF_NAME} has ${count} release objects; it must have at most one. Delete the extras by id, never with gh release delete <tag>, which picks one of them for you:"
+            while IFS=$'\t' read -r rid rdraft rassets; do
+              echo "  release ${rid}: draft=${rdraft}, ${rassets} assets -> gh api -X DELETE repos/${GH_REPO}/releases/${rid}"
+            done <<< "$rows"
+            exit 1
+          elif [ "$count" -eq 1 ]; then
+            IFS=$'\t' read -r id draft _ <<< "$rows"
+            found_by="the release list"
+          else
+            err="$RUNNER_TEMP/release-view.err"
+            if view="$(gh release view "$GITHUB_REF_NAME" --json databaseId,isDraft \
+                --jq '[.databaseId, .isDraft] | @tsv' 2> "$err")"; then
+              IFS=$'\t' read -r id draft <<< "$view"
+              found_by="gh release view"
+            elif ! grep -qxF 'release not found' "$err"; then
+              cat "$err" >&2
+              echo "::error::gh release view ${GITHUB_REF_NAME} failed for a reason other than a missing release."
+              exit 1
+            fi
+          fi
+
+          notes_file="$RUNNER_TEMP/release-notes.md"
+          printf '%s' "$NOTES" > "$notes_file"
+          if [ -n "$id" ]; then
+            if [ "$draft" != "true" ]; then
+              echo "::error::${GITHUB_REF_NAME} is already released (release ${id}, found by ${found_by}). Refusing to touch a published release."
+              exit 1
+            fi
+            # Write this tag's title and notes onto the adopted draft: no later
+            # job sets them, and a new run for the same tag means the tag was
+            # pushed again, often with corrected notes. tag_name goes along
+            # because gh release edit always sends it, as a PATCH without one
+            # can take the tag off the release.
+            if ! patched="$(gh api --method PATCH "repos/${GH_REPO}/releases/${id}" \
+                -f tag_name="$GITHUB_REF_NAME" -f name="$TITLE" \
+                -F body=@"$notes_file" --jq '"\(.id) \(.draft)"')"; then
+              echo "::error::Writing the title and notes of ${GITHUB_REF_NAME} onto draft ${id} failed."
+              exit 1
+            fi
+            if [ "$patched" != "${id} true" ]; then
+              echo "::error::GitHub answered the update of draft ${id} with '${patched}', not '${id} true'."
+              exit 1
+            fi
+            how="Adopted the existing draft"
+          else
+            # One POST, never retried: a POST whose response was lost may still
+            # have created the release, and a retry would add the duplicate
+            # this job exists to prevent. A failed run is re-run instead, and
+            # the re-run adopts whatever this attempt left.
+            if ! id="$(gh api --method POST "repos/${GH_REPO}/releases" \
+                -f tag_name="$GITHUB_REF_NAME" -f name="$TITLE" \
+                -F body=@"$notes_file" -F draft=true --jq .id)"; then
+              echo "::error::Creating the draft release for ${GITHUB_REF_NAME} failed. Check gh release list for a release the request may still have made, then re-run."
+              exit 1
+            fi
+            how="Created the draft"
+          fi
+
+          if ! [[ "$id" =~ ^[0-9]+$ ]]; then
+            echo "::error::Expected a numeric release id for ${GITHUB_REF_NAME}, got '${id}'."
+            exit 1
+          fi
+          echo "release_id=${id}" >> "$GITHUB_OUTPUT"
+          echo "${how} release ${id} for ${GITHUB_REF_NAME}."
+
+  release-macos:
+    needs: create-draft
     runs-on: macos-latest
     # notarytool --wait normally returns within minutes but Apple has taken half an hour.
     timeout-minutes: 45
@@ -132,9 +266,9 @@ jobs:
     # The `secrets` context is not allowed in step `if:`, so the steps gate on
     # env — but only on these booleans. The secret values themselves stay out
     # of the job environment and are handed to the individual steps that use
-    # them, so the third-party action at the end of this job never inherits a
-    # signing key. Both are false until the secrets exist (docs/SIGNING.md),
-    # so an unsigned release builds byte-for-byte as before.
+    # them, so no other step, the upload at the end of this job included, ever
+    # inherits a signing key. Both are false until the secrets exist
+    # (docs/SIGNING.md), so an unsigned release builds byte-for-byte as before.
     env:
       MACOS_SIGNING_CONFIGURED: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 != '' }}
       MACOS_NOTARY_CONFIGURED: ${{ secrets.MACOS_NOTARY_KEY_BASE64 != '' }}
@@ -250,18 +384,21 @@ jobs:
             exit 1
           fi
           echo "sha256=$(shasum -a 256 "${files[0]}" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        with:
-          name: ${{ needs.prepare-release.outputs.title }}
-          body: ${{ needs.prepare-release.outputs.notes }}
-          draft: true
-          files: dist/*.dmg
+      - name: Upload the DMG into the draft release
+        # The step above guarantees exactly one DMG. --clobber lets a re-run
+        # replace the asset an earlier attempt left on the draft.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release upload "$GITHUB_REF_NAME" dist/*.dmg --clobber
 
   # Windows twin of the job above: same gates (fat JAR, real-binary smoke),
   # same shared packaging script as the per-merge build, MSI instead of DMG.
-  # Both jobs upload to the same tag's release; action-gh-release appends.
+  # Every platform job uploads into the draft create-draft made.
   release-windows:
-    needs: prepare-release
+    needs: create-draft
     runs-on: windows-latest
     timeout-minutes: 30
     # The digest of the MSI this job uploaded; sign-release refuses an asset
@@ -272,7 +409,7 @@ jobs:
       contents: write
     # Only the gate lives in job env — the `secrets` context can't be used in
     # step `if:`. The certificate and its password go to the individual steps
-    # that need them, so the third-party release action never inherits them.
+    # that need them, so no other step, the upload included, inherits them.
     # False until the secret exists; the MSI is then unsigned as before.
     env:
       WINDOWS_SIGNING_CONFIGURED: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 != '' }}
@@ -353,17 +490,29 @@ jobs:
           }
           $hash = (Get-FileHash -Algorithm SHA256 $msis[0].FullName).Hash.ToLowerInvariant()
           "sha256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
-      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        with:
-          name: ${{ needs.prepare-release.outputs.title }}
-          body: ${{ needs.prepare-release.outputs.notes }}
-          draft: true
-          files: dist/*.msi
+      - name: Upload the MSI into the draft release
+        # pwsh does not expand dist/*.msi for a native command, so resolve the
+        # one file first. --clobber lets a re-run replace the asset an earlier
+        # attempt left on the draft.
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $msis = @(Get-ChildItem dist -Filter '*.msi' -File)
+          if ($msis.Count -ne 1) {
+            throw "expected exactly one MSI in dist/, found $($msis.Count)"
+          }
+          $msi = $msis[0].FullName
+          gh release upload $env:GITHUB_REF_NAME $msi --clobber
+          if ($LASTEXITCODE -ne 0) {
+            throw "gh release upload failed with exit code $LASTEXITCODE"
+          }
 
   # Linux twin: same gates (fat JAR, real-binary smoke), same shared
   # packaging script as the per-merge build, DEB instead of DMG/MSI.
   release-linux:
-    needs: prepare-release
+    needs: create-draft
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # The digest of the DEB this job uploaded; sign-release and
@@ -416,18 +565,21 @@ jobs:
             exit 1
           fi
           echo "sha256=$(sha256sum "${files[0]}" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        with:
-          name: ${{ needs.prepare-release.outputs.title }}
-          body: ${{ needs.prepare-release.outputs.notes }}
-          draft: true
-          files: dist/*.deb
+      - name: Upload the DEB into the draft release
+        # The step above guarantees exactly one DEB. --clobber lets a re-run
+        # replace the asset an earlier attempt left on the draft.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release upload "$GITHUB_REF_NAME" dist/*.deb --clobber
 
   # arm64 twin of release-linux on GitHub's free arm runners: same gates
   # (fat JAR, real-binary smoke on the linux-arm64 core), same script —
   # jpackage derives the deb architecture from the host.
   release-linux-arm64:
-    needs: prepare-release
+    needs: create-draft
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     # The digest of the DEB this job uploaded; sign-release and
@@ -469,12 +621,15 @@ jobs:
             exit 1
           fi
           echo "sha256=$(sha256sum "${files[0]}" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        with:
-          name: ${{ needs.prepare-release.outputs.title }}
-          body: ${{ needs.prepare-release.outputs.notes }}
-          draft: true
-          files: dist/*.deb
+      - name: Upload the DEB into the draft release
+        # The step above guarantees exactly one DEB. --clobber lets a re-run
+        # replace the asset an earlier attempt left on the draft.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release upload "$GITHUB_REF_NAME" dist/*.deb --clobber
 
   # Sign every installer with the project release key, so the in-app updater
   # can tell a build we published from one that merely appeared on the release
@@ -621,34 +776,86 @@ jobs:
           DEB_AMD64=$(sha_of "tunl_${V}_amd64.deb" "$BUILT_DEB_AMD64_SHA256")
           DEB_ARM64=$(sha_of "tunl_${V}_arm64.deb" "$BUILT_DEB_ARM64_SHA256")
           scripts/update-packaging.sh "$V" "$DMG" "$DEB_AMD64" "$DEB_ARM64"
-      # Re-assert name/body alongside the packaging uploads so this final call
-      # can never blank the notes the platform jobs set.
-      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        with:
-          name: ${{ needs.prepare-release.outputs.title }}
-          body: ${{ needs.prepare-release.outputs.notes }}
-          draft: true
-          files: |
-            packaging/homebrew/tunl.rb
-            packaging/aur/PKGBUILD
-            packaging/aur/.SRCINFO
-
-  # A release is invisible to users until every installer, updater signature,
-  # and package-manager file exists. This avoids a public partial release while
-  # parallel upload/signing jobs are still running or after one has failed.
-  publish-release:
-    needs: [prepare-release, sign-release, update-packaging]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - name: Verify the asset manifest and publish the draft
+      - name: Upload cask, PKGBUILD and .SRCINFO into the draft release
+        # GitHub stores an asset uploaded as .SRCINFO under the name
+        # default.SRCINFO. Upload it under that name, so the name --clobber
+        # replaces on a re-run and the name publish-release's manifest expects
+        # are the file's own name rather than a server-side rename.
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          cp packaging/aur/.SRCINFO "$RUNNER_TEMP/default.SRCINFO"
+          gh release upload "$GITHUB_REF_NAME" packaging/homebrew/tunl.rb \
+            packaging/aur/PKGBUILD "$RUNNER_TEMP/default.SRCINFO" --clobber
+
+  # A release is invisible to users until every installer, updater signature,
+  # and package-manager file exists. This avoids a public partial release while
+  # parallel upload/signing jobs are still running or after one has failed.
+  # The jobs before this one reach the draft by tag, and gh resolves a tag
+  # that carries two release objects to whichever GitHub picks, so the draft
+  # is published by the id create-draft handed on, and only once it is the
+  # tag's one release object and the one the tag resolves to.
+  publish-release:
+    needs: [prepare-release, create-draft, sign-release, update-packaging]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Verify the draft and its asset manifest, then publish it by id
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ needs.create-draft.outputs.release_id }}
+          TAG_OBJECT: ${{ needs.prepare-release.outputs.tag_object }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$RELEASE_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::create-draft handed on no usable release id (got '${RELEASE_ID}')."
+            exit 1
+          fi
+          if ! [[ "$TAG_OBJECT" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+            echo "::error::prepare-release handed on no usable tag object (got '${TAG_OBJECT}')."
+            exit 1
+          fi
+
+          # $ENV is jq's, not the shell's (gh's --jq takes no --arg).
+          # shellcheck disable=SC2016
+          if ! ids="$(gh api --paginate "repos/${GH_REPO}/releases?per_page=100" \
+              --jq '.[] | select(.tag_name == $ENV.GITHUB_REF_NAME) | .id')"; then
+            echo "::error::Could not list the releases of ${GH_REPO}."
+            exit 1
+          fi
+          if [ "$ids" != "$RELEASE_ID" ]; then
+            echo "::error::${GITHUB_REF_NAME} must have exactly one release object, the draft ${RELEASE_ID} create-draft made. The release list shows: ${ids//$'\n'/ }"
+            while IFS= read -r rid; do
+              if [ -n "$rid" ] && [ "$rid" != "$RELEASE_ID" ]; then
+                echo "  extra release ${rid} -> gh api -X DELETE repos/${GH_REPO}/releases/${rid}"
+              fi
+            done <<< "$ids"
+            exit 1
+          fi
+
+          if ! viewed="$(gh release view "$GITHUB_REF_NAME" --json databaseId --jq .databaseId)"; then
+            echo "::error::gh release view ${GITHUB_REF_NAME} failed."
+            exit 1
+          fi
+          if [ "$viewed" != "$RELEASE_ID" ]; then
+            echo "::error::gh release view ${GITHUB_REF_NAME} resolves to release ${viewed}, not the draft ${RELEASE_ID}: the uploads, signatures and packaging files may have gone to another release."
+            exit 1
+          fi
+
+          if ! draft="$(gh api "repos/${GH_REPO}/releases/${RELEASE_ID}" --jq .draft)"; then
+            echo "::error::Could not read release ${RELEASE_ID}."
+            exit 1
+          fi
+          if [ "$draft" != "true" ]; then
+            echo "::error::Release ${RELEASE_ID} is no longer a draft (draft=${draft}). Not publishing it again."
+            exit 1
+          fi
+
           V="${GITHUB_REF_NAME#v}"
           expected=$(printf '%s\n' \
             "default.SRCINFO" \
@@ -662,13 +869,53 @@ jobs:
             "tunl_${V}_amd64.deb.sig" \
             "tunl_${V}_arm64.deb" \
             "tunl_${V}_arm64.deb.sig" | sort)
-          actual=$(gh release view "$GITHUB_REF_NAME" --json assets \
-            --jq '.assets[].name' | sort)
+          # One "name<TAB>state" line per asset of this draft, from one listing.
+          if ! assets="$(gh api --paginate "repos/${GH_REPO}/releases/${RELEASE_ID}/assets?per_page=100" \
+              --jq '.[] | [.name, .state] | @tsv')"; then
+            echo "::error::Could not list the assets of release ${RELEASE_ID}."
+            exit 1
+          fi
+          actual=$(printf '%s\n' "$assets" | cut -f1 | sort)
           if ! diff -u <(printf '%s\n' "$expected") <(printf '%s\n' "$actual"); then
             echo "::error::Release asset manifest is incomplete or contains unexpected files."
             exit 1
           fi
-          gh release edit "$GITHUB_REF_NAME" --draft=false
+          pending=$(printf '%s\n' "$assets" | awk -F'\t' 'NF && $2 != "uploaded" { print $1 " (" $2 ")" }')
+          if [ -n "$pending" ]; then
+            echo "::error::Release ${RELEASE_ID} has assets that did not finish uploading: ${pending//$'\n'/, }"
+            exit 1
+          fi
+
+          # Last before the PATCH, leaving the tag the least time to move. The
+          # title and notes came from TAG_OBJECT and the installers from
+          # GITHUB_SHA; actions/checkout fails a job whose tag names another
+          # commit, but not a tag pushed again on the same commit with new
+          # notes (as v1.9.0 was). A push during this run queues the run for it
+          # behind this one: publishing here would put this run's notes or
+          # build under that tag and stop the queued run at "already released",
+          # so the draft is left for that run to adopt instead.
+          if ! tag_now="$(gh api "repos/${GH_REPO}/git/ref/tags/${GITHUB_REF_NAME}" --jq .object.sha)"; then
+            echo "::error::Could not read the tag ${GITHUB_REF_NAME}; it may have been deleted since this run started. Not publishing draft ${RELEASE_ID}; if the tag is pushed again, the run for that push adopts it."
+            exit 1
+          fi
+          if ! commit_now="$(gh api "repos/${GH_REPO}/commits/${GITHUB_REF_NAME}" --jq .sha)"; then
+            echo "::error::Could not resolve ${GITHUB_REF_NAME} to a commit. Not publishing draft ${RELEASE_ID}."
+            exit 1
+          fi
+          if [ "$tag_now" != "$TAG_OBJECT" ] || [ "$commit_now" != "$GITHUB_SHA" ]; then
+            echo "::error::${GITHUB_REF_NAME} was pushed again: it is now tag object ${tag_now} on ${commit_now}, but this run has the notes of ${TAG_OBJECT} and installers built from ${GITHUB_SHA}. Not publishing: the run for that push adopts draft ${RELEASE_ID}, rebuilds and publishes it."
+            exit 1
+          fi
+
+          if ! published="$(gh api --method PATCH "repos/${GH_REPO}/releases/${RELEASE_ID}" \
+              -F draft=false --jq .draft)"; then
+            echo "::error::Publishing release ${RELEASE_ID} failed."
+            exit 1
+          fi
+          if [ "$published" != "false" ]; then
+            echo "::error::GitHub answered the publish of release ${RELEASE_ID} with draft=${published}."
+            exit 1
+          fi
           echo "Published verified release $GITHUB_REF_NAME"
 
   # Keep the Releases page tidy: once all four installers are attached, delete
