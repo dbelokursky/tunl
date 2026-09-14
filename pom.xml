@@ -35,8 +35,8 @@
         <junit.version>6.1.3</junit.version>
         <jackson.version>3.2.2</jackson.version>
         <logback.version>1.6.3</logback.version>
-        <slf4j.version>2.0.18</slf4j.version>
-        <maxmind-db.version>4.1.0</maxmind-db.version>
+        <slf4j.version>2.0.19</slf4j.version>
+        <maxmind-db.version>4.2.0</maxmind-db.version>
         <assertj.version>3.27.7</assertj.version>
         <exec-maven-plugin.version>3.6.3</exec-maven-plugin.version>
         <spotbugs.baselineFile>${project.basedir}/config/spotbugs-baseline.xml</spotbugs.baselineFile>
@@ -61,6 +61,16 @@
                 <version>${jackson.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <!-- logback-classic depends on the slf4j-api it was released
+                 against, and slf4j ships ahead of logback. Managed here, the
+                 API the app compiles against and the copy logback pulls in are
+                 the same jar, instead of failing dependencyConvergence
+                 whenever slf4j moves first. -->
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-api</artifactId>
+                <version>${slf4j.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
