@@ -250,7 +250,7 @@ jobs:
             exit 1
           fi
           echo "sha256=$(shasum -a 256 "${files[0]}" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           name: ${{ needs.prepare-release.outputs.title }}
           body: ${{ needs.prepare-release.outputs.notes }}
@@ -353,7 +353,7 @@ jobs:
           }
           $hash = (Get-FileHash -Algorithm SHA256 $msis[0].FullName).Hash.ToLowerInvariant()
           "sha256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           name: ${{ needs.prepare-release.outputs.title }}
           body: ${{ needs.prepare-release.outputs.notes }}
@@ -416,7 +416,7 @@ jobs:
             exit 1
           fi
           echo "sha256=$(sha256sum "${files[0]}" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           name: ${{ needs.prepare-release.outputs.title }}
           body: ${{ needs.prepare-release.outputs.notes }}
@@ -469,7 +469,7 @@ jobs:
             exit 1
           fi
           echo "sha256=$(sha256sum "${files[0]}" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           name: ${{ needs.prepare-release.outputs.title }}
           body: ${{ needs.prepare-release.outputs.notes }}
@@ -623,7 +623,7 @@ jobs:
           scripts/update-packaging.sh "$V" "$DMG" "$DEB_AMD64" "$DEB_ARM64"
       # Re-assert name/body alongside the packaging uploads so this final call
       # can never blank the notes the platform jobs set.
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           name: ${{ needs.prepare-release.outputs.title }}
           body: ${{ needs.prepare-release.outputs.notes }}
