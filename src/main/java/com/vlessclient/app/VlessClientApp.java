@@ -256,9 +256,13 @@ public class VlessClientApp extends Application {
 
     @Override
     public void start(Stage primaryStage) throws Exception {
-        // The saved theme before anything is shown: the sing-box installer can
-        // open before the main window does, in the theme ThemeManager holds.
+        // The saved language and theme before anything is shown: the sing-box
+        // installer can open before the main window does, and it speaks the
+        // language I18n holds, in the theme ThemeManager holds.
         AppSettings settings = ServiceLocator.get(AppSettings.class);
+        String lang = settings.getLanguage();
+        Locale locale = "ru".equals(lang) ? Locale.of("ru") : Locale.ENGLISH;
+        I18n.setLocale(locale);
         ThemeManager themeManager = ServiceLocator.get(ThemeManager.class);
         themeManager.setTheme(settings.getTheme());
 
@@ -270,11 +274,6 @@ public class VlessClientApp extends Application {
         // Compact default size that fits the new top-bar Dashboard layout
         // without scrolling; users can still resize freely above the minimum.
         Scene scene = new Scene(root, 820, 500);
-
-        // Apply saved locale
-        String lang = settings.getLanguage();
-        Locale locale = "ru".equals(lang) ? Locale.of("ru") : Locale.ENGLISH;
-        I18n.setLocale(locale);
 
         // Apply saved theme
         themeManager.applyTheme(scene);
