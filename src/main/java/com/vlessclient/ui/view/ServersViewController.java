@@ -11,7 +11,6 @@ import com.vlessclient.service.Redact;
 import com.vlessclient.service.ServerBackupService;
 import com.vlessclient.service.ShareLinkExporter;
 import com.vlessclient.service.ShareLinkParser;
-import com.vlessclient.service.ThemeManager;
 import com.vlessclient.service.WireguardConfigParser;
 import java.io.File;
 import java.io.IOException;
@@ -62,7 +61,6 @@ import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 import javafx.stage.Modality;
-import javafx.stage.Stage;
 import javafx.stage.Window;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -789,24 +787,16 @@ public class ServersViewController {
             VBox formRoot = loader.load();
             final ServerFormController controller = loader.getController();
 
-            Stage dialog = new Stage();
+            DialogStage dialog = new DialogStage(ownerWindow());
             dialog.initModality(Modality.APPLICATION_MODAL);
             dialog.setTitle(existingServer == null
                     ? I18n.get("dialog.add.server")
                     : I18n.get("dialog.edit.server"));
             dialog.setMinWidth(500);
             dialog.setMinHeight(600);
-
-            Scene scene = new Scene(formRoot, 520, 650);
             // Follow the app's theme instead of forcing light: a dark-mode user
             // got a white flash on every add/edit.
-            try {
-                scene.getStylesheets().addAll(
-                        ServiceLocator.get(ThemeManager.class).currentStylesheets());
-            } catch (IllegalArgumentException e) {
-                log.debug("ThemeManager unavailable; server form uses default styling");
-            }
-            dialog.setScene(scene);
+            dialog.setThemedScene(new Scene(formRoot, 520, 650));
 
             if (existingServer != null) {
                 controller.setServerConfig(existingServer);

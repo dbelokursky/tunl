@@ -256,6 +256,16 @@ public class VlessClientApp extends Application {
 
     @Override
     public void start(Stage primaryStage) throws Exception {
+        // The saved language and theme before anything is shown: the sing-box
+        // installer can open before the main window does, and it speaks the
+        // language I18n holds, in the theme ThemeManager holds.
+        AppSettings settings = ServiceLocator.get(AppSettings.class);
+        String lang = settings.getLanguage();
+        Locale locale = "ru".equals(lang) ? Locale.of("ru") : Locale.ENGLISH;
+        I18n.setLocale(locale);
+        ThemeManager themeManager = ServiceLocator.get(ThemeManager.class);
+        themeManager.setTheme(settings.getTheme());
+
         ensureSingBoxAvailable();
 
         FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/MainView.fxml"));
@@ -265,15 +275,7 @@ public class VlessClientApp extends Application {
         // without scrolling; users can still resize freely above the minimum.
         Scene scene = new Scene(root, 820, 500);
 
-        // Apply saved locale
-        AppSettings settings = ServiceLocator.get(AppSettings.class);
-        String lang = settings.getLanguage();
-        Locale locale = "ru".equals(lang) ? Locale.of("ru") : Locale.ENGLISH;
-        I18n.setLocale(locale);
-
         // Apply saved theme
-        ThemeManager themeManager = ServiceLocator.get(ThemeManager.class);
-        themeManager.setTheme(settings.getTheme());
         themeManager.applyTheme(scene);
 
         primaryStage.setTitle("Tunl");
@@ -499,7 +501,8 @@ public class VlessClientApp extends Application {
         }
 
         SingBoxInstallerDialog dialog = new SingBoxInstallerDialog(installer);
-        Optional<Path> installed = dialog.showAndWait();
+        // No owner: the main window does not exist yet.
+        Optional<Path> installed = dialog.showAndWait(null);
         if (installed.isPresent()) {
             ServiceLocator.registerSingBoxEngine(installed.get());
             log.info("sing-box ready at {}", installed.get());
