@@ -3,6 +3,7 @@ package com.vlessclient.ui.view;
 import com.vlessclient.app.I18n;
 import com.vlessclient.service.SingBoxInstaller;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
@@ -16,10 +17,11 @@ import javafx.scene.control.ProgressBar;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
-import javafx.stage.Stage;
 import javafx.stage.StageStyle;
+import javafx.stage.Window;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,7 +39,7 @@ public final class SingBoxInstallerDialog {
 
     private final SingBoxInstaller installer;
 
-    private Stage stage;
+    private DialogStage stage;
     private Label statusLabel;
     private Label hintLabel;
     private ProgressBar progressBar;
@@ -58,10 +60,12 @@ public final class SingBoxInstallerDialog {
      * Shows the installer dialog and blocks until the user closes it. Must be
      * called on the JavaFX Application Thread.
      *
+     * @param owner the window the dialog belongs to and opens over, or null
+     *     when there is none: at startup the main window does not exist yet
      * @return installed binary path, or empty if the user chose to proceed without it
      */
-    public Optional<Path> showAndWait() {
-        build();
+    public Optional<Path> showAndWait(Window owner) {
+        build(owner);
         startDownload();
         stage.showAndWait();
         if (installedPath != null) {
@@ -70,18 +74,19 @@ public final class SingBoxInstallerDialog {
         return Optional.empty();
     }
 
-    private void build() {
-        stage = new Stage();
+    private void build(Window owner) {
+        stage = new DialogStage(owner);
         stage.initStyle(StageStyle.UTILITY);
         stage.initModality(Modality.APPLICATION_MODAL);
         stage.setTitle(I18n.get("installer.title"));
         stage.setResizable(false);
 
         Label title = new Label(I18n.get("installer.heading"));
-        title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold;");
+        title.getStyleClass().add("installer-title");
 
         statusLabel = new Label(
                 I18n.get("installer.downloading", SingBoxInstaller.PINNED_VERSION));
+        statusLabel.getStyleClass().add("installer-status");
         statusLabel.setWrapText(true);
 
         progressBar = new ProgressBar(0);
@@ -89,18 +94,21 @@ public final class SingBoxInstallerDialog {
         progressBar.setPrefHeight(18);
 
         hintLabel = new Label(I18n.get("installer.hint"));
-        hintLabel.setStyle("-fx-text-fill: #757575; -fx-font-size: 11px;");
+        hintLabel.getStyleClass().add("hint-label");
         hintLabel.setWrapText(true);
 
         cancelButton = new Button(I18n.get("button.cancel"));
+        cancelButton.getStyleClass().add("secondary-button");
         cancelButton.setOnAction(e -> cancelAndClose());
 
         retryButton = new Button(I18n.get("button.retry"));
+        retryButton.getStyleClass().add("primary-button");
         retryButton.setOnAction(e -> startDownload());
         retryButton.setVisible(false);
         retryButton.setManaged(false);
 
         skipButton = new Button(I18n.get("installer.skip"));
+        skipButton.getStyleClass().add("secondary-button");
         skipButton.setOnAction(e -> {
             userSkipped = true;
             stage.close();
@@ -108,6 +116,13 @@ public final class SingBoxInstallerDialog {
         skipButton.setVisible(false);
         skipButton.setManaged(false);
 
+        // Never narrower than their labels. In the app's button padding the
+        // three take 438 of the row's 440px in Russian at the widths Linux
+        // draws Cyrillic in, and a row short of that would clip a label where
+        // this lets the dialog widen instead.
+        for (Button button : List.of(retryButton, skipButton, cancelButton)) {
+            button.setMinWidth(Region.USE_PREF_SIZE);
+        }
         HBox buttons = new HBox(8, retryButton, skipButton, cancelButton);
         buttons.setAlignment(Pos.CENTER_RIGHT);
 
@@ -116,24 +131,23 @@ public final class SingBoxInstallerDialog {
         errorBox.setManaged(false);
 
         VBox root = new VBox(12, title, statusLabel, progressBar, hintLabel, errorBox, buttons);
+        root.getStyleClass().add("installer-pane");
         root.setPadding(new Insets(20));
         root.setPrefWidth(480);
 
-        Scene scene = new Scene(root);
-        stage.setScene(scene);
+        stage.setThemedScene(new Scene(root));
     }
 
     private VBox buildErrorHint() {
         Label header = new Label(I18n.get("installer.error.header"));
-        header.setStyle("-fx-font-weight: bold; -fx-text-fill: #b71c1c;");
+        header.getStyleClass().add("banner-title");
 
         Label body = new Label(I18n.get("installer.error.body"));
+        body.getStyleClass().add("banner-subtitle");
         body.setWrapText(true);
 
         Label cmd = new Label(SingBoxInstaller.brewInstallCommand());
-        cmd.setStyle("-fx-font-family: 'Menlo', 'Monaco', monospace; "
-                + "-fx-background-color: #eeeeee; -fx-padding: 6 10; "
-                + "-fx-background-radius: 4;");
+        cmd.getStyleClass().add("banner-command");
 
         Hyperlink copy = new Hyperlink(I18n.get("installer.copy.command"));
         copy.setOnAction(e -> {
@@ -146,10 +160,10 @@ public final class SingBoxInstallerDialog {
         HBox cmdRow = new HBox(8, cmd, copy);
         cmdRow.setAlignment(Pos.CENTER_LEFT);
 
+        // The dashboard's banner for the same missing core, in its colours.
         VBox box = new VBox(6, header, body, cmdRow);
+        box.getStyleClass().add("singbox-missing-banner");
         box.setPadding(new Insets(10));
-        box.setStyle("-fx-background-color: #fff3e0; -fx-background-radius: 6; "
-                + "-fx-border-color: #ffb74d; -fx-border-radius: 6;");
         return box;
     }
 

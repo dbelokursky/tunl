@@ -403,7 +403,7 @@ public class DashboardViewController implements ViewShownAware {
 
         com.vlessclient.ui.view.SingBoxInstallerDialog dialog =
                 new com.vlessclient.ui.view.SingBoxInstallerDialog(installer);
-        dialog.showAndWait().ifPresent(path -> {
+        dialog.showAndWait(ownerWindow()).ifPresent(path -> {
             ServiceLocator.registerSingBoxEngine(path);
             singBoxEngine = ServiceLocator.find(SingBoxEngine.class).orElse(null);
             if (singBoxEngine != null) {

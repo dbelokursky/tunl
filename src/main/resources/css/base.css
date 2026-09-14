@@ -1162,6 +1162,42 @@
     -fx-background-radius: 4;
 }
 
+/* ===== sing-box installer =====
+   A Stage of its own rather than a Dialog, so none of the .dialog-pane rules
+   reach it: its root takes the same surface, and the fallback it shows after a
+   failed download wears the banner above, for the same missing core. */
+.installer-pane {
+    -fx-background-color: -c-surface;
+}
+
+.installer-title {
+    -fx-font-size: 16px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -c-text;
+}
+
+.installer-status {
+    -fx-text-fill: -c-text-body;
+}
+
+/* Modena draws the track from its own light palette and the bar in its blue. */
+.installer-pane .progress-bar > .track {
+    -fx-background-color: -c-border-strong, -c-surface-sunken;
+    -fx-background-insets: 0, 1;
+    -fx-background-radius: 4, 3;
+}
+
+.installer-pane .progress-bar > .bar {
+    -fx-background-color: -c-accent;
+}
+
+/* Modena's link blue read 3.09:1 on the light banner. An app stylesheet
+   outranks Modena whatever the selectors, so this holds once the link is
+   visited too, where Modena switches colour. */
+.installer-pane .hyperlink {
+    -fx-text-fill: -c-info;
+}
+
 .update-banner {
     -fx-background-color: -c-banner-info-bg;
     -fx-border-color: -c-banner-info-border;
