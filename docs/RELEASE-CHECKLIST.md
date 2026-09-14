@@ -16,10 +16,20 @@ On a pushed `v*` tag:
   four required checks (`test-macos`, `test-windows`, `test-linux`,
   `test-linux-arm`) passed. The release jobs build with `-DskipTests`, so this
   provenance check is what stands in for `mvn verify`.
+- **One draft per tag** (`create-draft`): the only job that creates a release.
+  It makes the tag's one **draft** release, with the title and notes from the
+  tag, or adopts the draft an earlier attempt left (a re-run, or a failed run
+  for the same tag) and writes the current tag's title and notes onto it. It
+  fails if the tag already has a published release or more than one release
+  object. Every later job only uploads into that draft: in v1.19.0 two jobs
+  created a release at the same moment and left a second, empty draft on the
+  tag. Runs for the same tag queue behind each other rather than overlap, and
+  a run whose tag is pushed again before it publishes does not publish: it
+  leaves its draft to the run for the new push, which adopts it.
 - **Per OS** — macOS (Apple Silicon), Windows x64, Linux amd64, Linux arm64:
   fat JAR, the real-binary smoke suite (`SingBoxRealBinarySmokeTest`) on the
   bundled core, the installer via the shared `scripts/package-*` script, and
-  an upload into a **draft** release.
+  a `gh release upload` into that draft.
 - **Signing and notarization**, gated on secrets (`SIGNING.md`): macOS
   `codesign` + `notarytool` + `stapler`, Windows `signtool`. A partially
   configured set of secrets fails the job; no secrets means an unsigned
@@ -34,12 +44,16 @@ On a pushed `v*` tag:
   the release rather than shipping one the updater cannot install.
 - **Cask and PKGBUILD** (`update-packaging`): `scripts/update-packaging.sh`
   stamps the version and asset checksums into `packaging/`'s templates and
-  attaches `tunl.rb`, `PKGBUILD` and `.SRCINFO` (listed as `default.SRCINFO`)
-  to the release. Nothing is pushed to a tap or to the AUR — neither exists
+  uploads `tunl.rb`, `PKGBUILD` and `.SRCINFO` (as `default.SRCINFO`) into the
+  draft. Nothing is pushed to a tap or to the AUR — neither exists
   (`DISTRIBUTION.md`).
-- **Manifest check and publish** (`publish-release`): the asset list must
-  equal exactly the four installers, their four `.sig` files and the three
-  packaging files; only then is the draft made public. A failed job leaves a
+- **Manifest check and publish** (`publish-release`): the tag must have
+  exactly one release object, the draft `create-draft` made, and
+  `gh release view` must resolve the tag to it; it must still be a draft, and
+  its assets must be exactly the four installers, their four `.sig` files and
+  the three packaging files, all fully uploaded. Last, the tag must still be
+  the tag object the run took its title and notes from, on the commit it
+  built. Only then is that draft made public, by its id. A failed job leaves a
   draft to diagnose, never a partial public release.
 - **Pruning** (`prune-old-releases`): real releases older than the newest five
   are deleted (tags kept; `dev-latest` and drafts untouched).
@@ -111,8 +125,19 @@ after the fact: `gh release edit vX.Y.Z --notes-file notes.txt` — immune to th
 ## After the workflow
 
 - [ ] The draft became public with all eleven assets. If it did not, the run
-      log names the failed job: fix and re-run it, or delete the draft and the
-      tag and tag again.
+      log names the failed job: fix the cause and use **Re-run failed jobs**,
+      which reuses the draft (the uploads replace their assets), or delete the
+      draft by id (next item) and the tag, and tag again.
+- [ ] The tag has exactly one row in `gh release list`. An extra release
+      object is deleted by id, never with `gh release delete vX.Y.Z` while two
+      exist: which of them gh picks for a tag is GitHub's choice, so it can
+      delete the real one.
+
+      ```sh
+      gh api --paginate 'repos/dbelokursky/tunl/releases?per_page=100' \
+        --jq '.[] | select(.tag_name == "vX.Y.Z") | [.id, .draft, (.assets | length)] | @tsv'
+      gh api -X DELETE repos/dbelokursky/tunl/releases/<id>
+      ```
 - [ ] **Version** shows correctly in **Settings → About** of an installed
       build (matches the tag; not "dev").
 - [ ] **In-app updater** — on the previous release, "Check for updates" sees

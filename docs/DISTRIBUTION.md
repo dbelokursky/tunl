@@ -15,9 +15,10 @@ assets — no channel is the source of the binaries.
 checksums. On every release the `update-packaging` job of `release.yml` runs
 `scripts/update-packaging.sh <version> <dmg sha256> <amd64 deb sha256>
 <arm64 deb sha256>`, which stamps the version and checksums into the three
-files, and attaches the results — `tunl.rb`, `PKGBUILD` and `.SRCINFO`
-(GitHub lists it as `default.SRCINFO`) — to the GitHub release. The
-`publish-release` job refuses to make the release public without them.
+files, and uploads the results — `tunl.rb`, `PKGBUILD` and `.SRCINFO` (as
+`default.SRCINFO`, the name GitHub gives a dot-file asset anyway) — into the
+release's draft. The `publish-release` job refuses to make the release public
+without them.
 
 That is all the workflow does. **Nothing is pushed to a tap, to the AUR, or
 back into this repository**; the templates in git stay at `0.0.0`.
