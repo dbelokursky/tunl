@@ -261,11 +261,10 @@ public class ViewDialogThemeTest extends ApplicationTest {
         fillSubscription(dialog, "Provider", "http://provider.example/sub");
 
         assertBelongsToTheWindow(dialog, theme);
-        String warning = onFx(() -> ((Text) dialog.lookup(".subscription-http-warning")
-                .lookup(".text")).getText());
         assertThat(assertReadsInTheTheme(dialog, theme))
-                .as("the values typed and the warning, as the dialog draws it")
-                .contains("Provider", "http://provider.example/sub", warning);
+                .as("the values typed and the whole warning")
+                .contains("Provider", "http://provider.example/sub",
+                        I18n.get("subscriptions.http.warning"));
     }
 
     @Test

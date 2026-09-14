@@ -177,12 +177,25 @@ public class SubscriptionsViewController {
         httpWarning.getStyleClass().add("subscription-http-warning");
         httpWarning.setWrapText(true);
         httpWarning.setMaxWidth(350);
+        // Never shorter than its wrapped lines: a window sized to its scene
+        // measures the dialog without a width, which makes this label one line.
+        httpWarning.setMinHeight(Region.USE_PREF_SIZE);
         httpWarning.setVisible(false);
         httpWarning.setManaged(false);
         urlField.textProperty().addListener((obs, oldVal, newVal) -> {
             boolean insecure = SubscriptionService.isInsecureHttpUrl(newVal);
+            if (insecure == httpWarning.isVisible()) {
+                return;
+            }
             httpWarning.setVisible(insecure);
             httpWarning.setManaged(insecure);
+            // A shown dialog keeps the size it opened with: a warning typed in
+            // got one line and pushed the buttons out, and one that went left
+            // a blank band.
+            Window window = dialog.getDialogPane().getScene().getWindow();
+            if (window.isShowing()) {
+                window.sizeToScene();
+            }
         });
         // After the listener, so an http URL being edited shows its warning.
         nameField.setText(name == null ? "" : name);
