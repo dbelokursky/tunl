@@ -62,6 +62,16 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!-- logback-classic depends on the slf4j-api it was released
+                 against, and slf4j ships ahead of logback. Managed here, the
+                 API the app compiles against and the copy logback pulls in are
+                 the same jar, instead of failing dependencyConvergence
+                 whenever slf4j moves first. -->
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-api</artifactId>
+                <version>${slf4j.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
