@@ -11,8 +11,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * Marks a TestFX class: it gets the network-free service graph built before
- * it runs and the locator restored after it, and it carries the {@code ui}
- * tag so the slow half of the suite can be left out —
+ * it runs and the locator restored after it, a test of it fails if it leaves
+ * an animation running ({@link AnimationLeakGuardExtension}), and it carries
+ * the {@code ui} tag so the slow half of the suite can be left out —
  * {@code mvn test -Dsurefire.excludedGroups=ui,smoke} runs everything else.
  *
  * <p>Headless rendering itself needs nothing per class — surefire sets the
@@ -23,5 +24,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 @Documented
 @Tag("ui")
 @ExtendWith(UiServicesExtension.class)
+@ExtendWith(AnimationLeakGuardExtension.class)
 public @interface UiTest {
 }

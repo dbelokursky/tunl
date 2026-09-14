@@ -207,6 +207,7 @@ public class DashboardHiddenWindowTest extends ApplicationTest {
                     .addListener((obs, oldText, newText) -> cardChanges.incrementAndGet()));
         });
         int probesBefore = checker.calls.get();
+        assertNothingAnimates();
 
         long pulses;
         try (FxPulses.Counter counter = FxPulses.countPulses()) {
@@ -306,6 +307,7 @@ public class DashboardHiddenWindowTest extends ApplicationTest {
         interact(stage::hide);
         // Past the pulses hiding the window asks for itself.
         Thread.sleep(500);
+        assertNothingAnimates();
 
         long pulses;
         try (FxPulses.Counter counter = FxPulses.countPulses()) {
@@ -321,6 +323,19 @@ public class DashboardHiddenWindowTest extends ApplicationTest {
         assertThat(pulses)
                 .as("pulses while thirty samples arrived for a dashboard in the tray")
                 .isLessThanOrEqualTo(2);
+    }
+
+    /**
+     * A pulse count means something only while nothing animates: an animation
+     * running anywhere in the fork, the dashboard's or one an earlier class
+     * left behind, pulses the toolkit at the display refresh rate and buries
+     * whatever the dashboard costs.
+     */
+    private void assertNothingAnimates() {
+        assertThat(FxPulses.running())
+                .as("precondition: animations running as the pulse count starts, %d of them"
+                        + " already before the dashboard was built", animationsBeforeDashboard)
+                .isEmpty();
     }
 
     private void connect() {
