@@ -25,9 +25,16 @@ public final class FxTestSupport {
 
     /**
      * Starts the JavaFX toolkit unless another class in this JVM already has,
-     * and returns once the FX thread is accepting work.
+     * and returns once the FX thread is accepting work. The toolkit stays up
+     * when a test hides the last window it showed.
      */
     public static void startToolkit() {
+        // After Platform.startup nothing waits for an application to finish, so
+        // with implicit exit on, hiding the last window exits JavaFX and drops
+        // every later runLater for the rest of the fork. TestFX turns it off in
+        // FxToolkit.registerPrimaryStage, which only ApplicationTest classes go
+        // through: a plain class that showed a window passed only after one of them.
+        Platform.setImplicitExit(false);
         CountDownLatch ready = new CountDownLatch(1);
         try {
             Platform.startup(ready::countDown);
