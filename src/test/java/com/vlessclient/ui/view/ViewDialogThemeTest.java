@@ -100,6 +100,8 @@ public class ViewDialogThemeTest extends ApplicationTest {
     static Path tempDir;
 
     private Stage stage;
+    /** The window of every dialog the test opened, closed since or not. */
+    private final List<Window> dialogs = new ArrayList<>();
 
     @Override
     public void start(Stage stage) {
@@ -108,13 +110,29 @@ public class ViewDialogThemeTest extends ApplicationTest {
         stage.show();
     }
 
-    /** Hiding a dialog also ends the showAndWait a failed assertion left open. */
+    /**
+     * Hides every dialog still open, which also ends the showAndWait a failed
+     * assertion left open, and takes the focus to the root of every dialog the
+     * test opened. Monocle keeps a window focused after it hides, so the field
+     * focused in a dialog would go on blinking its caret: an animation that
+     * keeps JavaFX pulsing for the rest of the fork, which
+     * DashboardHiddenWindowTest counts. A form its own OK button closed blinks
+     * on as well, though it has left Window.getWindows() and its field has
+     * left its scene, so the dialogs come from {@link #open} too.
+     */
     @AfterEach
     void closeTheDialogs() {
         interact(() -> {
-            for (Window window : List.copyOf(Window.getWindows())) {
-                if (window != stage) {
-                    window.hide();
+            List<Window> windows = new ArrayList<>(dialogs);
+            for (Window window : Window.getWindows()) {
+                if (window != stage && !windows.contains(window)) {
+                    windows.add(window);
+                }
+            }
+            for (Window window : windows) {
+                window.hide();
+                if (window.getScene() != null) {
+                    window.getScene().getRoot().requestFocus();
                 }
             }
         });
@@ -394,7 +412,7 @@ public class ViewDialogThemeTest extends ApplicationTest {
     /**
      * Fires what opens a dialog and returns the dialog once it is on screen:
      * the first showing window that was not showing before, with a dialog pane
-     * for its root.
+     * for its root. The window is kept for {@link #closeTheDialogs}.
      */
     private DialogPane open(Runnable opener) {
         List<Window> before = onFx(() -> List.copyOf(Window.getWindows()));
@@ -403,6 +421,7 @@ public class ViewDialogThemeTest extends ApplicationTest {
             for (Window window : Window.getWindows()) {
                 if (!before.contains(window) && window.isShowing() && window.getScene() != null
                         && window.getScene().getRoot() instanceof DialogPane pane) {
+                    dialogs.add(window);
                     return pane;
                 }
             }
