@@ -2,8 +2,11 @@ package com.vlessclient.ui.view;
 
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.service.ThemeManager;
+import java.util.List;
 import java.util.Optional;
+import javafx.geometry.Rectangle2D;
 import javafx.scene.Scene;
+import javafx.stage.Screen;
 import javafx.stage.Stage;
 import javafx.stage.Window;
 import org.slf4j.Logger;
@@ -52,11 +55,11 @@ final class DialogStage extends Stage {
     }
 
     /**
-     * Sets the stage down over its owner where JavaFX sets a Dialog down: the
-     * middles of the two scenes together, half the owner's title bar lower.
-     * A window calls this as it is first shown, once its scene is sized and
-     * before it is on screen. With no owner on screen, the middle of the
-     * screen.
+     * Sets the stage down over its owner where JavaFX sets a Dialog down, the
+     * middles of the two scenes together and half the owner's title bar lower,
+     * but inside the screen the owner is on. A window calls this as it is first
+     * shown, once its scene is sized and before it is on screen. With no owner
+     * on screen, the middle of the screen.
      */
     @Override
     public void centerOnScreen() {
@@ -67,8 +70,34 @@ final class DialogStage extends Stage {
             return;
         }
         Scene ownerScene = owner.getScene();
-        setX(owner.getX() + (ownerScene.getWidth() - scene.getWidth()) / 2);
-        setY(owner.getY() + ownerScene.getY() / 2
-                + (ownerScene.getHeight() - scene.getHeight()) / 2);
+        double x = owner.getX() + (ownerScene.getWidth() - scene.getWidth()) / 2;
+        double y = owner.getY() + ownerScene.getY() / 2
+                + (ownerScene.getHeight() - scene.getHeight()) / 2;
+        // JavaFX sets a Dialog down with no regard for the screen, which an
+        // alert's size gets away with. The server form is taller than the main
+        // window: over a window against the top or the bottom edge it would put
+        // its title bar out of reach above the screen, or its Save button below
+        // it. The owner's title bar stands in for this stage's, not drawn yet.
+        Rectangle2D screen = screenOf(owner).getVisualBounds();
+        setX(within(x, screen.getMinX(), screen.getMaxX() - scene.getWidth()));
+        setY(within(y, screen.getMinY(),
+                screen.getMaxY() - ownerScene.getY() - scene.getHeight()));
+    }
+
+    /** The screen the middle of {@code window} is on. */
+    private static Screen screenOf(Window window) {
+        List<Screen> screens = Screen.getScreensForRectangle(
+                window.getX() + window.getWidth() / 2, window.getY() + window.getHeight() / 2,
+                1, 1);
+        return screens.isEmpty() ? Screen.getPrimary() : screens.get(0);
+    }
+
+    /**
+     * {@code value} kept between {@code min} and {@code max}, and at
+     * {@code min} when the two cross: a stage larger than the screen keeps its
+     * top-left corner, and so its title bar, on the screen.
+     */
+    private static double within(double value, double min, double max) {
+        return Math.max(min, Math.min(value, max));
     }
 }

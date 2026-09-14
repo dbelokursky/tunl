@@ -21,6 +21,7 @@ import java.util.function.DoubleConsumer;
 import java.util.function.Supplier;
 import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
+import javafx.geometry.Rectangle2D;
 import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
@@ -31,6 +32,7 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Text;
+import javafx.stage.Screen;
 import javafx.stage.Stage;
 import javafx.stage.Window;
 import org.junit.jupiter.api.AfterEach;
@@ -233,6 +235,43 @@ public class DialogStageThemeTest extends ApplicationTest {
         problems.addAll(dress(form, theme));
         assertNoProblems(theme + ": the server form", problems);
         assertThat(onFx(form::getTitle)).isEqualTo(I18n.get("dialog.add.server"));
+    }
+
+    /**
+     * The server form is taller than the main window, which opens 500px high:
+     * set down over a window against the top or the bottom of the screen, the
+     * form would put its title bar out of reach above the screen, or its Save
+     * button below it. It sits over the window as far as the screen allows.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"top", "bottom"})
+    void theServerFormStaysOnTheScreenOverAWindowAtItsEdge(String edge) {
+        Rectangle2D screen = onFx(() -> Screen.getPrimary().getVisualBounds());
+        interact(() -> {
+            window.setHeight(500);
+            window.setY("top".equals(edge) ? screen.getMinY() : screen.getMaxY() - 500);
+        });
+        Parent servers = mount("ServersView", "light");
+
+        Stage form = open(button(servers, "#addServerButton")::fire);
+
+        double[] at = onFx(() -> new double[] {
+            form.getX(), form.getY(),
+            form.getX() + form.getWidth(), form.getY() + form.getHeight(),
+            form.getX() + form.getWidth() / 2 - (window.getX() + window.getWidth() / 2)});
+        List<String> problems = new ArrayList<>(ownership(form));
+        if (at[0] < screen.getMinX() || at[1] < screen.getMinY()
+                || at[2] > screen.getMaxX() || at[3] > screen.getMaxY()) {
+            problems.add(String.format(Locale.ROOT,
+                    "it spans (%.0f, %.0f) to (%.0f, %.0f), past the screen's (%.0f, %.0f) to "
+                            + "(%.0f, %.0f)", at[0], at[1], at[2], at[3], screen.getMinX(),
+                    screen.getMinY(), screen.getMaxX(), screen.getMaxY()));
+        }
+        if (Math.abs(at[4]) > 1) {
+            problems.add(String.format(Locale.ROOT,
+                    "its middle is %.0fpx right of the window's", at[4]));
+        }
+        assertNoProblems(edge + ": the server form over a window at the screen's edge", problems);
     }
 
     // ===== Opening and reading stages =====
