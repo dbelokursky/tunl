@@ -12,14 +12,18 @@ import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.service.TunnelRecoveryService;
 import com.vlessclient.ui.view.FxTimer;
+import com.vlessclient.ui.view.OnScreen;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javafx.application.Platform;
+import javafx.beans.value.ObservableValue;
 import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.Tooltip;
@@ -47,6 +51,9 @@ import org.slf4j.LoggerFactory;
  * {@link TunnelHealthState}, because the health card is not the only thing
  * that must not claim a dead tunnel is fine: the menu-bar icon reads the same
  * signal, and it has no access to this view.</p>
+ *
+ * <p>For the same reason the loop runs whether or not anyone can see the card,
+ * while its rows and summary are drawn only when someone can.</p>
  */
 public final class HealthCheckCoordinator {
 
@@ -90,6 +97,16 @@ public final class HealthCheckCoordinator {
     // re-probe would flicker the tray icon and the hero card twelve times a
     // minute. Only the unproven window after a connect is worth showing.
     private final AtomicBoolean hasVerdict = new AtomicBoolean();
+
+    /** Whether the card is in a scene whose window is showing; null without a card. */
+    private final ObservableValue<Boolean> cardOnScreen;
+
+    // What the card shows, or is to show once it is back on screen; see showOnCard.
+    private List<RowContent> cardRows = List.of();
+    private Supplier<String> cardSummary = () -> "—";
+
+    /** The row nodes, in serviceStatusList order, reused from one probe to the next. */
+    private final List<ServiceRow> rows = new ArrayList<>();
 
     /**
      * Creates the coordinator over the given controls. The engine is read
@@ -139,6 +156,15 @@ public final class HealthCheckCoordinator {
         this.healthState = healthState;
         this.engineSupplier = engineSupplier;
         this.recovery = recovery;
+        this.cardOnScreen = healthCard != null ? OnScreen.of(healthCard) : null;
+        if (cardOnScreen != null) {
+            // What the probes found while the card was away is drawn as it returns.
+            cardOnScreen.addListener((obs, wasOnScreen, isOnScreen) -> {
+                if (isOnScreen) {
+                    drawCard();
+                }
+            });
+        }
         if (recovery != null) {
             recovery.retryProperty().addListener((obs, old, next) -> renderRetry(next));
             renderRetry(recovery.retryProperty().get());
@@ -236,10 +262,7 @@ public final class HealthCheckCoordinator {
             // Keep the card (and its "+" button) visible: hiding it would
             // leave no way to add a target back after removing the last one.
             setHealthCardVisible(true);
-            if (serviceStatusList != null) {
-                serviceStatusList.getChildren().clear();
-            }
-            healthSummaryLabel.setText(I18n.get("health.no.targets"));
+            showOnCard(List.of(), () -> I18n.get("health.no.targets"));
             publishHealth(TunnelHealth.UNMONITORED);
             return;
         }
@@ -249,7 +272,6 @@ public final class HealthCheckCoordinator {
 
         setHealthCardVisible(true);
         renderPendingRows(targets);
-        healthSummaryLabel.setText(I18n.get("dashboard.health.checking"));
         if (!hasVerdict.get()) {
             publishHealth(TunnelHealth.CHECKING);
         }
@@ -269,7 +291,7 @@ public final class HealthCheckCoordinator {
                     }
                     if (err != null) {
                         log.warn("Reachability check failed", err);
-                        healthSummaryLabel.setText(I18n.get("dashboard.health.failed"));
+                        showOnCard(cardRows, () -> I18n.get("dashboard.health.failed"));
                         // A failed batch is not a healthy tunnel and not a
                         // broken one — say so rather than leaving the last
                         // answer standing.
@@ -383,12 +405,7 @@ public final class HealthCheckCoordinator {
         hasVerdict.set(false);
         publishHealth(TunnelHealth.UNMONITORED);
         hideReconnectBanner();
-        if (serviceStatusList != null) {
-            serviceStatusList.getChildren().clear();
-        }
-        if (healthSummaryLabel != null) {
-            healthSummaryLabel.setText("—");
-        }
+        showOnCard(List.of(), () -> "—");
         setHealthCardVisible(false);
         if (recovery != null) {
             renderRetry(recovery.retryProperty().get());
@@ -396,23 +413,17 @@ public final class HealthCheckCoordinator {
     }
 
     private void renderPendingRows(List<HealthCheckTarget> targets) {
-        if (serviceStatusList == null) {
-            return;
-        }
-        serviceStatusList.getChildren().clear();
+        List<RowContent> pending = new ArrayList<>(targets.size());
         for (HealthCheckTarget t : targets) {
             String name = t.getName() != null && !t.getName().isBlank() ? t.getName() : t.getUrl();
-            serviceStatusList.getChildren().add(buildServiceRow(name, t.getUrl(),
-                    "status-circle-connecting", I18n.get("dashboard.health.checking"),
-                    "service-pending"));
+            pending.add(new RowContent(name, t.getUrl(), "status-circle-connecting",
+                    () -> I18n.get("dashboard.health.checking"), "service-pending"));
         }
+        showOnCard(pending, () -> I18n.get("dashboard.health.checking"));
     }
 
     private void renderResultRows(List<ServiceReachabilityChecker.ProbeResult> results) {
-        if (serviceStatusList == null) {
-            return;
-        }
-        serviceStatusList.getChildren().clear();
+        List<RowContent> answered = new ArrayList<>(results.size());
         int reachable = 0;
         for (ServiceReachabilityChecker.ProbeResult r : results) {
             boolean ok = r.reachable();
@@ -420,13 +431,15 @@ public final class HealthCheckCoordinator {
                 reachable++;
             }
             String dotClass = ok ? "status-circle-connected" : "status-circle-error";
-            String resultText =
-                    ok ? r.latencyMs() + " ms" : I18n.get("dashboard.health.unreachable");
+            String latency = r.latencyMs() + " ms";
+            Supplier<String> resultText =
+                    ok ? () -> latency : () -> I18n.get("dashboard.health.unreachable");
             String resultClass = ok ? "service-ok" : "service-fail";
-            serviceStatusList.getChildren().add(
-                    buildServiceRow(r.name(), r.url(), dotClass, resultText, resultClass));
+            answered.add(new RowContent(r.name(), r.url(), dotClass, resultText, resultClass));
         }
-        healthSummaryLabel.setText(summarize(reachable, results.size()));
+        int reachableCount = reachable;
+        int total = results.size();
+        showOnCard(answered, () -> summarize(reachableCount, total));
     }
 
     private static String summarize(int reachable, int total) {
@@ -439,34 +452,116 @@ public final class HealthCheckCoordinator {
         return I18n.get("dashboard.health.some.reachable", reachable, total);
     }
 
-    private HBox buildServiceRow(String name, String url, String dotStyleClass,
-                                 String resultText, String resultStyleClass) {
-        HBox row = new HBox(8);
-        row.setAlignment(Pos.CENTER_LEFT);
+    /**
+     * Remembers what the card should show and draws it if anyone can see it.
+     *
+     * <p>The probes go on with the window hidden to the tray and with the
+     * dashboard cached behind another page, and their verdicts matter there;
+     * drawing them does not. Every changed row and label asks for a layout,
+     * and a layout request that reaches the scene root costs JavaFX a pulse
+     * whether or not the window is showing. Off screen the latest rows and
+     * summary are only kept, and they are drawn once when the card is back.</p>
+     *
+     * @param content one entry per service, in the order of the rows
+     * @param summary the summary line, resolved when it is drawn so that it
+     *                follows the current language
+     */
+    private void showOnCard(List<RowContent> content, Supplier<String> summary) {
+        cardRows = content;
+        cardSummary = summary;
+        if (cardOnScreen == null || cardOnScreen.getValue()) {
+            drawCard();
+        }
+    }
 
-        Circle dot = new Circle(5);
-        dot.getStyleClass().setAll(dotStyleClass);
+    /**
+     * Brings the rows and the summary in line with the latest probe. Rows are
+     * reused and a value is set only when it differs, so drawing the card again
+     * after a stay off screen in which nothing changed costs nothing.
+     */
+    private void drawCard() {
+        if (serviceStatusList != null) {
+            while (rows.size() > cardRows.size()) {
+                serviceStatusList.getChildren().remove(rows.remove(rows.size() - 1).box);
+            }
+            while (rows.size() < cardRows.size()) {
+                ServiceRow row = new ServiceRow();
+                rows.add(row);
+                serviceStatusList.getChildren().add(row.box);
+            }
+            for (int i = 0; i < rows.size(); i++) {
+                rows.get(i).show(cardRows.get(i));
+            }
+        }
+        if (healthSummaryLabel != null) {
+            healthSummaryLabel.setText(cardSummary.get());
+        }
+    }
 
-        Label nameLabel = new Label(name);
-        nameLabel.getStyleClass().setAll("service-name");
+    /**
+     * What one row shows. The result text is resolved when the row is drawn,
+     * so a card drawn after a language switch uses the new language.
+     */
+    private record RowContent(
+            String name,
+            String url,
+            String dotStyleClass,
+            Supplier<String> resultText,
+            String resultStyleClass) {
+    }
 
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
+    /**
+     * One row's nodes, built when the card lists more services than it has
+     * rows and updated in place after that. A probe every few seconds used to
+     * build every row again, each with a tooltip of its own, and a tooltip is
+     * a popup window with a scene of its own.
+     */
+    private final class ServiceRow {
 
-        Label resultLabel = new Label(resultText);
-        resultLabel.getStyleClass().setAll(resultStyleClass);
+        private final HBox box = new HBox(8);
+        private final Circle dot = new Circle(5);
+        private final Label nameLabel = new Label();
+        private final Label resultLabel = new Label();
+        private final Button remove = new Button("✕");
+        private final Tooltip removeTooltip = new Tooltip();
 
-        row.getChildren().addAll(dot, nameLabel, spacer, resultLabel);
+        /** The service the row stands for now; a reused row moves on to another. */
+        private String url;
 
-        if (url != null && !url.isBlank()) {
-            Button remove = new Button("✕");
+        ServiceRow() {
+            box.setAlignment(Pos.CENTER_LEFT);
+            nameLabel.getStyleClass().setAll("service-name");
+            Region spacer = new Region();
+            HBox.setHgrow(spacer, Priority.ALWAYS);
             remove.getStyleClass().setAll("icon-button", "destructive");
             remove.setFocusTraversable(false);
-            remove.setTooltip(new Tooltip(I18n.get("health.target.remove")));
+            remove.setTooltip(removeTooltip);
             remove.setOnAction(e -> removeHealthTarget(url));
-            row.getChildren().add(remove);
+            box.getChildren().addAll(dot, nameLabel, spacer, resultLabel, remove);
         }
-        return row;
+
+        void show(RowContent content) {
+            url = content.url();
+            nameLabel.setText(content.name());
+            styleAs(dot, content.dotStyleClass());
+            resultLabel.setText(content.resultText().get());
+            styleAs(resultLabel, content.resultStyleClass());
+            boolean removable = url != null && !url.isBlank();
+            remove.setVisible(removable);
+            remove.setManaged(removable);
+            removeTooltip.setText(I18n.get("health.target.remove"));
+        }
+    }
+
+    /**
+     * Makes {@code styleClass} the node's only style class. A list that already
+     * is just that is left alone: setting it again fires a change, and a change
+     * sends the node through CSS again.
+     */
+    private static void styleAs(Node node, String styleClass) {
+        if (node.getStyleClass().size() != 1 || !node.getStyleClass().get(0).equals(styleClass)) {
+            node.getStyleClass().setAll(styleClass);
+        }
     }
 
     // ===== health-target list editing =====
