@@ -77,8 +77,9 @@ public final class FxPulses {
         return onFx(() -> {
             AbstractPrimaryTimer timer = Toolkit.getToolkit().getPrimaryTimer();
             List<Running> running = new ArrayList<>();
-            addEntries(running, timer, "receivers", "receiversLength");
-            addEntries(running, timer, "animationTimers", "animationTimersLength");
+            addEntries(running, timer, "receivers", "receiversLength", Animation.class);
+            addEntries(running, timer, "animationTimers", "animationTimersLength",
+                    AnimationTimer.class);
             return running;
         });
     }
@@ -102,8 +103,7 @@ public final class FxPulses {
     /**
      * An animation or animation timer the toolkit drives; see {@link #running()}.
      *
-     * @param animation the {@link Animation} or {@link AnimationTimer}, or the
-     *     receiver the timer calls when it belongs to neither
+     * @param animation the {@link Animation} or {@link AnimationTimer}
      * @param description what it is and, as far as can be told, whose it is
      * @param repeatsForever whether it runs until something stops it: an
      *     animation that cycles indefinitely, or any animation timer
@@ -159,6 +159,40 @@ public final class FxPulses {
         }
     }
 
+    /**
+     * Runs {@code work} on the FX thread, or right away when already on it,
+     * and hands back what it returned. It waits five seconds at most, and
+     * never goes through TestFX, so an exception TestFX holds for its next call
+     * is left where it is.
+     */
+    static <T> T onFx(Supplier<T> work) {
+        if (Platform.isFxApplicationThread()) {
+            return work.get();
+        }
+        CompletableFuture<T> result = new CompletableFuture<>();
+        Platform.runLater(() -> {
+            try {
+                result.complete(work.get());
+            } catch (RuntimeException e) {
+                result.completeExceptionally(e);
+            }
+        });
+        try {
+            return result.get(FX_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("interrupted while reading the JavaFX toolkit", e);
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof RuntimeException cause) {
+                throw cause;
+            }
+            throw new IllegalStateException(e.getCause());
+        } catch (TimeoutException e) {
+            throw new AssertionError("the FX thread did not answer within "
+                    + FX_TIMEOUT_SECONDS + "s", e);
+        }
+    }
+
     private static int intField(AbstractPrimaryTimer timer, String name) {
         return (Integer) field(timer, name);
     }
@@ -177,10 +211,10 @@ public final class FxPulses {
     /**
      * Lists the entries of one of the timer's two arrays. An entry is a
      * ReceiverRecord around the receiver the timer calls, and the receiver an
-     * inner object of the animation or animation timer it drives.
+     * inner object of the {@code kind} of thing it drives.
      */
     private static void addEntries(List<Running> running, AbstractPrimaryTimer timer,
-                                   String array, String length) {
+                                   String array, String length, Class<?> kind) {
         Object[] records = (Object[]) field(timer, array);
         int count = intField(timer, length);
         try {
@@ -188,7 +222,7 @@ public final class FxPulses {
                     + "$ReceiverRecord").getDeclaredMethod("receiver");
             receiver.setAccessible(true);
             for (int i = 0; i < count; i++) {
-                Object animation = outerAnimation(receiver.invoke(records[i]));
+                Object animation = outer(receiver.invoke(records[i]), kind);
                 running.add(new Running(animation, describe(animation),
                         !(animation instanceof Animation playing)
                                 || playing.getCycleCount() == Animation.INDEFINITE));
@@ -199,14 +233,19 @@ public final class FxPulses {
         }
     }
 
-    /** The animation or animation timer {@code receiver} belongs to, or the receiver itself. */
-    private static Object outerAnimation(Object receiver) {
+    /**
+     * The {@code kind} of object {@code receiver} is an inner object of. Not
+     * lenient: an entry that leads to no animation could be neither told apart
+     * nor stopped.
+     */
+    private static Object outer(Object receiver, Class<?> kind) {
         for (Object value : fieldValues(receiver)) {
-            if (value instanceof Animation || value instanceof AnimationTimer) {
+            if (kind.isInstance(value)) {
                 return value;
             }
         }
-        return receiver;
+        throw new IllegalStateException(receiver.getClass().getName() + " holds no "
+                + kind.getSimpleName() + " in this JavaFX; update FxPulses");
     }
 
     /**
@@ -312,33 +351,5 @@ public final class FxPulses {
 
     private static String millis(Duration duration) {
         return String.format(Locale.ROOT, "%.0f ms", duration.toMillis());
-    }
-
-    private static <T> T onFx(Supplier<T> work) {
-        if (Platform.isFxApplicationThread()) {
-            return work.get();
-        }
-        CompletableFuture<T> result = new CompletableFuture<>();
-        Platform.runLater(() -> {
-            try {
-                result.complete(work.get());
-            } catch (RuntimeException e) {
-                result.completeExceptionally(e);
-            }
-        });
-        try {
-            return result.get(FX_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new AssertionError("interrupted while reading the JavaFX toolkit", e);
-        } catch (ExecutionException e) {
-            if (e.getCause() instanceof RuntimeException cause) {
-                throw cause;
-            }
-            throw new IllegalStateException(e.getCause());
-        } catch (TimeoutException e) {
-            throw new AssertionError("the FX thread did not answer within "
-                    + FX_TIMEOUT_SECONDS + "s", e);
-        }
     }
 }

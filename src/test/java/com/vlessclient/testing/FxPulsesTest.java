@@ -74,6 +74,36 @@ class FxPulsesTest {
         }
     }
 
+    @Test
+    void listsARunningAnimationTimerAndStopsIt() throws Exception {
+        javafx.animation.AnimationTimer timer = new javafx.animation.AnimationTimer() {
+            @Override
+            public void handle(long now) {
+            }
+        };
+        Platform.runLater(timer::start);
+        flushFxEvents();
+        try {
+            FxPulses.Running running = FxPulses.running().stream()
+                    .filter(entry -> entry.animation() == timer)
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("the running timer is not listed"));
+            assertThat(running.description()).isEqualTo(timer.getClass().getName());
+            assertThat(running.repeatsForever())
+                    .as("whether an animation timer runs until something stops it")
+                    .isTrue();
+
+            running.stop();
+
+            assertThat(FxPulses.running())
+                    .as("what runs once the timer was stopped through its entry")
+                    .noneMatch(entry -> entry.animation() == timer);
+        } finally {
+            Platform.runLater(timer::stop);
+            flushFxEvents();
+        }
+    }
+
     /**
      * The leak the descriptions were written for: a caret blinks while its
      * field is focused, and Monocle keeps a window focused after it hides, so
