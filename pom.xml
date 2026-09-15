@@ -48,6 +48,9 @@
         <!-- Smoke tests (@Tag "smoke") run the real bundled binary; excluded
              by default, enabled with -Psmoke. -->
         <surefire.excludedGroups>smoke</surefire.excludedGroups>
+        <!-- -Psmoke sets it: the smoke suites then fail without the bundled
+             core instead of skipping themselves (see BundledCore). -->
+        <tunl.smoke.requireCore>false</tunl.smoke.requireCore>
         <!-- Safe default so surefire's @{argLine} resolves even when the
              JaCoCo agent is skipped (prepare-agent overwrites this). -->
         <argLine></argLine>
@@ -280,6 +283,7 @@
                             a populated world locally and an empty one on CI.
                         -->
                         <vless.data.dir>${project.build.directory}/test-data-dir</vless.data.dir>
+                        <tunl.smoke.requireCore>${tunl.smoke.requireCore}</tunl.smoke.requireCore>
                         <!--
                             Headless JavaFX for the whole suite. The UI tests
                             always set these per-class, but service tests that
@@ -502,6 +506,7 @@
             <id>smoke</id>
             <properties>
                 <surefire.excludedGroups/>
+                <tunl.smoke.requireCore>true</tunl.smoke.requireCore>
             </properties>
         </profile>
 
