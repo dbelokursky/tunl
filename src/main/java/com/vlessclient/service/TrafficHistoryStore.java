@@ -84,6 +84,13 @@ public class TrafficHistoryStore {
     private long lastFlushAt;
 
     /**
+     * True while the file on disk holds a history this session could not
+     * load. It is left as it is: nothing is written over it until the app
+     * starts again, or until {@link #reset()} removes it.
+     */
+    private boolean keepExistingFile;
+
+    /**
      * Writes happen here rather than on the caller's thread: samples arrive on
      * the FX thread, and the file grows for as long as the user keeps the app.
      */
@@ -215,9 +222,12 @@ public class TrafficHistoryStore {
         }
     }
 
-    /** Writes pending changes to disk; a no-op when nothing changed. */
+    /**
+     * Writes pending changes to disk; a no-op when nothing changed, or while
+     * the file holds a history this session could not load.
+     */
     public synchronized void flush() {
-        if (!dirty) {
+        if (!dirty || keepExistingFile) {
             return;
         }
         TrafficHistory history = new TrafficHistory();
@@ -245,6 +255,9 @@ public class TrafficHistoryStore {
         Path file = dataDir.resolve(HISTORY_FILE);
         try {
             Files.deleteIfExists(file);
+            // The file this session could not load is gone, so the record can
+            // start again.
+            keepExistingFile = false;
         } catch (IOException e) {
             log.error("Failed to delete traffic history at {}", file, e);
         }
@@ -432,20 +445,32 @@ public class TrafficHistoryStore {
         if (!Files.exists(file)) {
             return;
         }
+        byte[] bytes;
         try {
-            TrafficHistory history = objectMapper.readValue(Files.readAllBytes(file),
-                    TrafficHistory.class);
+            bytes = Files.readAllBytes(file);
+        } catch (IOException e) {
+            // There but unreadable, which says nothing about what it holds: an
+            // antivirus or a backup tool can have the file open at startup.
+            log.error("Could not read traffic history at {}; leaving it untouched "
+                    + "until the app restarts", file, e);
+            keepExistingFile = true;
+            return;
+        }
+        try {
+            TrafficHistory history = objectMapper.readValue(bytes, TrafficHistory.class);
             version = history.getVersion();
             for (TrafficHistory.Day day : history.getDays()) {
                 if (day.getDate() != null && !day.getDate().isBlank()) {
                     byDate.put(day.getDate(), day);
                 }
             }
-        } catch (IOException | JacksonException e) {
-            // A corrupt history is worth losing, never worth blocking startup:
-            // it is a convenience record, not configuration.
-            log.error("Could not read traffic history at {}; starting empty", file, e);
+        } catch (JacksonException e) {
+            // Not worth blocking startup over, but nothing in the record is
+            // ever pruned: move the file aside before a flush can replace it.
+            log.error("Could not parse traffic history at {}; starting empty", file, e);
             byDate.clear();
+            ConfigStore.quarantineCorrupt(file);
+            keepExistingFile = Files.exists(file);
         }
     }
 }
