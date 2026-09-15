@@ -126,10 +126,12 @@ public final class LinuxTunLauncher implements TunLauncher {
         // Process.destroy() (SIGTERM), and dash does NOT run an EXIT-only trap
         // when killed by a signal — it would die mid-`sleep`, leaving sing-box
         // orphaned with the TUN still up. Handling TERM/INT kills the core
-        // first, then the shell exits through the loop as usual.
+        // first, then the shell exits through the loop as usual. The trap is
+        // set before the core starts: a signal between the two used to kill
+        // the shell with the core already running.
         return String.format(
-                "%s run -c %s & SBPID=$!; "
-                        + "trap 'kill $SBPID 2>/dev/null; exit 0' EXIT INT TERM; "
+                "trap 'kill ${SBPID:-$!} 2>/dev/null; exit 0' EXIT INT TERM; "
+                        + "%s run -c %s & SBPID=$!; "
                         + "while kill -0 $SBPID 2>/dev/null "
                         + "&& kill -0 %d 2>/dev/null "
                         + "&& [ ! -f %s ]; do sleep 0.3; done; "
