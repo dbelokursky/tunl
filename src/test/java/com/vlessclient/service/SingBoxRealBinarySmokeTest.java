@@ -311,6 +311,36 @@ class SingBoxRealBinarySmokeTest {
     }
 
     /**
+     * A DNS server can be named by host, and the Settings fields take it with
+     * or without a scheme or a port. The core refused a Direct DNS it had no
+     * way to resolve, and "8.8.8.8:53" reached it as a name, so TUN mode never
+     * started with either.
+     */
+    @Test
+    void checkAcceptsDnsServersHoweverSettingsSpellThem() throws Exception {
+        List<String> addresses = List.of(
+                "https://dns.google/dns-query",
+                "tls://dns.quad9.net",
+                "quic://dns.adguard-dns.com",
+                "h3://dns.google/dns-query",
+                "dns.google",
+                "8.8.8.8:53",
+                "dns.google:53",
+                "[2001:4860:4860::8888]:53",
+                "2001:4860:4860::8888",
+                "https://[2606:4700:4700::1111]/dns-query");
+
+        for (String address : addresses) {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(ProxyMode.TUN);
+            settings.setProxyDns(address);
+            settings.setDirectDns(address);
+
+            assertCheckPasses(generator.generate(serverFor(Protocol.VLESS), settings), address);
+        }
+    }
+
+    /**
      * The production check against the real core: what it lets through, and
      * what it refuses in the core's own words. A subscription can still carry
      * Xray's retired {@code xtls-rprx-direct} flow; the core refuses to build
