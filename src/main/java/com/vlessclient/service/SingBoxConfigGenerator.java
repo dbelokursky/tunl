@@ -150,6 +150,7 @@ public class SingBoxConfigGenerator {
         if (routingConfig != null) {
             ObjectNode route = buildRoute(routingConfig);
             ensureTunRouteEssentials(route, settings);
+            resolveNamesBeforeIpRules(root, route, settings, routingConfig);
             root.set("route", route);
         } else if (settings.getProxyMode() == ProxyMode.TUN) {
             // sing-box 1.13 needs a route block with default_domain_resolver
@@ -252,11 +253,12 @@ public class SingBoxConfigGenerator {
         // all queries through the proxy DNS by default.
         dns.put("final", "proxy-dns");
 
-        // A device without an IPv6 address routes IPv4 alone, and the core
+        // A TUN device without an IPv6 address routes IPv4 alone, and the core
         // drops AAAA answers only for ipv4_only: any other strategy handed the
         // system IPv6 addresses, which it reached around the tunnel.
-        dns.put("strategy", settings.isTunIpv6Enabled()
-                ? settings.getDnsStrategy() : "ipv4_only");
+        boolean tunWithoutIpv6 = settings.getProxyMode() == ProxyMode.TUN
+                && !settings.isTunIpv6Enabled();
+        dns.put("strategy", tunWithoutIpv6 ? "ipv4_only" : settings.getDnsStrategy());
 
         return dns;
     }
@@ -449,6 +451,80 @@ public class SingBoxConfigGenerator {
         privateIp.put("action", "route");
         privateIp.put("outbound", "direct");
         return privateIp;
+    }
+
+    /**
+     * Behind the system proxy a browser asks for a name ({@code CONNECT
+     * host:443}), and the core matches IP rules against the destination address
+     * alone: without a lookup a country bypass or a GEOIP / IP_CIDR rule never
+     * matched named traffic. A {@code resolve} action right before the first
+     * such rule gives them an address, and rules above it still match by name
+     * without one. It names no server, so the DNS rules pick one: the system
+     * resolver for LAN names, proxy DNS for the rest, so a name bound for the
+     * tunnel is not asked of the local network. The direct outbound still
+     * resolves a name itself, so bypassed traffic keeps a nearby CDN node.
+     *
+     * <p>A name the chosen resolver cannot answer is dropped at that rule; it
+     * used to reach the proxy, which could not resolve it either. TUN mode
+     * needs none of this: its connections carry an address already.</p>
+     */
+    private void resolveNamesBeforeIpRules(ObjectNode root, ObjectNode route,
+                                           AppSettings settings, RoutingConfig routingConfig) {
+        if (settings.getProxyMode() == ProxyMode.TUN) {
+            return;
+        }
+        ArrayNode rules = (ArrayNode) route.get("rules");
+        int first = firstIpRuleBelowLanBypass(rules);
+        if (first < 0) {
+            return;
+        }
+        ObjectNode resolve = mapper.createObjectNode();
+        resolve.put("action", "resolve");
+        rules.insert(first, resolve);
+        // A LAN name only becomes a private address here, below the rule that
+        // sends private addresses direct.
+        rules.insert(first + 1, buildPrivateIpDirectRule());
+
+        ArrayNode lanSuffixes = mapper.createArrayNode();
+        lanSuffixes.add(".lan");
+        lanSuffixes.add(".home.arpa");
+        lanSuffixes.add(".internal");
+        ObjectNode lanNames = mapper.createObjectNode();
+        lanNames.set("domain_suffix", lanSuffixes);
+        lanNames.put("server", "local-dns");
+        ObjectNode dns = buildDns(settings, routingConfig);
+        ((ArrayNode) dns.get("rules")).insert(1, lanNames);
+        root.set("dns", dns);
+        // The core demands one once a dns block exists, and the OS resolver
+        // keeps the proxy server's own name off the proxy.
+        route.put("default_domain_resolver", "local-dns");
+    }
+
+    /**
+     * Index of the first rule that matches on the destination address below the
+     * universal LAN bypass, or -1. The bypass list above it is the user's own
+     * list of hosts and stays a match by name.
+     */
+    private static int firstIpRuleBelowLanBypass(ArrayNode rules) {
+        int start = 0;
+        for (int i = 0; i < rules.size(); i++) {
+            if (rules.get(i).path("ip_is_private").asBoolean()) {
+                start = i + 1;
+                break;
+            }
+        }
+        for (int i = start; i < rules.size(); i++) {
+            JsonNode rule = rules.get(i);
+            if (rule.has("ip_cidr")) {
+                return i;
+            }
+            for (JsonNode tag : rule.path("rule_set")) {
+                if (tag.asString().startsWith("geoip-")) {
+                    return i;
+                }
+            }
+        }
+        return -1;
     }
 
     /**
