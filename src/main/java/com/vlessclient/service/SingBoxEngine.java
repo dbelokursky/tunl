@@ -104,6 +104,12 @@ public class SingBoxEngine {
     private volatile boolean stopRequested;
 
     /**
+     * The last start was a TUN launch through an elevation prompt that every
+     * launch raises again; see {@link #restartNeedsElevationPrompt()}.
+     */
+    private volatile boolean launchPrompts;
+
+    /**
      * Creates a new SingBoxEngine.
      *
      * @param singBoxBinary path to the sing-box executable
@@ -180,6 +186,7 @@ public class SingBoxEngine {
 
         this.activeProxyMode = proxyMode;
         this.stopRequested = false;
+        this.launchPrompts = false;
 
         Platform.runLater(() -> {
             connectionState.set(ConnectionState.CONNECTING);
@@ -389,6 +396,7 @@ public class SingBoxEngine {
         TunLauncher.Launched launched = tunLauncher.launch(singBoxBinary, tempConfigFile);
         process = launched.process();
         stopSignalFile = launched.stopSignalFile();
+        launchPrompts = launched.promptsEachLaunch();
     }
 
     /**
@@ -505,6 +513,17 @@ public class SingBoxEngine {
      */
     public boolean isStopping() {
         return stopRequested && isRunning();
+    }
+
+    /**
+     * Whether starting the core again would ask the user for elevation: the
+     * last start was a TUN launch through a prompt that every launch raises
+     * again ({@link TunLauncher.Launched#promptsEachLaunch()}).
+     *
+     * @return true when a restart would raise the prompt again
+     */
+    public boolean restartNeedsElevationPrompt() {
+        return launchPrompts;
     }
 
     /**

@@ -76,6 +76,8 @@ class ConnectionServiceTest {
         volatile boolean stopping;
         /** The stop under way finishes while a connect waits for it. */
         volatile boolean stopFinishesWhileAwaited;
+        /** The last launch asked for elevation, so starting again would ask again. */
+        volatile boolean prompts;
 
         RecordingEngine(Path binary) {
             super(binary);
@@ -116,6 +118,11 @@ class ConnectionServiceTest {
         }
 
         @Override
+        public boolean restartNeedsElevationPrompt() {
+            return prompts;
+        }
+
+        @Override
         public boolean awaitStopped(Duration timeout) {
             calls.add("await");
             if (stopFinishesWhileAwaited) {
@@ -143,6 +150,30 @@ class ConnectionServiceTest {
 
     private RecordingEngine engine() {
         return new RecordingEngine(tempDir.resolve("sing-box"));
+    }
+
+    @Test
+    void recoveryLeavesTheReconnectToTheUserOnlyWhereARestartWouldPrompt() {
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        try {
+            store.getSettings().setProxyMode(ProxyMode.TUN);
+            engine.prompts = true;
+            assertThat(service.restartNeedsTheUser()).as("TUN, launched through a prompt").isTrue();
+
+            store.getSettings().setProxyMode(ProxyMode.SYSTEM_PROXY);
+            assertThat(service.restartNeedsTheUser())
+                    .as("the system proxy asks for no elevation")
+                    .isFalse();
+
+            store.getSettings().setProxyMode(ProxyMode.TUN);
+            engine.prompts = false;
+            assertThat(service.restartNeedsTheUser())
+                    .as("TUN through the sudoers rule or cap_net_admin asks for nothing")
+                    .isFalse();
+        } finally {
+            service.getRecoveryService().close();
+        }
     }
 
     /** Refuses every start the way the real check does, with a reason built from the config. */
