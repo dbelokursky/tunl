@@ -36,6 +36,8 @@ import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.function.Supplier;
 import javafx.application.Platform;
+import javafx.collections.ObservableList;
+import javafx.collections.transformation.FilteredList;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
 import javafx.scene.Scene;
@@ -389,6 +391,41 @@ public class ViewDialogThemeTest extends ApplicationTest {
         assertThat(confirm.getHeaderText())
                 .isEqualTo(I18n.get("settings.traffic.history.clear.confirm"));
         assertBelongsToTheWindow(confirm, "dark");
+    }
+
+    @Test
+    void theTokenRegenerationConfirmation() {
+        mount("SettingsView", "dark");
+        Button regenerate = lookup("#mcpRegenButton").query();
+
+        DialogPane confirm = open(regenerate::fire);
+
+        assertThat(confirm.getHeaderText())
+                .isEqualTo(I18n.get("settings.mcp.regenerate.confirm"));
+        assertBelongsToTheWindow(confirm, "dark");
+    }
+
+    // ===== Logs =====
+
+    @Test
+    void theClearLogsConfirmation() {
+        mount("LogsView", "dark");
+        ListView<String> list = lookup("#logListView").query();
+        Await.until("the log list to be live",
+                () -> onFx(() -> list.getItems() instanceof FilteredList), PATIENCE);
+        interact(() -> logSource(list).add("INFO[0000] sing-box started"));
+        Button clear = lookup("#clearButton").query();
+
+        DialogPane confirm = open(clear::fire);
+
+        assertThat(confirm.getHeaderText()).isEqualTo(I18n.get("logs.clear.confirm"));
+        assertBelongsToTheWindow(confirm, "dark");
+    }
+
+    /** The log's own list, behind the view's filtered one. */
+    @SuppressWarnings("unchecked")
+    private static ObservableList<String> logSource(ListView<String> list) {
+        return (ObservableList<String>) ((FilteredList<String>) list.getItems()).getSource();
     }
 
     // ===== Opening and reading dialogs =====

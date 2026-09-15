@@ -18,6 +18,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.function.Consumer;
 import javafx.fxml.FXML;
+import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
@@ -30,6 +31,7 @@ import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.Circle;
+import javafx.stage.Window;
 import javafx.util.StringConverter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -677,11 +679,23 @@ public class SettingsViewController implements ViewShownAware {
 
     @FXML
     private void onRegenerateMcpToken() {
-        if (mcpServerService == null) {
+        // A new token takes effect at once, and every agent set up with the
+        // old one loses access: it used to happen on one click.
+        if (mcpServerService == null || !Confirmations.confirmIrreversible(mcpDialogOwner(),
+                I18n.get("settings.mcp.regenerate.title"),
+                I18n.get("settings.mcp.regenerate.confirm"),
+                I18n.get("settings.mcp.regenerate.content"),
+                I18n.get("settings.mcp.regenerate.action"))) {
             return;
         }
         mcpServerService.regenerateToken();
         refreshMcpCommand();
+    }
+
+    /** The window the MCP buttons are in, or null while the view is in none. */
+    private Window mcpDialogOwner() {
+        Scene scene = mcpRegenButton.getScene();
+        return scene == null ? null : scene.getWindow();
     }
 
     private int parsePort(String text, int defaultPort) {
