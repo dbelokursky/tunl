@@ -1,5 +1,6 @@
 package com.vlessclient.ui.view;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
@@ -9,15 +10,20 @@ import com.vlessclient.service.TestConfigStores;
 import com.vlessclient.testing.UiTest;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import javafx.fxml.FXMLLoader;
+import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.Label;
+import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.TextField;
+import javafx.scene.control.Tooltip;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -127,6 +133,28 @@ public class ServersViewSearchSortTest extends ApplicationTest {
                 .orElse(null);
     }
 
+    /**
+     * The latency tooltip of every visible cell that shows a measured server,
+     * read after a layout pass; {@code items} receives what each of those
+     * cells shows.
+     */
+    private Map<ListCell<?>, Tooltip> latencyTooltipsByCell(Map<ListCell<?>, ServerConfig> items) {
+        Map<ListCell<?>, Tooltip> tooltips = new IdentityHashMap<>();
+        interact(() -> {
+            list().layout();
+            for (Node node : list().lookupAll(".list-cell")) {
+                if (node instanceof ListCell<?> cell && cell.isVisible() && !cell.isEmpty()
+                        && cell.getItem() instanceof ServerConfig server
+                        && cell.getGraphic() != null
+                        && cell.getGraphic().lookup(".latency-chip") instanceof Label chip) {
+                    tooltips.put(cell, chip.getTooltip());
+                    items.put(cell, server);
+                }
+            }
+        });
+        return tooltips;
+    }
+
     @Test
     void searchMatchesNameAddressPortAndProtocol() {
         search("germany");
@@ -180,6 +208,40 @@ public class ServersViewSearchSortTest extends ApplicationTest {
                 "Germany 02",       // 212 ms
                 "Finland WG",       // unreachable
                 "Netherlands 01");  // never measured
+    }
+
+    /**
+     * A row's latency tooltip belongs to its cell and gets new text when the
+     * cell shows another server. A new Tooltip per fill cost a popup control
+     * on every sort, search and scroll.
+     */
+    @Test
+    void reorderingRetextsTheLatencyTooltipsRatherThanReplacingThem() {
+        Map<ListCell<?>, ServerConfig> itemsBefore = new IdentityHashMap<>();
+        Map<ListCell<?>, Tooltip> tooltipsBefore = latencyTooltipsByCell(itemsBefore);
+
+        chooseSort("LATENCY");
+        Map<ListCell<?>, ServerConfig> itemsAfter = new IdentityHashMap<>();
+        Map<ListCell<?>, Tooltip> tooltipsAfter = latencyTooltipsByCell(itemsAfter);
+
+        List<ListCell<?>> refilled = tooltipsBefore.keySet().stream()
+                .filter(tooltipsAfter::containsKey)
+                .filter(cell -> itemsBefore.get(cell) != itemsAfter.get(cell))
+                .toList();
+        assertThat(refilled)
+                .as("cells that showed one measured server and now show another")
+                .isNotEmpty();
+        for (ListCell<?> cell : refilled) {
+            ServerConfig shown = itemsAfter.get(cell);
+            Tooltip tooltip = tooltipsAfter.get(cell);
+            assertThat(tooltip)
+                    .as("the latency tooltip of the row now showing " + shown.getName())
+                    .isSameAs(tooltipsBefore.get(cell));
+            assertThat(tooltip.getText())
+                    .as("the text of that tooltip")
+                    .isEqualTo(I18n.get(tester.canned.get(shown.getId()).throughProxy()
+                            ? "dashboard.latency.via.proxy" : "dashboard.latency.via.tcp"));
+        }
     }
 
     @Test
