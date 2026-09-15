@@ -64,8 +64,11 @@ class SingBoxEngineTest {
                     + "echo sing-box started\r\n"
                     + "timeout /t " + sleepSeconds + " /nobreak > NUL\r\n");
         }
+        // bash, not sh: macOS's /bin/sh hands a script over to bash in the
+        // same process soon after it starts, so the executable the system
+        // reports changed under a test that records it (CoreRecord).
         return writeScript(dir, name,
-                "#!/bin/sh\n"
+                "#!/bin/bash\n"
                 + "[ \"$1\" = check ] && exit 0\n"
                 + "echo 'sing-box started'\n"
                 + "sleep " + sleepSeconds + "\n");
