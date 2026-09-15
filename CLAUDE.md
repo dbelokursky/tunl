@@ -110,7 +110,8 @@ launchers, system-proxy guards, secret sealers, autostart, update appliers);
 - Base branch is `main` (there is no `develop`). PRs go sequentially off
   `main`, never stacked: `build.yml` only runs for PRs whose base is `main`,
   and `main` requires `test-macos`, `test-windows`, `test-linux` and
-  `test-linux-arm` to pass.
+  `test-linux-arm` to pass. `test-windows` and `test-linux` also build and
+  smoke-test the MSI and the DEB, so a broken installer fails a required check.
 - Releases are batched, not cut per PR: builds are unsigned, and every release
   makes users repeat the Gatekeeper / SmartScreen unblock. `dev-latest`
   already rebuilds on every merge. A release is an annotated tag
