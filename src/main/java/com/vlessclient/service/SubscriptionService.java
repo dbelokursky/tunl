@@ -19,6 +19,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
@@ -74,6 +75,19 @@ public class SubscriptionService {
     private final ShareLinkParser shareLinkParser;
     private final HttpClient httpClient;
     private final SecretSealer sealer;
+
+    /**
+     * The last URL sealed under each subscription id, and the tag it produced.
+     * Every save used to seal every URL again, one secret-tool process each on
+     * macOS, and a refresh saves the list. Loading fills it with the tags the
+     * file already holds. Guarded by this object's monitor.
+     */
+    private final Map<String, SealedUrl> urlSealCache = new HashMap<>();
+
+    /** A sealed URL and the plaintext that produced it. */
+    private record SealedUrl(String plaintext, String tag) {
+    }
+
     private final Object lifecycleLock = new Object();
     /**
      * Serializes refreshSubscription's apply stage against removeSubscription
@@ -249,6 +263,9 @@ public class SubscriptionService {
                 subscriptions.remove(sub);
             }
         });
+        synchronized (this) {
+            urlSealCache.remove(sub.getId());
+        }
         saveSubscriptions();
         Thread.startVirtualThread(() -> sealer.delete(urlSecretKey(sub.getId())));
         log.info("Removed subscription '{}' and {} servers",
@@ -807,13 +824,17 @@ public class SubscriptionService {
                 out.add(live);
                 continue;
             }
-            String sealed = sealer.seal(urlSecretKey(live.getId()), url);
+            SealedUrl cached = urlSealCache.get(live.getId());
+            String sealed = cached != null && cached.plaintext().equals(url)
+                    ? cached.tag()
+                    : sealer.seal(urlSecretKey(live.getId()), url);
             if (sealed == null) {
                 log.warn("Could not seal URL for subscription '{}'; keeping plaintext",
                         live.getName());
                 out.add(live);
                 continue;
             }
+            urlSealCache.put(live.getId(), new SealedUrl(url, sealed));
             try {
                 Subscription copy = objectMapper.readValue(
                         objectMapper.writeValueAsString(live), Subscription.class);
@@ -889,7 +910,13 @@ public class SubscriptionService {
             return;
         }
         sealer.unseal(urlSecretKey(subscription.getId()), stored).ifPresentOrElse(
-                subscription::setUrl,
+                url -> {
+                    subscription.setUrl(url);
+                    // The file already holds this URL sealed; see urlSealCache.
+                    synchronized (this) {
+                        urlSealCache.put(subscription.getId(), new SealedUrl(url, stored));
+                    }
+                },
                 () -> log.error(
                         "Could not unseal the URL for subscription '{}' ({}); "
                                 + "re-add it or restore the secret backend entry",

@@ -173,4 +173,27 @@ class ConfigStoreSecretsTest {
         // flow is a public mode selector for VLESS, not a secret.
         assertThat(rawServersJson()).contains("xtls-rprx-vision");
     }
+
+    /**
+     * The seal cache only knew values sealed in this session, so a restarted
+     * app sealed every credential again on its first save: on macOS one
+     * {@code security} process per server, on the FX thread when the save
+     * came from a click in the server list.
+     */
+    @Test
+    void aReloadedStoreDoesNotSealItsCredentialsAgainOnTheFirstSave() throws Exception {
+        InMemorySecretSealer sealer = new InMemorySecretSealer();
+        ConfigStore store = new ConfigStore(tempDir, sealer);
+        store.addServer(server("s1", "uuid-one"));
+        store.addServer(server("s2", "uuid-two"));
+
+        ConfigStore reloaded = new ConfigStore(tempDir, sealer);
+        sealer.resetSealCalls();
+        reloaded.setActiveServer(reloaded.getServers().get(1).getId());
+
+        assertThat(sealer.sealCalls())
+                .as("the credentials unsealed on load are sealed on disk already")
+                .isZero();
+        assertThat(rawServersJson()).doesNotContain("uuid-one").doesNotContain("uuid-two");
+    }
 }
