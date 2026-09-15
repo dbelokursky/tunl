@@ -755,9 +755,13 @@ public class ServersViewController {
      * which is the truth, while a placeholder reads as a measurement that
      * came back empty.
      *
+     * <p>The tooltip is the cell's own and only gets new text: this runs each
+     * time a cell is filled, on every sort, search and scroll, and a new
+     * Tooltip per fill cost a popup control each time.</p>
+     *
      * @return whether the chip carries a measurement and should be shown
      */
-    private boolean updateLatencyChip(Label chip, ServerConfig server) {
+    private boolean updateLatencyChip(Label chip, Tooltip tooltip, ServerConfig server) {
         Optional<LatencyTester.Result> measured = latencyTester == null
                 ? Optional.empty() : latencyTester.lastResult(server.getId());
         if (measured.isEmpty()) {
@@ -768,8 +772,8 @@ public class ServersViewController {
                 ? result.millis() + " ms" : I18n.get("dashboard.latency.timeout"));
         chip.getStyleClass().setAll("latency-chip",
                 result.reachable() ? "latency-chip-ok" : "latency-chip-fail");
-        chip.setTooltip(new Tooltip(I18n.get(result.throughProxy()
-                ? "dashboard.latency.via.proxy" : "dashboard.latency.via.tcp")));
+        tooltip.setText(I18n.get(result.throughProxy()
+                ? "dashboard.latency.via.proxy" : "dashboard.latency.via.tcp"));
         return true;
     }
 
@@ -888,6 +892,7 @@ public class ServersViewController {
         private final Label nameLabel = new Label();
         private final Label addressLabel = new Label();
         private final Label latencyChip = new Label();
+        private final Tooltip latencyTooltip = new Tooltip();
         private final Label protocolBadge = new Label();
         private final Label insecureBadge = new Label();
         private final Label activeBadge = new Label();
@@ -907,8 +912,13 @@ public class ServersViewController {
         ServerListCell() {
             setOnMouseClicked(event -> {
                 boolean extendingSelection = event.isShortcutDown() || event.isShiftDown();
+                // Control-click is the context-menu click on macOS, where the
+                // shortcut key is Command: it used to activate the row on the
+                // way to the menu and restart a live tunnel onto it.
+                boolean openingTheMenu = event.isControlDown();
                 if (isEmpty() || getItem() == null
-                        || event.getButton() != MouseButton.PRIMARY || extendingSelection) {
+                        || event.getButton() != MouseButton.PRIMARY || extendingSelection
+                        || openingTheMenu) {
                     return;
                 }
                 setActiveServer(getItem());
@@ -928,6 +938,7 @@ public class ServersViewController {
 
             HBox.setHgrow(spacer, Priority.ALWAYS);
 
+            latencyChip.setTooltip(latencyTooltip);
             protocolBadge.getStyleClass().add("protocol-badge");
             // A link that turns certificate verification off is one a network
             // attacker on the subscription's fetch path could have written;
@@ -995,7 +1006,7 @@ public class ServersViewController {
             // The same nodes every time; only which of the optional ones
             // appear changes with the item.
             row.getChildren().setAll(flagSlot, info, spacer);
-            if (updateLatencyChip(latencyChip, server)) {
+            if (updateLatencyChip(latencyChip, latencyTooltip, server)) {
                 row.getChildren().add(latencyChip);
             }
             row.getChildren().add(protocolBadge);
