@@ -23,7 +23,7 @@ final class MacKeychainSecretSealer implements SecretSealer {
     private volatile Boolean available;
 
     MacKeychainSecretSealer() {
-        this(SecretSealers::run);
+        this(SecretSealers.system());
     }
 
     /** Test seam: runs {@code security} through the given subprocess runner. */

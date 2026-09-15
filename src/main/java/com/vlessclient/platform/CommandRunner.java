@@ -1,8 +1,9 @@
 package com.vlessclient.platform;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Runs an OS command and captures its exit code and combined output. The seam
@@ -20,21 +21,26 @@ interface CommandRunner {
 
     /** The real implementation: ProcessBuilder with a 30-second timeout. */
     static CommandRunner system() {
+        return system(Duration.ofSeconds(30));
+    }
+
+    /**
+     * The real implementation with the given timeout. A command still running
+     * when it expires is killed and reported as an {@link IOException}.
+     */
+    static CommandRunner system(Duration timeout) {
         return command -> {
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.redirectErrorStream(true);
-            Process proc = pb.start();
-            String output = new String(proc.getInputStream().readAllBytes());
             try {
-                if (!proc.waitFor(30, TimeUnit.SECONDS)) {
-                    proc.destroyForcibly();
-                    throw new IOException("Command timed out: " + command);
-                }
+                TimedProcess.Exit exit = TimedProcess.run(pb, null, timeout);
+                return new Result(exit.code(), exit.output());
+            } catch (TimeoutException e) {
+                throw new IOException("Command timed out after " + timeout + ": " + command, e);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException("Command interrupted: " + command, e);
             }
-            return new Result(proc.exitValue(), output);
         };
     }
 }
