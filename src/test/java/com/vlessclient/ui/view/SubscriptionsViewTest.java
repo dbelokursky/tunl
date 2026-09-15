@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import javafx.application.Platform;
@@ -22,6 +23,7 @@ import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.DialogPane;
+import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
@@ -44,7 +46,10 @@ public class SubscriptionsViewTest extends ApplicationTest {
     @TempDir
     static Path tempDir;
 
-    private SubscriptionService service;
+    private TestSubscriptionServices.Scripted service;
+
+    /** The view's controller, as FXMLLoader built it. */
+    private Object controller;
 
     /** Whether the service was asked to remove a subscription on the FX thread. */
     private final AtomicReference<Boolean> removedOnFxThread = new AtomicReference<>();
@@ -56,7 +61,8 @@ public class SubscriptionsViewTest extends ApplicationTest {
         // seals through the platform keychain; this one writes to a temp dir,
         // seals nothing and never fetches. TestFX restarts per method, so
         // each start gets a directory of its own.
-        service = TestSubscriptionServices.quiet(tempDir.resolve("subs-" + System.nanoTime()), () -> {
+        service = TestSubscriptionServices.scripted(tempDir.resolve("subs-" + System.nanoTime()));
+        service.beforeRemove(() -> {
             removedOnFxThread.set(Platform.isFxApplicationThread());
             removed.countDown();
         });
@@ -64,6 +70,7 @@ public class SubscriptionsViewTest extends ApplicationTest {
 
         FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/SubscriptionsView.fxml"));
         Parent root = loader.load();
+        controller = loader.getController();
         stage.setScene(new Scene(root, 1100, 720));
         stage.show();
     }
@@ -138,6 +145,105 @@ public class SubscriptionsViewTest extends ApplicationTest {
                 .isFalse();
         Await.until("the list to empty", () -> service.getSubscriptions().isEmpty(),
                 Duration.ofSeconds(10));
+    }
+
+    /**
+     * A refresh that threw ended its thread without a word: no dialog, no
+     * redraw. Its button also stayed ready, so a second click started a
+     * second refresh of the same subscription.
+     */
+    @Test
+    void aRefreshThatFailsIsReportedAndItsButtonIsOfferedAgain() {
+        service.addSubscription("Provider", "https://provider.example/sub");
+        WaitForAsyncUtils.waitForFxEvents();
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger refreshes = new AtomicInteger();
+        service.onRefresh(id -> {
+            refreshes.incrementAndGet();
+            awaitQuietly(release);
+            throw new IllegalStateException("could not apply the refreshed servers");
+        });
+        try {
+            interact(rowRefreshButton()::fire);
+            Await.until("the refresh to start", () -> refreshes.get() == 1, Duration.ofSeconds(10));
+            interact(rowRefreshButton()::fire);
+            WaitForAsyncUtils.waitForFxEvents();
+
+            assertThat(rowRefreshButton().isDisabled()).as("the row's Refresh while it runs").isTrue();
+        } finally {
+            release.countDown();
+        }
+        DialogPane failure = awaitDialog("the refresh failure", pane ->
+                I18n.get("subscriptions.refresh.failed").equals(pane.getHeaderText()));
+        assertThat(failure.getContentText()).isEqualTo("could not apply the refreshed servers");
+        interact(() -> ((Button) failure.lookupButton(ButtonType.OK)).fire());
+
+        Await.until("the row's Refresh to be offered again",
+                () -> !rowRefreshButton().isDisabled(), Duration.ofSeconds(10));
+        assertThat(refreshes.get()).as("refreshes started").isEqualTo(1);
+    }
+
+    /** Refresh All started again on every click while the first run was still going. */
+    @Test
+    void refreshAllRunsOnceUntilItHasFinished() {
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger runs = new AtomicInteger();
+        service.onRefreshAll(() -> {
+            runs.incrementAndGet();
+            awaitQuietly(release);
+        });
+        Button refreshAll = lookup("#refreshAllButton").query();
+        try {
+            interact(refreshAll::fire);
+            Await.until("Refresh All to start", () -> runs.get() == 1, Duration.ofSeconds(10));
+            interact(refreshAll::fire);
+            WaitForAsyncUtils.waitForFxEvents();
+
+            assertThat(refreshAll.isDisabled()).as("Refresh All while it runs").isTrue();
+        } finally {
+            release.countDown();
+        }
+        Await.until("Refresh All to be offered again", () -> !refreshAll.isDisabled(),
+                Duration.ofSeconds(10));
+        assertThat(runs.get()).as("runs started").isEqualTo(1);
+    }
+
+    /**
+     * A refresh records its outcome in the subscription itself, and the hourly
+     * one tells no view. The cached list kept an old timestamp and no error,
+     * even after a provider's token had expired overnight.
+     */
+    @Test
+    void shownAgainTheRowsShowWhatARefreshRecordedMeanwhile() {
+        service.addSubscription("Provider", "https://provider.example/sub");
+        WaitForAsyncUtils.waitForFxEvents();
+        String shown = I18n.get("subscriptions.last.error", "401 Unauthorized");
+        // What the hourly refresh does: off the FX thread, and unannounced.
+        service.getSubscriptions().getFirst().setLastError("401 Unauthorized");
+        WaitForAsyncUtils.waitForFxEvents();
+        assertThat(showsLabel(shown)).as("before the view is shown again").isFalse();
+
+        interact(() -> ((ViewShownAware) controller).onViewShown());
+
+        assertThat(showsLabel(shown)).isTrue();
+    }
+
+    private Button rowRefreshButton() {
+        return lookup((Node node) -> node instanceof Button button
+                && I18n.get("button.refresh").equals(button.getText())).queryButton();
+    }
+
+    private boolean showsLabel(String text) {
+        return lookup((Node node) -> node instanceof Label label
+                && text.equals(label.getText())).tryQuery().isPresent();
+    }
+
+    private static void awaitQuietly(CountDownLatch latch) {
+        try {
+            latch.await(10, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private DialogPane awaitDialog(String what, Predicate<DialogPane> matches) {
