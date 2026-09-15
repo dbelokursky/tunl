@@ -190,9 +190,14 @@ public class RoutingViewController {
                     new javafx.scene.control.Tooltip(catalogEntryFor(code)));
             chip.getChildren().add(codeLabel);
 
-            Label remove = new Label("✕");
+            // A button, not a label: Tab reaches it, Enter and Space press it,
+            // and a screen reader says which country it removes. The label it
+            // replaces answered the pointer only.
+            Button remove = new Button("✕");
             remove.getStyleClass().add("country-chip-remove");
-            remove.setOnMouseClicked(e -> removeCountry(code));
+            remove.setAccessibleText(
+                    I18n.get("routing.bypass.countries.remove", catalogEntryFor(code)));
+            remove.setOnAction(e -> removeCountry(code));
             chip.getChildren().add(remove);
             chips.add(chip);
         }
