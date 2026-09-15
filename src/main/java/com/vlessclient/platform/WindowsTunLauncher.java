@@ -68,7 +68,8 @@ public final class WindowsTunLauncher implements TunLauncher {
         pb.redirectErrorStream(true);
         Process process = pb.start();
         log.info("Started sing-box TUN launch via UAC elevation (prompt expected)");
-        return new Launched(process, stopSignalFile);
+        // UAC asks on every launch: there is no one-time grant to fall back on.
+        return new Launched(process, stopSignalFile, true);
     }
 
     /**
