@@ -102,6 +102,38 @@ public class LogsViewTest extends ApplicationTest {
     }
 
     @Test
+    void disablingAutoScrollKeepsTheViewportAnchoredWhenABatchArrives() {
+        ListView<String> list = lookup("#logListView").query();
+        CheckBox autoScroll = lookup("#autoScrollCheckBox").query();
+        ObservableList<String> source = sourceOf(list);
+
+        interact(() -> source.setAll(IntStream.range(0, 100)
+                .mapToObj(i -> logLine(i))
+                .toList()));
+        WaitForAsyncUtils.waitForFxEvents();
+
+        interact(() -> {
+            list.scrollTo(source.size() - 1);
+            autoScroll.setSelected(false);
+        });
+        WaitForAsyncUtils.waitForFxEvents();
+        ViewportAnchor before = firstVisibleAnchor(list);
+
+        // LogReader hands a burst over in one task: one addition, then one
+        // removal from the front for the lines past the buffer's size.
+        interact(() -> {
+            source.addAll(IntStream.range(100, 110).mapToObj(i -> logLine(i)).toList());
+            source.remove(0, 10);
+        });
+        WaitForAsyncUtils.waitForFxEvents();
+        ViewportAnchor after = firstVisibleAnchor(list);
+
+        assertThat(after.item()).isSameAs(before.item());
+        assertThat(after.offset()).isCloseTo(
+                before.offset(), org.assertj.core.data.Offset.offset(0.5));
+    }
+
+    @Test
     void refilteringDoesNotMisclassifyTheChangeAsARingBufferTrim() {
         ListView<String> list = lookup("#logListView").query();
         CheckBox autoScroll = lookup("#autoScrollCheckBox").query();

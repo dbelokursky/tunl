@@ -8,6 +8,7 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -53,6 +54,15 @@ class ShareLinkParserEdgeCaseTest {
             assertThatThrownBy(() -> parser.parse(" \t\r\n "))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("must not be null or blank");
+        }
+
+        @Test
+        void aByteOrderMarkBeforeTheLinkIsIgnored() {
+            // A list saved with a byte order mark hands it over with its first
+            // line, where it read as part of the scheme: "unsupported scheme".
+            ServerConfig config = parser.parse((char) 0xFEFF + "vless://uuid@host.example:443#n");
+
+            assertThat(config.getProtocol()).isEqualTo(Protocol.VLESS);
         }
 
         @Test
@@ -167,10 +177,18 @@ class ShareLinkParserEdgeCaseTest {
         }
 
         @Test
-        void invalidPercentEncodingInFragmentThrows() {
-            assertThatThrownBy(() -> parser.parse("vless://uuid@host.example:443#%zz"))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("URLDecoder");
+        void aPercentThatStartsNoEscapeStaysInTheName() {
+            // URLDecoder threw on it, so a name such as "100%" rejected the
+            // whole link, whatever its type.
+            for (String link : List.of(
+                    "vless://uuid@host.example:443#100%",
+                    "trojan://pw@host.example:443#100%",
+                    "hysteria2://pw@host.example:443#100%",
+                    "ss://" + b64Url("aes-256-gcm:pw") + "@host.example:8388#100%")) {
+                assertThat(parser.parse(link).getName()).as(link).isEqualTo("100%");
+            }
+            assertThat(parser.parse("vless://uuid@host.example:443#%zz+50%25").getName())
+                    .isEqualTo("%zz 50%");
         }
 
         @Test
@@ -552,6 +570,17 @@ class ShareLinkParserEdgeCaseTest {
         }
 
         @Test
+        void aPathIsDecodedOnce() {
+            // The query is decoded as it is split. Decoding the path a second
+            // time turned an encoded + into a space and an encoded %20 into
+            // one, and threw on an encoded %.
+            ServerConfig config = parser.parse(
+                    "vless://uuid@host.example:443?type=ws&path=%2Fa%2Bb%2520c#n");
+
+            assertThat(config.getTransport().getPath()).isEqualTo("/a+b%20c");
+        }
+
+        @Test
         void tenThousandCharacterParamValueParses() {
             String big = "x".repeat(10_000);
 
@@ -672,6 +701,22 @@ class ShareLinkParserEdgeCaseTest {
 
     @Nested
     class RoundTripTests {
+
+        @Test
+        void aWebSocketPathWithPlusAndPercentRoundTrips() {
+            ServerConfig original = new ServerConfig();
+            original.setProtocol(Protocol.VLESS);
+            original.setUuid("550e8400-e29b-41d4-a716-446655440000");
+            original.setAddress("host.example");
+            original.setPort(443);
+            original.setName("ws");
+            original.getTransport().setType(TransportType.WEBSOCKET);
+            original.getTransport().setPath("/ws+feed?ed=50%");
+
+            ServerConfig parsed = parser.parse(exporter.export(original));
+
+            assertThat(parsed.getTransport().getPath()).isEqualTo("/ws+feed?ed=50%");
+        }
 
         @Test
         void vlessUnicodeNameWithEmojiRoundTrips() {

@@ -2,6 +2,7 @@ package com.vlessclient.service;
 
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
+import com.vlessclient.platform.CoreRecord;
 import com.vlessclient.testing.Await;
 import com.vlessclient.testing.FxToolkitExtension;
 import java.time.Duration;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.CleanupMode;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.InterruptedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
@@ -22,6 +24,8 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static com.vlessclient.testing.FxTestSupport.flushFxEvents;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -60,8 +64,11 @@ class SingBoxEngineTest {
                     + "echo sing-box started\r\n"
                     + "timeout /t " + sleepSeconds + " /nobreak > NUL\r\n");
         }
+        // bash, not sh: macOS's /bin/sh hands a script over to bash in the
+        // same process soon after it starts, so the executable the system
+        // reports changed under a test that records it (CoreRecord).
         return writeScript(dir, name,
-                "#!/bin/sh\n"
+                "#!/bin/bash\n"
                 + "[ \"$1\" = check ] && exit 0\n"
                 + "echo 'sing-box started'\n"
                 + "sleep " + sleepSeconds + "\n");
@@ -872,6 +879,86 @@ class SingBoxEngineTest {
                         }
                     })
                     .toList();
+        }
+    }
+
+    /**
+     * Nothing ends a plain child when the app is killed, so a direct core
+     * outlived it with the ports the next run needs. The record the engine
+     * keeps lets the next run end that core.
+     */
+    @Test
+    void theNextRunEndsADirectCoreThisRunLeftRunning(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        Path recordFile = tmp.resolve(CoreRecord.FILE_NAME);
+        SingBoxEngine engine = new SingBoxEngine(
+                createFakeSingBox(tmp, "sing-box", 30), new CoreRecord(recordFile));
+        engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+        try {
+            // The app dies here without stopping its core, and starts again.
+            assertThat(new CoreRecord(recordFile).endLeftover())
+                    .isEqualTo(CoreRecord.Leftover.ENDED);
+
+            assertThat(engine.awaitStopped(Duration.ofSeconds(10))).isTrue();
+        } finally {
+            engine.stop();
+        }
+    }
+
+    @Test
+    void aDirectCoreStaysRecordedUntilItStops(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        CoreRecord record = new CoreRecord(tmp.resolve(CoreRecord.FILE_NAME));
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30), record);
+        engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+        try {
+            assertThat(record.read()).hasValueSatisfying(entry ->
+                    assertThat(ProcessHandle.of(entry.pid())
+                            .flatMap(ProcessHandle::parent).map(ProcessHandle::pid))
+                            .as("the recorded process is the core this JVM started")
+                            .contains(ProcessHandle.current().pid()));
+        } finally {
+            engine.stop();
+        }
+        assertThat(record.read()).isEmpty();
+    }
+
+    /**
+     * The check hid an interrupt that cut it short, and the start went on to
+     * launch the core. At quit the recovery scheduler is shut down with an
+     * interrupt, so a reconnect under way launched a core nothing stopped.
+     */
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void aStartInterruptedDuringTheCheckLaunchesNothing(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        Path checking = tmp.resolve("checking");
+        Path fake = writeScript(tmp, "sing-box",
+                "#!/bin/sh\n"
+                + "if [ \"$1\" = check ]; then touch '" + checking + "'; exec sleep 30; fi\n"
+                + "echo 'sing-box started'\n"
+                + "sleep 30\n");
+        SingBoxEngine engine = new SingBoxEngine(fake);
+        AtomicReference<Exception> failure = new AtomicReference<>();
+        AtomicBoolean stillInterrupted = new AtomicBoolean();
+        Thread starter = new Thread(() -> {
+            try {
+                engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+            } catch (Exception e) {
+                failure.set(e);
+            }
+            stillInterrupted.set(Thread.currentThread().isInterrupted());
+        }, "start-to-interrupt");
+        starter.start();
+        try {
+            Await.until("the check to run", () -> Files.exists(checking), Duration.ofSeconds(10));
+            starter.interrupt();
+            starter.join(Duration.ofSeconds(10));
+
+            assertThat(starter.isAlive()).isFalse();
+            assertThat(engine.isRunning()).as("a core was launched").isFalse();
+            assertThat(failure.get()).isInstanceOf(InterruptedIOException.class);
+            assertThat(stillInterrupted.get()).as("the interrupt is kept for the caller").isTrue();
+            awaitConnectionState(engine, ConnectionState.DISCONNECTED, AWAIT_STATE_TIMEOUT_MS);
+        } finally {
+            engine.stop();
         }
     }
 }

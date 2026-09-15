@@ -2,6 +2,7 @@ package com.vlessclient.app;
 
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.platform.Autostart;
+import com.vlessclient.platform.CoreRecord;
 import com.vlessclient.platform.PlatformPaths;
 import com.vlessclient.platform.SecretSealer;
 import com.vlessclient.platform.SecretSealers;
@@ -88,7 +89,8 @@ public class ServiceLocator {
         if (existing.isPresent()) {
             singBoxPath = existing.get().toString();
             log.info("sing-box binary path: {}", singBoxPath);
-            register(SingBoxEngine.class, new SingBoxEngine(existing.get()));
+            register(SingBoxEngine.class,
+                    new SingBoxEngine(existing.get(), CoreRecord.inDataDir()));
         } else {
             singBoxPath = null;
             log.info("sing-box binary not found on disk; will be downloaded on startup");
@@ -461,7 +463,7 @@ public class ServiceLocator {
      */
     public static void registerSingBoxEngine(Path binaryPath) {
         singBoxPath = binaryPath.toString();
-        SingBoxEngine engine = new SingBoxEngine(binaryPath);
+        SingBoxEngine engine = new SingBoxEngine(binaryPath, CoreRecord.inDataDir());
         register(SingBoxEngine.class, engine);
         // Point the connect flow, the MCP control facade and the log bridge at
         // the fresh engine. Missing the first would leave every caller of
