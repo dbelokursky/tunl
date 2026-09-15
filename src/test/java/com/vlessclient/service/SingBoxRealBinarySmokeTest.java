@@ -393,7 +393,11 @@ class SingBoxRealBinarySmokeTest {
         custom.setBypassList(List.of("*.local", "192.168.0.0/16", "example.com"));
         RoutingRule rule = new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX,
                 "corp.example.com", RoutingRule.RuleAction.DIRECT);
-        custom.setRules(List.of(rule));
+        // An IP rule makes system-proxy mode resolve names first, which brings
+        // in a dns block and a default domain resolver the core has to accept.
+        RoutingRule ipRule = new RoutingRule(RoutingRule.RuleType.IP_CIDR,
+                "203.0.113.0/24", RoutingRule.RuleAction.BLOCK);
+        custom.setRules(List.of(rule, ipRule));
 
         // Country bypass — emits remote rule_set references (verified:
         // `sing-box check` does not download them, so this is CI-safe).
