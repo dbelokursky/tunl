@@ -724,6 +724,12 @@ public class SingBoxConfigGenerator {
             group.put("tolerance", PROBE_TOLERANCE_MS);
         } else {
             group.put("default", OutboundTags.server(active));
+            // A manual switch reaches the running core through this selector.
+            // Without this, connections already open stayed on the server the
+            // user switched away from while the UI named the new one. The
+            // automatic group keeps them: it re-picks as latencies move, and
+            // cutting every connection at each re-pick would break downloads.
+            group.put("interrupt_exist_connections", true);
         }
         return group;
     }
