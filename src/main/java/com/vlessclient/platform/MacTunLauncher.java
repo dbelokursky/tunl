@@ -42,10 +42,11 @@ public final class MacTunLauncher implements TunLauncher {
             }
         }
 
-        Process process = PrivilegeHelper.isConfigured(binary)
+        boolean withoutPrompt = PrivilegeHelper.isConfigured(binary);
+        Process process = withoutPrompt
                 ? startViaSudoNoPassword(binary, configFile, stopSignalFile)
                 : startViaOsascriptPrompt(binary, configFile, stopSignalFile);
-        return new Launched(process, stopSignalFile);
+        return new Launched(process, stopSignalFile, !withoutPrompt);
     }
 
     /**

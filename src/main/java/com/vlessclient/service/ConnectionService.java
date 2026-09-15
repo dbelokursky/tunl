@@ -167,7 +167,7 @@ public class ConnectionService {
         this.routingService = routingService;
         this.recovery = new TunnelRecoveryService(
                 () -> configStore != null ? configStore.getSettings() : new AppSettings(),
-                this::recover);
+                this::recover, this::restartNeedsTheUser);
         this.stateListener = (obs, old, state) -> {
             // A notice about what the core was started without ends with it.
             if (state == ConnectionState.DISCONNECTED || state == ConnectionState.ERROR) {
@@ -203,6 +203,32 @@ public class ConnectionService {
     /** The application-owned recovery loop, shared with health reporting and the UI. */
     public TunnelRecoveryService getRecoveryService() {
         return recovery;
+    }
+
+    /**
+     * Whether a tunnel that dropped waits for the user's reconnect, for the
+     * Dashboard; see {@link TunnelRecoveryService#isReconnectNeeded()}.
+     *
+     * @return the observable offer
+     */
+    public javafx.beans.property.ReadOnlyBooleanProperty reconnectNeededProperty() {
+        return recovery.reconnectNeededProperty();
+    }
+
+    /**
+     * Whether recovering the tunnel would raise an elevation prompt: the restart
+     * runs in TUN mode and the core's last launch went through a prompt that
+     * every launch raises again.
+     */
+    boolean restartNeedsTheUser() {
+        SingBoxEngine current = engine;
+        if (current == null || configStore == null) {
+            return false;
+        }
+        // The mode recover() would restart in.
+        ProxyMode mode = requestedMode != null
+                ? requestedMode : configStore.getSettings().getProxyMode();
+        return mode == ProxyMode.TUN && current.restartNeedsElevationPrompt();
     }
 
     /** The engine currently driven, or null when no binary is available. */

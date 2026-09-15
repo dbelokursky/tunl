@@ -110,6 +110,9 @@ public class DashboardViewController implements ViewShownAware {
     @FXML private Button updateBannerButton;
     @FXML private HBox skippedServersBanner;
     @FXML private Label skippedServersLabel;
+    @FXML private HBox tunnelDroppedBanner;
+    @FXML private Label tunnelDroppedLabel;
+    @FXML private Button tunnelDroppedButton;
 
     private final ObjectProperty<ConnectionState> connectionState =
             new SimpleObjectProperty<>(ConnectionState.DISCONNECTED);
@@ -178,6 +181,14 @@ public class DashboardViewController implements ViewShownAware {
         ServiceLocator.find(ConnectionService.class).ifPresent(service ->
                 new SkippedServersSection(skippedServersBanner, skippedServersLabel)
                         .bind(service.skippedServersProperty()));
+        // A dropped tunnel whose restart would ask for elevation again waits
+        // for the user rather than raising the prompt unasked.
+        tunnelDroppedLabel.textProperty().bind(I18n.binding("dashboard.tunnel.dropped"));
+        ButtonLabels.bindStatic(tunnelDroppedButton, "dashboard.tunnel.reconnect");
+        ServiceLocator.find(ConnectionService.class).ifPresent(service -> {
+            tunnelDroppedBanner.visibleProperty().bind(service.reconnectNeededProperty());
+            tunnelDroppedBanner.managedProperty().bind(service.reconnectNeededProperty());
+        });
 
         // Every collaborator is optional: a missing one degrades the card
         // rather than failing the view, and the log says which.
@@ -765,6 +776,15 @@ public class DashboardViewController implements ViewShownAware {
         activeServer = findActiveServer();
         connectButton.setDisable(true);
         Thread.startVirtualThread(() -> runConnect(service, true));
+    }
+
+    /**
+     * The dropped tunnel's notice: the reconnect recovery left to the user. A
+     * reconnect rather than a connect, since a BROKEN tunnel's core still runs.
+     */
+    @FXML
+    private void onReconnectDroppedTunnelClicked() {
+        reconnect();
     }
 
     /** Runs a connect (or reconnect) off the FX thread and reports the result. */

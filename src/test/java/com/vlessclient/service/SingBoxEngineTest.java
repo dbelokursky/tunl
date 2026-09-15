@@ -482,6 +482,44 @@ class SingBoxEngineTest {
     }
 
     /**
+     * Recovery must not restart a tunnel whose launch asks for elevation every
+     * time, so the engine keeps what the last launch reported; a direct start
+     * asks for nothing.
+     */
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void theLastLaunchSaysWhetherARestartWouldPrompt(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        Path stopFile = tmp.resolve("stop.signal");
+        Path wrapper = tmp.resolve("wrapper.sh");
+        Files.writeString(wrapper, "#!/bin/sh\n"
+                + "while [ ! -f '" + stopFile + "' ]; do sleep 0.2; done\n");
+        makeExecutable(wrapper);
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+
+        for (boolean prompts : new boolean[] {true, false}) {
+            engine.setTunLauncher((binary, cfg) -> new com.vlessclient.platform.TunLauncher.Launched(
+                    new ProcessBuilder(wrapper.toString()).redirectErrorStream(true).start(),
+                    stopFile, prompts));
+            engine.start(DUMMY_CONFIG, ProxyMode.TUN);
+            try {
+                assertThat(engine.restartNeedsElevationPrompt())
+                        .as("a TUN launch that prompts each time: " + prompts)
+                        .isEqualTo(prompts);
+            } finally {
+                engine.stop();
+            }
+        }
+
+        engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+        try {
+            assertThat(engine.restartNeedsElevationPrompt()).as("a direct start").isFalse();
+        } finally {
+            engine.stop();
+        }
+    }
+
+    /**
      * The TUN watchdog promoted a session to CONNECTED 1.8 s in whenever the
      * launcher was alive, and the Windows launcher stays alive for as long as
      * the UAC prompt stays open. Connected now means the core's controller

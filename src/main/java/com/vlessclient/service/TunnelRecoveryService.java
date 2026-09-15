@@ -11,6 +11,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import javafx.application.Platform;
+import javafx.beans.property.ReadOnlyBooleanProperty;
+import javafx.beans.property.ReadOnlyBooleanWrapper;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import org.slf4j.Logger;
@@ -22,8 +24,10 @@ public final class TunnelRecoveryService implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(TunnelRecoveryService.class);
     private final Supplier<AppSettings> settings;
     private final Attempt attempt;
+    private final BooleanSupplier restartNeedsTheUser;
     private final ScheduledExecutorService scheduler;
     private final ReadOnlyObjectWrapper<Retry> retry = new ReadOnlyObjectWrapper<>();
+    private final ReadOnlyBooleanWrapper reconnectNeeded = new ReadOnlyBooleanWrapper();
     private ScheduledFuture<?> pending;
     private long generation;
     private long publication;
@@ -31,6 +35,10 @@ public final class TunnelRecoveryService implements AutoCloseable {
     private boolean wanted;
     private boolean running;
     private boolean closed;
+    /** The tunnel reached CONNECTED since the last user request. */
+    private boolean connectedSinceRequest;
+    /** A dropped tunnel waits for the user, because a restart would prompt. */
+    private boolean waitingForTheUser;
     private ConnectionState lastState = ConnectionState.DISCONNECTED;
 
     /** The retry displayed by the UI; a null property value means no retry is pending. */
@@ -44,16 +52,26 @@ public final class TunnelRecoveryService implements AutoCloseable {
         boolean reconnect(BooleanSupplier stillWanted) throws IOException;
     }
 
-    /** Creates a recovery loop. Its daemon scheduler starts only when a retry is needed. */
-    public TunnelRecoveryService(Supplier<AppSettings> settings, Attempt attempt) {
-        this(settings, attempt, Executors.newSingleThreadScheduledExecutor(
+    /**
+     * Creates a recovery loop. Its daemon scheduler starts only when a retry is needed.
+     *
+     * @param settings            the live settings
+     * @param attempt             restarts the core
+     * @param restartNeedsTheUser whether a restart would raise an elevation prompt, so
+     *                            the reconnect is left to the user; must not block
+     */
+    public TunnelRecoveryService(Supplier<AppSettings> settings, Attempt attempt,
+                                 BooleanSupplier restartNeedsTheUser) {
+        this(settings, attempt, restartNeedsTheUser, Executors.newSingleThreadScheduledExecutor(
                 DaemonThreads.factory("tunnel-recovery")));
     }
 
     TunnelRecoveryService(Supplier<AppSettings> settings, Attempt attempt,
+                          BooleanSupplier restartNeedsTheUser,
                           ScheduledExecutorService scheduler) {
         this.settings = settings;
         this.attempt = attempt;
+        this.restartNeedsTheUser = restartNeedsTheUser;
         this.scheduler = scheduler;
     }
 
@@ -62,11 +80,27 @@ public final class TunnelRecoveryService implements AutoCloseable {
         return retry.getReadOnlyProperty();
     }
 
+    /** Observable offer of a reconnect only the user can make, for rendering only. */
+    public ReadOnlyBooleanProperty reconnectNeededProperty() {
+        return reconnectNeeded.getReadOnlyProperty();
+    }
+
+    /**
+     * Whether a tunnel that dropped waits for the user's reconnect, because
+     * restarting it would raise an elevation prompt nobody asked for.
+     *
+     * @return true while the reconnect is offered to the user
+     */
+    public synchronized boolean isReconnectNeeded() {
+        return waitingForTheUser;
+    }
+
     /** Records a new user connect/reconnect intent and supersedes any older attempt. */
     public synchronized long connectionRequested() {
         cancelPending();
         wanted = !closed;
         attempts = 0;
+        connectedSinceRequest = false;
         return ++generation;
     }
 
@@ -80,6 +114,7 @@ public final class TunnelRecoveryService implements AutoCloseable {
         wanted = false;
         generation++;
         attempts = 0;
+        connectedSinceRequest = false;
         cancelPending();
     }
 
@@ -91,6 +126,9 @@ public final class TunnelRecoveryService implements AutoCloseable {
     /** Receives the engine's state independently of any view being loaded. */
     public synchronized void onConnectionState(ConnectionState state) {
         lastState = state;
+        if (state == ConnectionState.CONNECTED) {
+            connectedSinceRequest = true;
+        }
         if (state == ConnectionState.ERROR) {
             schedule();
         } else if (state == ConnectionState.CONNECTED && !settings.get().isHealthCheckEnabled()) {
@@ -113,6 +151,16 @@ public final class TunnelRecoveryService implements AutoCloseable {
         AppSettings config = settings.get();
         if (!wanted || closed || running || pending != null
                 || !config.isHealthCheckAutoReconnect()) {
+            return;
+        }
+        if (restartNeedsTheUser.getAsBoolean()) {
+            // A restart would raise the elevation prompt again with nobody
+            // asking for it. A tunnel that was up offers the reconnect instead;
+            // a start that never connected, a declined prompt included, keeps
+            // the Retry of its own error.
+            if (connectedSinceRequest) {
+                publish(null, true);
+            }
             return;
         }
         int base = Math.max(1, config.getHealthCheckDelaySeconds());
@@ -160,12 +208,18 @@ public final class TunnelRecoveryService implements AutoCloseable {
     }
 
     private void publish(Retry value) {
+        publish(value, false);
+    }
+
+    private void publish(Retry value, boolean userReconnect) {
+        waitingForTheUser = userReconnect;
         // Never wait for FX while holding this monitor: a UI Cancel calls back here.
         long version = ++publication;
         Runnable update = () -> {
             synchronized (this) {
                 if (version == publication) {
                     retry.set(value);
+                    reconnectNeeded.set(userReconnect);
                 }
             }
         };

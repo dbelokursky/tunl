@@ -19,13 +19,29 @@ public interface TunLauncher {
     /**
      * Handle to a privileged core launch.
      *
-     * @param process        unprivileged observer process: its stdout streams
-     *                       the core's log output and it exits when the core
-     *                       dies
-     * @param stopSignalFile creating this file makes the privileged side stop
-     *                       sing-box; the privileged side deletes it afterwards
+     * @param process           unprivileged observer process: its stdout streams
+     *                          the core's log output and it exits when the core
+     *                          dies
+     * @param stopSignalFile    creating this file makes the privileged side stop
+     *                          sing-box; the privileged side deletes it afterwards
+     * @param promptsEachLaunch whether this launch went through an elevation
+     *                          prompt that every launch raises again (UAC; the
+     *                          macOS administrator dialog without the sudoers
+     *                          rule; PolicyKit without cap_net_admin), so starting
+     *                          the core again would ask the user again
      */
-    record Launched(Process process, Path stopSignalFile) {
+    record Launched(Process process, Path stopSignalFile, boolean promptsEachLaunch) {
+
+        /**
+         * A launch whose launcher does not say, counted as one that prompts:
+         * raising a prompt nobody asked for is the worse mistake.
+         *
+         * @param process        unprivileged observer process
+         * @param stopSignalFile creating this file stops the core
+         */
+        public Launched(Process process, Path stopSignalFile) {
+            this(process, stopSignalFile, true);
+        }
     }
 
     /**

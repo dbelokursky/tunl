@@ -74,7 +74,7 @@ public final class LinuxTunLauncher implements TunLauncher {
         log.info("Started sing-box TUN via {}", direct
                 ? "cap_net_admin fast path (no elevation prompt)"
                 : elevator + " wrapper (PolicyKit prompt expected)");
-        return new Launched(process, stopSignalFile);
+        return new Launched(process, stopSignalFile, !direct);
     }
 
     /**
