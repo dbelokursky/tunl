@@ -40,7 +40,7 @@ public final class WireguardEndpointBuilder {
 
         if (server.getFlow() != null && !server.getFlow().isBlank()) {
             ArrayNode address = mapper.createArrayNode();
-            address.add(server.getFlow().trim());
+            address.add(asPrefix(server.getFlow().trim()));
             endpoint.set("address", address);
         }
 
@@ -72,6 +72,18 @@ public final class WireguardEndpointBuilder {
         endpoint.set("peers", peers);
 
         return endpoint;
+    }
+
+    /**
+     * The interface address as the prefix the core requires. An address a
+     * {@code .conf} file or the form gives without one means a single host,
+     * so it gets /32 or /128; the core refused the bare address outright.
+     */
+    private static String asPrefix(String address) {
+        if (address.contains("/")) {
+            return address;
+        }
+        return address + (address.contains(":") ? "/128" : "/32");
     }
 
     /**

@@ -159,6 +159,80 @@ class SingBoxRealBinarySmokeTest {
     }
 
     /**
+     * Settings a share link can spell in a way the core refuses, although what
+     * they mean is not in doubt. The generator corrects them for every stored
+     * server, so the core has to accept each one as generated.
+     */
+    @Test
+    void checkAcceptsSettingsLinksSpellInWaysTheCoreRefuses() throws Exception {
+        String realityKey = "WZaG00XCAiVCF2SP5fmSbKiuTbBB-lMDg_81rC8hR80";
+        String realityKeyInStandardAlphabet = "WZaG00XCAiVCF2SP5fmSbKiuTbBB+lMDg/81rC8hR80=";
+        List<ServerConfig> servers = List.of(
+                realityServer("reality-without-fingerprint", null, realityKey),
+                realityServer("fingerprint-in-capitals", "Chrome", realityKey),
+                realityServer("key-in-the-standard-alphabet", "chrome",
+                        realityKeyInStandardAlphabet),
+                wireguardServer("wireguard-v4-without-prefix", "10.0.0.2"),
+                wireguardServer("wireguard-v6-without-prefix", "fd00::2"),
+                shadowsocksServer("xray-chacha20-poly1305", "chacha20-poly1305"),
+                shadowsocksServer("xray-xchacha20-poly1305", "xchacha20-poly1305"),
+                shadowsocksServer("xray-plain", "plain"),
+                shadowsocksServer("cipher-in-capitals", "AES-256-GCM"));
+
+        for (ProxyMode mode : ProxyMode.values()) {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(mode);
+            for (ServerConfig server : servers) {
+                assertCheckPasses(generator.generate(server, settings),
+                        server.getName() + "/" + mode);
+            }
+        }
+    }
+
+    private static ServerConfig realityServer(String name, String fingerprint, String publicKey) {
+        ServerConfig server = new ServerConfig();
+        server.setId(name);
+        server.setName(name);
+        server.setProtocol(Protocol.VLESS);
+        server.setAddress("203.0.113.10");
+        server.setPort(443);
+        server.setUuid(TEST_UUID);
+        server.setFlow("xtls-rprx-vision");
+        server.getTls().setEnabled(true);
+        server.getTls().setReality(true);
+        server.getTls().setServerName("www.microsoft.com");
+        server.getTls().setFingerprint(fingerprint);
+        server.getTls().setRealityPublicKey(publicKey);
+        server.getTls().setRealityShortId("0123abcd");
+        return server;
+    }
+
+    private static ServerConfig wireguardServer(String name, String address) {
+        ServerConfig server = new ServerConfig();
+        server.setId(name);
+        server.setName(name);
+        server.setProtocol(Protocol.WIREGUARD);
+        server.setAddress("203.0.113.11");
+        server.setPort(51820);
+        server.setUuid(WG_PRIVATE_KEY);
+        server.setEncryption(WG_PEER_PUBLIC_KEY);
+        server.setFlow(address);
+        return server;
+    }
+
+    private static ServerConfig shadowsocksServer(String name, String method) {
+        ServerConfig server = new ServerConfig();
+        server.setId(name);
+        server.setName(name);
+        server.setProtocol(Protocol.SHADOWSOCKS);
+        server.setAddress("203.0.113.12");
+        server.setPort(8388);
+        server.setUuid("smoke-password");
+        server.setEncryption(method);
+        return server;
+    }
+
+    /**
      * Every log level the Settings screen offers has to be a string the real
      * core accepts — a rejected one is not a wrong log, it is a core that
      * refuses to start at all, on the very connect the user was trying to
