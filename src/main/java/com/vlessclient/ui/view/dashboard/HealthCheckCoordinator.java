@@ -534,7 +534,6 @@ public final class HealthCheckCoordinator {
             Region spacer = new Region();
             HBox.setHgrow(spacer, Priority.ALWAYS);
             remove.getStyleClass().setAll("icon-button", "destructive");
-            remove.setFocusTraversable(false);
             remove.setTooltip(removeTooltip);
             remove.setOnAction(e -> removeHealthTarget(url));
             box.getChildren().addAll(dot, nameLabel, spacer, resultLabel, remove);
@@ -550,6 +549,8 @@ public final class HealthCheckCoordinator {
             remove.setVisible(removable);
             remove.setManaged(removable);
             removeTooltip.setText(I18n.get("health.target.remove"));
+            // "✕" is a symbol; a screen reader reads which service it removes.
+            remove.setAccessibleText(I18n.get("health.target.remove.named", content.name()));
         }
     }
 
