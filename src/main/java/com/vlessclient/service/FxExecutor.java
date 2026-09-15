@@ -1,8 +1,10 @@
 package com.vlessclient.service;
 
+import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import javafx.application.Platform;
 
@@ -40,15 +42,32 @@ public final class FxExecutor {
      * services — runs inline too: there is no FX thread to protect, and the
      * caller is then the only thread touching the list.
      *
+     * <p>If the FX thread has not started the task by the time the wait runs
+     * out, the task is dropped and never runs: the caller has already been
+     * told it failed. A task that has started is left to finish.</p>
+     *
      * @throws RuntimeException if the FX task fails or does not complete in time
      */
     public static <T> T get(Supplier<T> supplier) {
+        return get(supplier, Duration.ofSeconds(DEFAULT_TIMEOUT_SECONDS));
+    }
+
+    /** {@link #get(Supplier)} with the wait bounded by {@code timeout}; a test seam. */
+    static <T> T get(Supplier<T> supplier, Duration timeout) {
         if (Platform.isFxApplicationThread()) {
             return supplier.get();
         }
         CompletableFuture<T> future = new CompletableFuture<>();
+        // Claimed by whichever comes first: the task starting on the FX thread,
+        // or the caller giving up on it. The caller reports a timeout as a
+        // failure, so a task it gave up on must not run afterwards: a change it
+        // made then would land after whatever the caller did next.
+        AtomicBoolean claimed = new AtomicBoolean();
         try {
             Platform.runLater(() -> {
+                if (!claimed.compareAndSet(false, true)) {
+                    return;
+                }
                 try {
                     future.complete(supplier.get());
                 } catch (Throwable t) {
@@ -61,8 +80,14 @@ public final class FxExecutor {
             return supplier.get();
         }
         try {
-            return future.get(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
+            if (claimed.compareAndSet(false, true)) {
+                throw new RuntimeException("Timed out waiting for the UI thread; "
+                        + "the task had not started and will not run", e);
+            }
+            // Already running: it may be what the FX thread is stuck on, so
+            // waiting on for it could hang both sides for good.
             throw new RuntimeException("Timed out waiting for the UI thread", e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

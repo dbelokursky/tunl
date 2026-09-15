@@ -255,8 +255,12 @@ public class SubscriptionsViewController {
 
         Optional<ButtonType> result = confirm.showAndWait();
         if (result.isPresent() && result.get() == ButtonType.OK) {
-            subscriptionService.removeSubscription(sub.getId());
-            log.info("Deleted subscription: {}", sub.getName());
+            // Off the FX thread like add and edit: removing waits for the lock a
+            // refresh holds while that refresh waits for the FX thread.
+            runOffFxThread(() -> {
+                subscriptionService.removeSubscription(sub.getId());
+                log.info("Deleted subscription: {}", sub.getName());
+            }, "subscriptions.delete.failed");
         }
     }
 
