@@ -2,6 +2,9 @@ package com.vlessclient.service;
 
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.net.http.HttpClient;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
@@ -37,14 +40,23 @@ class LatencyTesterProbeTest {
         }
     }
 
-    private static ServerConfig server() {
+    private static ServerConfig server() throws IOException {
         ServerConfig server = new ServerConfig();
         server.setName("Test");
         server.setProtocol(Protocol.VLESS);
-        // Reserved-for-documentation address, so nothing real is contacted.
-        server.setAddress("192.0.2.1");
-        server.setPort(443);
+        // A loopback port nothing listens on, so the TCP fallback is refused at
+        // once. A reserved address such as 192.0.2.1 left each fallback test
+        // waiting out the tester's 5 s connect timeout on CI runners.
+        server.setAddress("127.0.0.1");
+        server.setPort(closedPort());
         return server;
+    }
+
+    /** A loopback port that was free a moment ago, so a connect to it is refused. */
+    private static int closedPort() throws IOException {
+        try (ServerSocket socket = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            return socket.getLocalPort();
+        }
     }
 
     @Test
@@ -76,9 +88,7 @@ class LatencyTesterProbeTest {
         LatencyTester.Result result = tester.measure(server()).get();
 
         // Only the fallback itself is asserted, not the number it produces:
-        // what a TCP connect to a reserved address does is environment
-        // dependent — this machine's network answers it in 0 ms rather than
-        // timing out, which would make an assertion on the value flaky.
+        // the connect is refused, so there is no latency to compare.
         assertThat(result.throughProxy()).isFalse();
     }
 
