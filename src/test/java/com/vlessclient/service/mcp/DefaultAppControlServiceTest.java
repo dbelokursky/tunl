@@ -236,6 +236,31 @@ class DefaultAppControlServiceTest {
     }
 
     /**
+     * A subscription URL carries the account token, so it is sealed on disk,
+     * shown as scheme and host in the app, and scrubbed from get_logs and the
+     * event stream. list_subscriptions returned it whole, to any agent holding
+     * the MCP token, even with configuration changes turned off.
+     */
+    @Test
+    void listSubscriptions_showsOnlySchemeAndHostOfTheUrl() throws Exception {
+        com.vlessclient.service.SubscriptionService subscriptions =
+                com.vlessclient.service.TestSubscriptionServices.quiet(tempDir.resolve("subs"));
+        subscriptions.addSubscription("Provider",
+                "https://sub.example.com/api/v1/client/subscribe?token=SECRET-TOKEN-123");
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, subscriptions,
+                null, null, null, null, new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        List<SubscriptionSummary> listed = svc.listSubscriptions();
+
+        assertThat(listed).singleElement().satisfies(summary -> {
+            assertThat(summary.name()).isEqualTo("Provider");
+            assertThat(summary.url()).startsWith("https://sub.example.com")
+                    .doesNotContain("SECRET-TOKEN-123")
+                    .doesNotContain("/api/v1");
+        });
+    }
+
+    /**
      * A link the core would refuse used to be stored and then left out of
      * every connect; an agent adding it is told why instead.
      */
