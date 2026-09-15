@@ -1242,7 +1242,8 @@
     -fx-cursor: hand;
 }
 
-.session-total-link:hover {
+.session-total-link:hover,
+.session-total-link:focused {
     -fx-underline: true;
 }
 
