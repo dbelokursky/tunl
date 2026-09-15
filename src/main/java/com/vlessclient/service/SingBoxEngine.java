@@ -411,6 +411,16 @@ public class SingBoxEngine {
     }
 
     /**
+     * Whether a stop has been asked for and the core has not exited yet: the
+     * one case in which a connect should wait for this process to go away.
+     *
+     * @return true while a stop is under way
+     */
+    public boolean isStopping() {
+        return stopRequested && isRunning();
+    }
+
+    /**
      * Blocks until the core is no longer running, or {@code timeout} elapses.
      *
      * <p>A stop can take seconds — a SIGTERM grace period, then a force-kill —

@@ -241,10 +241,11 @@ public class ConnectionService {
      * Connects to the active server.
      *
      * <p>Every configured server is passed to the generator as a candidate; the
-     * generator includes them in the manual or automatic group. Any
-     * previous core is waited out first, because {@code start} refuses while one
-     * is alive — that is what makes the reconnect paths (server switch, health
-     * auto-reconnect) work.</p>
+     * generator includes them in the manual or automatic group. A previous core
+     * that is being stopped is waited out first, because {@code start} refuses
+     * while one is alive — that is what makes the reconnect paths (server
+     * switch, health auto-reconnect) work. A core that is running with no stop
+     * under way is reported as {@link Outcome#ALREADY_RUNNING} at once.</p>
      *
      * <p>A server the core refuses to build is left out and the start is tried
      * again without it, since one broken entry in a subscription used to block
@@ -290,6 +291,12 @@ public class ConnectionService {
         AppSettings settings = configStore.getSettings();
         ProxyMode mode = modeOverride != null ? modeOverride : settings.getProxyMode();
 
+        if (current.isRunning() && !current.isStopping()) {
+            // Nothing is stopping this core, so waiting for it would only run
+            // out STOP_WAIT under the lock a Disconnect needs, and the start
+            // would be refused anyway.
+            return new ConnectAttempt(Outcome.ALREADY_RUNNING, active);
+        }
         log.info("Connecting to server: {} ({})", active.getName(), mode);
         current.awaitStopped(STOP_WAIT);
         if (!allowed.getAsBoolean()) {
