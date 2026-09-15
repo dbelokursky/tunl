@@ -41,9 +41,10 @@ import tools.jackson.databind.node.ObjectNode;
  * <p>The bundle holds {@code app-info.txt}, the tail of {@code tunl.log} with
  * every URL redacted, the sing-box configuration this build would generate
  * right now with every secret value replaced, and {@code settings.json} /
- * {@code routing.json} when they exist. It deliberately does <em>not</em>
- * hold {@code servers.json}, {@code subscriptions.json}, the MCP token file
- * or anything from the OS keychain.</p>
+ * {@code routing.json} with their URLs redacted, when they exist. It
+ * deliberately does <em>not</em> hold {@code servers.json},
+ * {@code subscriptions.json}, the MCP token file or anything from the OS
+ * keychain.</p>
  */
 public class DiagnosticsBundle {
 
@@ -77,15 +78,18 @@ public class DiagnosticsBundle {
 
     /**
      * Field names that identify the user's server without authenticating to
-     * it — the address, the SNI, the transport host and path. Not
-     * credentials, but the bundle is what gets attached to a public issue,
-     * and {@link #appInfo} keeps the address out for the same reason. Matched
-     * only inside {@code outbounds} and {@code endpoints}: the same key names
-     * elsewhere are DNS resolver tags and rule references, which the bundle
-     * is there to show.
+     * it: the address, the SNI, the transport host, path and gRPC service, the
+     * REALITY key and short id, and for WireGuard the peer's key and reserved
+     * bytes and the interface address. Not credentials, but the bundle is what
+     * gets attached to a public issue, and {@link #appInfo} keeps the address
+     * out for the same reason. Matched only inside {@code outbounds} and
+     * {@code endpoints}, whatever the value's type (a WireGuard address is a
+     * list): the same key names elsewhere are DNS resolver tags and rule
+     * references, which the bundle is there to show.
      */
     private static final Set<String> IDENTIFYING_FIELDS = Set.of(
-            "server", "server_name", "host", "sni", "path");
+            "server", "server_name", "host", "sni", "path", "service_name",
+            "address", "public_key", "short_id", "reserved");
 
     private final ConfigStore configStore;
     private final SingBoxConfigGenerator configGenerator;
@@ -133,8 +137,8 @@ public class DiagnosticsBundle {
             write(zip, APP_INFO_ENTRY, appInfo());
             write(zip, LOG_ENTRY, logTail());
             write(zip, CONFIG_ENTRY, redactedConfig());
-            copyIfPresent(zip, SETTINGS_ENTRY);
-            copyIfPresent(zip, ROUTING_ENTRY);
+            copyRedactedIfPresent(zip, SETTINGS_ENTRY);
+            copyRedactedIfPresent(zip, ROUTING_ENTRY);
         }
         log.info("Wrote diagnostics bundle to {}", file);
     }
@@ -147,18 +151,21 @@ public class DiagnosticsBundle {
     }
 
     /**
-     * Copies a data-directory file verbatim. Only the two files named by the
-     * constants above are ever passed here; the credential-bearing files in
-     * the same directory are not in the bundle at all.
+     * Copies a data-directory file with every URL in it cut down to its scheme
+     * and host, as the log tail is: a private DNS resolver in the settings
+     * keeps the account it belongs to in its path, and the bypass list takes
+     * whole URLs. Only the two files named by the constants above are ever
+     * passed here; the credential-bearing files in the same directory are not
+     * in the bundle at all.
      */
-    private void copyIfPresent(ZipOutputStream zip, String name) throws IOException {
+    private void copyRedactedIfPresent(ZipOutputStream zip, String name) throws IOException {
         Path source = configStore.getDataDir().resolve(name);
         if (!Files.isRegularFile(source)) {
             return;
         }
-        zip.putNextEntry(new ZipEntry(name));
-        Files.copy(source, zip);
-        zip.closeEntry();
+        // Lenient decoding: a stray invalid byte must not cost the report this file.
+        String content = new String(Files.readAllBytes(source), StandardCharsets.UTF_8);
+        write(zip, name, Redact.urlsIn(content));
     }
 
     /**
@@ -251,6 +258,13 @@ public class DiagnosticsBundle {
                     redactIdentifying(nodes);
                 }
             }
+            for (JsonNode server : root.path("dns").path("servers")) {
+                // A private resolver keeps the account it belongs to in its
+                // path; the resolver's type and host are what a report needs.
+                if (server instanceof ObjectNode object && object.has("path")) {
+                    object.put("path", REDACTED);
+                }
+            }
             return objectMapper.writeValueAsString(root) + "\n";
         } catch (JacksonException e) {
             // Redaction is the only reason this file is safe to include, so a
@@ -293,13 +307,15 @@ public class DiagnosticsBundle {
         }
     }
 
-    /** Replaces the server-identifying values under an outbound or endpoint. */
+    /**
+     * Replaces the server-identifying values under an outbound or endpoint,
+     * lists included: a list's elements carry no field name to match.
+     */
     private static void redactIdentifying(JsonNode node) {
         if (node instanceof ObjectNode object) {
             for (String name : List.copyOf(object.propertyNames())) {
                 JsonNode value = object.get(name);
-                if (IDENTIFYING_FIELDS.contains(name.toLowerCase(Locale.ROOT))
-                        && value != null && value.isValueNode()) {
+                if (IDENTIFYING_FIELDS.contains(name.toLowerCase(Locale.ROOT)) && value != null) {
                     object.put(name, REDACTED);
                 } else {
                     redactIdentifying(value);
