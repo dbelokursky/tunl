@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * {@link SubscriptionService} doubles for tests that live outside this
@@ -30,12 +31,13 @@ public final class TestSubscriptionServices {
     }
 
     /**
-     * A quiet service that runs {@code beforeRemove} on whichever thread asks
-     * it to remove a subscription, just before removing it: a view test can
-     * tell where the removal came from.
+     * A quiet service a view test scripts after the view has started: it runs
+     * what the test sets, on whichever thread asks it to remove or refresh, so
+     * the test can tell where a call came from, hold a refresh open, count
+     * refreshes or make one throw.
      */
-    public static SubscriptionService quiet(Path dataDir, Runnable beforeRemove) {
-        return new Quiet(storeUnder(dataDir), dataDir, beforeRemove);
+    public static Scripted scripted(Path dataDir) {
+        return new Scripted(storeUnder(dataDir), dataDir);
     }
 
     /**
@@ -59,21 +61,8 @@ public final class TestSubscriptionServices {
 
     private static class Quiet extends SubscriptionService {
 
-        private final Runnable beforeRemove;
-
         private Quiet(ConfigStore store, Path dataDir) {
-            this(store, dataDir, () -> { });
-        }
-
-        private Quiet(ConfigStore store, Path dataDir, Runnable beforeRemove) {
             super(store, new ShareLinkParser(), dataDir, HttpClient.newHttpClient());
-            this.beforeRemove = beforeRemove;
-        }
-
-        @Override
-        public void removeSubscription(String subscriptionId) {
-            beforeRemove.run();
-            super.removeSubscription(subscriptionId);
         }
 
         @Override
@@ -89,6 +78,49 @@ public final class TestSubscriptionServices {
         @Override
         public void startAutoRefresh() {
             // Never schedule HTTP work from a test.
+        }
+    }
+
+    /** The service {@link #scripted} returns. */
+    public static final class Scripted extends Quiet {
+
+        private volatile Runnable beforeRemoveAction = () -> { };
+        private volatile Consumer<String> refreshAction = id -> { };
+        private volatile Runnable refreshAllAction = () -> { };
+
+        private Scripted(ConfigStore store, Path dataDir) {
+            super(store, dataDir);
+        }
+
+        /** Runs {@code action} just before each removal, on the removing thread. */
+        public void beforeRemove(Runnable action) {
+            beforeRemoveAction = action;
+        }
+
+        /** Runs {@code action}, given the subscription's id, instead of each refresh. */
+        public void onRefresh(Consumer<String> action) {
+            refreshAction = action;
+        }
+
+        /** Runs {@code action} instead of each refresh of every subscription. */
+        public void onRefreshAll(Runnable action) {
+            refreshAllAction = action;
+        }
+
+        @Override
+        public void removeSubscription(String subscriptionId) {
+            beforeRemoveAction.run();
+            super.removeSubscription(subscriptionId);
+        }
+
+        @Override
+        public void refreshSubscription(String subscriptionId) {
+            refreshAction.accept(subscriptionId);
+        }
+
+        @Override
+        public void refreshAll() {
+            refreshAllAction.run();
         }
     }
 

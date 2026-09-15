@@ -253,6 +253,15 @@ jobs:
       - run: mvn -B package -DskipTests
       - name: Package DEB (arm64)
         run: scripts/package-linux.sh "1.0.0-dev-${GITHUB_SHA:0:7}" "1.0.0+dev${{ github.run_number }}"
+      - name: Smoke-test DEB install, launch and uninstall (arm64)
+        # The check package-linux runs on the amd64 package: install the .deb,
+        # launch it under Xvfb until "Tunl started" is logged, uninstall.
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
+            xvfb xauth libgtk-3-0t64 libglib2.0-0t64 libxtst6 libxi6 libxrender1 libxrandr2 \
+            libfreetype6 fontconfig libasound2t64 libgl1 libpango-1.0-0 libcairo2 fonts-dejavu-core
+          scripts/linux-deb-smoke.sh dist/*.deb "1.0.0-dev-${GITHUB_SHA:0:7}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vless-client-linux-arm-${{ github.sha }}
