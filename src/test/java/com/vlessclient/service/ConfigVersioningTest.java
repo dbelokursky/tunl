@@ -124,6 +124,20 @@ class ConfigVersioningTest {
                 .contains("\"core_log_level\" : \"warn\"");
     }
 
+    /**
+     * A new install starts with MCP configuration changes off. A settings file
+     * that already allows them keeps them: that may be the old default rather
+     * than a choice, but an agent set up on it must not stop working on update.
+     */
+    @Test
+    void mcpChangesAreOffUnlessTheSettingsFileAllowsThem() throws Exception {
+        assertThat(store().getSettings().isMcpAllowMutations()).isFalse();
+
+        Files.writeString(tempDir.resolve("settings.json"), "{ \"mcp_allow_mutations\": true }");
+
+        assertThat(store().getSettings().isMcpAllowMutations()).isTrue();
+    }
+
     @Test
     void unknownCoreLogLevelFallsBackToInfo() throws Exception {
         // A level this build does not know — a hand-edited file, or one
