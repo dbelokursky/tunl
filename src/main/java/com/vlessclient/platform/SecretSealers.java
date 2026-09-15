@@ -1,10 +1,11 @@
 package com.vlessclient.platform;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,7 +19,13 @@ import org.slf4j.LoggerFactory;
 public final class SecretSealers {
 
     private static final Logger log = LoggerFactory.getLogger(SecretSealers.class);
-    private static final int SUBPROCESS_TIMEOUT_SECONDS = 15;
+
+    /**
+     * A backend command can wait on an unlock prompt for a locked keychain or
+     * keyring, and the person it asks may first have to come back to the
+     * machine: the app often starts along with the login session.
+     */
+    private static final Duration SUBPROCESS_TIMEOUT = Duration.ofMinutes(2);
 
     private SecretSealers() {
     }
@@ -58,7 +65,7 @@ public final class SecretSealers {
 
     /**
      * The seam every backend shells out through: one command, an optional
-     * stdin payload, and its stdout when it exited 0. {@link #run} is the
+     * stdin payload, and its stdout when it exited 0. {@link #system()} is the
      * production implementation; the sealer tests substitute a recording fake
      * so nothing reaches a real keychain.
      */
@@ -68,34 +75,45 @@ public final class SecretSealers {
     }
 
     /**
-     * Runs a command, feeding {@code stdin} (may be null) and capturing
-     * stdout. Returns empty on non-zero exit, timeout, or launch failure.
+     * The production {@link Subprocess}. Each command runs through
+     * {@link TimedProcess} with its standard error discarded, and comes back
+     * empty on a non-zero exit, a timeout or a launch failure.
+     *
+     * <p>Once a command has timed out, later ones come back empty without
+     * running. The app unseals every stored credential in turn before its
+     * window first appears, and a store that never answers would otherwise
+     * cost a full timeout for each of them. The price is that an unlock
+     * prompt answered after the timeout takes effect on the next start.
+     * Nothing is lost meanwhile: a value that stays sealed loads then, and a
+     * value that cannot be sealed is kept as plaintext, as it is whenever no
+     * backend is available.</p>
      */
-    static Optional<String> run(String[] command, String stdin) {
+    static Subprocess system() {
+        return system(SUBPROCESS_TIMEOUT);
+    }
+
+    /** {@link #system()} with the given timeout. */
+    static Subprocess system(Duration timeout) {
+        AtomicBoolean timedOut = new AtomicBoolean();
+        return (command, stdin) -> timedOut.get()
+                ? Optional.empty()
+                : run(command, stdin, timeout, timedOut);
+    }
+
+    private static Optional<String> run(String[] command, String stdin, Duration timeout,
+                                        AtomicBoolean timedOut) {
+        // Nothing reads standard error, and a full pipe would stall the command.
+        ProcessBuilder pb = new ProcessBuilder(command)
+                .redirectError(ProcessBuilder.Redirect.DISCARD);
         try {
-            ProcessBuilder pb = new ProcessBuilder(command);
-            pb.redirectErrorStream(false);
-            Process process = pb.start();
-            if (stdin != null) {
-                try (var out = process.getOutputStream()) {
-                    out.write(stdin.getBytes(StandardCharsets.UTF_8));
-                }
-            } else {
-                process.getOutputStream().close();
-            }
-            String stdout;
-            try (var in = process.getInputStream()) {
-                stdout = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-            }
-            if (!process.waitFor(SUBPROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                process.destroyForcibly();
-                log.warn("Secret backend command timed out: {}", command[0]);
-                return Optional.empty();
-            }
-            if (process.exitValue() != 0) {
-                return Optional.empty();
-            }
-            return Optional.of(stdout);
+            TimedProcess.Exit exit = TimedProcess.run(pb, stdin, timeout);
+            return exit.code() == 0 ? Optional.of(exit.output()) : Optional.empty();
+        } catch (TimeoutException e) {
+            timedOut.set(true);
+            log.warn("Secret backend command {} did not finish within {}; "
+                    + "not running backend commands again until the app restarts",
+                    command[0], timeout);
+            return Optional.empty();
         } catch (IOException e) {
             log.debug("Secret backend command failed to run: {} ({})",
                     command[0], e.getMessage());

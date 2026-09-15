@@ -2,6 +2,7 @@ package com.vlessclient.platform;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,11 +33,18 @@ public final class LinuxTunLauncher implements TunLauncher {
 
     private static final Logger log = LoggerFactory.getLogger(LinuxTunLauncher.class);
 
+    /**
+     * The capability grant waits on a PolicyKit password prompt. Connecting
+     * runs off the JavaFX thread, so a long wait holds no window, while a grant
+     * cut short only brings the fallback's own prompt right after it.
+     */
+    private static final Duration PROMPT_TIMEOUT = Duration.ofMinutes(5);
+
     private final CommandRunner runner;
     private final String elevator;
 
     public LinuxTunLauncher() {
-        this(CommandRunner.system(), "pkexec");
+        this(CommandRunner.system(PROMPT_TIMEOUT), "pkexec");
     }
 
     /** Test seam: inject the capability-command runner and the elevation binary. */

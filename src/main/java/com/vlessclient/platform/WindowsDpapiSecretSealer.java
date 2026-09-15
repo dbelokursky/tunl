@@ -55,7 +55,7 @@ final class WindowsDpapiSecretSealer implements SecretSealer {
     private volatile Boolean available;
 
     WindowsDpapiSecretSealer() {
-        this(new WindowsDpapi(), SecretSealers::run);
+        this(new WindowsDpapi(), SecretSealers.system());
     }
 
     /**

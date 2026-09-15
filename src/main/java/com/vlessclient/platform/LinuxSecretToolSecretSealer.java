@@ -24,7 +24,7 @@ final class LinuxSecretToolSecretSealer implements SecretSealer {
     private volatile Boolean available;
 
     LinuxSecretToolSecretSealer() {
-        this(SecretSealers::run);
+        this(SecretSealers.system());
     }
 
     /** Test seam: runs {@code secret-tool} through the given subprocess runner. */
