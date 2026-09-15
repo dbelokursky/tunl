@@ -4,10 +4,12 @@ import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
 import com.vlessclient.service.outbound.CoreSettings;
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -23,6 +25,9 @@ public class ShareLinkParser {
 
     private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
 
+    /** U+FEFF, which a file or a response saved with a byte order mark starts with. */
+    private static final char BYTE_ORDER_MARK = 0xFEFF;
+
     /**
      * Parses a share link URI, dispatching by its scheme.
      *
@@ -35,17 +40,21 @@ public class ShareLinkParser {
         if (uri == null || uri.isBlank()) {
             throw new IllegalArgumentException("URI must not be null or blank");
         }
-        int schemeEnd = uri.indexOf("://");
+        // A list saved with a byte order mark hands it over with its first
+        // link, and trimming the line leaves it there. It read as part of the
+        // scheme, so the first server counted as an unsupported protocol.
+        String link = uri.charAt(0) == BYTE_ORDER_MARK ? uri.substring(1) : uri;
+        int schemeEnd = link.indexOf("://");
         if (schemeEnd < 0) {
             throw new IllegalArgumentException("Share link URI must contain ://");
         }
-        String scheme = uri.substring(0, schemeEnd).toLowerCase(Locale.ROOT);
+        String scheme = link.substring(0, schemeEnd).toLowerCase(Locale.ROOT);
         return switch (scheme) {
-            case "vless" -> parseVless(uri);
-            case "vmess" -> parseVmess(uri);
-            case "trojan" -> parseTrojan(uri);
-            case "ss" -> parseShadowsocks(uri);
-            case "hysteria2", "hy2" -> parseHysteria2(uri);
+            case "vless" -> parseVless(link);
+            case "vmess" -> parseVmess(link);
+            case "trojan" -> parseTrojan(link);
+            case "ss" -> parseShadowsocks(link);
+            case "hysteria2", "hy2" -> parseHysteria2(link);
             default -> throw new UnsupportedSchemeException(scheme);
         };
     }
@@ -97,6 +106,37 @@ public class ShareLinkParser {
     private static String displayName(String fragment, String host, int port) {
         String cleaned = cleanName(fragment);
         return cleaned.isEmpty() ? host + ":" + port : cleaned;
+    }
+
+    /**
+     * Decodes a link's fragment, its display name, the way a form value is
+     * decoded: {@code %XX} escapes as UTF-8, and {@code +} as a space. A
+     * {@code %} that starts no escape is kept as it is. URLDecoder threw on
+     * one, so a server named "100%" rejected the whole link.
+     *
+     * @param fragment the fragment as it appears in the link
+     * @return the decoded name
+     */
+    static String decodeName(String fragment) {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream(fragment.length());
+        StringBuilder text = new StringBuilder();
+        int i = 0;
+        while (i < fragment.length()) {
+            char c = fragment.charAt(i);
+            if (c == '%' && i + 2 < fragment.length()
+                    && HexFormat.isHexDigit(fragment.charAt(i + 1))
+                    && HexFormat.isHexDigit(fragment.charAt(i + 2))) {
+                bytes.writeBytes(text.toString().getBytes(StandardCharsets.UTF_8));
+                text.setLength(0);
+                bytes.write(HexFormat.fromHexDigits(fragment, i + 1, i + 3));
+                i += 3;
+            } else {
+                text.append(c == '+' ? ' ' : c);
+                i++;
+            }
+        }
+        bytes.writeBytes(text.toString().getBytes(StandardCharsets.UTF_8));
+        return bytes.toString(StandardCharsets.UTF_8);
     }
 
     /**
@@ -203,7 +243,7 @@ public class ShareLinkParser {
         String fragment = null;
         int fragmentIndex = uri.indexOf('#');
         if (fragmentIndex >= 0) {
-            fragment = URLDecoder.decode(uri.substring(fragmentIndex + 1), StandardCharsets.UTF_8);
+            fragment = decodeName(uri.substring(fragmentIndex + 1));
         }
 
         // Parse the URI using a workaround: replace vless:// with http:// so java.net.URI can parse it
@@ -371,7 +411,7 @@ public class ShareLinkParser {
         String fragment = null;
         int fragmentIndex = uri.indexOf('#');
         if (fragmentIndex >= 0) {
-            fragment = URLDecoder.decode(uri.substring(fragmentIndex + 1), StandardCharsets.UTF_8);
+            fragment = decodeName(uri.substring(fragmentIndex + 1));
         }
 
         String httpUri = "http://" + uri.substring("trojan://".length());
@@ -463,7 +503,7 @@ public class ShareLinkParser {
         String fragment = null;
         int fragmentIndex = rest.indexOf('#');
         if (fragmentIndex >= 0) {
-            fragment = URLDecoder.decode(rest.substring(fragmentIndex + 1), StandardCharsets.UTF_8);
+            fragment = decodeName(rest.substring(fragmentIndex + 1));
             rest = rest.substring(0, fragmentIndex);
         }
 
@@ -557,7 +597,7 @@ public class ShareLinkParser {
         String fragment = null;
         int fragmentIndex = uri.indexOf('#');
         if (fragmentIndex >= 0) {
-            fragment = URLDecoder.decode(uri.substring(fragmentIndex + 1), StandardCharsets.UTF_8);
+            fragment = decodeName(uri.substring(fragmentIndex + 1));
         }
 
         String httpUri = "http://" + uri.substring(schemeEnd + 3);
@@ -628,9 +668,11 @@ public class ShareLinkParser {
         TransportType transportType = parseTransportType(type);
         config.getTransport().setType(transportType);
 
+        // Decoded once already, with the rest of the query. A second pass
+        // turned an encoded + into a space and threw on an encoded %.
         String path = params.get("path");
         if (path != null && !path.isBlank()) {
-            config.getTransport().setPath(URLDecoder.decode(path, StandardCharsets.UTF_8));
+            config.getTransport().setPath(path);
         }
 
         String transportHost = params.get("host");
