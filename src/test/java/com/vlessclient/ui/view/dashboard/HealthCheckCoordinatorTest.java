@@ -211,7 +211,7 @@ class HealthCheckCoordinatorTest {
         recovery = new TunnelRecoveryService(() -> ServiceLocator.get(AppSettings.class), guard -> {
             reconnectAction.run();
             return true;
-        });
+        }, () -> false);
         recovery.connectionRequested();
         engine.state.addListener((obs, old, next) -> recovery.onConnectionState(next));
         healthState.healthProperty().addListener((obs, old, next) -> recovery.onHealth(next));
