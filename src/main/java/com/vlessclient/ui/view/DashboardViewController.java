@@ -150,6 +150,13 @@ public class DashboardViewController implements ViewShownAware {
     private StatusPresenter statusPresenter;
 
     /**
+     * Why Connect is disabled. One tooltip that gets new text: the refresh
+     * runs on every server-list change and after each connect and disconnect,
+     * and a new Tooltip each time cost a popup control.
+     */
+    private final Tooltip connectBlockedTooltip = new Tooltip();
+
+    /**
      * Wires up services, the connection-state listener, traffic/latency
      * readouts, and the initial UI state. Called by the FXML loader after
      * the view's nodes are injected.
@@ -974,17 +981,22 @@ public class DashboardViewController implements ViewShownAware {
         addServerLink.setManaged(servers.isEmpty());
         if (servers.isEmpty()) {
             connectButton.setDisable(true);
-            connectButton.setTooltip(new Tooltip(I18n.get("dashboard.no.servers")));
+            explainDisabledConnect("dashboard.no.servers");
         } else if (findActiveServer() == null) {
             // Gate on activation, not list size: enabling Connect with no
             // active server turns a click into a modal error telling the
             // user to "mark it active" — a gesture the UI never offers.
             connectButton.setDisable(true);
-            connectButton.setTooltip(new Tooltip(I18n.get("dashboard.no.server")));
+            explainDisabledConnect("dashboard.no.server");
         } else {
             connectButton.setDisable(false);
             connectButton.setTooltip(null);
         }
+    }
+
+    private void explainDisabledConnect(String key) {
+        connectBlockedTooltip.setText(I18n.get(key));
+        connectButton.setTooltip(connectBlockedTooltip);
     }
 
     private TunnelHealth currentHealth() {
