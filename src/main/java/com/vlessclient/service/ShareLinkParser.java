@@ -3,6 +3,7 @@ package com.vlessclient.service;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
+import com.vlessclient.service.outbound.CoreSettings;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
@@ -47,6 +48,26 @@ public class ShareLinkParser {
             case "hysteria2", "hy2" -> parseHysteria2(uri);
             default -> throw new UnsupportedSchemeException(scheme);
         };
+    }
+
+    /**
+     * Parses a share link for a server that is about to be stored: like
+     * {@link #parse}, and also refuses one the core would refuse however its
+     * settings are spelled ({@link CoreSettings#refusal}). Such a server used
+     * to be stored and then left out of every connect.
+     *
+     * @param uri the share link URI to parse
+     * @return the parsed server configuration
+     * @throws UnsupportedFeatureException if the core would refuse the server
+     * @throws IllegalArgumentException    if {@code uri} does not parse
+     */
+    public ServerConfig parseForImport(String uri) {
+        ServerConfig server = parse(uri);
+        CoreSettings.Refusal refusal = CoreSettings.refusal(server).orElse(null);
+        if (refusal != null) {
+            throw new UnsupportedFeatureException(refusal.feature(), refusal.reason());
+        }
+        return server;
     }
 
     /** Longest display name kept from a link; anything past it is noise. */
@@ -132,6 +153,37 @@ public class ShareLinkParser {
         /** The scheme of the rejected link, e.g. {@code tuic}. */
         public String scheme() {
             return scheme;
+        }
+    }
+
+    /**
+     * A link that parses but asks for something this client cannot run: a
+     * transport sing-box does not implement, or a setting the core refuses
+     * however it is spelled.
+     *
+     * <p>Counted with {@link UnsupportedSchemeException} rather than with
+     * unreadable lines, for the same reason: a provider that also hands out
+     * xhttp servers has not sent a truncated list, and treating it as one
+     * stopped every later refresh from removing a withdrawn server.</p>
+     */
+    public static final class UnsupportedFeatureException extends IllegalArgumentException {
+
+        private final String feature;
+
+        /**
+         * Creates the exception.
+         *
+         * @param feature what the link asks for, e.g. {@code transport xhttp}
+         * @param message the sentence to show for this link
+         */
+        public UnsupportedFeatureException(String feature, String message) {
+            super(message);
+            this.feature = feature;
+        }
+
+        /** What the link asks for, short enough for a list, e.g. {@code transport xhttp}. */
+        public String feature() {
+            return feature;
         }
     }
 
@@ -634,9 +686,10 @@ public class ShareLinkParser {
     }
 
     private String mapVmessNet(String net) {
-        return switch (net.toLowerCase()) {
+        return switch (net.toLowerCase(Locale.ROOT)) {
             case "h2" -> "http";
-            case "kcp" -> "tcp";
+            // sing-box has no mKCP, and dialling a KCP server over TCP never connects.
+            case "kcp" -> throw unsupportedTransport("kcp");
             default -> net;
         };
     }
@@ -674,7 +727,18 @@ public class ShareLinkParser {
                 return t;
             }
         }
-        throw new IllegalArgumentException("Unknown transport type: " + type);
+        throw unsupportedTransport(type);
+    }
+
+    /**
+     * A transport sing-box does not implement, such as Xray's xhttp. The link
+     * itself is well-formed, so a list holding it is neither truncated nor
+     * corrupt.
+     */
+    private static UnsupportedFeatureException unsupportedTransport(String type) {
+        String name = type.toLowerCase(Locale.ROOT);
+        return new UnsupportedFeatureException("transport " + name,
+                "sing-box does not support the " + name + " transport.");
     }
 
     private Map<String, String> parseQueryParams(String query) {

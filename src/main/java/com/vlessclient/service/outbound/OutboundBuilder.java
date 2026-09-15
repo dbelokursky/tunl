@@ -4,7 +4,6 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TlsConfig;
 import com.vlessclient.model.TransportConfig;
 import com.vlessclient.model.TransportType;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import tools.jackson.databind.ObjectMapper;
@@ -17,9 +16,6 @@ import tools.jackson.databind.node.ObjectNode;
  * protocols embed into their outbound objects.
  */
 public abstract class OutboundBuilder {
-
-    /** The uTLS fingerprint a REALITY server gets when its link names none. */
-    private static final String REALITY_FINGERPRINT = "chrome";
 
     /** Shared mapper used to create the JSON nodes of the outbound. */
     protected final ObjectMapper mapper;
@@ -64,7 +60,7 @@ public abstract class OutboundBuilder {
             tlsNode.set("alpn", alpnArray);
         }
 
-        String fingerprint = fingerprintOf(tls);
+        String fingerprint = CoreSettings.fingerprint(tls);
         if (fingerprint != null) {
             ObjectNode utls = mapper.createObjectNode();
             utls.put("enabled", true);
@@ -80,7 +76,8 @@ public abstract class OutboundBuilder {
             ObjectNode reality = mapper.createObjectNode();
             reality.put("enabled", true);
             if (tls.getRealityPublicKey() != null && !tls.getRealityPublicKey().isBlank()) {
-                reality.put("public_key", base64Url(tls.getRealityPublicKey()));
+                reality.put("public_key",
+                        CoreSettings.realityPublicKey(tls.getRealityPublicKey()));
             }
             if (tls.getRealityShortId() != null && !tls.getRealityShortId().isEmpty()) {
                 reality.put("short_id", tls.getRealityShortId());
@@ -89,34 +86,6 @@ public abstract class OutboundBuilder {
         }
 
         outbound.set("tls", tlsNode);
-    }
-
-    /**
-     * The uTLS fingerprint to send: the link's own, in the lower case the core
-     * matches on, or Chrome for a REALITY server whose link names none. The
-     * core refuses a REALITY client without uTLS, and a link that leaves the
-     * fingerprint out means "any", not "none".
-     */
-    private static String fingerprintOf(TlsConfig tls) {
-        String fingerprint = tls.getFingerprint();
-        if (fingerprint != null && !fingerprint.isBlank()) {
-            return fingerprint.strip().toLowerCase(Locale.ROOT);
-        }
-        return tls.isReality() ? REALITY_FINGERPRINT : null;
-    }
-
-    /**
-     * A REALITY key as the core decodes it: base64url without padding. Links
-     * also carry the same bytes in the standard alphabet with padding, which
-     * the core refuses.
-     */
-    private static String base64Url(String key) {
-        String converted = key.strip().replace('+', '-').replace('/', '_');
-        int end = converted.length();
-        while (end > 0 && converted.charAt(end - 1) == '=') {
-            end--;
-        }
-        return converted.substring(0, end);
     }
 
     /**

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Parser branches that change the produced config without saying so.
@@ -70,11 +71,12 @@ class ShareLinkSilentDefaultsTest {
     }
 
     @Test
-    @DisplayName("vmess net=kcp becomes the tcp transport")
-    void kcpMapsToTcp() {
-        // sing-box has no kcp transport; the parser maps it to tcp rather than
-        // passing a value the core would reject at start.
-        assertThat(parser.parse(vmess("kcp")).getTransport().getType())
-                .isEqualTo(TransportType.TCP);
+    @DisplayName("vmess net=kcp is reported as unsupported, not dialled over tcp")
+    void kcpIsReportedAsUnsupported() {
+        // sing-box has no kcp transport. Mapping it to tcp produced a server that
+        // dials a UDP service over TCP and never connects, with no word about why.
+        assertThatThrownBy(() -> parser.parse(vmess("kcp")))
+                .isInstanceOfSatisfying(ShareLinkParser.UnsupportedFeatureException.class,
+                        e -> assertThat(e.feature()).isEqualTo("transport kcp"));
     }
 }

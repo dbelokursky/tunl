@@ -170,6 +170,29 @@ class ServerBackupServiceTest {
         assertThat(result.skipped().get(0).entry()).doesNotContain("leaked-credential");
     }
 
+    /**
+     * A link the core would refuse used to be stored like any other and then
+     * left out of every connect; the import is where the user can still act
+     * on the reason.
+     */
+    @Test
+    void aLinkTheCoreWouldRefuseIsSkippedWithTheReason() throws IOException {
+        Path file = tempDir.resolve("links.txt");
+        Files.writeString(file,
+                "vless://11111111-2222-3333-4444-555555555555@198.51.100.7:443#ok\n"
+                        + "vless://11111111-2222-3333-4444-555555555555@198.51.100.8:443"
+                        + "?security=reality&sni=example.com&fp=chrome&pbk=pubkey123"
+                        + "&sid=0123abcd#broken-key\n",
+                StandardCharsets.UTF_8);
+
+        ServerBackupService.ImportResult result = backup.importFile(file);
+
+        assertThat(result.added()).isEqualTo(1);
+        assertThat(result.skipped()).singleElement()
+                .satisfies(skip -> assertThat(skip.reason()).contains("REALITY public key"));
+        assertThat(store.getServers()).extracting(ServerConfig::getName).containsExactly("ok");
+    }
+
     @Test
     void aCorruptFileFailsLoudlyAndChangesNothing() throws IOException {
         store.addServer(server("Netherlands 01", Protocol.VLESS, "vless-secret-uuid"));

@@ -267,7 +267,7 @@ public class ServerBackupService {
                 continue;
             }
             try {
-                parsed.add(shareLinkParser.parse(line));
+                parsed.add(shareLinkParser.parseForImport(line));
             } catch (RuntimeException e) {
                 // The line is a credential-bearing URL; report it redacted so
                 // the message is safe to paste into a bug report. The reason

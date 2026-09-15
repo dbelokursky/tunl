@@ -235,6 +235,24 @@ class DefaultAppControlServiceTest {
                 .isInstanceOf(McpToolException.class);
     }
 
+    /**
+     * A link the core would refuse used to be stored and then left out of
+     * every connect; an agent adding it is told why instead.
+     */
+    @Test
+    void addServer_linkTheCoreWouldRefuse_isRejectedWithTheReason() {
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, null, null,
+                null, null, new ShareLinkParser(), new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        assertThatThrownBy(() -> svc.addServer("vless://11111111-2222-3333-4444-555555555555"
+                + "@example.com:443?security=reality&sni=example.com&fp=chrome"
+                + "&pbk=pubkey123&sid=0123abcd#BrokenKey", null))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining("REALITY public key");
+        assertThat(store.getServers()).extracting(ServerConfig::getName)
+                .doesNotContain("BrokenKey");
+    }
+
     @Test
     void deleteServer_withoutConfirm_isRejected() {
         DefaultAppControlService svc = new DefaultAppControlService(store, null, null, null,

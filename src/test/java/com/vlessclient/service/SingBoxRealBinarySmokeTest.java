@@ -233,6 +233,66 @@ class SingBoxRealBinarySmokeTest {
     }
 
     /**
+     * CoreSettings answers for the core before a server is stored, so its
+     * answers have to be the core's: for each server here, "no refusal" and
+     * "sing-box check passes" must agree, whichever way the core goes. Port 0
+     * is left out on purpose: the check lets it through, but nothing can dial
+     * it, so the import refuses it anyway.
+     */
+    @Test
+    void coreSettingsRefusesExactlyWhatTheCoreRefuses() throws Exception {
+        String realityKey = "WZaG00XCAiVCF2SP5fmSbKiuTbBB-lMDg_81rC8hR80";
+        String key16 = "AAAAAAAAAAAAAAAAAAAAAA==";
+        String key32 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        List<ServerConfig> servers = List.of(
+                realityServer("fingerprint-chrome", "chrome", realityKey),
+                realityServer("fingerprint-unknown", "randomizednoalpn", realityKey),
+                realityServer("key-too-short", "chrome", "pubkey123"),
+                with(realityServer("short-id-empty", "chrome", realityKey),
+                        server -> server.getTls().setRealityShortId("")),
+                with(realityServer("short-id-odd-length", "chrome", realityKey),
+                        server -> server.getTls().setRealityShortId("abc")),
+                with(realityServer("short-id-too-long", "chrome", realityKey),
+                        server -> server.getTls().setRealityShortId("0123456789abcdef01")),
+                with(realityServer("flow-udp443", "chrome", realityKey),
+                        server -> server.setFlow("xtls-rprx-vision-udp443")),
+                with(realityServer("port-70000", "chrome", realityKey),
+                        server -> server.setPort(70000)),
+                shadowsocksServer("cipher-chacha20", "chacha20"),
+                shadowsocksServer("cipher-rc4-md5", "rc4-md5"),
+                with(shadowsocksServer("ss2022-aes128-long-key", "2022-blake3-aes-128-gcm"),
+                        server -> server.setUuid(key32)),
+                with(shadowsocksServer("ss2022-aes128", "2022-blake3-aes-128-gcm"),
+                        server -> server.setUuid(key16)),
+                with(shadowsocksServer("ss2022-multi-user", "2022-blake3-aes-256-gcm"),
+                        server -> server.setUuid(key32 + ":" + key32)));
+
+        for (ServerConfig server : servers) {
+            boolean coreAccepts = checkPasses(generator.generate(server, new AppSettings()));
+            assertThat(com.vlessclient.service.outbound.CoreSettings.refusal(server).isEmpty())
+                    .as("%s: sing-box check %s it", server.getName(),
+                            coreAccepts ? "accepts" : "refuses")
+                    .isEqualTo(coreAccepts);
+        }
+    }
+
+    private static ServerConfig with(ServerConfig server,
+                                     java.util.function.Consumer<ServerConfig> change) {
+        change.accept(server);
+        return server;
+    }
+
+    private boolean checkPasses(String config) throws Exception {
+        Path configFile = Files.createTempFile("smoke-check-", ".json");
+        try {
+            Files.writeString(configFile, config);
+            return run(binary, "check", "-c", configFile.toString()).exitCode() == 0;
+        } finally {
+            Files.deleteIfExists(configFile);
+        }
+    }
+
+    /**
      * Every log level the Settings screen offers has to be a string the real
      * core accepts — a rejected one is not a wrong log, it is a core that
      * refuses to start at all, on the very connect the user was trying to
