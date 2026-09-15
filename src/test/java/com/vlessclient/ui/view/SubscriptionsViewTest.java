@@ -131,8 +131,7 @@ public class SubscriptionsViewTest extends ApplicationTest {
     void deletingASubscriptionAsksThenRemovesItOffTheFxThread() throws Exception {
         service.addSubscription("Provider", "https://provider.example/sub");
         WaitForAsyncUtils.waitForFxEvents();
-        Button delete = lookup((Node node) -> node instanceof Button button
-                && I18n.get("button.delete").equals(button.getText())).queryButton();
+        Button delete = rowButton("button.delete");
 
         Platform.runLater(delete::fire);
         DialogPane confirm = awaitDialog("the delete confirmation", pane ->
@@ -229,8 +228,20 @@ public class SubscriptionsViewTest extends ApplicationTest {
     }
 
     private Button rowRefreshButton() {
-        return lookup((Node node) -> node instanceof Button button
-                && I18n.get("button.refresh").equals(button.getText())).queryButton();
+        return rowButton("button.refresh");
+    }
+
+    /**
+     * The row's button labelled with {@code key}, waited for: a ListView builds
+     * its cells during layout, a pulse after the subscription lands, so a query
+     * that runs straight after the change can find nothing.
+     */
+    private Button rowButton(String key) {
+        String text = I18n.get(key);
+        return Await.untilValue("the row's \"" + text + "\" button",
+                () -> lookup((Node node) -> node instanceof Button button
+                        && text.equals(button.getText())).tryQueryAs(Button.class).orElse(null),
+                Objects::nonNull, Duration.ofSeconds(10));
     }
 
     private boolean showsLabel(String text) {
