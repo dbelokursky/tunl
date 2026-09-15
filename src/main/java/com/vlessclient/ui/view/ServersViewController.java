@@ -907,8 +907,13 @@ public class ServersViewController {
         ServerListCell() {
             setOnMouseClicked(event -> {
                 boolean extendingSelection = event.isShortcutDown() || event.isShiftDown();
+                // Control-click is the context-menu click on macOS, where the
+                // shortcut key is Command: it used to activate the row on the
+                // way to the menu and restart a live tunnel onto it.
+                boolean openingTheMenu = event.isControlDown();
                 if (isEmpty() || getItem() == null
-                        || event.getButton() != MouseButton.PRIMARY || extendingSelection) {
+                        || event.getButton() != MouseButton.PRIMARY || extendingSelection
+                        || openingTheMenu) {
                     return;
                 }
                 setActiveServer(getItem());
