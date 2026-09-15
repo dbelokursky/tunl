@@ -227,8 +227,13 @@ class SingBoxConfigGeneratorRoutingTest {
                 .isEqualTo("https://raw.githubusercontent.com/SagerNet/sing-geosite/"
                         + "rule-set/geosite-category-ru.srs");
         // Through the tunnel: GitHub raw is often blocked when dialed
-        // directly on the networks this client is for.
-        assertThat(ruleSet.get(0).get("download_detour").asString()).isEqualTo("proxy");
+        // directly on the networks this client is for. Set on http_client:
+        // download_detour is deprecated, and a newer core stops at rule-set
+        // start over it while `check` still passes.
+        for (JsonNode entry : ruleSet) {
+            assertThat(entry.path("http_client").path("detour").asString()).isEqualTo("proxy");
+            assertThat(entry.has("download_detour")).isFalse();
+        }
         assertThat(ruleSet.get(1).get("tag").asString()).isEqualTo("geoip-ru");
         assertThat(ruleSet.get(1).get("url").asString())
                 .isEqualTo("https://raw.githubusercontent.com/SagerNet/sing-geoip/"

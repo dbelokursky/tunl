@@ -121,7 +121,8 @@ class LiveServerSwitchTest {
         var root = JsonMapper.builder().build().readTree(live.config());
         assertThat(root.path("route").path("rule_set")).isNotEmpty();
         for (var ruleSet : root.path("route").path("rule_set")) {
-            assertThat(ruleSet.path("download_detour").asString()).isEqualTo(live.groupTag());
+            assertThat(ruleSet.path("http_client").path("detour").asString())
+                    .isEqualTo(live.groupTag());
         }
     }
 
