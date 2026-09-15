@@ -146,11 +146,12 @@ class SubscriptionRefreshSafetyTest {
             Subscription sub = withTwoServersImported();
 
             // The provider still lists both servers, but one line is in a shape
-            // the parser cannot read - a format change, a new field, a
-            // truncated response. To diffAndApply that line is indistinguishable
-            // from a server that was withdrawn.
+            // the parser cannot read - a format change, a truncated response.
+            // To diffAndApply that line is indistinguishable from a server that
+            // was withdrawn. (A well-formed link asking for a transport sing-box
+            // lacks is not this case: it is unsupported, and removals go on.)
             service.serve("vless://uuid1@server1.example:443?security=tls&type=tcp#One\n"
-                    + "vless://uuid2@server2.example:443?security=tls&type=zzz-unknown\n");
+                    + "vless://uuid2@:443?security=tls&type=tcp\n");
             service.refreshSubscription(sub.getId());
 
             assertThat(configStore.getServers())

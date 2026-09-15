@@ -296,13 +296,18 @@ class ShareLinkParserEdgeCaseTest {
             assertThat(config.getName()).isEqualTo("12345");
         }
 
+        /**
+         * A transport sing-box lacks is reported as unsupported, not as a line
+         * the parser could not read: a subscription counting it as unreadable
+         * stopped removing withdrawn servers on every later refresh.
+         */
         @Test
-        void unknownNetworkTypeThrows() {
+        void unknownNetworkTypeIsReportedAsAnUnsupportedTransport() {
             String json = "{\"add\":\"h.example\",\"id\":\"u\",\"port\":443,\"net\":\"xhttp\"}";
 
             assertThatThrownBy(() -> parser.parse("vmess://" + b64(json)))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("Unknown transport type");
+                    .isInstanceOfSatisfying(ShareLinkParser.UnsupportedFeatureException.class,
+                            e -> assertThat(e.feature()).isEqualTo("transport xhttp"));
         }
 
         @Test

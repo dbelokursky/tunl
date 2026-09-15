@@ -311,7 +311,7 @@ public class SubscriptionService {
             } else {
                 // The list was read fine; it just holds nothing this client
                 // can connect to. Say so rather than hinting at expiry.
-                sub.setLastError("Every link in the response uses a protocol this "
+                sub.setLastError("Every link in the response asks for something this "
                         + "app does not support (" + parsed.unsupportedSummary() + ").");
             }
             saveSubscriptions();
@@ -694,11 +694,16 @@ public class SubscriptionService {
                 continue;
             }
             try {
-                ServerConfig server = shareLinkParser.parse(trimmedLine);
+                ServerConfig server = shareLinkParser.parseForImport(trimmedLine);
                 servers.add(server);
             } catch (ShareLinkParser.UnsupportedSchemeException e) {
                 unsupported.add(e.scheme());
                 log.debug("Leaving out a {} link: protocol not supported", e.scheme());
+            } catch (ShareLinkParser.UnsupportedFeatureException e) {
+                // Well-formed, but the core would refuse it: like a protocol this
+                // client lacks, and unlike a line the parser could not read.
+                unsupported.add(e.feature());
+                log.debug("Leaving out a link the core would refuse: {}", e.feature());
             } catch (Exception e) {
                 skipped++;
                 // Scrubbed: the line is a share link and a parser message may

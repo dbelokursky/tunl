@@ -510,7 +510,7 @@ public class DefaultAppControlService implements AppControlService {
             throw new McpToolException("'shareLink' is required.");
         }
         try {
-            ServerConfig config = shareLinkParser.parse(shareLink.trim());
+            ServerConfig config = shareLinkParser.parseForImport(shareLink.trim());
             if (config == null) {
                 throw new McpToolException("Could not parse share link.");
             }
