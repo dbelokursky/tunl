@@ -693,6 +693,15 @@ class SingBoxRealBinarySmokeTest {
                     TrafficMonitor.buildTrafficRequest(clashPort, secret),
                     HttpResponse.BodyHandlers.ofInputStream());
             assertThat(authed.statusCode()).isEqualTo(200);
+
+            // What the TUN watchdog waits for before it reports Connected.
+            SingBoxEngine.Controller controller = SingBoxEngine.extractController(config);
+            try (HttpClient probe = SingBoxEngine.controllerProbeClient()) {
+                assertThat(SingBoxEngine.coreAnswers(probe, controller)).isTrue();
+                assertThat(SingBoxEngine.coreAnswers(probe,
+                        new SingBoxEngine.Controller(controller.version(), "another-secret")))
+                        .isFalse();
+            }
         } finally {
             proc.destroy();
             if (!proc.waitFor(5, TimeUnit.SECONDS)) {

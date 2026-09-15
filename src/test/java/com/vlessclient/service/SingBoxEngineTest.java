@@ -481,6 +481,90 @@ class SingBoxEngineTest {
         assertThat(wrapperProc.get().exitValue()).isZero();
     }
 
+    /**
+     * The TUN watchdog promoted a session to CONNECTED 1.8 s in whenever the
+     * launcher was alive, and the Windows launcher stays alive for as long as
+     * the UAC prompt stays open. Connected now means the core's controller
+     * answers: it listens only once the core itself runs, and a bare probe of
+     * it leaves no error in the core's log, unlike a probe of a proxy inbound.
+     */
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void tunModeIsConnectedOnlyOnceTheCoreControllerAnswers(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        Path stopFile = tmp.resolve("stop.signal");
+        Path wrapper = tmp.resolve("wrapper.sh");
+        // A launcher waiting on an elevation prompt: alive, and silent.
+        Files.writeString(wrapper, "#!/bin/sh\n"
+                + "while [ ! -f '" + stopFile + "' ]; do sleep 0.2; done\n");
+        makeExecutable(wrapper);
+        int port;
+        try (java.net.ServerSocket free = new java.net.ServerSocket(0)) {
+            port = free.getLocalPort();
+        }
+        String config = "{\"experimental\":{\"clash_api\":{\"external_controller\":\"127.0.0.1:"
+                + port + "\",\"secret\":\"this-core\"}}}";
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+        engine.setTunLauncher((binary, cfg) -> new com.vlessclient.platform.TunLauncher.Launched(
+                new ProcessBuilder(wrapper.toString()).redirectErrorStream(true).start(),
+                stopFile));
+
+        engine.start(config, ProxyMode.TUN);
+        com.sun.net.httpserver.HttpServer controller = null;
+        try {
+            Thread.sleep(2500);
+            assertThat(stateOnFxThread(engine))
+                    .as("past the old 1.8 s promotion, with nothing on the controller port yet")
+                    .isEqualTo(ConnectionState.CONNECTING);
+
+            // Then the port answers for other programs before this core does.
+            String anotherSecret = "a clash API that checks another secret";
+            String notSingBox = "a clash API without a secret that is not sing-box";
+            java.util.concurrent.atomic.AtomicReference<String> answering =
+                    new java.util.concurrent.atomic.AtomicReference<>(anotherSecret);
+            java.util.concurrent.atomic.AtomicInteger probes =
+                    new java.util.concurrent.atomic.AtomicInteger();
+            controller = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(
+                    java.net.InetAddress.getLoopbackAddress(), port), 0);
+            controller.createContext("/version", exchange -> {
+                probes.incrementAndGet();
+                String who = answering.get();
+                boolean thisSecret = "Bearer this-core"
+                        .equals(exchange.getRequestHeaders().getFirst("Authorization"));
+                int status = who.equals(notSingBox) ? 200
+                        : who.equals(anotherSecret) ? 401
+                        : thisSecret ? 200 : 401;
+                byte[] body = ("{\"meta\":true,\"version\":\""
+                        + (who.equals(notSingBox) ? "v1.19.1" : "sing-box 1.14.0") + "\"}")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(status, body.length);
+                exchange.getResponseBody().write(body);
+                exchange.close();
+            });
+            controller.start();
+            for (String other : List.of(anotherSecret, notSingBox)) {
+                answering.set(other);
+                probes.set(0);
+                // Set before the reset, so both counted probes met this program.
+                Await.until("two probes of " + other + ", or a promotion",
+                        () -> probes.get() >= 2
+                                || stateOnFxThread(engine) != ConnectionState.CONNECTING,
+                        Duration.ofSeconds(10));
+                assertThat(stateOnFxThread(engine))
+                        .as("the controller port held by " + other)
+                        .isEqualTo(ConnectionState.CONNECTING);
+            }
+
+            answering.set("this core");
+            awaitConnectionState(engine, ConnectionState.CONNECTED, AWAIT_STATE_TIMEOUT_MS);
+        } finally {
+            if (controller != null) {
+                controller.stop(0);
+            }
+            engine.stop();
+        }
+    }
+
     @EnabledOnOs({OS.MAC, OS.LINUX})
     @Test
     void concurrentStartsLaunchExactlyOneCore(
