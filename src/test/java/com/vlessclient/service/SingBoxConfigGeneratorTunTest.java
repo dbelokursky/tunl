@@ -509,6 +509,28 @@ class SingBoxConfigGeneratorTunTest {
                 .doesNotContain(SingBoxConfigGenerator.TUN_IPV6_ADDRESS);
     }
 
+    /**
+     * Without an IPv6 address on the device, AAAA answers still reached the
+     * system: {@code prefer_ipv4} only orders them, and the core drops them
+     * only for {@code ipv4_only}. On a dual-stack network the system then
+     * connected over IPv6, around the tunnel.
+     */
+    @Test
+    void tunMode_withoutIpv6ResolvesNamesToIpv4Only() throws Exception {
+        AppSettings settings = tunSettings();
+        settings.setDnsStrategy("prefer_ipv6");
+
+        settings.setTunIpv6Enabled(false);
+        JsonNode v4Only = parse(generator.generate(createVlessServer(), settings)).get("dns");
+        assertThat(v4Only.get("strategy").asString()).isEqualTo("ipv4_only");
+
+        settings.setTunIpv6Enabled(true);
+        JsonNode dualStack = parse(generator.generate(createVlessServer(), settings)).get("dns");
+        assertThat(dualStack.get("strategy").asString())
+                .as("with IPv6 on the device, the chosen strategy stands")
+                .isEqualTo("prefer_ipv6");
+    }
+
     @Test
     void tunMode_bootstrapResolverIsTheOsResolver() throws Exception {
         // The proxy server's hostname and remote rule-set hosts must resolve

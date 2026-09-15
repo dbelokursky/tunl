@@ -252,7 +252,11 @@ public class SingBoxConfigGenerator {
         // all queries through the proxy DNS by default.
         dns.put("final", "proxy-dns");
 
-        dns.put("strategy", settings.getDnsStrategy());
+        // A device without an IPv6 address routes IPv4 alone, and the core
+        // drops AAAA answers only for ipv4_only: any other strategy handed the
+        // system IPv6 addresses, which it reached around the tunnel.
+        dns.put("strategy", settings.isTunIpv6Enabled()
+                ? settings.getDnsStrategy() : "ipv4_only");
 
         return dns;
     }

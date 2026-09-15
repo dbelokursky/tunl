@@ -341,6 +341,21 @@ class SingBoxRealBinarySmokeTest {
     }
 
     /**
+     * TUN mode with IPv6 turned off asks the core to resolve names to IPv4
+     * only, and the core has to accept that as generated.
+     */
+    @Test
+    void checkAcceptsTunModeWithoutIpv6() throws Exception {
+        AppSettings settings = new AppSettings();
+        settings.setProxyMode(ProxyMode.TUN);
+        settings.setTunIpv6Enabled(false);
+        String config = generator.generate(serverFor(Protocol.VLESS), settings);
+
+        assertThat(config).contains("\"strategy\" : \"ipv4_only\"");
+        assertCheckPasses(config, "tun-without-ipv6");
+    }
+
+    /**
      * The production check against the real core: what it lets through, and
      * what it refuses in the core's own words. A subscription can still carry
      * Xray's retired {@code xtls-rprx-direct} flow; the core refuses to build
