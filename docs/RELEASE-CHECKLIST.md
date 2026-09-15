@@ -124,20 +124,26 @@ after the fact: `gh release edit vX.Y.Z --notes-file notes.txt` — immune to th
 
 ## After the workflow
 
-- [ ] The draft became public with all eleven assets. If it did not, the run
-      log names the failed job: fix the cause and use **Re-run failed jobs**,
-      which reuses the draft (the uploads replace their assets), or delete the
-      draft by id (next item) and the tag, and tag again.
-- [ ] The tag has exactly one row in `gh release list`. An extra release
-      object is deleted by id, never with `gh release delete vX.Y.Z` while two
-      exist: which of them gh picks for a tag is GitHub's choice, so it can
-      delete the real one.
+A green run leaves nothing to check on the release object itself:
+`publish-release` publishes the draft only when it is the tag's one release
+object and carries the complete asset manifest, every upload finished. If the
+run failed, its log names the job that did:
 
-      ```sh
-      gh api --paginate 'repos/dbelokursky/tunl/releases?per_page=100' \
-        --jq '.[] | select(.tag_name == "vX.Y.Z") | [.id, .draft, (.assets | length)] | @tsv'
-      gh api -X DELETE repos/dbelokursky/tunl/releases/<id>
-      ```
+- Fix the cause and use **Re-run failed jobs**, which reuses the draft (the
+  uploads replace their assets), or delete the draft by id and the tag, and
+  tag again.
+- Delete an extra release object for the tag by id, never with
+  `gh release delete vX.Y.Z` while two exist: which of them gh picks for a tag
+  is GitHub's choice, so it can delete the real one.
+
+  ```sh
+  gh api --paginate 'repos/dbelokursky/tunl/releases?per_page=100' \
+    --jq '.[] | select(.tag_name == "vX.Y.Z") | [.id, .draft, (.assets | length)] | @tsv'
+  gh api -X DELETE repos/dbelokursky/tunl/releases/<id>
+  ```
+
+On a published release:
+
 - [ ] **Version** shows correctly in **Settings → About** of an installed
       build (matches the tag; not "dev").
 - [ ] **In-app updater** — on the previous release, "Check for updates" sees
