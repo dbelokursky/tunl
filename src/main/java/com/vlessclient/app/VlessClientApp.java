@@ -304,6 +304,20 @@ public class VlessClientApp extends Application {
         primaryStage.show();
         log.info("Tunl started");
 
+        // A second launch asks this copy to come forward instead of starting
+        // another one (SingleInstance); the window may be hidden in the tray.
+        SingleInstance.current().ifPresent(instance -> instance.onShowRequest(
+                () -> Platform.runLater(() -> {
+                    if (!primaryStage.isShowing()) {
+                        primaryStage.show();
+                    }
+                    if (primaryStage.isIconified()) {
+                        primaryStage.setIconified(false);
+                    }
+                    primaryStage.toFront();
+                    primaryStage.requestFocus();
+                })));
+
         installTrayIcon(primaryStage);
 
         // Connect now if the user enabled "Auto-connect on startup". Done
