@@ -262,7 +262,13 @@ public class ShareLinkParser {
 
         String path = getJsonString(node, "path", "");
         if (!path.isBlank()) {
-            config.getTransport().setPath(path);
+            // A VMess link has no service-name field: v2rayN writes gRPC's
+            // service name into path, and the core reads it as service_name.
+            if (transportType == TransportType.GRPC) {
+                config.getTransport().setServiceName(path);
+            } else {
+                config.getTransport().setPath(path);
+            }
         }
 
         String host = getJsonString(node, "host", "");

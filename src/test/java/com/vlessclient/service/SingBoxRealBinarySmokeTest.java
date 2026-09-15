@@ -30,6 +30,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
@@ -92,6 +93,69 @@ class SingBoxRealBinarySmokeTest {
                 assertCheckPasses(config, protocol + "/" + mode);
             }
         }
+    }
+
+    /**
+     * Every transport a provider's share link can carry has to reach the core
+     * as fields that transport accepts. sing-box refuses a whole configuration
+     * over one unknown field, and every stored server is a member of the proxy
+     * group, so a single WebSocket link with a Host header — the usual CDN
+     * setup — used to stop every server from connecting. The servers come from
+     * the real parser, since that is where the fields are filled in.
+     */
+    @Test
+    void checkAcceptsEveryTransportAsShareLinksCarryIt() throws Exception {
+        ShareLinkParser parser = new ShareLinkParser();
+        List<ServerConfig> servers = transportLinks().stream().map(parser::parse).toList();
+        // Readable tags in a failure: the core names a refused outbound by its tag.
+        servers.forEach(server -> server.setId(server.getName()));
+
+        for (ProxyMode mode : ProxyMode.values()) {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(mode);
+            for (ServerConfig server : servers) {
+                assertCheckPasses(generator.generate(server, settings),
+                        server.getName() + "/" + mode);
+            }
+            // The shape a real server list produces: every server a member of
+            // the one group, where a single refused member refuses them all.
+            assertCheckPasses(generator.generate(servers, servers.get(0), settings, null),
+                    "every-transport-in-one-group/" + mode);
+        }
+    }
+
+    private static List<String> transportLinks() {
+        String tls = "security=tls&sni=example.com";
+        return List.of(
+                "vless://" + TEST_UUID + "@cdn.example.com:443?type=ws&" + tls
+                        + "&host=example.com&path=%2Fws#vless-ws",
+                "vless://" + TEST_UUID + "@example.com:443?type=grpc&" + tls
+                        + "&serviceName=grpc-svc&host=example.com#vless-grpc",
+                "vless://" + TEST_UUID + "@example.com:443?type=http&" + tls
+                        + "&host=example.com&path=%2Fh2#vless-h2",
+                "vless://" + TEST_UUID + "@example.com:443?type=httpupgrade&" + tls
+                        + "&host=example.com&path=%2Fup#vless-httpupgrade",
+                "vless://" + TEST_UUID + "@example.com:443?type=quic&" + tls
+                        + "&quicSecurity=none&key=&headerType=none#vless-quic",
+                "trojan://smoke-password@example.com:443?type=ws&" + tls
+                        + "&host=example.com&path=%2Fws#trojan-ws",
+                "trojan://smoke-password@example.com:443?type=grpc&" + tls
+                        + "&serviceName=grpc-svc#trojan-grpc",
+                vmessLink("vmess-ws", "ws", "example.com", "/ws"),
+                vmessLink("vmess-grpc", "grpc", "example.com", "grpc-svc"),
+                vmessLink("vmess-h2", "h2", "example.com", "/h2"),
+                // v2rayN keeps QUIC's header security in host and its key in path.
+                vmessLink("vmess-quic", "quic", "none", "key"));
+    }
+
+    private static String vmessLink(String name, String net, String host, String path) {
+        String json = "{\"v\":\"2\",\"ps\":\"" + name + "\",\"add\":\"example.com\","
+                + "\"port\":\"443\",\"id\":\"" + TEST_UUID + "\",\"aid\":\"0\","
+                + "\"scy\":\"auto\",\"net\":\"" + net + "\",\"type\":\"none\","
+                + "\"host\":\"" + host + "\",\"path\":\"" + path + "\","
+                + "\"tls\":\"tls\",\"sni\":\"example.com\"}";
+        return "vmess://" + Base64.getEncoder().encodeToString(
+                json.getBytes(StandardCharsets.UTF_8));
     }
 
     /**

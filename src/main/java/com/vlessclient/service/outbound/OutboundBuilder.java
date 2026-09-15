@@ -5,6 +5,7 @@ import com.vlessclient.model.TlsConfig;
 import com.vlessclient.model.TransportConfig;
 import com.vlessclient.model.TransportType;
 import java.util.Map;
+import java.util.Set;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -85,35 +86,88 @@ public abstract class OutboundBuilder {
         outbound.set("tls", tlsNode);
     }
 
-    /** Adds the {@code transport} block unless the transport is plain TCP. */
+    /**
+     * Adds the {@code transport} block unless the transport is plain TCP.
+     *
+     * <p>Only the fields the type defines ({@code fieldsOf}) are written.
+     * sing-box refuses the whole configuration over a field a transport does
+     * not know, and every stored server is a member of the proxy group, so one
+     * server's stray field stopped all of them from connecting. A WebSocket
+     * link with a Host header, the usual CDN setup, did exactly that.</p>
+     */
     protected final void addTransportIfNeeded(ObjectNode outbound, TransportConfig transport) {
-        if (transport == null || transport.getType() == TransportType.TCP) {
+        if (transport == null || transport.getType() == null
+                || transport.getType() == TransportType.TCP) {
             return;
         }
+        Set<String> fields = fieldsOf(transport.getType());
 
         ObjectNode transportNode = mapper.createObjectNode();
         transportNode.put("type", transport.getType().getValue());
 
-        if (transport.getPath() != null && !transport.getPath().isEmpty()) {
-            transportNode.put("path", transport.getPath());
+        if (fields.contains("path")) {
+            putIfPresent(transportNode, "path", transport.getPath());
         }
-
-        if (transport.getHost() != null && !transport.getHost().isEmpty()) {
-            transportNode.put("host", transport.getHost());
+        if (fields.contains("host")) {
+            putIfPresent(transportNode, "host", transport.getHost());
         }
-
-        if (transport.getServiceName() != null && !transport.getServiceName().isEmpty()) {
-            transportNode.put("service_name", transport.getServiceName());
+        if (fields.contains("service_name")) {
+            // VMess links keep gRPC's service name in path, and servers
+            // imported before the parser mapped it still carry it there.
+            putIfPresent(transportNode, "service_name", present(transport.getServiceName())
+                    ? transport.getServiceName() : transport.getPath());
         }
-
-        if (transport.getHeaders() != null && !transport.getHeaders().isEmpty()) {
-            ObjectNode headersNode = mapper.createObjectNode();
-            for (Map.Entry<String, String> entry : transport.getHeaders().entrySet()) {
-                headersNode.put(entry.getKey(), entry.getValue());
+        if (fields.contains("headers")) {
+            ObjectNode headers = headersOf(transport, !fields.contains("host"));
+            if (!headers.isEmpty()) {
+                transportNode.set("headers", headers);
             }
-            transportNode.set("headers", headersNode);
         }
 
         outbound.set("transport", transportNode);
+    }
+
+    /**
+     * The fields each sing-box transport defines beside its type. A switch
+     * expression, so a new transport type does not compile until its fields
+     * are decided here.
+     */
+    private static Set<String> fieldsOf(TransportType type) {
+        return switch (type) {
+            case TCP, QUIC -> Set.of();
+            case WEBSOCKET -> Set.of("path", "headers");
+            case HTTP2, HTTPUPGRADE -> Set.of("host", "path", "headers");
+            case GRPC -> Set.of("service_name");
+        };
+    }
+
+    /**
+     * The request headers, with the link's host added as {@code Host} when the
+     * transport has no host field of its own. A Host header the server's
+     * configuration already names, in any case, is left as it is.
+     */
+    private ObjectNode headersOf(TransportConfig transport, boolean hostAsHeader) {
+        ObjectNode headers = mapper.createObjectNode();
+        boolean hasHostHeader = false;
+        if (transport.getHeaders() != null) {
+            for (Map.Entry<String, String> entry : transport.getHeaders().entrySet()) {
+                headers.put(entry.getKey(), entry.getValue());
+                hasHostHeader |= "host".equalsIgnoreCase(entry.getKey());
+            }
+        }
+        if (hostAsHeader && !hasHostHeader && present(transport.getHost())) {
+            headers.put("Host", transport.getHost());
+        }
+        return headers;
+    }
+
+    private static void putIfPresent(ObjectNode node, String field, String value) {
+        if (present(value)) {
+            node.put(field, value);
+        }
+    }
+
+    private static boolean present(String value) {
+        return value != null && !value.isEmpty();
     }
 }
