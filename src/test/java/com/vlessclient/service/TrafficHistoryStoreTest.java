@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -12,10 +13,14 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 /**
  * Tests for the day/server bucketing in {@link TrafficHistoryStore}.
@@ -178,6 +183,74 @@ class TrafficHistoryStoreTest {
         store.record(server("a", "Amsterdam 01"), 1_000, 1_000);
         store.flush();
         assertThat(store.lastDays(1).get(0).total()).isEqualTo(2_000);
+    }
+
+    /**
+     * A history that would not parse was dropped in memory, and the first
+     * flush, a minute into the next tunnel, wrote over it. Nothing in it is
+     * ever pruned, so that file may have held years of days.
+     */
+    @Test
+    void aFileThatWillNotParseIsMovedAsideBeforeAnythingIsWritten(@TempDir Path dir)
+            throws IOException {
+        Files.writeString(dir.resolve("traffic-history.json"), "{ not json",
+                StandardCharsets.UTF_8);
+        TrafficHistoryStore store = new TrafficHistoryStore(dir, clockAt("2026-09-05T10:00:00Z"));
+
+        store.record(server("a", "Amsterdam 01"), 1_000, 1_000);
+        store.flush();
+
+        try (Stream<Path> files = Files.list(dir)) {
+            assertThat(files.filter(file -> file.getFileName().toString()
+                            .startsWith("traffic-history.json.corrupt-")))
+                    .singleElement()
+                    .satisfies(aside -> assertThat(aside).hasContent("{ not json"));
+        }
+    }
+
+    /**
+     * A file that is there but cannot be read says nothing about what it
+     * holds: an antivirus or a backup tool can have it open at startup. The
+     * first flush replaced it with a minute of traffic.
+     */
+    @Test
+    @DisabledOnOs(value = OS.WINDOWS, disabledReason = "POSIX permissions make the file unreadable")
+    void aFileThatCannotBeReadIsNotWrittenOver(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("traffic-history.json");
+        String history = """
+                {"version": 1, "days": [
+                  {"date": "2025-01-01",
+                   "servers": [{"serverId": "a", "upload": 5, "download": 5}]}
+                ]}""";
+        Files.writeString(file, history, StandardCharsets.UTF_8);
+        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("---------"));
+        assumeFalse(Files.isReadable(file), "this user can read any file");
+        TrafficHistoryStore store = new TrafficHistoryStore(dir, clockAt("2026-09-05T10:00:00Z"));
+
+        store.record(server("a", "Amsterdam 01"), 1_000, 1_000);
+        store.flush();
+
+        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"));
+        assertThat(file).hasContent(history);
+    }
+
+    @Test
+    @DisabledOnOs(value = OS.WINDOWS, disabledReason = "POSIX permissions make the file unreadable")
+    void clearingAFileThatCannotBeReadLetsANewRecordStart(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("traffic-history.json");
+        Files.writeString(file, "{}", StandardCharsets.UTF_8);
+        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("---------"));
+        assumeFalse(Files.isReadable(file), "this user can read any file");
+        TestClock clock = clockAt("2026-09-05T10:00:00Z");
+        TrafficHistoryStore store = new TrafficHistoryStore(dir, clock);
+
+        store.reset();
+        store.record(server("a", "Amsterdam 01"), 1_000, 1_000);
+        store.flush();
+
+        assertThat(new TrafficHistoryStore(dir, clock).lastDays(1).get(0).total())
+                .as("the file nobody could read is gone, so there is nothing left to protect")
+                .isEqualTo(2_000);
     }
 
     @Test
