@@ -4,15 +4,25 @@ import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import javafx.application.Platform;
 import javafx.collections.ObservableList;
 
 /**
- * Reads an {@link InputStream} line by line in a daemon thread, appending each line
- * to a JavaFX {@link ObservableList}. Trims the list to a maximum number of lines
- * and detects the sing-box "started" message to signal a successful connection.
+ * Reads an {@link InputStream} line by line in a daemon thread and hands the
+ * lines to a JavaFX {@link ObservableList} in batches. Trims the list to a
+ * maximum number of lines and detects the sing-box "started" message to signal
+ * a successful connection.
+ *
+ * <p>Each line used to be its own FX task: an addition and, once the list was
+ * full, a removal, and the Logs view reacted to both. At debug level the core
+ * writes thousands of lines a second. One task now takes every line read by
+ * the time it runs.</p>
  */
 public class LogReader {
 
@@ -24,6 +34,12 @@ public class LogReader {
     private final int maxLines;
     private final Consumer<String> onStartedDetected;
     private volatile Thread readerThread;
+
+    /** Lines read and not yet on the list, oldest first. */
+    private final ConcurrentLinkedQueue<String> pending = new ConcurrentLinkedQueue<>();
+
+    /** Set while an FX task that will take {@link #pending} is queued. */
+    private final AtomicBoolean handOverQueued = new AtomicBoolean();
 
     /**
      * Creates a new LogReader.
@@ -69,7 +85,7 @@ public class LogReader {
             String line;
             while ((line = reader.readLine()) != null) {
                 String logLine = stripAnsi(line);
-                Platform.runLater(() -> appendLine(logLine));
+                handOver(logLine);
 
                 if (isStartedMessage(logLine)) {
                     onStartedDetected.accept(logLine);
@@ -77,8 +93,7 @@ public class LogReader {
             }
         } catch (Exception e) {
             if (!(e instanceof InterruptedException)) {
-                String errorLine = "Log reader error: " + e.getMessage();
-                Platform.runLater(() -> appendLine(errorLine));
+                handOver("Log reader error: " + e.getMessage());
             }
         }
     }
@@ -91,10 +106,35 @@ public class LogReader {
         return ANSI_ESCAPE.matcher(line).replaceAll("");
     }
 
-    private void appendLine(String line) {
-        logLines.add(line);
-        while (logLines.size() > maxLines) {
-            logLines.removeFirst();
+    /** Queues a line for the list, and the FX task that takes it unless one is queued. */
+    private void handOver(String line) {
+        pending.add(line);
+        if (handOverQueued.compareAndSet(false, true)) {
+            Platform.runLater(this::appendPending);
+        }
+    }
+
+    /**
+     * Moves every queued line to the list in one addition, then trims the
+     * oldest in one removal. The flag is cleared first, so a line queued while
+     * this runs is either taken here or queues the next task.
+     */
+    private void appendPending() {
+        handOverQueued.set(false);
+        List<String> batch = new ArrayList<>();
+        String line = pending.poll();
+        while (line != null) {
+            batch.add(line);
+            line = pending.poll();
+        }
+        if (batch.isEmpty()) {
+            return;
+        }
+        // Lines past the buffer's size would only be removed again.
+        logLines.addAll(batch.subList(Math.max(0, batch.size() - maxLines), batch.size()));
+        int excess = logLines.size() - maxLines;
+        if (excess > 0) {
+            logLines.remove(0, excess);
         }
     }
 
