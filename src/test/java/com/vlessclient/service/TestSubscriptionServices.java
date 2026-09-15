@@ -30,6 +30,15 @@ public final class TestSubscriptionServices {
     }
 
     /**
+     * A quiet service that runs {@code beforeRemove} on whichever thread asks
+     * it to remove a subscription, just before removing it: a view test can
+     * tell where the removal came from.
+     */
+    public static SubscriptionService quiet(Path dataDir, Runnable beforeRemove) {
+        return new Quiet(storeUnder(dataDir), dataDir, beforeRemove);
+    }
+
+    /**
      * A quiet service whose every add fails, once {@code release} opens. A
      * provider that never answers fails when its timeout runs out, and the
      * view hears about it from another thread whenever that is: the latch
@@ -50,8 +59,21 @@ public final class TestSubscriptionServices {
 
     private static class Quiet extends SubscriptionService {
 
+        private final Runnable beforeRemove;
+
         private Quiet(ConfigStore store, Path dataDir) {
+            this(store, dataDir, () -> { });
+        }
+
+        private Quiet(ConfigStore store, Path dataDir, Runnable beforeRemove) {
             super(store, new ShareLinkParser(), dataDir, HttpClient.newHttpClient());
+            this.beforeRemove = beforeRemove;
+        }
+
+        @Override
+        public void removeSubscription(String subscriptionId) {
+            beforeRemove.run();
+            super.removeSubscription(subscriptionId);
         }
 
         @Override
