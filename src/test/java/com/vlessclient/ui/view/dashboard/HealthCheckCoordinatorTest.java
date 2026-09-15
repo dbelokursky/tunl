@@ -6,10 +6,13 @@ import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.HealthCheckTarget;
 import com.vlessclient.model.TunnelHealth;
+import com.vlessclient.service.ConfigRejectedException;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.service.FxExecutor;
 import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TestConfigStores;
+import com.vlessclient.service.TestRejections;
 import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.service.TunnelRecoveryService;
 import org.junit.jupiter.api.AfterEach;
@@ -208,10 +211,16 @@ class HealthCheckCoordinatorTest {
     }
 
     private HealthCheckCoordinator coordinatorWith(ServiceReachabilityChecker checker) {
-        recovery = new TunnelRecoveryService(() -> ServiceLocator.get(AppSettings.class), guard -> {
+        return coordinatorWith(checker, guard -> {
             reconnectAction.run();
             return true;
-        }, () -> false);
+        });
+    }
+
+    private HealthCheckCoordinator coordinatorWith(ServiceReachabilityChecker checker,
+                                                   TunnelRecoveryService.Attempt attempt) {
+        recovery = new TunnelRecoveryService(
+                () -> ServiceLocator.get(AppSettings.class), attempt, () -> false);
         recovery.connectionRequested();
         engine.state.addListener((obs, old, next) -> recovery.onConnectionState(next));
         healthState.healthProperty().addListener((obs, old, next) -> recovery.onHealth(next));
@@ -323,6 +332,38 @@ class HealthCheckCoordinatorTest {
         onFxAndWait(coordinator::cancelReconnectCountdown);
         assertThat(banner.isVisible()).isFalse();
         assertThat(healthCard.isVisible()).isFalse();
+    }
+
+    /**
+     * A restart the core refuses stops recovery, and the banner says why. It
+     * used to count down to the same refused restart, again and again, under
+     * a line blaming unreachable services.
+     */
+    @Test
+    void aRestartTheCoreRefusesStopsRecoveryAndTheBannerSaysWhy() throws Exception {
+        AppSettings settings = healthSettings(true, new HealthCheckTarget("a", "https://a"));
+        settings.setHealthCheckDelaySeconds(1);
+        ConfigRejectedException refusal = TestRejections.refusal("unknown field");
+        FakeChecker checker = new FakeChecker();
+        checker.results = List.of(probe("a", true));
+        HealthCheckCoordinator coordinator = coordinatorWith(checker, guard -> {
+            throw refusal;
+        });
+        connectAndCheck(coordinator);
+
+        onFxAndWait(() -> {
+            engine.state.set(ConnectionState.ERROR);
+            coordinator.onConnectionStateChanged(ConnectionState.ERROR);
+        });
+        String expected = I18n.get("dashboard.reconnect.stopped", refusal.getMessage());
+        Await.until("the banner to say why recovery stopped",
+                () -> FxExecutor.get(() -> banner.isVisible()
+                        && expected.equals(bannerLabel.getText())),
+                Duration.ofSeconds(10));
+        assertThat(healthCard.isVisible()).as("the card holding the banner").isTrue();
+
+        onFxAndWait(coordinator::cancelReconnectCountdown);
+        assertThat(banner.isVisible()).as("the banner once dismissed").isFalse();
     }
 
     @Test
