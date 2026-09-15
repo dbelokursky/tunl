@@ -8,7 +8,7 @@ import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.RoutingRule;
 import com.vlessclient.model.ServerConfig;
-import com.vlessclient.platform.CorePlatform;
+import com.vlessclient.testing.BundledCore;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
@@ -32,11 +32,9 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Smoke tests that execute the REAL sing-box binary bundled by
@@ -62,16 +60,7 @@ class SingBoxRealBinarySmokeTest {
 
     @BeforeAll
     static void locateBundledBinary() {
-        String osArch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
-        String arch = osArch.contains("aarch64") || osArch.contains("arm64")
-                ? "arm64" : "amd64";
-        CorePlatform core = CorePlatform.current();
-        binary = Path.of("target", "classes", "native",
-                        core.osKey() + "-" + arch, core.binaryName())
-                .toAbsolutePath();
-        assumeTrue(Files.isExecutable(binary),
-                "bundled sing-box not found at " + binary
-                        + " — run the generate-resources phase first");
+        binary = BundledCore.locate();
     }
 
     @Test
