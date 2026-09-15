@@ -91,6 +91,11 @@ class LinuxTunLauncherTest {
         // SIGTERM), not EXIT alone — see wrapperKillsChildOnSigterm.
         assertThat(wrapper).contains("EXIT INT TERM");
         assertThat(wrapper).contains("rm -f '/tmp/stop'");
+        // The trap has to be in place before the core starts: a SIGTERM
+        // between the two killed the shell and left the core running.
+        assertThat(wrapper.indexOf("trap "))
+                .as("the trap is set before the core starts")
+                .isLessThan(wrapper.indexOf(" run -c "));
     }
 
     /**

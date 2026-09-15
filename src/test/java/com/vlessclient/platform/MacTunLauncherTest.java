@@ -56,6 +56,11 @@ class MacTunLauncherTest {
         // SIGTERM), not EXIT alone — see sudoWrapperKillsChildOnSigterm.
         assertThat(wrapper).contains("EXIT INT TERM");
         assertThat(wrapper).contains("rm -f '/tmp/stop'");
+        // The trap has to be in place before the core starts: a SIGTERM
+        // between the two killed the shell and left the core running.
+        assertThat(wrapper.indexOf("trap "))
+                .as("the trap is set before the core starts")
+                .isLessThan(wrapper.indexOf(" run -c "));
     }
 
     @Test
@@ -69,6 +74,11 @@ class MacTunLauncherTest {
         assertThat(wrapper).contains("kill -0 " + ProcessHandle.current().pid());
         assertThat(wrapper).contains("EXIT INT TERM");
         assertThat(wrapper).contains("rm -f '/tmp/stop'");
+        // The trap has to be in place before the core starts: a SIGTERM
+        // between the two killed the shell and left the core running.
+        assertThat(wrapper.indexOf("trap "))
+                .as("the trap is set before the core starts")
+                .isLessThan(wrapper.indexOf(" run -c "));
     }
 
     @Test
