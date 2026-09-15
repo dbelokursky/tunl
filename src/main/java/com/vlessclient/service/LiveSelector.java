@@ -20,8 +20,10 @@ final class LiveSelector {
 
     private static final Logger log = LoggerFactory.getLogger(LiveSelector.class);
     private static final ObjectMapper MAPPER = JsonMapper.builder().build();
+    // Keys that can name the proxy group. replaceReferences walks nested
+    // objects, so "detour" also covers a remote rule set's http_client.detour.
     private static final Set<String> REFERENCES = Set.of(
-            "tag", "outbound", "detour", "download_detour", "final");
+            "tag", "outbound", "detour", "final");
     private final JsonNode comparable;
     private final String groupTag;
     private final String config;
