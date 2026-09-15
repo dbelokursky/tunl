@@ -14,6 +14,7 @@ import com.vlessclient.service.outbound.TrojanOutboundBuilder;
 import com.vlessclient.service.outbound.VlessOutboundBuilder;
 import com.vlessclient.service.outbound.VmessOutboundBuilder;
 import com.vlessclient.service.outbound.WireguardEndpointBuilder;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Path;
@@ -209,6 +210,15 @@ public class SingBoxConfigGenerator {
         // FATAL "detour to an empty direct outbound makes no sense".
         // Omitting detour lets the server dial through the default outbound
         // route, which for a bare system resolver address does the right thing.
+        if (!isIpLiteral(directDns.get("server").asString())) {
+            // The core refuses a server named by host that it has no way to
+            // resolve ("missing domain resolver for domain server address"),
+            // and route.default_domain_resolver does not reach DNS servers, so
+            // TUN mode never started. Resolve the name through the OS, like the
+            // other bootstrap lookups. Proxy DNS needs no resolver: it dials
+            // through the proxy, which takes the name as it is.
+            directDns.put("domain_resolver", "local-dns");
+        }
         servers.add(directDns);
 
         // Local resolver (OS/mDNS). Used only for localhost and *.local so
@@ -505,7 +515,9 @@ public class SingBoxConfigGenerator {
     /**
      * Populates a DNS server object using the sing-box 1.13 schema. Accepts
      * both the legacy URL-style address (e.g. {@code https://1.1.1.1/dns-query})
-     * and bare IPs/hostnames.
+     * and bare IPs/hostnames. A bare address is read as a {@code udp://} one,
+     * so a port it carries ({@code 8.8.8.8:53}) is split off; left whole, it
+     * reached the core as a name that nothing could resolve.
      */
     void populateDnsServerAddress(ObjectNode server, String address) {
         if (address == null || address.isBlank()) {
@@ -513,13 +525,9 @@ public class SingBoxConfigGenerator {
             server.put("server", "1.1.1.1");
             return;
         }
-        if (!address.contains("://")) {
-            server.put("type", "udp");
-            server.put("server", address);
-            return;
-        }
+        String url = address.contains("://") ? address : "udp://" + address;
         try {
-            URI uri = new URI(address);
+            URI uri = new URI(url);
             String scheme = uri.getScheme() != null ? uri.getScheme().toLowerCase() : "udp";
             String host = uri.getHost();
             if (host == null || host.isBlank()) {
@@ -542,6 +550,22 @@ public class SingBoxConfigGenerator {
             log.warn("Could not parse DNS address {}, falling back to UDP", address);
             server.put("type", "udp");
             server.put("server", address);
+        }
+    }
+
+    /**
+     * Whether a DNS server's address is an IP literal, with or without the
+     * brackets a URL puts around IPv6, rather than a name.
+     */
+    private static boolean isIpLiteral(String server) {
+        String bare = server.startsWith("[") && server.endsWith("]")
+                ? server.substring(1, server.length() - 1)
+                : server;
+        try {
+            InetAddress.ofLiteral(bare);
+            return true;
+        } catch (IllegalArgumentException notAnIpLiteral) {
+            return false;
         }
     }
 
