@@ -72,6 +72,10 @@ class ConnectionServiceTest {
         volatile java.util.function.Function<String, String> refuseWith;
         CountDownLatch awaiting;
         CountDownLatch releaseAwait;
+        /** A stop is under way, so a connect has to wait for it. */
+        volatile boolean stopping;
+        /** The stop under way finishes while a connect waits for it. */
+        volatile boolean stopFinishesWhileAwaited;
 
         RecordingEngine(Path binary) {
             super(binary);
@@ -107,8 +111,17 @@ class ConnectionServiceTest {
         }
 
         @Override
+        public boolean isStopping() {
+            return stopping;
+        }
+
+        @Override
         public boolean awaitStopped(Duration timeout) {
             calls.add("await");
+            if (stopFinishesWhileAwaited) {
+                running = false;
+                stopping = false;
+            }
             if (awaiting != null) {
                 awaiting.countDown();
                 try {
@@ -496,6 +509,40 @@ class ConnectionServiceTest {
 
         assertThat(attempt.started()).isTrue();
         assertThat(engine.calls).containsExactly("stop", "await", "start");
+    }
+
+    /**
+     * A connect while the core is already up waited out the whole stop timeout
+     * for a stop nobody had asked for, holding the lock a Disconnect needs, and
+     * then reported the core as already running anyway.
+     */
+    @Test
+    void connectWhileTheCoreRunsReportsItAtOnce() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        RecordingEngine engine = engine();
+        engine.running = true;
+        engine.refuseAsAlreadyRunning = true;
+
+        ConnectionService.ConnectAttempt attempt = service(engine).connect();
+
+        assertThat(attempt.outcome()).isEqualTo(ConnectionService.Outcome.ALREADY_RUNNING);
+        assertThat(engine.calls)
+                .as("no wait for a stop nobody asked for, and no second start")
+                .isEmpty();
+    }
+
+    @Test
+    void connectWhileTheCoreIsStoppingWaitsForItToExit() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        RecordingEngine engine = engine();
+        engine.running = true;
+        engine.stopping = true;
+        engine.stopFinishesWhileAwaited = true;
+
+        ConnectionService.ConnectAttempt attempt = service(engine).connect();
+
+        assertThat(attempt.started()).isTrue();
+        assertThat(engine.calls).containsExactly("await", "start");
     }
 
     @Test
