@@ -156,11 +156,15 @@ public class AppSettings {
     /**
      * Whether MCP tools that change state (add/edit servers, routing, connect)
      * are permitted. When {@code false} the server exposes read-only tools only.
-     * The most dangerous actions (TUN connect, delete) always require an explicit
-     * {@code confirm} argument regardless of this flag.
+     *
+     * <p>Off by default. An agent can be steered by what it reads, and these
+     * tools let it add a server and send all traffic through it. The
+     * {@code confirm} argument that TUN connect and delete require is supplied
+     * by the agent itself, so it catches a slip, not that. A settings file that
+     * already allows changes keeps its value.</p>
      */
     @JsonProperty("mcp_allow_mutations")
-    private boolean mcpAllowMutations = true;
+    private boolean mcpAllowMutations;
 
     public AppSettings() {
     }

@@ -396,10 +396,12 @@ and more.
 - Every request needs an `Authorization: Bearer <token>` header; the token lives
   in `mcp-token` (in the data dir) with `0600` permissions.
 - **Off by default** — enabled from Settings.
-- Mutating operations are gated by the "Allow configuration changes" toggle
-  (on by default). The most dangerous ones (connecting in TUN mode, which
-  prompts for the macOS admin password; deleting a server) additionally
-  require an explicit `confirm: true`.
+- Every tool outside the Read row below changes something, and those tools are
+  **off by default**: they appear only once **Allow configuration changes** is
+  ticked. An agent can be steered by what it reads, and these tools let it add a
+  server and send all traffic through it. Connecting in TUN mode and deleting a
+  server also take an explicit `confirm: true`, but the agent supplies that
+  itself: it catches a slip, not an agent following someone else's instructions.
 - Every mutating call is appended to `logs/mcp-audit.log`.
 - Log lines handed to agents (`get_logs`, the SSE stream) have URLs reduced to
   scheme and host, so a subscription's account token never leaves the app
@@ -409,7 +411,9 @@ and more.
 
 **Settings → Agent Control (MCP):**
 1. Tick **Enable MCP server** (default port `55555`).
-2. Optionally toggle **Allow configuration changes** (on by default).
+2. Tick **Allow configuration changes** if the agent should connect, switch
+   servers or change the configuration (off on a new install; an existing
+   install keeps the value it had).
 3. Click **Copy command** and run it:
 
 ```bash
