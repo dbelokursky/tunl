@@ -110,8 +110,12 @@ public class ShareLinkExporter {
         if (config.getTransport() != null) {
             node.put("host", config.getTransport().getHost() != null
                     ? config.getTransport().getHost() : "");
-            node.put("path", config.getTransport().getPath() != null
-                    ? config.getTransport().getPath() : "");
+            // gRPC's service name travels in path, where the parser reads it back.
+            String serviceName = config.getTransport().getServiceName();
+            String path = config.getTransport().getType() == TransportType.GRPC
+                    && serviceName != null && !serviceName.isBlank()
+                    ? serviceName : config.getTransport().getPath();
+            node.put("path", path != null ? path : "");
         } else {
             node.put("host", "");
             node.put("path", "");
