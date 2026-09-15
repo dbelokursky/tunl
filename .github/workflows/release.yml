@@ -679,6 +679,22 @@ jobs:
           chmod 600 "$KEY"
           trap 'rm -f "$KEY"' EXIT
 
+          # Installed updaters verify these signatures against
+          # ReleaseSignature.PUBLIC_KEY as this tag builds it. The verify below
+          # derives its public key from this same secret, so a secret that does
+          # not match the sources would sign a release every installed updater
+          # refuses, and the job would still pass. Compare them before anything
+          # is downloaded or signed.
+          source_key=$(gh api -H "Accept: application/vnd.github.raw" \
+            "repos/${GH_REPO}/contents/src/main/java/com/vlessclient/service/ReleaseSignature.java?ref=${GITHUB_REF_NAME}" \
+            | sed -nE 's/.*static final String PUBLIC_KEY = "([^"]*)".*/\1/p')
+          secret_key=$(openssl pkey -in "$KEY" -pubout -outform DER | base64 -w0)
+          if [ -z "$source_key" ] || [ "$source_key" != "$secret_key" ]; then
+            echo "::error::RELEASE_SIGNING_KEY does not belong to the public key in ReleaseSignature.java at ${GITHUB_REF_NAME} (sources: '${source_key}', secret: '${secret_key}'). Every installed updater would refuse its signatures. Not signing."
+            exit 1
+          fi
+          echo "signing key matches ReleaseSignature.PUBLIC_KEY at ${GITHUB_REF_NAME}"
+
           V="${GITHUB_REF_NAME#v}"
           assets=(
             "tunl_${V}.dmg"
