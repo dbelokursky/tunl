@@ -3,6 +3,7 @@ package com.vlessclient.ui.view.settings;
 import com.vlessclient.app.I18n;
 import com.vlessclient.service.TrafficHistoryStore;
 import com.vlessclient.service.TrafficMonitor;
+import com.vlessclient.ui.view.Confirmations;
 import com.vlessclient.ui.view.Icons;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -13,10 +14,7 @@ import java.util.function.Predicate;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.WeakChangeListener;
 import javafx.scene.Scene;
-import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
-import javafx.scene.control.ButtonBar;
-import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
 import javafx.stage.Window;
 
@@ -126,26 +124,10 @@ public final class TrafficHistorySettingsSection {
      * @return true when the user chose to clear the record
      */
     public static boolean confirmWithDialog(Window owner) {
-        ButtonType clear = new ButtonType(I18n.get("settings.traffic.history.clear.action"),
-                ButtonBar.ButtonData.OK_DONE);
-        ButtonType cancel = new ButtonType(I18n.get("button.cancel"),
-                ButtonBar.ButtonData.CANCEL_CLOSE);
-        Alert dialog = new Alert(Alert.AlertType.CONFIRMATION,
-                I18n.get("settings.traffic.history.clear.content"), cancel, clear);
-        dialog.setTitle(I18n.get("settings.traffic.history.clear.title"));
-        dialog.setHeaderText(I18n.get("settings.traffic.history.clear.confirm"));
-
-        // Enter must not be the key that deletes. The stock dialog makes OK its
-        // default button, and a reflexive Enter was half of how the old Clear
-        // link wiped the record: here Cancel takes Enter as well as Escape, and
-        // the button that deletes has to be clicked and says what it does.
-        if (dialog.getDialogPane().lookupButton(clear) instanceof Button deleting) {
-            deleting.setDefaultButton(false);
-        }
-        if (dialog.getDialogPane().lookupButton(cancel) instanceof Button keeping) {
-            keeping.setDefaultButton(true);
-        }
-        dialog.initOwner(owner);
-        return dialog.showAndWait().filter(button -> button == clear).isPresent();
+        return Confirmations.confirmIrreversible(owner,
+                I18n.get("settings.traffic.history.clear.title"),
+                I18n.get("settings.traffic.history.clear.confirm"),
+                I18n.get("settings.traffic.history.clear.content"),
+                I18n.get("settings.traffic.history.clear.action"));
     }
 }
