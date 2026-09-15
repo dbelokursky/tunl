@@ -7,6 +7,10 @@ import com.vlessclient.platform.SecureFiles;
 import com.vlessclient.platform.SystemProxyGuard;
 import com.vlessclient.platform.TunLauncher;
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -85,6 +89,10 @@ public class SingBoxEngine {
 
     /** Listen endpoint of the inbound that carries {@code set_system_proxy}. */
     record SystemProxyTarget(String host, int port) {
+    }
+
+    /** The core's clash API {@code /version} endpoint and the secret it expects. */
+    record Controller(URI version, String secret) {
     }
 
     /**
@@ -241,30 +249,50 @@ public class SingBoxEngine {
         // stdout (osascript buffers until the script exits; the Windows
         // outer script polls log files). LogReader may never see the
         // "started" line in real time, so the UI would otherwise be stuck on
-        // CONNECTING forever. Promote to CONNECTED after a short delay as
-        // long as the process is still alive.
+        // CONNECTING forever; the watchdog promotes the session once the core
+        // answers instead.
         if (proxyMode == ProxyMode.TUN) {
-            startTunConnectedWatchdog();
+            startTunConnectedWatchdog(extractController(configJson));
         }
 
         startProcessMonitor();
     }
 
     private static final long TUN_CONNECTED_DELAY_MS = 1800;
+    private static final Duration CONTROLLER_PROBE_TIMEOUT = Duration.ofSeconds(1);
+    private static final long CONTROLLER_PROBE_INTERVAL_MS = 200;
+    private static final ObjectMapper CONTROLLER_JSON = JsonMapper.builder().build();
 
-    private void startTunConnectedWatchdog() {
+    /**
+     * Promotes a TUN session to CONNECTED once its core answers.
+     *
+     * <p>The launcher process is not the core. On Windows it is the wrapper
+     * waiting on the UAC prompt, alive for as long as the prompt stays open,
+     * so its being alive says nothing about the tunnel. The watchdog asks the
+     * core's clash API controller instead ({@link #coreAnswers}). The
+     * controller opens only once every inbound, the TUN adapter included, has
+     * started, and the requests leave nothing in the core's log, where a bare
+     * connect to the http inbound logs an error. A config without a controller
+     * falls back to the launcher still being alive after
+     * {@code TUN_CONNECTED_DELAY_MS}.</p>
+     */
+    private void startTunConnectedWatchdog(Controller controller) {
         // Same session-capture discipline as the process monitor: a stale
         // watchdog outliving its session must not promote the next one.
         Process proc = process;
         Thread watchdog = new Thread(() -> {
             try {
-                Thread.sleep(TUN_CONNECTED_DELAY_MS);
+                if (controller == null) {
+                    Thread.sleep(TUN_CONNECTED_DELAY_MS);
+                } else if (!awaitController(proc, controller)) {
+                    return;
+                }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return;
             }
             Platform.runLater(() -> {
-                if (proc != null && proc == process && proc.isAlive()
+                if (!stopRequested && proc != null && proc == process && proc.isAlive()
                         && connectionState.get() == ConnectionState.CONNECTING) {
                     connectionState.set(ConnectionState.CONNECTED);
                 }
@@ -272,6 +300,65 @@ public class SingBoxEngine {
         }, "singbox-tun-watchdog");
         watchdog.setDaemon(true);
         watchdog.start();
+    }
+
+    /**
+     * Polls the controller while {@code proc} is this engine's session and no
+     * stop was asked for.
+     *
+     * @return true once {@link #coreAnswers} does
+     */
+    private boolean awaitController(Process proc, Controller controller)
+            throws InterruptedException {
+        try (HttpClient client = controllerProbeClient()) {
+            while (!stopRequested && proc != null && proc == process && proc.isAlive()) {
+                if (coreAnswers(client, controller)) {
+                    return true;
+                }
+                Thread.sleep(CONTROLLER_PROBE_INTERVAL_MS);
+            }
+        }
+        return false;
+    }
+
+    /** The client the watchdog probes with: the controller is on loopback, so no proxy. */
+    static HttpClient controllerProbeClient() {
+        return HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .proxy(HttpClient.Builder.NO_PROXY)
+                .connectTimeout(CONTROLLER_PROBE_TIMEOUT)
+                .build();
+    }
+
+    /**
+     * Asks the controller once whether this config's core is up.
+     *
+     * <p>Only a 200 for the config's secret that names a sing-box version
+     * counts, so a program already on the port that checks another secret, or
+     * is not sing-box, does not. Two can still pass for the core: a sing-box
+     * without a secret, and this app run's previous core while it shuts down,
+     * since the secret lasts the whole run. Both hold the port, so this core
+     * cannot bind it and the session ends in ERROR moments later.</p>
+     *
+     * @return true when the core answers
+     */
+    static boolean coreAnswers(HttpClient client, Controller controller)
+            throws InterruptedException {
+        HttpRequest.Builder request = HttpRequest.newBuilder(controller.version())
+                .timeout(CONTROLLER_PROBE_TIMEOUT);
+        if (!controller.secret().isEmpty()) {
+            request.header("Authorization", "Bearer " + controller.secret());
+        }
+        try {
+            HttpResponse<String> answer =
+                    client.send(request.build(), HttpResponse.BodyHandlers.ofString());
+            return answer.statusCode() == 200
+                    && CONTROLLER_JSON.readTree(answer.body()).path("version").asString("")
+                            .startsWith("sing-box");
+        } catch (IOException | JacksonException notTheCore) {
+            // Not listening yet, or not a clash API.
+            return false;
+        }
     }
 
     /**
@@ -579,6 +666,26 @@ public class SingBoxEngine {
             }
         } catch (JacksonException e) {
             log.debug("Could not parse config for set_system_proxy", e);
+        }
+        return null;
+    }
+
+    /**
+     * Finds the core's clash API controller
+     * ({@code experimental.clash_api.external_controller}) and its secret, or
+     * null when the config has none.
+     */
+    static Controller extractController(String configJson) {
+        try {
+            JsonNode api = CONTROLLER_JSON.readTree(configJson)
+                    .path("experimental").path("clash_api");
+            URI version = URI.create(
+                    "http://" + api.path("external_controller").asString("") + "/version");
+            if (version.getHost() != null && version.getPort() > 0) {
+                return new Controller(version, api.path("secret").asString(""));
+            }
+        } catch (JacksonException | IllegalArgumentException e) {
+            log.debug("Could not parse config for the clash API controller", e);
         }
         return null;
     }
