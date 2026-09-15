@@ -3,6 +3,7 @@ package com.vlessclient.app;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.platform.Autostart;
+import com.vlessclient.platform.CoreRecord;
 import com.vlessclient.platform.PrivilegeHelper;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
@@ -74,6 +75,7 @@ public class VlessClientApp extends Application {
         setDockIcon();
         installQuitHandler();
         installMcpShutdownHook();
+        endLeftoverCore();
         ServiceLocator.initialize();
         clearStaleSystemProxy();
         refreshLoginItem();
@@ -90,6 +92,30 @@ public class VlessClientApp extends Application {
             Runtime.getRuntime().addShutdownHook(hook);
         } catch (IllegalStateException | SecurityException e) {
             log.warn("Could not install MCP shutdown hook: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Ends a sing-box an earlier run left running when it was killed or
+     * crashed ({@link CoreRecord}): that core still holds the ports this run
+     * connects on, so every start would fail on "address already in use".
+     *
+     * <p>Runs before the service graph is built. Building it deletes the old
+     * core binary when this release pins another core, and starts the MCP
+     * server, whose connect must not race the old core for its ports. The
+     * stale-proxy cleanup after it clears the proxy the core pointed at. Only
+     * a copy that holds the single-instance lock does this: without the lock
+     * another copy may be running, and the record names its live core.</p>
+     */
+    private void endLeftoverCore() {
+        if (SingleInstance.current().isEmpty()) {
+            return;
+        }
+        try {
+            CoreRecord.inDataDir().endLeftover();
+        } catch (RuntimeException e) {
+            // A failed cleanup must not keep the app from starting.
+            log.warn("Could not end a sing-box left running by an earlier run", e);
         }
     }
 
