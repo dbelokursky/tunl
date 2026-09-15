@@ -944,7 +944,8 @@
     -fx-text-fill: -c-text-secondary;
 }
 
-.reconnect-banner {
+.reconnect-banner,
+.skipped-servers-banner {
     -fx-background-color: -c-warn-tint;
     -fx-border-color: -c-warn-border;
     -fx-border-width: 1;
@@ -952,7 +953,8 @@
     -fx-border-radius: 8;
 }
 
-.reconnect-banner-label {
+.reconnect-banner-label,
+.skipped-servers-label {
     -fx-font-size: 12px;
     -fx-text-fill: -c-warn-text;
 }

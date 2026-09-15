@@ -24,6 +24,7 @@ import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.service.outbound.OutboundTags;
 import com.vlessclient.ui.view.dashboard.AddHealthTargetDialog;
 import com.vlessclient.ui.view.dashboard.HealthCheckCoordinator;
+import com.vlessclient.ui.view.dashboard.SkippedServersSection;
 import com.vlessclient.ui.view.dashboard.StatusPresenter;
 import com.vlessclient.ui.view.dashboard.TrafficDisplayBinder;
 import com.vlessclient.ui.view.dashboard.TrafficHistorySection;
@@ -107,6 +108,8 @@ public class DashboardViewController implements ViewShownAware {
     @FXML private Label updateBannerTitle;
     @FXML private Label updateBannerHint;
     @FXML private Button updateBannerButton;
+    @FXML private HBox skippedServersBanner;
+    @FXML private Label skippedServersLabel;
 
     private final ObjectProperty<ConnectionState> connectionState =
             new SimpleObjectProperty<>(ConnectionState.DISCONNECTED);
@@ -171,6 +174,10 @@ public class DashboardViewController implements ViewShownAware {
         updateBannerSection = new UpdateBannerSection(new UpdateBannerSection.Controls(
                 updateBanner, updateBannerTitle, updateBannerHint, updateBannerButton));
         updateBannerSection.init();
+        // Servers the core refused and the connection went ahead without.
+        ServiceLocator.find(ConnectionService.class).ifPresent(service ->
+                new SkippedServersSection(skippedServersBanner, skippedServersLabel)
+                        .bind(service.skippedServersProperty()));
 
         // Every collaborator is optional: a missing one degrades the card
         // rather than failing the view, and the log says which.
