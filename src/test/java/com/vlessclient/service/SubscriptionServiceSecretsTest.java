@@ -135,4 +135,31 @@ class SubscriptionServiceSecretsTest {
                 Duration.ofSeconds(5));
         assertThat(sealer.entries()).isEmpty();
     }
+
+    /**
+     * Every save sealed every URL again, and a refresh saves the list each
+     * time: on macOS one {@code security} process per subscription, per save.
+     */
+    @Test
+    void aUrlIsSealedAgainOnlyWhenItChanges() throws Exception {
+        InMemorySecretSealer sealer = new InMemorySecretSealer();
+        SubscriptionService service = serviceWith(sealer);
+        Files.createDirectories(tempDir.resolve("subs"));
+        service.getSubscriptions().add(subscription(TOKEN_URL));
+        service.saveSubscriptions();
+
+        sealer.resetSealCalls();
+        service.saveSubscriptions();
+        assertThat(sealer.sealCalls()).as("a second save of the same URL").isZero();
+
+        SubscriptionService reloaded = serviceWith(sealer);
+        sealer.resetSealCalls();
+        reloaded.saveSubscriptions();
+        assertThat(sealer.sealCalls()).as("the first save after a reload").isZero();
+
+        reloaded.getSubscriptions().get(0).setUrl(TOKEN_URL + "-rotated");
+        reloaded.saveSubscriptions();
+        assertThat(sealer.sealCalls()).as("a changed URL is sealed").isEqualTo(1);
+        assertThat(rawSubscriptionsJson()).doesNotContain("secret-token-123");
+    }
 }

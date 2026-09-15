@@ -3,10 +3,12 @@ package com.vlessclient.service;
 import com.vlessclient.app.I18n;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
+import com.vlessclient.platform.CoreRecord;
 import com.vlessclient.platform.SecureFiles;
 import com.vlessclient.platform.SystemProxyGuard;
 import com.vlessclient.platform.TunLauncher;
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -45,6 +47,10 @@ public class SingBoxEngine {
     private static final int STOP_TIMEOUT_SECONDS = 5;
 
     private final Path singBoxBinary;
+
+    /** Where a direct core is written down for the next run to find; null writes nothing. */
+    private final CoreRecord coreRecord;
+
     private final ObservableList<String> logLines;
     private final ReadOnlyObjectWrapper<ConnectionState> connectionState;
     private final ReadOnlyStringWrapper errorMessage;
@@ -73,6 +79,8 @@ public class SingBoxEngine {
     private Path stopSignalFile;
     private LogReader logReader;
     private ProxyMode activeProxyMode;
+    /** This session's entry in {@link #coreRecord}, removed once its core has stopped. */
+    private CoreRecord.Entry recordedCore;
 
     /**
      * The local endpoint sing-box registered as the OS proxy
@@ -110,12 +118,25 @@ public class SingBoxEngine {
     private volatile boolean launchPrompts;
 
     /**
-     * Creates a new SingBoxEngine.
+     * Creates a new SingBoxEngine that writes its core down nowhere.
      *
      * @param singBoxBinary path to the sing-box executable
      */
     public SingBoxEngine(Path singBoxBinary) {
+        this(singBoxBinary, null);
+    }
+
+    /**
+     * Creates a new SingBoxEngine.
+     *
+     * @param singBoxBinary path to the sing-box executable
+     * @param coreRecord    where each direct core is written down, so the next
+     *                      run can end one this run leaves running; null for
+     *                      nowhere
+     */
+    public SingBoxEngine(Path singBoxBinary, CoreRecord coreRecord) {
         this.singBoxBinary = singBoxBinary;
+        this.coreRecord = coreRecord;
         this.logLines = FXCollections.observableArrayList();
         this.connectionState = new ReadOnlyObjectWrapper<>(ConnectionState.DISCONNECTED);
         this.errorMessage = new ReadOnlyStringWrapper("");
@@ -146,7 +167,9 @@ public class SingBoxEngine {
      * @param configJson the sing-box configuration in JSON format
      * @param proxyMode  the proxy mode determining how sing-box is started
      * @throws IOException          if the config file cannot be written, the core refuses it
-     *                              ({@link ConfigRejectedException}), or the process cannot
+     *                              ({@link ConfigRejectedException}), the calling thread is
+     *                              interrupted before the launch
+     *                              ({@link InterruptedIOException}), or the process cannot
      *                              start
      * @throws IllegalStateException if sing-box is already running
      */
@@ -164,7 +187,9 @@ public class SingBoxEngine {
      *
      * @param configJson the sing-box configuration in JSON format
      * @throws IOException          if the config file cannot be written, the core refuses it
-     *                              ({@link ConfigRejectedException}), or the process cannot
+     *                              ({@link ConfigRejectedException}), the calling thread is
+     *                              interrupted before the launch
+     *                              ({@link InterruptedIOException}), or the process cannot
      *                              start
      * @throws IllegalStateException if sing-box is already running
      */
@@ -183,6 +208,7 @@ public class SingBoxEngine {
         // stale monitor waking inside that window must see that its session
         // is over, or it would fire a spurious ERROR into this one.
         this.process = null;
+        this.recordedCore = null;
 
         this.activeProxyMode = proxyMode;
         this.stopRequested = false;
@@ -207,6 +233,13 @@ public class SingBoxEngine {
             String refusal = configCheck.rejection(singBoxBinary, tempConfigFile).orElse(null);
             if (refusal != null) {
                 throw new ConfigRejectedException(refusal);
+            }
+            // The check hides an interrupt that cut it short. Whoever
+            // interrupted this start is abandoning it (at quit the recovery
+            // scheduler and the MCP server interrupt their threads), and a
+            // core launched now would run on with nothing left to stop it.
+            if (Thread.currentThread().isInterrupted()) {
+                throw new InterruptedIOException("interrupted before sing-box was launched");
             }
         } catch (IOException | RuntimeException e) {
             cleanupConfigFile();
@@ -381,7 +414,11 @@ public class SingBoxEngine {
         pb.directory(SecureFiles.parentDirectory(singBoxBinary).toFile());
         pb.redirectErrorStream(true);
 
-        process = pb.start();
+        Process started = pb.start();
+        process = started;
+        if (coreRecord != null) {
+            recordedCore = coreRecord.write(started.toHandle());
+        }
     }
 
     /**
@@ -418,6 +455,7 @@ public class SingBoxEngine {
             // A crashed core leaves the dead process in the field; retire it
             // so the next start() doesn't inherit a stale session token.
             process = null;
+            forgetRecordedCore();
             Platform.runLater(() -> connectionState.set(ConnectionState.DISCONNECTED));
             return;
         }
@@ -445,6 +483,7 @@ public class SingBoxEngine {
 
         process = null;
         activeProxyMode = null;
+        forgetRecordedCore();
         cleanupConfigFile();
         Platform.runLater(() -> connectionState.set(ConnectionState.DISCONNECTED));
     }
@@ -599,6 +638,7 @@ public class SingBoxEngine {
         Path sessionConfigFile = tempConfigFile;
         SystemProxyTarget sessionProxyTarget = systemProxyTarget;
         boolean sessionUsedTun = activeProxyMode == ProxyMode.TUN;
+        CoreRecord.Entry sessionRecord = recordedCore;
         if (proc == null) {
             return;
         }
@@ -648,6 +688,11 @@ public class SingBoxEngine {
                 // running on.
                 if (sessionUsedTun && noSuccessor) {
                     tunLauncher.cleanupSession();
+                }
+                // No successor guard here: the record is cleared only while
+                // it still names this session's core.
+                if (coreRecord != null) {
+                    coreRecord.clear(sessionRecord);
                 }
             }
         }, "singbox-process-monitor");
@@ -753,6 +798,14 @@ public class SingBoxEngine {
         Platform.runLater(() -> connectionState.set(ConnectionState.DISCONNECTED));
     }
 
+    /** Removes this session's core from the record once it has stopped. */
+    private void forgetRecordedCore() {
+        if (coreRecord != null) {
+            coreRecord.clear(recordedCore);
+        }
+        recordedCore = null;
+    }
+
     /**
      * Force-stops the sing-box process without state transitions.
      * Used by the JVM shutdown hook.
@@ -799,6 +852,7 @@ public class SingBoxEngine {
             }
             stopSignalFile = null;
         }
+        forgetRecordedCore();
         cleanupConfigFile();
         // The JVM is going down: the daemon process monitor may never get to
         // run its own restore, so clear a stale OS proxy entry synchronously.

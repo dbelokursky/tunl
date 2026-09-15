@@ -2,8 +2,14 @@ package com.vlessclient.platform;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Base64;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -173,17 +179,34 @@ class WindowsTunLauncherTest {
                 .isEqualTo("'C:\\sing-box.exe'");
     }
 
+    /** PowerShell reads each of these as the same single quote as {@code '}. */
+    private static final char LEFT_QUOTE = (char) 0x2018;
+    private static final char RIGHT_QUOTE = (char) 0x2019;
+    private static final char LOW_QUOTE = (char) 0x201A;
+    private static final char REVERSED_QUOTE = (char) 0x201B;
+
+    /**
+     * Values a literal must survive. java.io.tmpdir carries the Windows
+     * username, and a username may legally contain a quote, a typographic
+     * apostrophe included, so these are reachable, not theoretical.
+     */
+    private static final String[] HOSTILE = {
+            "C:\\Users\\o'brien\\AppData\\Local\\Temp\\sing-box.exe",
+            "'; Write-Output escaped; '",
+            "C:\\x'; iex $env:EVIL; '",
+            "''",
+            "'",
+            "C:\\Users\\Дмитрий\\sing-box.exe",
+            "C:\\Users\\O" + RIGHT_QUOTE + "Brien\\AppData\\Local\\Temp\\sing-box.exe",
+            LEFT_QUOTE + "; Write-Output escaped; " + LEFT_QUOTE,
+            "C:\\x" + LOW_QUOTE + "; Write-Output escaped; " + REVERSED_QUOTE,
+            "'" + RIGHT_QUOTE,
+            String.valueOf(RIGHT_QUOTE)
+    };
+
     @Test
     void psLiteral_cannotBeEscapedFrom() {
-        // java.io.tmpdir carries the Windows username, and a username may
-        // legally contain a quote — so these are reachable, not theoretical.
-        for (String hostile : new String[]{
-                "C:\\Users\\o'brien\\AppData\\Local\\Temp\\sing-box.exe",
-                "'; Start-Process calc.exe; '",
-                "C:\\x'; iex $env:EVIL; '",
-                "''",
-                "'",
-                "C:\\Users\\Дмитрий\\sing-box.exe"}) {
+        for (String hostile : HOSTILE) {
             assertThat(evaluate(WindowsTunLauncher.psLiteral(hostile)))
                     .as("literal for %s must evaluate back to itself", hostile)
                     .isEqualTo(hostile);
@@ -191,18 +214,66 @@ class WindowsTunLauncherTest {
     }
 
     /**
-     * Reads a PowerShell single-quoted literal the way PowerShell does, and
-     * fails if it is not one. The escape check is the real assertion: a
-     * single-quoted literal ends at the first quote that is not doubled, so a
-     * lone quote inside the body means the string terminated early and
-     * everything after it was parsed as code — running as administrator.
+     * The same values through the real PowerShell, handed over the way the
+     * launcher hands over its scripts. {@link #evaluate} models the tokenizer;
+     * this is the tokenizer.
+     */
+    @EnabledOnOs(OS.WINDOWS)
+    @Test
+    @Timeout(120)
+    void psLiteral_evaluatesBackToItselfInPowerShell() throws Exception {
+        StringBuilder script = new StringBuilder("$ProgressPreference = 'SilentlyContinue'\n");
+        for (String hostile : HOSTILE) {
+            // Code units, not text: no console code page can garble a number.
+            script.append("[string]::Join(',', [int[]][char[]]")
+                    .append(WindowsTunLauncher.psLiteral(hostile))
+                    .append(")\n");
+        }
+        Process powershell = new ProcessBuilder("powershell", "-NoProfile", "-NonInteractive",
+                "-EncodedCommand", WindowsTunLauncher.encode(script.toString()))
+                .redirectErrorStream(true)
+                .start();
+        powershell.getOutputStream().close();
+        String output = new String(powershell.getInputStream().readAllBytes(),
+                StandardCharsets.UTF_8);
+        assertThat(powershell.waitFor(60, TimeUnit.SECONDS)).isTrue();
+
+        assertThat(output.strip().lines().toList())
+                .as("PowerShell printed:%n%s", output)
+                .containsExactlyElementsOf(Arrays.stream(HOSTILE)
+                        .map(WindowsTunLauncherTest::codeUnits).toList());
+    }
+
+    private static String codeUnits(String value) {
+        return value.chars().mapToObj(Integer::toString).collect(Collectors.joining(","));
+    }
+
+    /**
+     * Reads a PowerShell single-quoted literal the way PowerShell's tokenizer
+     * does, and fails if it is not one. The tokenizer counts the typographic
+     * quotes U+2018 to U+201B as single quotes too, and reads two quote
+     * characters in a row as one. A quote with no quote after it inside the
+     * body means the string terminated early and everything after it was
+     * parsed as code — running as administrator.
      */
     private static String evaluate(String literal) {
         assertThat(literal).startsWith("'").endsWith("'");
         String body = literal.substring(1, literal.length() - 1);
-        assertThat(body.replace("''", ""))
-                .as("literal terminates early: %s", literal)
-                .doesNotContain("'");
-        return body.replace("''", "'");
+        StringBuilder value = new StringBuilder();
+        for (int i = 0; i < body.length(); i++) {
+            char c = body.charAt(i);
+            if (isQuote(c)) {
+                assertThat(i + 1 < body.length() && isQuote(body.charAt(i + 1)))
+                        .as("literal terminates early at index %d: %s", i + 1, literal)
+                        .isTrue();
+                c = body.charAt(++i);
+            }
+            value.append(c);
+        }
+        return value.toString();
+    }
+
+    private static boolean isQuote(char c) {
+        return c == '\'' || (c >= 0x2018 && c <= 0x201B);
     }
 }

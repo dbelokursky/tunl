@@ -227,16 +227,34 @@ public final class WindowsTunLauncher implements TunLauncher {
      *
      * <p>Single quotes, not double: inside a double-quoted string PowerShell
      * expands {@code $(...)}, {@code $env:X} and backtick escapes, so a path is
-     * code. A single-quoted string has exactly one metacharacter — the quote
-     * itself, escaped by doubling — and treats backslashes, dollars and even
-     * newlines as literal text. Doubling is therefore total rather than a
-     * blocklist, which is why nothing here rejects input: no value can escape,
-     * so refusing one could only break a connect that would have worked.</p>
+     * code. A single-quoted string has exactly one metacharacter — the quote,
+     * escaped by doubling — and treats backslashes, dollars and even newlines
+     * as literal text. To PowerShell's tokenizer that quote is five
+     * characters, though: the ASCII apostrophe and the typographic quotes
+     * U+2018 to U+201B each end the string. Each is doubled with itself, as
+     * PowerShell's own CodeGeneration.EscapeSingleQuotedStringContent does,
+     * and reads back as that one character. Doubling is therefore total rather
+     * than a blocklist, which is why nothing here rejects input: no value can
+     * escape, so refusing one could only break a connect that would have
+     * worked.</p>
      *
      * @param value the raw text to embed
      * @return a literal that PowerShell evaluates back to exactly {@code value}
      */
     static String psLiteral(String value) {
-        return "'" + value.replace("'", "''") + "'";
+        StringBuilder literal = new StringBuilder(value.length() + 2).append('\'');
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            literal.append(c);
+            if (isSingleQuote(c)) {
+                literal.append(c);
+            }
+        }
+        return literal.append('\'').toString();
+    }
+
+    /** Whether PowerShell reads {@code c} as a single quote: ' and U+2018 to U+201B. */
+    private static boolean isSingleQuote(char c) {
+        return c == '\'' || (c >= 0x2018 && c <= 0x201B);
     }
 }
