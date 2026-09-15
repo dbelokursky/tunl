@@ -74,8 +74,11 @@ public class ConfigStore {
      * have recreated; that already surfaces on load as "Could not unseal …",
      * and the fix there is the same either way.</p>
      *
+     * <p>Loading fills it too, with the tags the file already holds: without
+     * them the first save after a restart sealed every credential again.</p>
+     *
      * <p>Guarded by this object's monitor: only reached from the synchronized
-     * save path and the synchronized mutators.</p>
+     * save path, the synchronized mutators and loading.</p>
      */
     private final Map<String, SealedSecret> sealCache = new HashMap<>();
 
@@ -620,8 +623,16 @@ public class ConfigStore {
         if (!SecretSealer.isSealed(stored)) {
             return;
         }
-        sealer.unseal(secretKey(server.getId(), field), stored).ifPresentOrElse(
-                setter,
+        String key = secretKey(server.getId(), field);
+        sealer.unseal(key, stored).ifPresentOrElse(
+                plaintext -> {
+                    setter.accept(plaintext);
+                    // The file already holds this value sealed: a save reuses
+                    // the tag instead of forking the secret tool for it again.
+                    synchronized (this) {
+                        sealCache.put(key, new SealedSecret(plaintext, stored));
+                    }
+                },
                 () -> log.error(
                         "Could not unseal {} for server '{}' ({}); "
                                 + "re-enter it or restore the secret backend entry",

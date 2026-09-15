@@ -965,8 +965,8 @@ public class SingBoxConfigGenerator {
      * to fetch the binary rule set from. Tags are used verbatim as the file
      * name ({@code <tag>.srs}) under
      * {@code github.com/SagerNet/sing-{geoip|geosite}/rule-set/}; the kind is
-     * taken from the first path segment of the tag. {@code download_detour:
-     * "direct"} makes the download bypass the (not-yet-up) proxy tunnel.
+     * taken from the first path segment of the tag. The download goes through
+     * the proxy group, by the entry's {@code http_client.detour}.
      */
     private ObjectNode buildRemoteRuleSet(String tag) {
         // Kind ('geoip' or 'geosite') is the first dash-separated segment
@@ -985,8 +985,11 @@ public class SingBoxConfigGenerator {
         // Through the tunnel: on the networks this client is for, GitHub raw
         // is often blocked or poisoned when dialed directly. The proxy
         // outbound is up by the time sing-box fetches rule-sets, and after
-        // the first success the cache_file serves them offline anyway.
-        entry.put("download_detour", "proxy");
+        // the first success the cache_file serves them offline anyway. Set on
+        // http_client: download_detour is deprecated, and a core one minor
+        // release before its removal stops at rule-set start over it, which
+        // `sing-box check` never reaches.
+        entry.putObject("http_client").put("detour", "proxy");
         return entry;
     }
 
