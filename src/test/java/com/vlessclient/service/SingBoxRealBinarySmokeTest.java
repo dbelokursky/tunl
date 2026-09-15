@@ -55,6 +55,7 @@ class SingBoxRealBinarySmokeTest {
     private static final String WG_PRIVATE_KEY = "xunATixZ9R2SMbEghGvNz1fen77h9i5gNCPfxxgxtWk=";
     private static final String WG_PEER_PUBLIC_KEY = "2Gl1nZ7pohiktxNLQq7rb1ZwdPN2BBaHpwA2M6dMJXM=";
     private static final String TEST_UUID = "b1c2d3e4-f5a6-7890-abcd-ef1234567890";
+    private static final int OUTPUT_TAIL_LINES = 40;
 
     private static Path binary;
     private static final SingBoxConfigGenerator generator = new SingBoxConfigGenerator();
@@ -460,14 +461,15 @@ class SingBoxRealBinarySmokeTest {
         String config = generator.generate(serverFor(Protocol.VLESS), settings, routing);
         Path configFile = Files.createTempFile("smoke-run-", ".json");
         Files.writeString(configFile, config);
+        Path logFile = Files.createTempFile("smoke-run-", ".log");
 
         Process proc = new ProcessBuilder(
                 binary.toString(), "run", "-c", configFile.toString())
                 .redirectErrorStream(true)
-                .redirectOutput(Files.createTempFile("smoke-run-", ".log").toFile())
+                .redirectOutput(logFile.toFile())
                 .start();
         try {
-            awaitPort(clashPort, proc);
+            awaitPort(clashPort, proc, logFile);
 
             HttpClient direct = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofSeconds(5))
@@ -502,12 +504,10 @@ class SingBoxRealBinarySmokeTest {
             assertThat(response.statusCode()).isEqualTo(200);
             assertThat(response.body()).isEqualTo("smoke");
         } finally {
-            proc.destroy();
-            if (!proc.waitFor(5, TimeUnit.SECONDS)) {
-                proc.destroyForcibly();
-            }
+            stopCore(proc);
             target.stop(0);
             Files.deleteIfExists(configFile);
+            Files.deleteIfExists(logFile);
         }
     }
 
@@ -563,7 +563,7 @@ class SingBoxRealBinarySmokeTest {
                             file.toString()).redirectErrorStream(true)
                             .redirectOutput(logs.toFile()).start();
                     try {
-                        awaitPort(settings.getClashApiPort(), process);
+                        awaitPort(settings.getClashApiPort(), process, logs);
                         long pid = process.pid();
                         assertThat(selectorTraffic(settings.getHttpPort())).isEqualTo("A");
                         assertThat(selector.select("srv-second")).isTrue();
@@ -573,10 +573,7 @@ class SingBoxRealBinarySmokeTest {
                     } catch (Throwable e) {
                         throw new AssertionError(Files.readString(logs), e);
                     } finally {
-                        process.destroy();
-                        if (!process.waitFor(5, TimeUnit.SECONDS)) {
-                            process.destroyForcibly().waitFor(5, TimeUnit.SECONDS);
-                        }
+                        stopCore(process);
                         Files.deleteIfExists(file);
                         Files.deleteIfExists(logs);
                     }
@@ -668,14 +665,15 @@ class SingBoxRealBinarySmokeTest {
         String config = generator.generate(serverFor(Protocol.VLESS), settings, routing);
         Path configFile = Files.createTempFile("smoke-clash-", ".json");
         Files.writeString(configFile, config);
+        Path logFile = Files.createTempFile("smoke-clash-", ".log");
 
         Process proc = new ProcessBuilder(
                 binary.toString(), "run", "-c", configFile.toString())
                 .redirectErrorStream(true)
-                .redirectOutput(Files.createTempFile("smoke-clash-", ".log").toFile())
+                .redirectOutput(logFile.toFile())
                 .start();
         try {
-            awaitPort(clashPort, proc);
+            awaitPort(clashPort, proc, logFile);
             HttpClient direct = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofSeconds(5))
                     .build();
@@ -703,11 +701,9 @@ class SingBoxRealBinarySmokeTest {
                         .isFalse();
             }
         } finally {
-            proc.destroy();
-            if (!proc.waitFor(5, TimeUnit.SECONDS)) {
-                proc.destroyForcibly();
-            }
+            stopCore(proc);
             Files.deleteIfExists(configFile);
+            Files.deleteIfExists(logFile);
         }
     }
 
@@ -852,19 +848,12 @@ class SingBoxRealBinarySmokeTest {
                 .redirectOutput(logFile.toFile())
                 .start();
         try {
-            try {
-                awaitPort(clashPort, proc);
-            } catch (AssertionError e) {
-                throw new AssertionError(e.getMessage()
-                        + "\n--- sing-box output ---\n" + Files.readString(logFile), e);
-            }
+            awaitPort(clashPort, proc, logFile);
             assertThat(proc.isAlive()).isTrue();
         } finally {
-            proc.destroy();
-            if (!proc.waitFor(5, TimeUnit.SECONDS)) {
-                proc.destroyForcibly();
-            }
+            stopCore(proc);
             Files.deleteIfExists(configFile);
+            Files.deleteIfExists(logFile);
         }
     }
 
@@ -982,19 +971,12 @@ class SingBoxRealBinarySmokeTest {
                 .redirectOutput(logFile.toFile())
                 .start();
         try {
-            try {
-                awaitPort(clashPort, proc);
-            } catch (AssertionError e) {
-                throw new AssertionError(e.getMessage()
-                        + "\n--- sing-box output ---\n" + Files.readString(logFile), e);
-            }
+            awaitPort(clashPort, proc, logFile);
             assertThat(proc.isAlive()).isTrue();
         } finally {
-            proc.destroy();
-            if (!proc.waitFor(5, TimeUnit.SECONDS)) {
-                proc.destroyForcibly();
-            }
+            stopCore(proc);
             Files.deleteIfExists(configFile);
+            Files.deleteIfExists(logFile);
         }
     }
 
@@ -1043,8 +1025,9 @@ class SingBoxRealBinarySmokeTest {
             assertThat(proc.exitValue()).isNotZero();
             assertThat(Files.readString(logFile)).contains("set system proxy");
         } finally {
-            proc.destroyForcibly();
+            stopCore(proc);
             Files.deleteIfExists(configFile);
+            Files.deleteIfExists(logFile);
         }
     }
 
@@ -1061,12 +1044,18 @@ class SingBoxRealBinarySmokeTest {
         }
     }
 
-    /** Waits until the port accepts connections; fails fast if the process dies. */
-    private static void awaitPort(int port, Process proc) throws Exception {
+    /**
+     * Waits until the port accepts connections; fails fast if the process dies.
+     * Either failure ends with the core's own output, which holds the reason:
+     * the FATAL line of an early exit, or how far a core that never opened the
+     * port got.
+     */
+    private static void awaitPort(int port, Process proc, Path log) throws Exception {
         long deadline = System.currentTimeMillis() + 15_000;
         while (System.currentTimeMillis() < deadline) {
             if (!proc.isAlive()) {
-                throw new AssertionError("sing-box exited early with code " + proc.exitValue());
+                throw new AssertionError("sing-box exited early with code " + proc.exitValue()
+                        + outputTail(log));
             }
             try (Socket socket = new Socket()) {
                 socket.connect(new InetSocketAddress("127.0.0.1", port), 500);
@@ -1075,7 +1064,39 @@ class SingBoxRealBinarySmokeTest {
                 Thread.sleep(200);
             }
         }
-        throw new AssertionError("clash_api port " + port + " did not open within 15s");
+        throw new AssertionError("clash_api port " + port + " did not open within 15s"
+                + outputTail(log));
+    }
+
+    /** The last {@code OUTPUT_TAIL_LINES} lines of a core's output, for a failure message. */
+    private static String outputTail(Path log) {
+        List<String> lines;
+        try {
+            // Decoded leniently: a malformed byte must not replace the failure
+            // being reported with a decoding exception.
+            lines = new String(Files.readAllBytes(log), StandardCharsets.UTF_8).lines().toList();
+        } catch (IOException e) {
+            return "\n--- sing-box output could not be read: " + e + " ---";
+        }
+        if (lines.isEmpty()) {
+            return "\n--- sing-box wrote no output ---";
+        }
+        int from = Math.max(0, lines.size() - OUTPUT_TAIL_LINES);
+        String shown = from == 0 ? "" : ", last " + (lines.size() - from) + " of " + lines.size();
+        return "\n--- sing-box output" + shown + " ---\n"
+                + String.join("\n", lines.subList(from, lines.size()));
+    }
+
+    /**
+     * Stops a core a test started and waits for it to exit. The wait matters
+     * for the cleanup that follows: Windows refuses to delete a log file while
+     * the process writing it is still alive.
+     */
+    private static void stopCore(Process proc) throws InterruptedException {
+        proc.destroy();
+        if (!proc.waitFor(5, TimeUnit.SECONDS)) {
+            proc.destroyForcibly().waitFor(5, TimeUnit.SECONDS);
+        }
     }
 
     @AfterAll
