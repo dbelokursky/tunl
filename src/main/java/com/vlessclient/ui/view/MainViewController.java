@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
@@ -39,6 +40,8 @@ public class MainViewController {
     @FXML private HBox persistenceBanner;
     @FXML private Label persistenceMessage;
     @FXML private Button retrySavingButton;
+    @FXML private HBox unreadableBanner;
+    @FXML private Label unreadableMessage;
     private PersistenceState persistence;
 
     @FXML private Button btnDashboard;
@@ -83,6 +86,12 @@ public class MainViewController {
             persistence = store.getPersistenceState();
             persistenceBanner.visibleProperty().bind(persistence.unsavedProperty());
             persistenceBanner.managedProperty().bind(persistenceBanner.visibleProperty());
+            unreadableMessage.textProperty().bind(Bindings.createStringBinding(
+                    () -> I18n.get("persistence.unreadable",
+                            persistence.unreadableFilesProperty().get()),
+                    I18n.localeProperty(), persistence.unreadableFilesProperty()));
+            unreadableBanner.visibleProperty().bind(persistence.hasUnreadableProperty());
+            unreadableBanner.managedProperty().bind(unreadableBanner.visibleProperty());
         });
     }
 

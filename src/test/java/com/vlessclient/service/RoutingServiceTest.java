@@ -43,6 +43,31 @@ class RoutingServiceTest {
     }
 
     /**
+     * routing.json from a newer build can carry a rule type this one does not
+     * know. Read as one object, the file failed on that rule, was quarantined,
+     * and routing fell back to "everything through the VPN" without a word --
+     * the opposite of a user who had configured a bypass.
+     */
+    @Test
+    void aRuleFromANewerBuildIsSkippedAndTheOthersSurvive() throws Exception {
+        java.nio.file.Files.writeString(tempDir.resolve("routing.json"), """
+                { "rules": [
+                    { "id": "r-1", "type": "domain", "value": "example.com",
+                      "action": "direct" },
+                    { "id": "r-2", "type": "process_name", "value": "curl",
+                      "action": "block" },
+                    { "id": "r-3", "type": "geosite", "value": "category-ads",
+                      "action": "block" } ] }""");
+
+        RoutingConfig config = new RoutingService(tempDir).getConfig();
+
+        assertThat(config.getRules()).extracting(RoutingRule::getId)
+                .containsExactly("r-1", "r-3");
+        assertThat(tempDir.resolve("routing.json"))
+                .as("the file still reads, so nothing is quarantined").exists();
+    }
+
+    /**
      * Pre-port installs wrote routing.json mac-style on every OS. Moving to
      * PlatformPaths must carry that file over, or a Windows/Linux user silently
      * starts from empty routing rules.
