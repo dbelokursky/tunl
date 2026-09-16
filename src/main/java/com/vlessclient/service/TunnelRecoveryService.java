@@ -15,6 +15,8 @@ import javafx.beans.property.ReadOnlyBooleanProperty;
 import javafx.beans.property.ReadOnlyBooleanWrapper;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
+import javafx.beans.property.ReadOnlyStringProperty;
+import javafx.beans.property.ReadOnlyStringWrapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,6 +30,7 @@ public final class TunnelRecoveryService implements AutoCloseable {
     private final ScheduledExecutorService scheduler;
     private final ReadOnlyObjectWrapper<Retry> retry = new ReadOnlyObjectWrapper<>();
     private final ReadOnlyBooleanWrapper reconnectNeeded = new ReadOnlyBooleanWrapper();
+    private final ReadOnlyStringWrapper stopReason = new ReadOnlyStringWrapper();
     private ScheduledFuture<?> pending;
     private long generation;
     private long publication;
@@ -39,6 +42,8 @@ public final class TunnelRecoveryService implements AutoCloseable {
     private boolean connectedSinceRequest;
     /** A dropped tunnel waits for the user, because a restart would prompt. */
     private boolean waitingForTheUser;
+    /** Why recovery stopped for the current request, or null while it has not. */
+    private String stoppedBecause;
     private ConnectionState lastState = ConnectionState.DISCONNECTED;
 
     /** The retry displayed by the UI; a null property value means no retry is pending. */
@@ -86,6 +91,24 @@ public final class TunnelRecoveryService implements AutoCloseable {
     }
 
     /**
+     * Why automatic recovery stopped, for rendering only: null while it has
+     * not, and again once the user connects, reconnects or cancels.
+     */
+    public ReadOnlyStringProperty stopReasonProperty() {
+        return stopReason.getReadOnlyProperty();
+    }
+
+    /**
+     * Why automatic recovery stopped, as of now.
+     *
+     * @return the core's refusal of the configuration, or null while recovery
+     *     has not stopped
+     */
+    public synchronized String stopReason() {
+        return stoppedBecause;
+    }
+
+    /**
      * Whether a tunnel that dropped waits for the user's reconnect, because
      * restarting it would raise an elevation prompt nobody asked for.
      *
@@ -107,6 +130,16 @@ public final class TunnelRecoveryService implements AutoCloseable {
     /** Whether a captured request still represents the user's intent. */
     public synchronized boolean isWanted(long request) {
         return wanted && !closed && generation == request;
+    }
+
+    /**
+     * The user's current connection request. A connect, reconnect, cancel or
+     * disconnect moves it on; automatic retries keep it.
+     *
+     * @return an id that changes with every request the user makes
+     */
+    public synchronized long currentRequest() {
+        return generation;
     }
 
     /** Cancels automatic recovery, including a restart that has not reached start() yet. */
@@ -185,18 +218,42 @@ public final class TunnelRecoveryService implements AutoCloseable {
             publish(null);
         }
         boolean started = false;
+        String refused = null;
         try {
             started = attempt.reconnect(() -> isWanted(request));
+        } catch (ConfigRejectedException e) {
+            // The core refuses the configuration, and a retry would hand it the
+            // same one: the refusal used to be retried at every backoff step for
+            // as long as the app ran. Stop, and say why.
+            refused = e.getMessage();
+            log.warn("Automatic tunnel recovery stopped: {}", e.getMessage());
         } catch (IOException | RuntimeException e) {
             log.warn("Automatic tunnel recovery failed", e);
         } finally {
             synchronized (this) {
                 running = false;
-                if ((!started && isWanted(request)) || lastState == ConnectionState.ERROR) {
+                if (refused != null) {
+                    if (isWanted(request)) {
+                        stop(refused);
+                    }
+                } else if ((!started && isWanted(request)) || lastState == ConnectionState.ERROR) {
                     schedule();
                 }
             }
         }
+    }
+
+    /** Gives recovery up until the user's next request, and publishes why. */
+    private void stop(String reason) {
+        wanted = false;
+        generation++;
+        attempts = 0;
+        connectedSinceRequest = false;
+        if (pending != null) {
+            pending.cancel(false);
+            pending = null;
+        }
+        publish(null, false, reason);
     }
 
     private void cancelPending() {
@@ -208,11 +265,16 @@ public final class TunnelRecoveryService implements AutoCloseable {
     }
 
     private void publish(Retry value) {
-        publish(value, false);
+        publish(value, false, null);
     }
 
     private void publish(Retry value, boolean userReconnect) {
+        publish(value, userReconnect, null);
+    }
+
+    private void publish(Retry value, boolean userReconnect, String stopped) {
         waitingForTheUser = userReconnect;
+        stoppedBecause = stopped;
         // Never wait for FX while holding this monitor: a UI Cancel calls back here.
         long version = ++publication;
         Runnable update = () -> {
@@ -220,6 +282,7 @@ public final class TunnelRecoveryService implements AutoCloseable {
                 if (version == publication) {
                     retry.set(value);
                     reconnectNeeded.set(userReconnect);
+                    stopReason.set(stopped);
                 }
             }
         };

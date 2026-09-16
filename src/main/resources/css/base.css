@@ -582,14 +582,25 @@
     -fx-text-fill: -c-chip-text;
 }
 
+/* A button drawn as the bare glyph the chip used to carry: no background and
+   no padding, so the chip keeps its size. Focus takes the hover colour, with
+   the focus glow of the form fields. */
 .country-chip-remove {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-padding: 0;
     -fx-font-size: 11px;
     -fx-text-fill: -c-chip-muted;
     -fx-cursor: hand;
 }
 
-.country-chip-remove:hover {
+.country-chip-remove:hover,
+.country-chip-remove:focused {
     -fx-text-fill: -c-danger-soft;
+}
+
+.country-chip-remove:focused {
+    -fx-effect: dropshadow(gaussian, -c-shadow-focus, 6, 0, 0, 0);
 }
 
 /* Small pill showing a live count (e.g. bypass-list entries). */
@@ -1242,7 +1253,8 @@
     -fx-cursor: hand;
 }
 
-.session-total-link:hover {
+.session-total-link:hover,
+.session-total-link:focused {
     -fx-underline: true;
 }
 
