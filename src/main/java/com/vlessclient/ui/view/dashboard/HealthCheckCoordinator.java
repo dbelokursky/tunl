@@ -442,7 +442,7 @@ public final class HealthCheckCoordinator {
                 reachable++;
             }
             String dotClass = ok ? "status-circle-connected" : "status-circle-error";
-            String latency = r.latencyMs() + " ms";
+            String latency = I18n.get("unit.ms", r.latencyMs());
             Supplier<String> resultText =
                     ok ? () -> latency : () -> I18n.get("dashboard.health.unreachable");
             String resultClass = ok ? "service-ok" : "service-fail";

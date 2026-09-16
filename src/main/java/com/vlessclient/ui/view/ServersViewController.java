@@ -769,7 +769,8 @@ public class ServersViewController {
         }
         LatencyTester.Result result = measured.get();
         chip.setText(result.reachable()
-                ? result.millis() + " ms" : I18n.get("dashboard.latency.timeout"));
+                ? I18n.get("unit.ms", result.millis())
+                : I18n.get("dashboard.latency.timeout"));
         chip.getStyleClass().setAll("latency-chip",
                 result.reachable() ? "latency-chip-ok" : "latency-chip-fail");
         tooltip.setText(I18n.get(result.throughProxy()

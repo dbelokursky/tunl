@@ -1,5 +1,6 @@
 package com.vlessclient.service;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
@@ -356,7 +357,7 @@ public class ConfigStore {
             return;
         }
         copy.setId(UUID.randomUUID().toString());
-        copy.setName(copy.getName() + " (copy)");
+        copy.setName(copy.getName() + I18n.get("servers.copy.suffix"));
         copy.setActive(false);
         mutateList(() -> servers.add(copy));
         saveServers();
