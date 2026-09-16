@@ -1,11 +1,13 @@
 package com.vlessclient.service;
 
 import com.vlessclient.model.AppSettings;
+import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.ServerSelection;
+import com.vlessclient.testing.Await;
 import com.vlessclient.testing.FxToolkitExtension;
 import javafx.application.Platform;
 import org.junit.jupiter.api.BeforeEach;
@@ -174,6 +176,64 @@ class ConnectionServiceTest {
         } finally {
             service.getRecoveryService().close();
         }
+    }
+
+    /**
+     * A crash is recovered by stopping what is left of the core and starting it
+     * again, through the service. {@code recover()} had no test of its own: the
+     * recovery loop was tested with a stand-in restart only.
+     */
+    @Test
+    void aCrashIsRecoveredByRestartingTheCore() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.getSettings().setHealthCheckAutoReconnect(true);
+        store.getSettings().setHealthCheckDelaySeconds(1);
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        try {
+            assertThat(service.connect().started()).as("the first start").isTrue();
+            engine.running = false;
+
+            service.getRecoveryService().onConnectionState(ConnectionState.ERROR);
+
+            Await.until("recovery to start the core again",
+                    () -> starts(engine) >= 2, Duration.ofSeconds(10));
+            assertThat(engine.calls)
+                    .as("what the restart asked of the engine")
+                    .containsSubsequence("start", "stop", "await", "start");
+        } finally {
+            service.getRecoveryService().close();
+        }
+    }
+
+    /** A disconnect during the wait before a restart keeps the core stopped. */
+    @Test
+    void aDisconnectDuringTheWaitBeforeARestartKeepsTheCoreStopped() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.getSettings().setHealthCheckAutoReconnect(true);
+        store.getSettings().setHealthCheckDelaySeconds(1);
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        try {
+            assertThat(service.connect().started()).as("the first start").isTrue();
+            engine.running = false;
+            service.getRecoveryService().onConnectionState(ConnectionState.ERROR);
+
+            service.disconnect();
+            // Absence has no event to wait for: sleep past the one-second
+            // wait, twice over, and count.
+            Thread.sleep(2_000);
+
+            assertThat(starts(engine))
+                    .as("starts, after a disconnect during the wait before a restart")
+                    .isEqualTo(1);
+        } finally {
+            service.getRecoveryService().close();
+        }
+    }
+
+    private static long starts(RecordingEngine engine) {
+        return engine.calls.stream().filter("start"::equals).count();
     }
 
     /** Refuses every start the way the real check does, with a reason built from the config. */

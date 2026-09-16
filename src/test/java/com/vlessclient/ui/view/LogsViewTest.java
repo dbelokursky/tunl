@@ -4,6 +4,9 @@ import com.vlessclient.app.I18n;
 import com.vlessclient.testing.Await;
 import com.vlessclient.testing.UiTest;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -476,5 +479,35 @@ public class LogsViewTest extends ApplicationTest {
     }
 
     private record ViewportAnchor(String item, double offset) {
+    }
+
+    /**
+     * Download, Save diagnostics and Clear show only an icon, and a screen
+     * reader read out nothing for them. Each names its action, in the current
+     * language.
+     */
+    @Test
+    void theIconButtonsCarryTheirNamesInTheCurrentLanguage() {
+        try {
+            for (Locale locale : List.of(Locale.ENGLISH, Locale.of("ru"))) {
+                interact(() -> I18n.setLocale(locale));
+                assertThat(iconButtonNames())
+                        .as("the names of Download, Save diagnostics and Clear in %s", locale)
+                        .containsExactly(I18n.get("logs.download.tooltip"),
+                                I18n.get("logs.diagnostics.tooltip"),
+                                I18n.get("logs.clear.tooltip"));
+            }
+        } finally {
+            interact(() -> I18n.setLocale(Locale.ENGLISH));
+        }
+    }
+
+    private List<String> iconButtonNames() {
+        List<String> names = new ArrayList<>();
+        for (String id : List.of("#downloadButton", "#diagnosticsButton", "#clearButton")) {
+            Button button = lookup(id).query();
+            names.add(button.getAccessibleText());
+        }
+        return names;
     }
 }

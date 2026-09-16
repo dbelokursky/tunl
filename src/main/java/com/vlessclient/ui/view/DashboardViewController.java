@@ -97,6 +97,7 @@ public class DashboardViewController implements ViewShownAware {
     @FXML private VBox healthCard;
     @FXML private Label healthSummaryLabel;
     @FXML private Button recheckButton;
+    @FXML private Button addTargetButton;
     @FXML private Label modeLabel;
     @FXML private Label healthSectionTitle;
     @FXML private Hyperlink addServerLink;
@@ -177,6 +178,8 @@ public class DashboardViewController implements ViewShownAware {
         modeLabel.textProperty().bind(I18n.binding("dashboard.mode"));
         healthSectionTitle.textProperty().bind(I18n.binding("dashboard.health.title"));
         ButtonLabels.bindStatic(recheckButton, "dashboard.health.recheck");
+        // "+" is a symbol: a screen reader read out nothing for it.
+        addTargetButton.accessibleTextProperty().bind(I18n.binding("health.target.add.title"));
         ButtonLabels.bindStatic(cancelReconnectButton, "button.cancel");
         addServerLink.textProperty().bind(I18n.binding("dashboard.cta.add.server"));
         bindInstallBannerLabels();
