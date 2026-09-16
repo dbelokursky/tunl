@@ -754,6 +754,21 @@ jobs:
               openssl pkeyutl -verify -rawin -pubin -inkey "$PUB" \
                 -in "$RUNNER_TEMP/message" -sigfile "$RUNNER_TEMP/signature.verify"
               gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/$asset.sig" --clobber
+              # The same digest, bound to the version and the asset it belongs
+              # to. The digest alone authorised the bytes and said nothing
+              # about which release they were: an old signed installer could be
+              # republished under a new tag and installs would move backwards.
+              # Published beside the digest-only signature, which builds from
+              # before this change still verify.
+              printf 'tunl-release-v1\n%s\n%s\nsha256:%s' "$V" "$asset" "$hex" \
+                > "$RUNNER_TEMP/manifest"
+              openssl pkeyutl -sign -rawin -inkey "$KEY" \
+                -in "$RUNNER_TEMP/manifest" -out "$RUNNER_TEMP/manifest.sig"
+              base64 -w0 "$RUNNER_TEMP/manifest.sig" > "$RUNNER_TEMP/$asset.manifest.sig"
+              base64 -d "$RUNNER_TEMP/$asset.manifest.sig" > "$RUNNER_TEMP/manifest.verify"
+              openssl pkeyutl -verify -rawin -pubin -inkey "$PUB" \
+                -in "$RUNNER_TEMP/manifest" -sigfile "$RUNNER_TEMP/manifest.verify"
+              gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/$asset.manifest.sig" --clobber
               echo "signed $asset"
           done
 
@@ -889,12 +904,16 @@ jobs:
             "tunl.rb" \
             "tunl_${V}.dmg" \
             "tunl_${V}.dmg.sig" \
+            "tunl_${V}.dmg.manifest.sig" \
             "tunl_${V}.msi" \
             "tunl_${V}.msi.sig" \
+            "tunl_${V}.msi.manifest.sig" \
             "tunl_${V}_amd64.deb" \
             "tunl_${V}_amd64.deb.sig" \
+            "tunl_${V}_amd64.deb.manifest.sig" \
             "tunl_${V}_arm64.deb" \
-            "tunl_${V}_arm64.deb.sig" | sort)
+            "tunl_${V}_arm64.deb.sig" \
+            "tunl_${V}_arm64.deb.manifest.sig" | sort)
           # One "name<TAB>state" line per asset of this draft, from one listing.
           if ! assets="$(gh api --paginate "repos/${GH_REPO}/releases/${RELEASE_ID}/assets?per_page=100" \
               --jq '.[] | [.name, .state] | @tsv')"; then

@@ -39,7 +39,7 @@ class UpdateStagingTest {
      * must be rejected, and that one needs no private key.
      */
     private UpdateStaging staging() {
-        return new UpdateStaging(tempDir.resolve("staging"), (digest, sig) -> true);
+        return new UpdateStaging(tempDir.resolve("staging"), (version, asset, digest, sig) -> true);
     }
 
     @Test

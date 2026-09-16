@@ -180,3 +180,25 @@ base64 -d < tunl_1.6.0.dmg.sig > signature.bin
 openssl pkeyutl -verify -rawin -pubin -inkey tunl-release.pub.pem \
   -in message -sigfile signature.bin
 ```
+
+### What a release signature covers
+
+Every installer gets two detached signatures:
+
+- `<asset>.sig` — over the digest alone, as `sha256:<hex>`. Builds released
+  before this existed verify that one, so it keeps being published and their
+  updates keep working.
+- `<asset>.manifest.sig` — over the version, the asset name and the digest
+  together, with no trailing newline:
+
+  ```
+  tunl-release-v1
+  1.19.1
+  tunl_1.19.1.dmg
+  sha256:<hex>
+  ```
+
+Current builds require the second one. A signature over the digest alone
+authorises bytes without saying which release they are, so anyone able to
+publish a release without holding the key could put an old, still-signed
+installer under a new tag and move installs backwards.
