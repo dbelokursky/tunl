@@ -132,6 +132,16 @@ public final class TunnelRecoveryService implements AutoCloseable {
         return wanted && !closed && generation == request;
     }
 
+    /**
+     * The user's current connection request. A connect, reconnect, cancel or
+     * disconnect moves it on; automatic retries keep it.
+     *
+     * @return an id that changes with every request the user makes
+     */
+    public synchronized long currentRequest() {
+        return generation;
+    }
+
     /** Cancels automatic recovery, including a restart that has not reached start() yet. */
     public synchronized void cancel() {
         wanted = false;
