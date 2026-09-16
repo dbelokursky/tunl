@@ -420,10 +420,6 @@ class SingBoxRealBinarySmokeTest {
      */
     @Test
     void realRunServesClashApiAndHttpInbound() throws Exception {
-        int socksPort = freePort();
-        int httpPort = freePort();
-        int clashPort = freePort();
-
         HttpServer target = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         target.createContext("/ok", exchange -> {
             byte[] body = "smoke".getBytes(StandardCharsets.UTF_8);
@@ -440,25 +436,19 @@ class SingBoxRealBinarySmokeTest {
         // (developer machines, CI runners). The set_system_proxy shape is
         // still config-checked by checkAcceptsEveryProtocolInBothModes.
         settings.setSystemProxyAutoConfig(false);
-        settings.setSocksPort(socksPort);
-        settings.setHttpPort(httpPort);
-        settings.setClashApiPort(clashPort);
 
         RoutingConfig routing = new RoutingConfig();
         routing.setBypassList(List.of("127.0.0.1/32"));
 
-        String config = generator.generate(serverFor(Protocol.VLESS), settings, routing);
-        Path configFile = Files.createTempFile("smoke-run-", ".json");
-        Files.writeString(configFile, config);
-        Path logFile = Files.createTempFile("smoke-run-", ".log");
-
-        Process proc = new ProcessBuilder(
-                binary.toString(), "run", "-c", configFile.toString())
-                .redirectErrorStream(true)
-                .redirectOutput(logFile.toFile())
-                .start();
+        CoreRun run = startOnFreshPorts(settings,
+                s -> generator.generate(serverFor(Protocol.VLESS), s, routing));
+        int socksPort = settings.getSocksPort();
+        int httpPort = settings.getHttpPort();
+        int clashPort = settings.getClashApiPort();
+        Process proc = run.process();
+        Path configFile = run.configFile();
+        Path logFile = run.logFile();
         try {
-            awaitPort(clashPort, proc, logFile);
 
             HttpClient direct = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofSeconds(5))
@@ -765,6 +755,66 @@ class SingBoxRealBinarySmokeTest {
         } finally {
             Files.deleteIfExists(out);
         }
+    }
+
+    /** A core a smoke test started, with the file its output goes to. */
+    private record CoreRun(Process process, Path configFile, Path logFile) {
+    }
+
+    /** Attempts before a core that will not come up is treated as a real failure. */
+    private static final int START_ATTEMPTS = 3;
+
+    /**
+     * Starts the core on freshly picked ports and waits for its control port,
+     * trying again when it dies before answering.
+     *
+     * <p>{@link #freePort()} has to close its socket to learn the number, so
+     * anything else on the machine can take that port in the moment before the
+     * core binds it. That is rare and it cost a whole release job each time,
+     * because this is the one live test every release runs. Each attempt picks
+     * new numbers; the last failure is rethrown, so a core that is genuinely
+     * broken still fails the test with the same message and the same log
+     * tail.</p>
+     */
+    private CoreRun startOnFreshPorts(AppSettings settings,
+                                      java.util.function.Function<AppSettings, String> configFor)
+            throws Exception {
+        // Throwable, not Exception: awaitPort reports a core that died with an
+        // AssertionError, which is an Error -- caught as Exception, the retry
+        // never ran at all.
+        Throwable last = null;
+        for (int attempt = 1; attempt <= START_ATTEMPTS; attempt++) {
+            settings.setSocksPort(freePort());
+            settings.setHttpPort(freePort());
+            settings.setClashApiPort(freePort());
+
+            Path configFile = Files.createTempFile("smoke-run-", ".json");
+            Files.writeString(configFile, configFor.apply(settings));
+            Path logFile = Files.createTempFile("smoke-run-", ".log");
+            Process proc = new ProcessBuilder(
+                    binary.toString(), "run", "-c", configFile.toString())
+                    .redirectErrorStream(true)
+                    .redirectOutput(logFile.toFile())
+                    .start();
+            try {
+                awaitPort(settings.getClashApiPort(), proc, logFile);
+                return new CoreRun(proc, configFile, logFile);
+            } catch (AssertionError | Exception notUp) {
+                proc.destroyForcibly();
+                proc.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+                // The failure already carries the tail of this log.
+                Files.deleteIfExists(configFile);
+                Files.deleteIfExists(logFile);
+                last = notUp;
+                System.err.println("smoke: the core did not come up on attempt " + attempt
+                        + " of " + START_ATTEMPTS + "; trying new ports");
+            }
+        }
+        if (last instanceof Error error) {
+            // The same failure the last attempt produced, log tail and all.
+            throw error;
+        }
+        throw (Exception) last;
     }
 
     private static int freePort() throws IOException {
