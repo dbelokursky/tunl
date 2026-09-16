@@ -175,6 +175,23 @@ class ShareLinkMultiProtocolTest {
         }
 
         @Test
+        void parseTrojanKeepsTheRealityKeys() {
+            // A Trojan link can carry REALITY the same way a VLESS one does.
+            // The parser read security=reality but neither key, so the server
+            // it produced could not complete a handshake.
+            String uri = "trojan://pass@host.example:443"
+                    + "?security=reality&sni=www.example.com&fp=chrome"
+                    + "&pbk=PUBLICKEY123&sid=ab12#Name";
+
+            ServerConfig config = parser.parse(uri);
+
+            assertThat(config.getTls().isReality()).isTrue();
+            assertThat(config.getTls().getServerName()).isEqualTo("www.example.com");
+            assertThat(config.getTls().getRealityPublicKey()).isEqualTo("PUBLICKEY123");
+            assertThat(config.getTls().getRealityShortId()).isEqualTo("ab12");
+        }
+
+        @Test
         void parseTrojanDefaultsTlsEnabled() {
             String uri = "trojan://password@host.example:443#Simple";
 
