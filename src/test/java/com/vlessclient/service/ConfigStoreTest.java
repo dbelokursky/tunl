@@ -116,6 +116,26 @@ class ConfigStoreTest {
         assertThat(reloaded.getServers()).isEmpty();
     }
 
+    /**
+     * The suffix goes into the server's name, and the name is saved: a Russian
+     * UI produced "Мой сервер (copy)" and wrote the English word into
+     * servers.json, where it stays.
+     */
+    @Test
+    void aDuplicateTakesItsCopySuffixFromTheCurrentLanguage() {
+        ServerConfig server = createTestServer("My Server");
+        store.addServer(server);
+        com.vlessclient.app.I18n.setLocale(java.util.Locale.of("ru"));
+        try {
+            store.duplicateServer(server.getId());
+
+            assertThat(store.getServers().get(1).getName())
+                    .isEqualTo("My Server" + com.vlessclient.app.I18n.get("servers.copy.suffix"));
+        } finally {
+            com.vlessclient.app.I18n.setLocale(java.util.Locale.ENGLISH);
+        }
+    }
+
     @Test
     void duplicateServer_createsCopyWithNewIdAndCopySuffix() {
         ServerConfig server = createTestServer("My Server");

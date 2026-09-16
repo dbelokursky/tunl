@@ -28,6 +28,26 @@ public class RoutingViewTest extends ApplicationTest {
         stage.show();
     }
 
+    /**
+     * The country catalogue was built with Locale.ENGLISH, so a Russian UI
+     * offered "RU — Russia" and every other name in English, in a list the
+     * user reads to find their country.
+     */
+    @Test
+    void theCountryCatalogueFollowsTheCurrentLanguage() {
+        @SuppressWarnings("unchecked")
+        javafx.scene.control.ComboBox<String> combo =
+                (javafx.scene.control.ComboBox<String>) lookup("#bypassCountryCombo").query();
+        interact(() -> com.vlessclient.app.I18n.setLocale(java.util.Locale.of("ru")));
+        try {
+            assertThat(combo.getItems())
+                    .as("the catalogue is rebuilt in the language the app is in now")
+                    .contains("ru \u2014 \u0420\u043e\u0441\u0441\u0438\u044f");
+        } finally {
+            interact(() -> com.vlessclient.app.I18n.setLocale(java.util.Locale.ENGLISH));
+        }
+    }
+
     @Test
     void redesignedControlsExist() {
         assertThat(lookup("#bypassCountryCombo").tryQuery()).isPresent();

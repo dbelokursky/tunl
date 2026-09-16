@@ -93,6 +93,16 @@ public class RoutingViewController {
         updateEmptyState();
     }
 
+    /** Every ISO country as "code — name", in the language the app is in. */
+    private static List<String> countryCatalogue() {
+        List<String> catalog = new ArrayList<>();
+        for (String iso : java.util.Locale.getISOCountries()) {
+            catalog.add(catalogEntryFor(iso.toLowerCase(java.util.Locale.ROOT)));
+        }
+        catalog.sort(String.CASE_INSENSITIVE_ORDER);
+        return catalog;
+    }
+
     /**
      * Maps "code — display name" catalog entries back to the bare code. The
      * catalog answers "which countries CAN I pick": every ISO-3166 country
@@ -110,7 +120,7 @@ public class RoutingViewController {
     private static String catalogEntryFor(String code) {
         String upper = code.toUpperCase(java.util.Locale.ROOT);
         String name = java.util.Locale.of("", upper)
-                .getDisplayCountry(java.util.Locale.ENGLISH);
+                .getDisplayCountry(I18n.getLocale());
         return code + (name.isEmpty() || name.equals(upper) ? "" : " — " + name);
     }
 
@@ -125,12 +135,11 @@ public class RoutingViewController {
         if (bypassCountryCombo == null || bypassCountryChips == null) {
             return;
         }
-        List<String> catalog = new ArrayList<>();
-        for (String iso : java.util.Locale.getISOCountries()) {
-            catalog.add(catalogEntryFor(iso.toLowerCase(java.util.Locale.ROOT)));
-        }
-        catalog.sort(String.CASE_INSENSITIVE_ORDER);
-        bypassCountryCombo.getItems().addAll(catalog);
+        bypassCountryCombo.getItems().setAll(countryCatalogue());
+        // Rebuilt when the language changes: this list is how a user finds
+        // their country, and it was in English whatever the app was in.
+        I18n.localeProperty().addListener((observable, oldLocale, newLocale) ->
+                bypassCountryCombo.getItems().setAll(countryCatalogue()));
         bypassCountryCombo.setVisibleRowCount(12);
 
         bypassCountryCombo.setOnAction(e -> commitCountryFromCombo());
