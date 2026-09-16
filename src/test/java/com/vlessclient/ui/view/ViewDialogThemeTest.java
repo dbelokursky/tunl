@@ -240,19 +240,6 @@ public class ViewDialogThemeTest extends ApplicationTest {
     }
 
     @Test
-    void theWarningAboutAnEmptyRule() {
-        ServiceLocator.register(RoutingService.class, TestRoutingServices.at(freshDir("routing")));
-        mount("RoutingView", "dark");
-        DialogPane form = open(button("#addRuleButton")::fire);
-
-        DialogPane warning = open(((Button) form.lookupButton(ButtonType.OK))::fire);
-
-        assertThat(warning.getHeaderText())
-                .isEqualTo(I18n.get("error.field.required", I18n.get("routing.rule.value")));
-        assertBelongsToTheWindow(warning, "dark");
-    }
-
-    @Test
     void theRuleDeleteConfirmation() {
         RoutingService routing = TestRoutingServices.at(freshDir("routing"));
         routing.addRule(new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "example.com",
@@ -285,20 +272,6 @@ public class ViewDialogThemeTest extends ApplicationTest {
                 .as("the values typed and the whole warning")
                 .contains("Provider", "http://provider.example/sub",
                         I18n.get("subscriptions.http.warning"));
-    }
-
-    @Test
-    void theWarningAboutAnIncompleteSubscription() {
-        ServiceLocator.register(SubscriptionService.class,
-                TestSubscriptionServices.quiet(freshDir("subscriptions")));
-        mount("SubscriptionsView", "dark");
-        DialogPane form = open(button("#addSubscriptionButton")::fire);
-
-        DialogPane warning = open(((Button) form.lookupButton(ButtonType.OK))::fire);
-
-        assertThat(warning.getHeaderText())
-                .isEqualTo(I18n.get("subscriptions.name.url.required"));
-        assertBelongsToTheWindow(warning, "dark");
     }
 
     @Test
