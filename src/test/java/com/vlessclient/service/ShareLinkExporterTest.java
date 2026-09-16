@@ -104,6 +104,31 @@ class ShareLinkExporterTest {
     }
 
     @Test
+    void exportedTrojanRealityComesBackWhole() {
+        // Export has always written pbk and sid; the parser ignored them, so
+        // the app's own export produced a Trojan server it could not import.
+        ServerConfig config = new ServerConfig();
+        config.setProtocol(Protocol.TROJAN);
+        config.setUuid("trojan-password");
+        config.setAddress("host.example");
+        config.setPort(443);
+        config.setName("Reality");
+        config.getTls().setEnabled(true);
+        config.getTls().setReality(true);
+        config.getTls().setServerName("www.example.com");
+        config.getTls().setFingerprint("chrome");
+        config.getTls().setRealityPublicKey("PUBLICKEY123");
+        config.getTls().setRealityShortId("ab12");
+
+        ServerConfig back = new ShareLinkParser().parse(exporter.export(config));
+
+        assertThat(back.getTls().isReality()).isTrue();
+        assertThat(back.getTls().getRealityPublicKey()).isEqualTo("PUBLICKEY123");
+        assertThat(back.getTls().getRealityShortId()).isEqualTo("ab12");
+        assertThat(back.getTls().getFingerprint()).isEqualTo("chrome");
+    }
+
+    @Test
     void exportUrlEncodesServerName() {
         ServerConfig config = new ServerConfig();
         config.setProtocol(Protocol.VLESS);

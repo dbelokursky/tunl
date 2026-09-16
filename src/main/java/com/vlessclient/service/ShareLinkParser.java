@@ -452,35 +452,12 @@ public class ShareLinkParser {
         Map<String, String> params = parseQueryParams(parsed.getRawQuery());
         applyTransportParams(config, params);
 
-        // Security / TLS - trojan defaults to TLS enabled
-        String security = params.getOrDefault("security", "tls");
-        if ("tls".equals(security)) {
-            config.getTls().setEnabled(true);
-        } else if ("reality".equals(security)) {
-            config.getTls().setEnabled(true);
-            config.getTls().setReality(true);
-        }
-
-        String sni = params.get("sni");
-        if (sni != null && !sni.isBlank()) {
-            config.getTls().setServerName(sni);
-        }
-
-        String fp = params.get("fp");
-        if (fp != null && !fp.isBlank()) {
-            config.getTls().setFingerprint(fp);
-        }
-
-        String alpn = params.get("alpn");
-        if (alpn != null && !alpn.isBlank()) {
-            config.getTls().setAlpn(alpn);
-        }
-
-        // Both spellings circulate: allowInsecure=1 (v2rayN, Xray) and
-        // insecure=1 (sing-box-flavoured links).
-        if ("1".equals(params.get("allowInsecure")) || "1".equals(params.get("insecure"))) {
-            config.getTls().setAllowInsecure(true);
-        }
+        // Security / TLS: a Trojan link is TLS unless it says otherwise, and it
+        // carries REALITY the same way a VLESS link does. This was a copy of
+        // applyTlsParams that had drifted -- it read security and sni but
+        // neither pbk nor sid, so the app could not import the REALITY links
+        // its own export wrote.
+        applyTlsParams(config, params, "tls");
 
         return config;
     }
@@ -687,7 +664,20 @@ public class ShareLinkParser {
     }
 
     private void applyTlsParams(ServerConfig config, Map<String, String> params) {
-        String security = params.getOrDefault("security", "none");
+        applyTlsParams(config, params, "none");
+    }
+
+    /**
+     * Applies the TLS and REALITY query parameters that every protocol
+     * carrying them shares.
+     *
+     * <p>{@code defaultSecurity} is what a link means when it names none: a
+     * VLESS link is plain unless it says otherwise, a Trojan link is TLS by
+     * definition.</p>
+     */
+    private void applyTlsParams(ServerConfig config, Map<String, String> params,
+                                String defaultSecurity) {
+        String security = params.getOrDefault("security", defaultSecurity);
         if ("tls".equals(security)) {
             config.getTls().setEnabled(true);
         } else if ("reality".equals(security)) {
