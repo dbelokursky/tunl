@@ -301,7 +301,7 @@ public class SubscriptionService {
             // Record it: a failed refresh used to be invisible in the UI, so a
             // subscription with a dead URL or an expired token silently went
             // stale while still looking healthy.
-            sub.setLastError(reason);
+            sub.recordFailure(reason);
             saveSubscriptions();
             return;
         }
@@ -322,14 +322,12 @@ public class SubscriptionService {
                     + "server links; keeping the {} server(s) already stored",
                     sub.getName(), content.length(), sub.getServerIds().size());
             if (parsed.unsupportedSchemes().isEmpty()) {
-                sub.setLastError("The response contained no recognizable server links. "
-                        + "The subscription may have expired, or a captive portal "
-                        + "may have answered instead of the provider.");
+                sub.recordFailure("subscriptions.error.no.links", List.of());
             } else {
                 // The list was read fine; it just holds nothing this client
                 // can connect to. Say so rather than hinting at expiry.
-                sub.setLastError("Every link in the response asks for something this "
-                        + "app does not support (" + parsed.unsupportedSummary() + ").");
+                sub.recordFailure("subscriptions.error.unsupported",
+                        List.of(parsed.unsupportedSummary()));
             }
             saveSubscriptions();
             return;
@@ -373,12 +371,10 @@ public class SubscriptionService {
                 log.warn("Subscription '{}': {} line(s) could not be parsed; "
                         + "keeping every stored server and removing none",
                         sub.getName(), parsed.skipped());
-                sub.setLastError(parsed.skipped() + " line(s) in the response could "
-                        + "not be read, so no servers were removed. The provider "
-                        + "may have changed format, or the response may be "
-                        + "truncated.");
+                sub.recordFailure("subscriptions.error.partial",
+                        List.of(String.valueOf(parsed.skipped())));
             } else {
-                sub.setLastError(null);
+                sub.clearLastError();
             }
             if (!parsed.unsupportedSchemes().isEmpty()) {
                 // Not an error and not a reason to keep withdrawn servers: the

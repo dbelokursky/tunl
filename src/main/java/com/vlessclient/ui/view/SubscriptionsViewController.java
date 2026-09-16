@@ -182,6 +182,19 @@ public class SubscriptionsViewController implements ViewShownAware {
     }
 
     /**
+     * The failure to show: one the app worded itself is rendered from its key
+     * now, in the current language; a sentence from an older file is shown as
+     * it stands, because that is all such a file holds.
+     */
+    private static String failureText(Subscription sub) {
+        String key = sub.getLastErrorKey();
+        if (key != null && !key.isBlank()) {
+            return I18n.get(key, sub.getLastErrorArgs().toArray());
+        }
+        return sub.getLastError();
+    }
+
+    /**
      * The add/edit form, prefilled with {@code name} and {@code url}.
      *
      * @return what the user entered, or empty when cancelled
@@ -371,9 +384,9 @@ public class SubscriptionsViewController implements ViewShownAware {
 
             // A failed refresh is otherwise invisible: the row keeps showing an
             // old timestamp and looks the same as a healthy subscription.
-            if (sub.getLastError() != null && !sub.getLastError().isBlank()) {
+            if (sub.hasLastError()) {
                 Label errorLabel = new Label(
-                        I18n.get("subscriptions.last.error", sub.getLastError()));
+                        I18n.get("subscriptions.last.error", failureText(sub)));
                 errorLabel.getStyleClass().add("subscription-error");
                 errorLabel.setWrapText(true);
                 info.getChildren().add(errorLabel);
