@@ -104,6 +104,26 @@ class ShareLinkExporterTest {
     }
 
     @Test
+    void exportShadowsocksKeepsThePluginSoTheLinkStillWorks() {
+        ServerConfig config = new ServerConfig();
+        config.setProtocol(Protocol.SHADOWSOCKS);
+        config.setEncryption("aes-256-gcm");
+        config.setUuid("password");
+        config.setAddress("host.example");
+        config.setPort(443);
+        config.setPlugin("obfs-local");
+        config.setPluginOpts("obfs=http;obfs-host=bing.com");
+
+        String uri = exporter.export(config);
+
+        ServerConfig back = new ShareLinkParser().parse(uri);
+        assertThat(back.getPlugin()).isEqualTo("obfs-local");
+        assertThat(back.getPluginOpts()).isEqualTo("obfs=http;obfs-host=bing.com");
+        assertThat(back.getEncryption()).isEqualTo("aes-256-gcm");
+        assertThat(back.getUuid()).isEqualTo("password");
+    }
+
+    @Test
     void exportUrlEncodesServerName() {
         ServerConfig config = new ServerConfig();
         config.setProtocol(Protocol.VLESS);
