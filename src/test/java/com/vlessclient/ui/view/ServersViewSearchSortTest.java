@@ -155,6 +155,39 @@ public class ServersViewSearchSortTest extends ApplicationTest {
         return tooltips;
     }
 
+    /**
+     * The chip's unit was an English literal, so a Russian UI read "212 ms"
+     * beside every server.
+     */
+    @Test
+    void theLatencyChipUsesTheUnitOfTheCurrentLanguage() {
+        interact(() -> com.vlessclient.app.I18n.setLocale(java.util.Locale.of("ru")));
+        try {
+            interact(() -> list().refresh());
+
+            assertThat(latencyChipTexts())
+                    .as("a measured chip reads in the language the app is in")
+                    .anyMatch(text -> text.endsWith("\u043c\u0441"));
+        } finally {
+            interact(() -> com.vlessclient.app.I18n.setLocale(java.util.Locale.ENGLISH));
+            interact(() -> list().refresh());
+        }
+    }
+
+    /** The text of every latency chip on screen. */
+    private java.util.List<String> latencyChipTexts() {
+        java.util.List<String> texts = new java.util.ArrayList<>();
+        interact(() -> {
+            list().layout();
+            for (Node node : list().lookupAll(".latency-chip")) {
+                if (node instanceof Label chip && chip.getText() != null) {
+                    texts.add(chip.getText());
+                }
+            }
+        });
+        return texts;
+    }
+
     @Test
     void searchMatchesNameAddressPortAndProtocol() {
         search("germany");
