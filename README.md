@@ -311,6 +311,7 @@ discarded, so the bundled binary always wins.
 | `⌘⇧C`  | Connect / Disconnect                                          |
 | `⌘N`   | Add server                                                    |
 | `⌘V`   | Import share links from the clipboard (on the Servers tab)    |
+| `⌘F`   | Focus the search field (on the Servers and Logs tabs)         |
 | `⌘1`   | Dashboard                                                     |
 | `⌘2`   | Servers                                                       |
 | `⌘3`   | Subscriptions                                                 |

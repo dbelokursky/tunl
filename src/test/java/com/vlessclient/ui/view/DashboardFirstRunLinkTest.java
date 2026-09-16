@@ -2,18 +2,20 @@ package com.vlessclient.ui.view;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.testing.UiTest;
-import java.util.List;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
+import javafx.scene.control.Button;
 import javafx.scene.control.Hyperlink;
+import javafx.scene.control.Tooltip;
 import javafx.stage.Stage;
-import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
 
@@ -26,12 +28,14 @@ import org.testfx.framework.junit5.ApplicationTest;
 @UiTest
 public class DashboardFirstRunLinkTest extends ApplicationTest {
 
-    private static ServerConfig added;
+    /** Removed after each test, so every test starts from the empty test data dir. */
+    private ServerConfig added;
 
-    @AfterAll
-    static void cleanUp() {
+    @AfterEach
+    void removeTheAddedServer() {
         if (added != null) {
-            ServiceLocator.get(ConfigStore.class).applyServerBatch(List.of(), List.of(added.getId()));
+            interact(() -> ServiceLocator.get(ConfigStore.class).removeServer(added.getId()));
+            added = null;
         }
     }
 
@@ -51,15 +55,46 @@ public class DashboardFirstRunLinkTest extends ApplicationTest {
         assertThat(link.isVisible()).isTrue();
         assertThat(link.getText()).isNotBlank();
 
-        added = new ServerConfig();
-        added.setName("First");
-        added.setProtocol(Protocol.VLESS);
-        added.setAddress("203.0.113.9");
-        added.setPort(443);
-        added.setUuid("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+        added = firstServer();
         interact(() -> store.addServer(added));
 
         assertThat(link.isVisible()).isFalse();
         assertThat(link.isManaged()).isFalse();
+    }
+
+    /**
+     * A disabled Connect says why in a tooltip. It is one tooltip that gets
+     * new text: the refresh runs on every server-list change, and a new
+     * Tooltip each time cost a popup control.
+     */
+    @Test
+    void aDisabledConnectKeepsOneTooltipAcrossServerListChanges() {
+        Button connect = lookup("#connectButton").query();
+        ConfigStore store = ServiceLocator.get(ConfigStore.class);
+        assertThat(store.getServers()).as("the test data dir starts empty").isEmpty();
+        Tooltip hint = connect.getTooltip();
+        assertThat(hint).as("the tooltip of a disabled Connect").isNotNull();
+        assertThat(hint.getText()).isEqualTo(I18n.get("dashboard.no.servers"));
+
+        added = firstServer();
+        interact(() -> store.addServer(added));
+        assertThat(connect.getTooltip()).as("the tooltip once a server is active").isNull();
+
+        interact(() -> store.removeServer(added.getId()));
+        added = null;
+        assertThat(connect.getTooltip())
+                .as("the tooltip once the list is empty again")
+                .isSameAs(hint);
+        assertThat(hint.getText()).isEqualTo(I18n.get("dashboard.no.servers"));
+    }
+
+    private static ServerConfig firstServer() {
+        ServerConfig server = new ServerConfig();
+        server.setName("First");
+        server.setProtocol(Protocol.VLESS);
+        server.setAddress("203.0.113.9");
+        server.setPort(443);
+        server.setUuid("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+        return server;
     }
 }

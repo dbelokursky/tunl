@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
+<?import com.vlessclient.ui.view.PressableLabel?>
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.ComboBox?>
@@ -138,9 +139,11 @@
                         <Label fx:id="downloadSpeedLabel" text="0 B/s" styleClass="speed-value"/>
                     </HBox>
                 </HBox>
-                <Label fx:id="sessionTotalLabel" text="—"
-                       styleClass="session-total, session-total-link"
-                       onMouseClicked="#onSessionTotalClicked"/>
+                <!-- Pressable: the one way into the traffic history has to
+                     work from the keyboard and for a screen reader too. -->
+                <PressableLabel fx:id="sessionTotalLabel" text="—"
+                                styleClass="session-total, session-total-link"
+                                onMouseClicked="#onSessionTotalClicked"/>
             </VBox>
         </HBox>
 

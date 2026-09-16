@@ -19,6 +19,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
  * returned zero would turn every "no animation is running" assertion into one
  * that cannot fail, so both readings are shown to move when an animation plays,
  * and what is listed as running is shown to lead back to what left it.
+ *
+ * <p>Each test waits for what it started inside the try that stops it. The
+ * wait used to come first, so a stalled FX thread failed the wait and skipped
+ * the cleanup: a caret left blinking in a hidden window then failed
+ * {@code DashboardHiddenWindowTest}, later in the same fork.</p>
  */
 @ExtendWith(FxToolkitExtension.class)
 class FxPulsesTest {
@@ -51,8 +56,8 @@ class FxPulsesTest {
         pause.setOnFinished(event -> {
         });
         Platform.runLater(pause::play);
-        flushFxEvents();
         try {
+            flushFxEvents();
             FxPulses.Running running = FxPulses.running().stream()
                     .filter(entry -> entry.animation() == pause)
                     .findFirst()
@@ -82,8 +87,8 @@ class FxPulsesTest {
             }
         };
         Platform.runLater(timer::start);
-        flushFxEvents();
         try {
+            flushFxEvents();
             FxPulses.Running running = FxPulses.running().stream()
                     .filter(entry -> entry.animation() == timer)
                     .findFirst()
@@ -121,8 +126,8 @@ class FxPulsesTest {
             window[0].show();
             field.requestFocus();
         });
-        flushFxEvents();
         try {
+            flushFxEvents();
             FxPulses.Running caret = caret();
             assertThat(caret.description())
                     .isEqualTo("Timeline repeating every 1000 ms, handled in"
