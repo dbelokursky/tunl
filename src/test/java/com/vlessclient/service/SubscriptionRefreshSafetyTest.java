@@ -70,9 +70,9 @@ class SubscriptionRefreshSafetyTest {
                     .as("the stored servers survive a response we could not read")
                     .hasSize(2);
             assertThat(sub.getServerIds()).hasSize(2);
-            assertThat(sub.getLastError())
+            assertThat(sub.hasLastError())
                     .as("and the refresh is not reported as a success")
-                    .isNotBlank();
+                    .isTrue();
         }
 
         @Test
@@ -172,10 +172,11 @@ class SubscriptionRefreshSafetyTest {
                     + "not a share link at all\n");
             service.refreshSubscription(sub.getId());
 
-            assertThat(sub.getLastError())
+            // Keyed, so the row renders it in the reader's language; the key is
+            // the one that says nothing was removed.
+            assertThat(sub.getLastErrorKey())
                     .as("silently succeeding is how this used to lose servers")
-                    .isNotBlank()
-                    .contains("no servers were removed");
+                    .isEqualTo("subscriptions.error.partial");
         }
     }
 

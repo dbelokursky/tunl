@@ -33,30 +33,36 @@ class LiveServerSwitchTest {
         AtomicReference<String> selected = new AtomicReference<>();
         AtomicInteger puts = new AtomicInteger();
         AtomicInteger status = new AtomicInteger(204);
-        HttpServer api = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        api.createContext("/proxies/", exchange -> {
-            assertThat(exchange.getRequestHeaders().getFirst("Authorization"))
-                    .isEqualTo("Bearer private-test-token");
-            if (exchange.getRequestMethod().equals("PUT")) {
-                puts.incrementAndGet();
-                selected.set(JsonMapper.builder().build().readTree(
-                        exchange.getRequestBody().readAllBytes()).path("name").asString());
-                exchange.sendResponseHeaders(status.get(), -1);
-            } else {
-                byte[] body = ("{\"now\":\"" + selected.get() + "\"}")
-                        .getBytes(StandardCharsets.UTF_8);
-                exchange.sendResponseHeaders(200, body.length);
-                exchange.getResponseBody().write(body);
-            }
-            exchange.close();
-        });
-        api.start();
-        store.getSettings().setClashApiPort(api.getAddress().getPort());
         RecordingEngine engine = new RecordingEngine(dir.resolve("core"));
         ConnectionService service = new ConnectionService(store, new SingBoxConfigGenerator(),
                 null, engine);
+        HttpServer api = null;
         try {
             service.connect();
+            // The fake stands in for the core's control endpoint, so it takes
+            // the port the connect settled on. In a real run nothing holds
+            // that port until the core binds it, and holding it beforehand
+            // now moves the app off it.
+            api = HttpServer.create(new InetSocketAddress(
+                    "127.0.0.1", store.getSettings().getClashApiPort()), 0);
+            api.createContext("/proxies/", exchange -> {
+                assertThat(exchange.getRequestHeaders().getFirst("Authorization"))
+                        .isEqualTo("Bearer private-test-token");
+                if (exchange.getRequestMethod().equals("PUT")) {
+                    puts.incrementAndGet();
+                    selected.set(JsonMapper.builder().build().readTree(
+                            exchange.getRequestBody().readAllBytes()).path("name").asString());
+                    exchange.sendResponseHeaders(status.get(), -1);
+                } else {
+                    byte[] body = ("{\"now\":\"" + selected.get() + "\"}")
+                            .getBytes(StandardCharsets.UTF_8);
+                    exchange.sendResponseHeaders(200, body.length);
+                    exchange.getResponseBody().write(body);
+                }
+                exchange.close();
+            });
+            api.start();
+
             String initialGroup = service.getProxyGroupTag();
             store.setActiveServer(second.getId());
             assertThat(service.switchToActiveServer().outcome())
@@ -85,7 +91,9 @@ class LiveServerSwitchTest {
         } finally {
             service.disconnect();
             service.getRecoveryService().close();
-            api.stop(0);
+            if (api != null) {
+                api.stop(0);
+            }
         }
     }
 

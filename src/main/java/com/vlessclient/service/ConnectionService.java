@@ -8,8 +8,11 @@ import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.outbound.OutboundTags;
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -328,6 +331,13 @@ public class ConnectionService {
         if (!allowed.getAsBoolean()) {
             return new ConnectAttempt(Outcome.CANCELLED, active);
         }
+        if (!current.isRunning()) {
+            // Only on a cold start. A restart keeps the ports this session
+            // already settled on: the core being replaced may still hold them
+            // for a moment, and moving again on every restart would walk the
+            // ports upward for no reason.
+            moveTakenListenPortsAside(settings);
+        }
         List<ServerConfig> members = candidates;
         List<SkippedServer> skipped = new ArrayList<>();
         RoutingConfig routing = safeRoutingConfig();
@@ -560,6 +570,56 @@ public class ConnectionService {
                     .path("tag").asString("");
         } catch (JacksonException | NumberFormatException e) {
             return "";
+        }
+    }
+
+    /**
+     * Moves each local listening port another program holds to the next free
+     * one, for this run.
+     *
+     * <p>The core refuses to start on a port it cannot bind, and recovery then
+     * repeated that refusal for as long as the other program lived, with a
+     * notification every time. Only the in-memory settings move: the file
+     * keeps what the user chose, so the next start tries their port again, and
+     * the ports the app shows are the ones it is really listening on, because
+     * every reader takes them from here.</p>
+     */
+    private static void moveTakenListenPortsAside(AppSettings settings) {
+        Set<Integer> taken = new LinkedHashSet<>();
+        settings.setSocksPort(freePortFrom(settings.getSocksPort(), "SOCKS", taken));
+        settings.setHttpPort(freePortFrom(settings.getHttpPort(), "HTTP", taken));
+        settings.setClashApiPort(freePortFrom(settings.getClashApiPort(), "control", taken));
+    }
+
+    /**
+     * The configured port when it is free, else the next free one above it.
+     * Ports already handed out in this pass count as taken, so two inbounds
+     * cannot be moved onto the same one.
+     */
+    private static int freePortFrom(int configured, String what, Set<Integer> alreadyTaken) {
+        for (int port = configured; port <= 65535 && port < configured + 64; port++) {
+            if (alreadyTaken.contains(port) || !canBind(port)) {
+                continue;
+            }
+            if (port != configured) {
+                log.warn("The {} port {} is held by another program; this run listens on {}",
+                        what, configured, port);
+            }
+            alreadyTaken.add(port);
+            return port;
+        }
+        // Nothing free nearby: keep the choice and let the core say why it
+        // cannot start, rather than listening somewhere nobody expects.
+        log.error("No free {} port near {}; starting on it anyway", what, configured);
+        alreadyTaken.add(configured);
+        return configured;
+    }
+
+    private static boolean canBind(int port) {
+        try (ServerSocket probe = new ServerSocket(port, 1, InetAddress.getLoopbackAddress())) {
+            return probe.getLocalPort() == port;
+        } catch (IOException taken) {
+            return false;
         }
     }
 

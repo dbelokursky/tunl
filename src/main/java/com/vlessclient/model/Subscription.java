@@ -38,6 +38,19 @@ public class Subscription {
     private String lastError;
 
     /**
+     * The message key of the last failure, when the app worded that failure
+     * itself. Stored instead of the sentence so the row reads in whatever
+     * language the app is in now -- a sentence written into the file stays in
+     * the language it was written in, on disk, forever.
+     */
+    @JsonProperty("lastErrorKey")
+    private String lastErrorKey;
+
+    /** Arguments for {@link #lastErrorKey}, in order. */
+    @JsonProperty("lastErrorArgs")
+    private List<String> lastErrorArgs = new ArrayList<>();
+
+    /**
      * The provider's quota, from the {@code subscription-userinfo} response
      * header: bytes used in each direction, the plan's total, and the expiry
      * as Unix seconds. Zero means the provider did not say.
@@ -105,6 +118,55 @@ public class Subscription {
 
     public void setLastError(String lastError) {
         this.lastError = lastError;
+    }
+
+    /** The key of a failure the app worded itself, or null for a technical one. */
+    public String getLastErrorKey() {
+        return lastErrorKey;
+    }
+
+    public void setLastErrorKey(String lastErrorKey) {
+        this.lastErrorKey = lastErrorKey;
+    }
+
+    /** Arguments for the keyed failure; empty when there are none. */
+    public List<String> getLastErrorArgs() {
+        return lastErrorArgs;
+    }
+
+    public void setLastErrorArgs(List<String> lastErrorArgs) {
+        this.lastErrorArgs = lastErrorArgs == null
+                ? new ArrayList<>() : new ArrayList<>(lastErrorArgs);
+    }
+
+    /**
+     * Records a failure the app words itself: the key and its arguments are
+     * stored, the free-text reason cleared.
+     */
+    public void recordFailure(String key, List<String> args) {
+        this.lastErrorKey = key;
+        setLastErrorArgs(args);
+        this.lastError = null;
+    }
+
+    /** Records a technical failure verbatim, such as an HTTP status. */
+    public void recordFailure(String reason) {
+        this.lastError = reason;
+        this.lastErrorKey = null;
+        this.lastErrorArgs = new ArrayList<>();
+    }
+
+    /** Clears both forms after a refresh that worked. */
+    public void clearLastError() {
+        this.lastError = null;
+        this.lastErrorKey = null;
+        this.lastErrorArgs = new ArrayList<>();
+    }
+
+    /** Whether the last refresh failed, in either form. */
+    public boolean hasLastError() {
+        return (lastError != null && !lastError.isBlank())
+                || (lastErrorKey != null && !lastErrorKey.isBlank());
     }
 
     public long getUploadBytes() {
