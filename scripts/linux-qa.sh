@@ -21,6 +21,10 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_DIR="${REPO_ROOT}/target/linux-qa"
+# No vendor publishes a 27 image yet (GA was 2026-09-15; images and apt
+# packages follow it by days), so this default cannot build the current
+# sources. Override it -- IMAGE=azul/zulu-openjdk:27-jdk ./scripts/linux-qa.sh
+# -- as soon as one exists, and make that the default here.
 IMAGE="${IMAGE:-eclipse-temurin:25-jdk}"
 PLATFORM_ARGS=()
 [[ -n "${PLATFORM:-}" ]] && PLATFORM_ARGS=(--platform "${PLATFORM}")

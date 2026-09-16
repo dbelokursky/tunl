@@ -62,6 +62,8 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends 
   libgtk-3-0t64 libglib2.0-0t64 libxtst6 libxi6 libxrender1 libxrandr2 \
   libfreetype6 fontconfig libasound2t64 libgl1 libpango-1.0-0 libcairo2 \
   fonts-dejavu-core libcap2-bin iproute2 >/dev/null 2>&1
+# Still 25: no vendor ships a 27 apt package yet (GA was 2026-09-15), so the
+# guest cannot build the current sources until one does.
 if ! command -v java >/dev/null 2>&1 || ! java -version 2>&1 | grep -q '"25'; then
   wget -qO- https://packages.adoptium.net/artifactory/api/gpg/key/public \
     | sudo gpg --dearmor --yes -o /usr/share/keyrings/adoptium.gpg
