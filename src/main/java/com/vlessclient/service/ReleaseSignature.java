@@ -59,6 +59,13 @@ public final class ReleaseSignature {
     /** The suffix the release workflow gives a signature asset. */
     public static final String SIGNATURE_SUFFIX = ".sig";
 
+    /**
+     * The suffix of the signature that covers the version and the asset
+     * name along with the digest. Published beside the digest-only one, so
+     * builds from before it existed keep updating.
+     */
+    public static final String MANIFEST_SIGNATURE_SUFFIX = ".manifest.sig";
+
     private ReleaseSignature() {
     }
 
@@ -81,6 +88,41 @@ public final class ReleaseSignature {
      */
     public static boolean verifyDigest(String digest, String signatureBase64) {
         return verify(PUBLIC_KEY, digest, signatureBase64);
+    }
+
+    /**
+     * The message a release signature covers: a format marker, the version,
+     * the asset's file name and its digest, one per line.
+     *
+     * <p>A signature over the digest alone says "these bytes came from the
+     * publisher" and nothing about which release they were published as.
+     * Anyone who can publish a release without holding the key could put an
+     * old, still-signed installer under a new tag, and installs would "update"
+     * backwards -- into a build whose holes the one they were running had
+     * already fixed.</p>
+     *
+     * @param version   the release version, without a leading "v"
+     * @param assetName the installer's file name as published
+     * @param digest    the {@code sha256:<hex>} of the installer's bytes
+     * @return the exact message the release signs and this build verifies
+     */
+    public static String manifestFor(String version, String assetName, String digest) {
+        return "tunl-release-v1\n" + version + "\n" + assetName + "\n" + digest;
+    }
+
+    /**
+     * Verifies a signature over {@link #manifestFor}, which ties the bytes to
+     * the version and the asset they were published as.
+     *
+     * @param version         the version the download claims to be
+     * @param assetName       the installer's file name
+     * @param digest          the {@code sha256:<hex>} computed from the bytes
+     * @param signatureBase64 the contents of the release's signature asset
+     * @return true when the signature is valid for this build's key
+     */
+    public static boolean verifyRelease(String version, String assetName, String digest,
+                                        String signatureBase64) {
+        return verify(PUBLIC_KEY, manifestFor(version, assetName, digest), signatureBase64);
     }
 
     /**
