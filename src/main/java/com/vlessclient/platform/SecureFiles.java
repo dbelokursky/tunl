@@ -1,11 +1,14 @@
 package com.vlessclient.platform;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermissions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,7 +62,9 @@ public final class SecureFiles {
      * Writes {@code data} to {@code target} owner-only and atomically: the
      * bytes land in a sibling temp file (created 0600 on POSIX) which then
      * replaces the target, so a reader never sees a half-written config and a
-     * crash mid-write can't truncate the previous one.
+     * crash mid-write can't truncate the previous one. The temp file is forced
+     * to the device before the move, so a power cut after the move cannot leave
+     * the target empty either.
      */
     public static void writePrivately(Path target, byte[] data) throws IOException {
         Path absoluteTarget = target.toAbsolutePath();
@@ -73,7 +78,16 @@ public final class SecureFiles {
             if (POSIX) {
                 Files.setPosixFilePermissions(tmp, PosixFilePermissions.fromString("rw-------"));
             }
-            Files.write(tmp, data);
+            // A filesystem may commit the rename before the data it points at:
+            // a power cut in between left the config empty, and an empty
+            // servers.json was quarantined as corrupt on the next start.
+            try (FileChannel channel = FileChannel.open(tmp, StandardOpenOption.WRITE)) {
+                ByteBuffer remaining = ByteBuffer.wrap(data);
+                while (remaining.hasRemaining()) {
+                    channel.write(remaining);
+                }
+                channel.force(true);
+            }
             try {
                 Files.move(tmp, absoluteTarget, StandardCopyOption.REPLACE_EXISTING,
                         StandardCopyOption.ATOMIC_MOVE);
