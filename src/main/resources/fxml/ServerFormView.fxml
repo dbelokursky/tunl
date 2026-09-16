@@ -144,9 +144,10 @@
          the scroll pane, so it does not lose the width a scrollbar takes and
          its buttons would sit right of the fields whenever the form scrolls. -->
     <HBox fx:id="formActions" spacing="12" alignment="CENTER_RIGHT" styleClass="form-actions">
+        <!-- Escape cancels and Enter saves, as in every other dialog of the app. -->
         <Button fx:id="cancelButton" text="Cancel" styleClass="secondary-button"
-                onAction="#onCancelClicked"/>
+                cancelButton="true" onAction="#onCancelClicked"/>
         <Button fx:id="saveButton" text="Save" styleClass="primary-button"
-                onAction="#onSaveClicked"/>
+                defaultButton="true" onAction="#onSaveClicked"/>
     </HBox>
 </VBox>
