@@ -140,6 +140,28 @@ class SubscriptionServiceTest {
         assertThat(sub.getLastError()).isNull();
     }
 
+    /**
+     * The three failures the app words itself were stored as English
+     * sentences -- in the file. They stayed English after the reader switched
+     * the app to Russian, and they were written to disk in a language the
+     * reader may not have. A technical reason (an HTTP status) still goes in
+     * verbatim; only the app's own wording becomes a key.
+     */
+    @Test
+    void aFailureTheAppWordsItselfIsStoredAsAKeyNotASentence() {
+        service.setFetchedContent(Base64.getEncoder().encodeToString(
+                "not a link at all\n".getBytes(StandardCharsets.UTF_8)));
+        service.addSubscription("TestSub", "https://example.com/sub");
+        Subscription sub = service.getSubscriptions().get(0);
+
+        service.refreshSubscription(sub.getId());
+
+        assertThat(sub.getLastErrorKey()).isEqualTo("subscriptions.error.no.links");
+        assertThat(sub.getLastError())
+                .as("no English sentence is written beside the key").isNull();
+        assertThat(sub.hasLastError()).isTrue();
+    }
+
     @Test
     void parseContent_unsupportedProtocolsAreNotUnreadableLines() {
         String content = "vless://uuid1@server1.com:443?security=tls&type=tcp#Good\n"
@@ -192,7 +214,10 @@ class SubscriptionServiceTest {
         service.setFetchedContent("tuic://uuid:pass@tuic.example:443#Tuic\n");
         service.refreshSubscription(sub.getId());
 
-        assertThat(sub.getLastError()).contains("not support").contains("tuic");
+        // Keyed now, so the row can render it in the reader's language; the
+        // argument still names what was unsupported.
+        assertThat(sub.getLastErrorKey()).isEqualTo("subscriptions.error.unsupported");
+        assertThat(sub.getLastErrorArgs()).singleElement().asString().contains("tuic");
         assertThat(configStore.getServers())
                 .as("nothing usable came back, so nothing is removed")
                 .hasSize(1);

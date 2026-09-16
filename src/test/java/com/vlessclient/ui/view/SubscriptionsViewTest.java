@@ -227,6 +227,24 @@ public class SubscriptionsViewTest extends ApplicationTest {
         assertThat(showsLabel(shown)).isTrue();
     }
 
+    /**
+     * A keyed failure has to be rendered when the row is drawn: the point of
+     * storing the key rather than the sentence is that the reader sees it in
+     * the language the app is in now.
+     */
+    @Test
+    void aKeyedFailureIsRenderedInTheCurrentLanguage() {
+        service.addSubscription("Provider", "https://provider.example/sub");
+        WaitForAsyncUtils.waitForFxEvents();
+        service.getSubscriptions().getFirst()
+                .recordFailure("subscriptions.error.no.links", java.util.List.of());
+
+        interact(() -> ((ViewShownAware) controller).onViewShown());
+
+        assertThat(showsLabel(I18n.get("subscriptions.last.error",
+                I18n.get("subscriptions.error.no.links")))).isTrue();
+    }
+
     private Button rowRefreshButton() {
         return rowButton("button.refresh");
     }
