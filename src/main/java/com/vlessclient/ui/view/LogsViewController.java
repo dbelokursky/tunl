@@ -140,6 +140,12 @@ public class LogsViewController {
         diagnosticsButton.setTooltip(new Tooltip(I18n.get("logs.diagnostics.tooltip")));
         clearButton.setGraphic(Icons.clear(16));
         clearButton.setTooltip(new Tooltip(I18n.get("logs.clear.tooltip")));
+        // Icon-only, so a screen reader had nothing to read for them. The name
+        // is the tooltip's text, kept in the current language.
+        downloadButton.accessibleTextProperty().bind(I18n.binding("logs.download.tooltip"));
+        diagnosticsButton.accessibleTextProperty()
+                .bind(I18n.binding("logs.diagnostics.tooltip"));
+        clearButton.accessibleTextProperty().bind(I18n.binding("logs.clear.tooltip"));
 
         SingBoxEngine engine = null;
         try {

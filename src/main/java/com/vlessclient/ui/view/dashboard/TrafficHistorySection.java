@@ -5,6 +5,7 @@ import com.vlessclient.service.TrafficHistoryStore;
 import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.ui.view.FxTimer;
 import com.vlessclient.ui.view.OnScreen;
+import com.vlessclient.ui.view.PressableLabel;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.YearMonth;
@@ -128,6 +129,13 @@ public final class TrafficHistorySection {
      */
     public void init(boolean expanded) {
         controls.title().textProperty().bind(I18n.binding("dashboard.traffic.history.title"));
+        // The session total is the one way into the panel, and it answered the
+        // pointer only: as a PressableLabel it also opens and closes it on
+        // Enter, Space and a screen reader's press.
+        if (controls.sessionTotal() instanceof PressableLabel total) {
+            total.setOnPress(this::toggle);
+            total.accessibleHelpProperty().bind(I18n.binding("dashboard.traffic.history.help"));
+        }
 
         popover = new TrafficDayPopover(controls.barsHost());
 

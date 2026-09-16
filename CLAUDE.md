@@ -15,8 +15,8 @@ truth read by `pom.xml`, `scripts/bundle-singbox.*` and `SingBoxInstaller`.
 
 ## Build and verify
 
-- `mvn clean verify` is the gate: Checkstyle at `validate`, ~900 tests, JaCoCo
-  floors (55 % line, 42 % branch), SpotBugs at `verify`. Run it from a clean
+- `mvn clean verify` is the gate: Checkstyle at `validate`, ~1350 tests, JaCoCo
+  floors (73 % line, 60 % branch), SpotBugs at `verify`. Run it from a clean
   state before calling anything done, and report failures verbatim.
 - `mvn clean verify -Psmoke` also runs `SingBoxRealBinarySmokeTest` against the
   bundled core; CI runs it on macOS, Windows, Linux amd64 and Linux arm64.
