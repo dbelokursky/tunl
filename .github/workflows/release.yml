@@ -20,7 +20,7 @@ permissions:
 env:
   # The JDK jpackage bakes into every installer of a release: one pin for
   # the whole workflow, the same one build.yml tests on.
-  JAVA_VERSION: '25'
+  JAVA_VERSION: '27'
 # No job here pushes, so every checkout passes persist-credentials: false:
 # the token would otherwise sit in .git/config for every later step of the job.
 jobs:
@@ -279,7 +279,7 @@ jobs:
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
         with:
           java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
+          distribution: 'zulu'
           cache: 'maven'
       # Shares the cache the Build workflow populates on merge to main, so a
       # tagged release does not re-download the sing-box tarballs. Keyed on
@@ -420,7 +420,7 @@ jobs:
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
         with:
           java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
+          distribution: 'zulu'
           cache: 'maven'
       # Shares the cache the Build workflow populates on merge to main, so a
       # tagged release does not re-download the sing-box tarballs. Keyed on
@@ -528,7 +528,7 @@ jobs:
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
         with:
           java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
+          distribution: 'zulu'
           cache: 'maven'
       # Shares the cache the Build workflow populates on merge to main, so a
       # tagged release does not re-download the sing-box tarballs. Keyed on
@@ -596,7 +596,7 @@ jobs:
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
         with:
           java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
+          distribution: 'zulu'
           cache: 'maven'
       # Shares the cache the Build workflow populates on merge to main, so a
       # tagged release does not re-download the sing-box tarballs. Keyed on

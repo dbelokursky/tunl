@@ -16,7 +16,7 @@ env:
   # The JDK every job tests on and jpackage bakes into every installer: one
   # pin for the whole workflow. test-jdk27-ea keeps its own '27-ea' on
   # purpose — it is the canary for the next runtime and must float ahead.
-  JAVA_VERSION: '25'
+  JAVA_VERSION: '27'
 # Every checkout passes persist-credentials: false except dev-release's, the
 # one job that pushes (git tag -f and a force push of dev-latest). Nothing
 # else needs the token in .git/config, where every later step could read it.
@@ -55,7 +55,7 @@ jobs:
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
         with:
           java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
+          distribution: 'zulu'
           cache: 'maven'
       # The sing-box tarballs are fetched at generate-resources on every build
       # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
@@ -128,12 +128,13 @@ jobs:
   # can fail loudly and still stop nothing: nothing needs it, and main requires
   # only test-macos, test-windows, test-linux and test-linux-arm.
   #
-  # '27-ea' floats to whatever early-access build is newest. That is right for
+  # '28-ea' floats to whatever early-access build is newest. That is right for
   # a canary and wrong for an installer, which is why this pin appears here and
   # nowhere near a packaging job: jpackage bakes the CI JDK into the DMG, MSI
-  # and DEB, and an -ea selector never converges to GA. The job goes away when
-  # #216 moves everything to 27 at GA.
-  test-jdk27-ea:
+  # and DEB, and an -ea selector never converges to GA. It stays one release
+  # ahead of what the build targets, which is how the 27 problems were found
+  # before 27 was the build.
+  test-jdk28-ea:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -142,7 +143,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
         with:
-          java-version: '27-ea'
+          java-version: '28-ea'
           distribution: 'temurin'
           cache: 'maven'
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
@@ -174,7 +175,7 @@ jobs:
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
         with:
           java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
+          distribution: 'zulu'
           cache: 'maven'
       # The sing-box tarballs are fetched at generate-resources on every build
       # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
@@ -211,7 +212,7 @@ jobs:
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
         with:
           java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
+          distribution: 'zulu'
           cache: 'maven'
       # The sing-box tarballs are fetched at generate-resources on every build
       # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
