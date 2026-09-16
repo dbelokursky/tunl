@@ -1,5 +1,6 @@
 package com.vlessclient.ui.view;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.testing.UiTest;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
@@ -70,5 +71,15 @@ public class DashboardViewTest extends ApplicationTest {
         Node reconnectBanner = lookup("#reconnectBanner").query();
         assertThat(healthCard.isVisible()).isFalse();
         assertThat(reconnectBanner.isVisible()).isFalse();
+    }
+
+    /** "+" is a symbol: a screen reader read out nothing for it. */
+    @Test
+    void theAddServiceButtonHasAName() {
+        Button add = lookup("#addTargetButton").query();
+
+        assertThat(add.getAccessibleText())
+                .as("the name a screen reader reads for \"+\"")
+                .isEqualTo(I18n.get("health.target.add.title"));
     }
 }

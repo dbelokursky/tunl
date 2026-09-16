@@ -85,6 +85,7 @@ public class TrayIconService {
     private final ConnectionService connectionService;
     private final TunnelHealthState healthState;
     private final Stage stage;
+    private final FailureNotices failureNotices;
 
     private TrayIcon trayIcon;
     private PopupMenu popupMenu;
@@ -116,6 +117,11 @@ public class TrayIconService {
         this.connectionService = connectionService;
         this.healthState = healthState;
         this.stage = stage;
+        // Automatic retries stay within the user's request; a connect,
+        // reconnect or disconnect starts another.
+        this.failureNotices = new FailureNotices(connectionService == null
+                ? () -> 0L
+                : () -> connectionService.getRecoveryService().currentRequest());
     }
 
     /**
@@ -428,7 +434,9 @@ public class TrayIconService {
         }
         stateListener = (obs, oldVal, newVal) -> {
             refreshTrayState();
-            if (newVal == ConnectionState.ERROR) {
+            // Once per failure streak: recovery restarting a core that fails at
+            // every start used to notify again at every backoff step.
+            if (failureNotices.onState(newVal)) {
                 notifyTunnelFailed();
             }
         };
@@ -439,9 +447,10 @@ public class TrayIconService {
     /**
      * A system notification for a core that died. With the window hidden, a
      * change of icon colour was all the user got — and a tunnel that stops
-     * is exactly the moment the app must not be quiet.
+     * is exactly the moment the app must not be quiet. Package-private so a
+     * test can count the notices.
      */
-    private void notifyTunnelFailed() {
+    void notifyTunnelFailed() {
         TrayIcon icon = trayIcon;
         SingBoxEngine engine = engine();
         if (icon == null || engine == null) {
