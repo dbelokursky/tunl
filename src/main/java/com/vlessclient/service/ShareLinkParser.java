@@ -452,35 +452,12 @@ public class ShareLinkParser {
         Map<String, String> params = parseQueryParams(parsed.getRawQuery());
         applyTransportParams(config, params);
 
-        // Security / TLS - trojan defaults to TLS enabled
-        String security = params.getOrDefault("security", "tls");
-        if ("tls".equals(security)) {
-            config.getTls().setEnabled(true);
-        } else if ("reality".equals(security)) {
-            config.getTls().setEnabled(true);
-            config.getTls().setReality(true);
-        }
-
-        String sni = params.get("sni");
-        if (sni != null && !sni.isBlank()) {
-            config.getTls().setServerName(sni);
-        }
-
-        String fp = params.get("fp");
-        if (fp != null && !fp.isBlank()) {
-            config.getTls().setFingerprint(fp);
-        }
-
-        String alpn = params.get("alpn");
-        if (alpn != null && !alpn.isBlank()) {
-            config.getTls().setAlpn(alpn);
-        }
-
-        // Both spellings circulate: allowInsecure=1 (v2rayN, Xray) and
-        // insecure=1 (sing-box-flavoured links).
-        if ("1".equals(params.get("allowInsecure")) || "1".equals(params.get("insecure"))) {
-            config.getTls().setAllowInsecure(true);
-        }
+        // Security / TLS: a Trojan link is TLS unless it says otherwise, and it
+        // carries REALITY the same way a VLESS link does. This was a copy of
+        // applyTlsParams that had drifted -- it read security and sni but
+        // neither pbk nor sid, so the app could not import the REALITY links
+        // its own export wrote.
+        applyTlsParams(config, params, "tls");
 
         return config;
     }
@@ -511,6 +488,7 @@ public class ShareLinkParser {
         int port;
         String method;
         String password;
+        String query = null;
 
         // SIP002 format: BASE64(method:password)@host:port/?plugin=...
         // Legacy format: BASE64(method:password@host:port)
@@ -518,7 +496,7 @@ public class ShareLinkParser {
         if (atSign >= 0) {
             // SIP002: userinfo is base64, then @host:port
             String userInfoEncoded = rest.substring(0, atSign);
-            String userInfo = decodeBase64(userInfoEncoded);
+            String userInfo = decodeUserInfo(userInfoEncoded);
             int colonIndex = userInfo.indexOf(':');
             if (colonIndex < 0) {
                 throw new IllegalArgumentException("Invalid Shadowsocks userinfo format");
@@ -527,9 +505,10 @@ public class ShareLinkParser {
             password = userInfo.substring(colonIndex + 1);
 
             String hostPort = rest.substring(atSign + 1);
-            // Remove query string if present
+            // The query carries the SIP003 plugin, which the server needs.
             int queryIndex = hostPort.indexOf('?');
             if (queryIndex >= 0) {
+                query = hostPort.substring(queryIndex + 1);
                 hostPort = hostPort.substring(0, queryIndex);
             }
             // Remove trailing slash
@@ -576,8 +555,58 @@ public class ShareLinkParser {
         config.setAddress(host);
         config.setPort(port);
         config.setName(displayName(fragment, host, port));
+        applyPlugin(config, query);
 
         return config;
+    }
+
+    /**
+     * Reads SIP002 userinfo: either base64 of {@code method:password}, or that
+     * pair itself with the password percent-encoded.
+     *
+     * <p>The 2022 ciphers require the second form -- their key is base64
+     * already, and wrapping the pair in another base64 is what breaks
+     * interoperability -- and the app used to reject it outright. A base64
+     * blob never contains a colon, so the colon tells the two apart. {@code +}
+     * is left alone rather than read as a space: in a 2022 key it is a base64
+     * character, and decoding it as a space would corrupt the credential.</p>
+     */
+    private static String decodeUserInfo(String encoded) {
+        if (encoded.indexOf(':') >= 0) {
+            return URLDecoder.decode(encoded.replace("+", "%2B"), StandardCharsets.UTF_8);
+        }
+        return decodeBase64(encoded);
+    }
+
+    /**
+     * Keeps the SIP003 plugin a link names: {@code plugin=<name>;<options>},
+     * percent-encoded as one value, which sing-box takes as two fields.
+     *
+     * <p>Both are kept verbatim -- the core is what validates them. Dropping
+     * them silently was worse than refusing the link: the server answers only
+     * through its plugin, so the app reported a connected tunnel that carried
+     * nothing.</p>
+     */
+    private static void applyPlugin(ServerConfig config, String query) {
+        if (query == null || query.isBlank()) {
+            return;
+        }
+        for (String pair : query.split("&")) {
+            int eq = pair.indexOf('=');
+            if (eq < 0 || !"plugin".equalsIgnoreCase(pair.substring(0, eq))) {
+                continue;
+            }
+            String value = URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8);
+            if (value.isBlank()) {
+                return;
+            }
+            int semicolon = value.indexOf(';');
+            config.setPlugin(semicolon < 0 ? value : value.substring(0, semicolon));
+            if (semicolon >= 0 && semicolon + 1 < value.length()) {
+                config.setPluginOpts(value.substring(semicolon + 1));
+            }
+            return;
+        }
     }
 
     /**
@@ -687,7 +716,20 @@ public class ShareLinkParser {
     }
 
     private void applyTlsParams(ServerConfig config, Map<String, String> params) {
-        String security = params.getOrDefault("security", "none");
+        applyTlsParams(config, params, "none");
+    }
+
+    /**
+     * Applies the TLS and REALITY query parameters that every protocol
+     * carrying them shares.
+     *
+     * <p>{@code defaultSecurity} is what a link means when it names none: a
+     * VLESS link is plain unless it says otherwise, a Trojan link is TLS by
+     * definition.</p>
+     */
+    private void applyTlsParams(ServerConfig config, Map<String, String> params,
+                                String defaultSecurity) {
+        String security = params.getOrDefault("security", defaultSecurity);
         if ("tls".equals(security)) {
             config.getTls().setEnabled(true);
         } else if ("reality".equals(security)) {

@@ -41,6 +41,18 @@ public class ServerConfig {
     @JsonProperty("tls")
     private TlsConfig tls;
 
+    /**
+     * A Shadowsocks SIP003 plugin name, such as {@code obfs-local} or
+     * {@code v2ray-plugin}. Kept verbatim: the core validates it, and a link
+     * that names a plugin does not work without it.
+     */
+    @JsonProperty("plugin")
+    private String plugin;
+
+    /** The plugin's options, as the {@code plugin_opts} string sing-box takes. */
+    @JsonProperty("plugin_opts")
+    private String pluginOpts;
+
     @JsonProperty("active")
     private boolean active;
 
@@ -131,6 +143,22 @@ public class ServerConfig {
 
     public void setTls(TlsConfig tls) {
         this.tls = tls == null ? null : new TlsConfig(tls);
+    }
+
+    public String getPlugin() {
+        return plugin;
+    }
+
+    public void setPlugin(String plugin) {
+        this.plugin = plugin;
+    }
+
+    public String getPluginOpts() {
+        return pluginOpts;
+    }
+
+    public void setPluginOpts(String pluginOpts) {
+        this.pluginOpts = pluginOpts;
     }
 
     public boolean isActive() {

@@ -361,13 +361,17 @@ class ShareLinkParserEdgeCaseTest {
     class ShadowsocksTests {
 
         @Test
-        void plainUserinfoIsNotSupported() {
-            // SIP002 also allows plain "method:password" userinfo (used by AEAD-2022
-            // ciphers), but this parser only accepts Base64 userinfo and rejects the
-            // plain form because ':' is not a valid Base64 character.
-            assertThatThrownBy(() -> parser.parse("ss://aes-256-gcm:pass@host.example:8388#n"))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("Illegal base64 character");
+        void plainUserinfoParses() {
+            // SIP002 also allows plain "method:password" userinfo, with the
+            // password percent-encoded, and the AEAD-2022 ciphers require it.
+            // The parser used to reject that form because ':' is not a base64
+            // character; the colon is now what tells the two forms apart.
+            ServerConfig config = parser.parse("ss://aes-256-gcm:pass@host.example:8388#n");
+
+            assertThat(config.getEncryption()).isEqualTo("aes-256-gcm");
+            assertThat(config.getUuid()).isEqualTo("pass");
+            assertThat(config.getAddress()).isEqualTo("host.example");
+            assertThat(config.getPort()).isEqualTo(8388);
         }
 
         @Test

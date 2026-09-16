@@ -175,6 +175,23 @@ class ShareLinkMultiProtocolTest {
         }
 
         @Test
+        void parseTrojanKeepsTheRealityKeys() {
+            // A Trojan link can carry REALITY the same way a VLESS one does.
+            // The parser read security=reality but neither key, so the server
+            // it produced could not complete a handshake.
+            String uri = "trojan://pass@host.example:443"
+                    + "?security=reality&sni=www.example.com&fp=chrome"
+                    + "&pbk=PUBLICKEY123&sid=ab12#Name";
+
+            ServerConfig config = parser.parse(uri);
+
+            assertThat(config.getTls().isReality()).isTrue();
+            assertThat(config.getTls().getServerName()).isEqualTo("www.example.com");
+            assertThat(config.getTls().getRealityPublicKey()).isEqualTo("PUBLICKEY123");
+            assertThat(config.getTls().getRealityShortId()).isEqualTo("ab12");
+        }
+
+        @Test
         void parseTrojanDefaultsTlsEnabled() {
             String uri = "trojan://password@host.example:443#Simple";
 
@@ -291,7 +308,8 @@ class ShareLinkMultiProtocolTest {
             String userInfo = "aes-256-gcm:password";
             String encoded = Base64.getUrlEncoder().withoutPadding()
                     .encodeToString(userInfo.getBytes(StandardCharsets.UTF_8));
-            String uri = "ss://" + encoded + "@host.example:443/?plugin=obfs-local#Name";
+            String uri = "ss://" + encoded + "@host.example:443/"
+                    + "?plugin=obfs-local%3Bobfs%3Dhttp%3Bobfs-host%3Dbing.com#Name";
 
             ServerConfig config = parser.parse(uri);
 
@@ -299,6 +317,26 @@ class ShareLinkMultiProtocolTest {
             assertThat(config.getPort()).isEqualTo(443);
             assertThat(config.getEncryption()).isEqualTo("aes-256-gcm");
             assertThat(config.getUuid()).isEqualTo("password");
+            // The plugin is the point of a link that carries one: the server
+            // speaks nothing else. Dropping it left the app reporting a
+            // connected tunnel that moved no traffic.
+            assertThat(config.getPlugin()).isEqualTo("obfs-local");
+            assertThat(config.getPluginOpts()).isEqualTo("obfs=http;obfs-host=bing.com");
+        }
+
+        @Test
+        void parseSsWithPlainPercentEncodedUserInfo() {
+            // SIP002 allows the userinfo in the clear, percent-encoded, and the
+            // 2022 ciphers require it: their key is base64 already, so wrapping
+            // the pair in another base64 is what breaks interoperability.
+            String uri = "ss://2022-blake3-aes-128-gcm:L3zK%2FQ%3D%3D@host.example:8388#Name";
+
+            ServerConfig config = parser.parse(uri);
+
+            assertThat(config.getEncryption()).isEqualTo("2022-blake3-aes-128-gcm");
+            assertThat(config.getUuid()).isEqualTo("L3zK/Q==");
+            assertThat(config.getAddress()).isEqualTo("host.example");
+            assertThat(config.getPort()).isEqualTo(8388);
         }
 
         @Test
