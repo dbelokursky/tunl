@@ -798,6 +798,7 @@ public class SubscriptionService {
                     objectMapper.valueToTree(serializableSubscriptions()));
             SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(envelope));
             configStore.getPersistenceState().saved(SUBSCRIPTIONS_FILE);
+            ConfigStore.dropLegacyBackupOnceMigrated(file, objectMapper, "subscriptions");
         } catch (IOException e) {
             log.error("Failed to save subscriptions to {}", file, e);
             configStore.getPersistenceState().failed(SUBSCRIPTIONS_FILE, this::saveSubscriptions);

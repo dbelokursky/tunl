@@ -433,6 +433,7 @@ public class ConfigStore {
             envelope.set("servers", objectMapper.valueToTree(serializableServers()));
             SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(envelope));
             persistence.saved(SERVERS_FILE);
+            dropLegacyBackupOnceMigrated(file, objectMapper, "servers");
         } catch (IOException e) {
             log.error("Failed to save servers to {}", file, e);
             persistence.failed(SERVERS_FILE, this::saveServers);
@@ -618,6 +619,36 @@ public class ConfigStore {
             Files.copy(file, backup);
         } catch (IOException e) {
             log.warn("Could not back up legacy {} to {}", file.getFileName(), backup, e);
+        }
+    }
+
+    /**
+     * Removes the {@code .v0.bak} beside {@code file} once the file itself
+     * reads back in the current envelope format.
+     *
+     * <p>The backup covers the window between reading a pre-envelope file and
+     * writing the first envelope one. Past that window it is a copy of the
+     * user's credentials in the clear -- these files predate sealing -- living
+     * in the data directory for good. It goes only when the new file is really
+     * there: if the save did not land, the backup is still the only copy, so
+     * anything unexpected here keeps it.</p>
+     */
+    static void dropLegacyBackupOnceMigrated(Path file, ObjectMapper mapper, String listField) {
+        Path backup = file.resolveSibling(file.getFileName() + ".v0.bak");
+        if (!Files.exists(backup)) {
+            return;
+        }
+        try {
+            JsonNode root = mapper.readTree(file.toFile());
+            if (!root.isObject() || !root.path(listField).isArray()) {
+                return;
+            }
+            Files.delete(backup);
+            log.info("Removed {}: {} is in the current format now",
+                    backup.getFileName(), file.getFileName());
+        } catch (JacksonException | IOException e) {
+            log.warn("Kept {}: could not confirm {} migrated ({})",
+                    backup.getFileName(), file.getFileName(), e.getMessage());
         }
     }
 

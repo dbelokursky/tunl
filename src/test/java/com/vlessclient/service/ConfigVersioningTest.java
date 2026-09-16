@@ -48,9 +48,39 @@ class ConfigVersioningTest {
 
         String raw = Files.readString(tempDir.resolve("servers.json"));
         assertThat(raw).contains("\"config_version\" : 1").contains("\"servers\"");
-        // The backup still holds the pre-envelope bytes for downgrades.
-        assertThat(Files.readString(tempDir.resolve("servers.json.v0.bak")))
-                .isEqualTo(LEGACY_SERVERS);
+        // The backup covered the window between reading the old file and
+        // writing the new one. It holds credentials in the clear, from the
+        // builds before sealing, so it goes as soon as the new file is there.
+        assertThat(tempDir.resolve("servers.json.v0.bak")).doesNotExist();
+    }
+
+    /**
+     * The backup is the only copy of the old file until the new one lands, so
+     * a save that failed must not take it: disk full, a locked file, a
+     * read-only directory all end here.
+     */
+    @Test
+    void aFailedSaveKeepsTheLegacyBackup() throws Exception {
+        Files.writeString(tempDir.resolve("servers.json"), LEGACY_SERVERS);
+        ConfigStore store = store();
+        assertThat(tempDir.resolve("servers.json.v0.bak")).exists();
+
+        // A directory where the file belongs: the write cannot land.
+        Files.delete(tempDir.resolve("servers.json"));
+        Files.createDirectory(tempDir.resolve("servers.json"));
+        Files.writeString(tempDir.resolve("servers.json").resolve("blocker"), "not a file");
+
+        ServerConfig added = new ServerConfig();
+        added.setName("new");
+        added.setAddress("192.0.2.2");
+        added.setPort(443);
+        added.setUuid("u2");
+        store.addServer(added);
+
+        assertThat(store.getPersistenceState().failedFiles()).contains("servers.json");
+        assertThat(tempDir.resolve("servers.json.v0.bak"))
+                .as("the only copy of the old file, while the new one is not there")
+                .exists();
     }
 
     @Test
@@ -212,5 +242,7 @@ class ConfigVersioningTest {
         service.saveSubscriptions();
         String raw = Files.readString(tempDir.resolve("subscriptions.json"));
         assertThat(raw).contains("\"config_version\" : 1").contains("\"subscriptions\"");
+        // Subscription URLs carry the account token, so the same applies here.
+        assertThat(tempDir.resolve("subscriptions.json.v0.bak")).doesNotExist();
     }
 }
