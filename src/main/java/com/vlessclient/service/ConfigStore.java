@@ -26,7 +26,6 @@ import javafx.collections.ObservableList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.SerializationFeature;
@@ -555,10 +554,25 @@ public class ConfigStore {
                 log.error("servers.json has no readable server list; leaving list empty");
                 return;
             }
-            List<ServerConfig> loaded = objectMapper.convertValue(
-                    items, new TypeReference<List<ServerConfig>>() {});
+            List<ServerConfig> loaded = new ArrayList<>();
+            int unreadable = 0;
+            for (JsonNode item : items) {
+                try {
+                    loaded.add(objectMapper.treeToValue(item, ServerConfig.class));
+                } catch (JacksonException e) {
+                    // Per entry, not per file: a protocol or transport a newer
+                    // build wrote used to fail the whole list, quarantine
+                    // servers.json and leave a downgraded install with nothing.
+                    unreadable++;
+                    log.warn("Skipping a server entry this build cannot read: {}",
+                            e.getMessage());
+                }
+            }
             loaded.forEach(this::unsealInPlace);
             servers.addAll(loaded);
+            if (unreadable > 0) {
+                persistence.couldNotRead(SERVERS_FILE, unreadable);
+            }
             log.info("Loaded {} servers from {}", servers.size(), file);
         } catch (JacksonException e) {
             log.error("Failed to load servers from {}", file, e);
