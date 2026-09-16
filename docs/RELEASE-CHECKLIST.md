@@ -37,11 +37,15 @@ On a pushed `v*` tag:
 - **MSI install smoke** (`scripts/windows-msi-smoke.ps1`): installs and
   uninstalls the MSI on the runner and checks its version, runtime, embedded
   core and shortcut.
-- **Updater signatures** (`sign-release`): an Ed25519 signature over each
-  installer's `sha256:<hex>` digest, verified against the public key and
-  uploaded as `<asset>.sig`. `RELEASE_SIGNING_KEY` is required — the in-app
-  updater refuses assets without a valid signature, so a missing key fails
-  the release rather than shipping one the updater cannot install.
+- **Updater signatures** (`sign-release`): two Ed25519 signatures per
+  installer, each verified against the public key before upload.
+  `<asset>.sig` covers the `sha256:<hex>` digest alone, which is what builds
+  from before September 2026 check; `<asset>.manifest.sig` covers the version,
+  the asset's file name and that digest together, which is what current builds
+  require — a signature over the digest alone says nothing about which release
+  the bytes were published as. `RELEASE_SIGNING_KEY` is required: the in-app
+  updater refuses assets without a valid signature, so a missing key fails the
+  release rather than shipping one the updater cannot install.
 - **Cask and PKGBUILD** (`update-packaging`): `scripts/update-packaging.sh`
   stamps the version and asset checksums into `packaging/`'s templates and
   uploads `tunl.rb`, `PKGBUILD` and `.SRCINFO` (as `default.SRCINFO`) into the
@@ -50,8 +54,9 @@ On a pushed `v*` tag:
 - **Manifest check and publish** (`publish-release`): the tag must have
   exactly one release object, the draft `create-draft` made, and
   `gh release view` must resolve the tag to it; it must still be a draft, and
-  its assets must be exactly the four installers, their four `.sig` files and
-  the three packaging files, all fully uploaded. Last, the tag must still be
+  its assets must be exactly the four installers, their four `.sig` files,
+  their four `.manifest.sig` files and the three packaging files — fifteen in
+  all, every one fully uploaded. Last, the tag must still be
   the tag object the run took its title and notes from, on the commit it
   built. Only then is that draft made public, by its id. A failed job leaves a
   draft to diagnose, never a partial public release.
@@ -150,7 +155,8 @@ On a published release:
       the new one (it compares `latest` from the GitHub Releases API to the
       running version) and installs it.
 - [ ] **Downloads** — all four installers (DMG / MSI / amd64 DEB / arm64 DEB)
-      and their `.sig` files download from the Releases page.
+      and both signatures of each (`.sig` and `.manifest.sig`) download from
+      the Releases page.
 
 ## Windows (manual desktop/network coverage)
 
