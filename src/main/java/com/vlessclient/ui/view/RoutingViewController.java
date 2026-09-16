@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
@@ -300,25 +301,19 @@ public class RoutingViewController {
 
         dialog.getDialogPane().setContent(grid);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        // OK waits for a value. It used to be checked after the dialog closed,
+        // which put up a warning and dropped the type and action chosen.
+        dialog.getDialogPane().lookupButton(ButtonType.OK).disableProperty().bind(
+                Bindings.createBooleanBinding(() -> valueField.getText().isBlank(),
+                        valueField.textProperty()));
         dialog.initOwner(ownerWindow());
 
         Platform.runLater(valueField::requestFocus);
 
         Optional<ButtonType> result = dialog.showAndWait();
         if (result.isPresent() && result.get() == ButtonType.OK) {
-            String value = valueField.getText().trim();
-            if (value.isEmpty()) {
-                Alert alert = new Alert(Alert.AlertType.WARNING);
-                alert.setTitle(I18n.get("routing.rule.invalid.title"));
-                alert.setHeaderText(
-                        I18n.get("error.field.required", I18n.get("routing.rule.value")));
-                alert.initOwner(ownerWindow());
-                alert.showAndWait();
-                return;
-            }
-
             RoutingRule rule = new RoutingRule(
-                    typeCombo.getValue(), value, actionCombo.getValue());
+                    typeCombo.getValue(), valueField.getText().trim(), actionCombo.getValue());
             routingService.addRule(rule);
             loadRules();
         }
