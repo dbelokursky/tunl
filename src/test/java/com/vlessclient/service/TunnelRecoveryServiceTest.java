@@ -205,6 +205,53 @@ class TunnelRecoveryServiceTest {
         assertThat(scheduler.jobs).isEmpty();
     }
 
+    /**
+     * A configuration the core refuses is refused again by every retry. The
+     * refusal used to be logged and the same restart tried again at every
+     * backoff step, for as long as the app ran.
+     */
+    @Test
+    void aConfigurationTheCoreRefusesIsNotRetried() {
+        recovery.close();
+        ManualScheduler other = new ManualScheduler();
+        AtomicInteger tries = new AtomicInteger();
+        recovery = new TunnelRecoveryService(() -> settings, guard -> {
+            tries.incrementAndGet();
+            throw new ConfigRejectedException("unknown field \"download_detour\"");
+        }, () -> false, other);
+        recovery.connectionRequested();
+        recovery.onConnectionState(ConnectionState.ERROR);
+
+        other.jobs.getFirst().run();
+        recovery.onConnectionState(ConnectionState.ERROR);
+        recovery.onHealth(TunnelHealth.BROKEN);
+
+        assertThat(tries).as("restarts tried").hasValue(1);
+        assertThat(other.jobs)
+                .as("retries scheduled once the core refused the configuration")
+                .hasSize(1);
+    }
+
+    /** The refusal stays on record until the user's next request, which clears it. */
+    @Test
+    void aRefusalIsKeptAsTheReasonUntilTheUserConnectsAgain() {
+        recovery.close();
+        ManualScheduler other = new ManualScheduler();
+        ConfigRejectedException refusal =
+                new ConfigRejectedException("unknown field \"download_detour\"");
+        recovery = new TunnelRecoveryService(() -> settings, guard -> {
+            throw refusal;
+        }, () -> false, other);
+        recovery.connectionRequested();
+        recovery.onConnectionState(ConnectionState.ERROR);
+        other.jobs.getFirst().run();
+
+        assertThat(recovery.stopReason()).as("why recovery stopped").isEqualTo(refusal.getMessage());
+
+        recovery.connectionRequested();
+        assertThat(recovery.stopReason()).as("the reason once the user connects again").isNull();
+    }
+
     private static final class ManualScheduler extends ScheduledThreadPoolExecutor {
         final List<Job> jobs = new ArrayList<>();
 

@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
 import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
 import javafx.geometry.Pos;
@@ -183,7 +184,7 @@ public class SubscriptionsViewController implements ViewShownAware {
     /**
      * The add/edit form, prefilled with {@code name} and {@code url}.
      *
-     * @return what the user entered, or empty when cancelled or incomplete
+     * @return what the user entered, or empty when cancelled
      */
     private Optional<Entry> showSubscriptionDialog(String title, String header,
                                                    String name, String url) {
@@ -241,6 +242,13 @@ public class SubscriptionsViewController implements ViewShownAware {
 
         dialog.getDialogPane().setContent(grid);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        // OK waits for both fields. They used to be checked after the dialog
+        // closed: OK on an incomplete form put up a warning and dropped what
+        // had been typed, a pasted URL included.
+        dialog.getDialogPane().lookupButton(ButtonType.OK).disableProperty().bind(
+                Bindings.createBooleanBinding(
+                        () -> nameField.getText().isBlank() || urlField.getText().isBlank(),
+                        nameField.textProperty(), urlField.textProperty()));
         dialog.initOwner(ownerWindow());
 
         Platform.runLater(nameField::requestFocus);
@@ -249,17 +257,7 @@ public class SubscriptionsViewController implements ViewShownAware {
         if (result.isEmpty() || result.get() != ButtonType.OK) {
             return Optional.empty();
         }
-        String enteredName = nameField.getText().trim();
-        String enteredUrl = urlField.getText().trim();
-        if (enteredName.isEmpty() || enteredUrl.isEmpty()) {
-            Alert alert = new Alert(Alert.AlertType.WARNING);
-            alert.setTitle(I18n.get("subscriptions.invalid.input"));
-            alert.setHeaderText(I18n.get("subscriptions.name.url.required"));
-            alert.initOwner(ownerWindow());
-            alert.showAndWait();
-            return Optional.empty();
-        }
-        return Optional.of(new Entry(enteredName, enteredUrl));
+        return Optional.of(new Entry(nameField.getText().trim(), urlField.getText().trim()));
     }
 
     // Both refreshes ran on a bare thread: an exception ended it without a

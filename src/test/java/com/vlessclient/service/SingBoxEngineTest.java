@@ -14,7 +14,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.CleanupMode;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.io.InterruptedIOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
@@ -421,6 +423,69 @@ class SingBoxEngineTest {
 
         awaitMonitorsFinished(monitorsBefore);
         assertThat(guardCalls).isEmpty();
+    }
+
+    /**
+     * The old core's monitor decided that no newer session had started, then
+     * cleared the OS proxy through slow platform commands, all without the
+     * lifecycle lock. A reconnect could start its core and register the same
+     * proxy in between, and the clear then took the new session's proxy away.
+     */
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void aStaleMonitorClearsTheProxyBeforeTheNextCoreStarts(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+        CountDownLatch clearing = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<Boolean> coreRanDuringTheClear = new AtomicReference<>();
+        CountDownLatch cleared = new CountDownLatch(1);
+        engine.setSystemProxyGuard((host, port) -> {
+            if (clearing.getCount() == 0) {
+                return;
+            }
+            clearing.countDown();
+            try {
+                release.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            // The moment a real guard switches the proxy off.
+            coreRanDuringTheClear.set(engine.isRunning());
+            cleared.countDown();
+        });
+        engine.start(SET_SYSTEM_PROXY_CONFIG, ProxyMode.SYSTEM_PROXY);
+        engine.stop();
+        assertThat(clearing.await(10, TimeUnit.SECONDS))
+                .as("the old core's monitor clears its proxy").isTrue();
+
+        CountDownLatch nextStarted = new CountDownLatch(1);
+        Thread reconnect = new Thread(() -> {
+            try {
+                engine.start(SET_SYSTEM_PROXY_CONFIG, ProxyMode.SYSTEM_PROXY);
+                nextStarted.countDown();
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }, "reconnect");
+        reconnect.start();
+        try {
+            // Long enough for a start that does not wait to launch its core.
+            nextStarted.await(2, TimeUnit.SECONDS);
+        } finally {
+            release.countDown();
+        }
+        // The record is made on the monitor's thread once it is let go.
+        assertThat(cleared.await(10, TimeUnit.SECONDS))
+                .as("the old monitor finishes its clear").isTrue();
+        reconnect.join(Duration.ofSeconds(10));
+        try {
+            assertThat(coreRanDuringTheClear.get())
+                    .as("a new core was running while the old monitor cleared the proxy")
+                    .isFalse();
+            assertThat(engine.isRunning()).as("the reconnect still starts").isTrue();
+        } finally {
+            engine.stop();
+        }
     }
 
     @Test
