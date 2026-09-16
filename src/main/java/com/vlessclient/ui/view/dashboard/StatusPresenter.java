@@ -55,6 +55,9 @@ public class StatusPresenter {
     private final Supplier<SingBoxEngine> engine;
     private final Runnable refreshConnectAvailability;
 
+    /** The state last painted, so a language switch can paint it again. */
+    private ConnectionState lastState;
+
     /**
      * The engine's last failure text, kept so a repaint in the ERROR state
      * does not wipe it. It used to be recognised by its English prefix, which
@@ -101,6 +104,11 @@ public class StatusPresenter {
         this.health = health;
         this.engine = engine;
         this.refreshConnectAvailability = refreshConnectAvailability;
+
+        // The card's texts are set, not bound, so switching the language left
+        // the title and subtitle in the old one until the state next moved --
+        // and on a healthy tunnel nothing moves for hours.
+        I18n.localeProperty().addListener((observable, oldLocale, newLocale) -> repaintWording());
     }
 
     private ServerConfig routed() {
@@ -115,6 +123,7 @@ public class StatusPresenter {
      * @param state the engine's connection state
      */
     public void update(ConnectionState state) {
+        lastState = state;
         TunnelStatus status = TunnelStatus.of(state, currentHealth());
 
         paintStatusIndicator(status, state);
@@ -263,30 +272,51 @@ public class StatusPresenter {
     }
 
     private void paintConnectButton(ConnectionState state) {
+        connectButton.setText(connectButtonText(state));
+        connectButton.setDisable(false);
         switch (state) {
             case CONNECTED -> {
-                connectButton.setText(I18n.get("button.disconnect"));
-                connectButton.setDisable(false);
                 connectButton.getStyleClass().removeAll("connect-button");
                 connectButton.getStyleClass().add("disconnect-button");
             }
             case CONNECTING -> {
-                connectButton.setText(I18n.get("button.cancel"));
-                connectButton.setDisable(false);
-            }
-            case ERROR -> {
-                connectButton.setText(I18n.get("button.retry"));
-                connectButton.setDisable(false);
-                connectButton.getStyleClass().removeAll("disconnect-button");
-                connectButton.getStyleClass().add("connect-button");
+                // Cancelling keeps whatever the previous state painted.
             }
             default -> {
-                connectButton.setText(I18n.get("button.connect"));
-                connectButton.setDisable(false);
                 connectButton.getStyleClass().removeAll("disconnect-button");
                 connectButton.getStyleClass().add("connect-button");
             }
         }
+    }
+
+    private static String connectButtonText(ConnectionState state) {
+        return switch (state) {
+            case CONNECTED -> I18n.get("button.disconnect");
+            case CONNECTING -> I18n.get("button.cancel");
+            case ERROR -> I18n.get("button.retry");
+            default -> I18n.get("button.connect");
+        };
+    }
+
+    /**
+     * Re-renders the card's wording in the current language, for the state it
+     * last painted.
+     *
+     * <p>Text only. Painting the whole card again would set the same style
+     * classes a second time, and re-applying a style class re-runs the CSS
+     * lookups for that node -- work with nothing to show for it, and enough
+     * to make a scene without the theme's variables emit warnings.</p>
+     */
+    private void repaintWording() {
+        if (lastState == null) {
+            return;
+        }
+        TunnelStatus status = TunnelStatus.of(lastState, currentHealth());
+        if (statusTitle != null) {
+            statusTitle.setText(titleFor(status));
+        }
+        paintStatusSubtitle(status);
+        connectButton.setText(connectButtonText(lastState));
     }
 
     /**

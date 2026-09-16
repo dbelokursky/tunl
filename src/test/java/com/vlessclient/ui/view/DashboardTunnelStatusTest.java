@@ -11,6 +11,7 @@ import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.testing.UiTest;
 import java.nio.file.Path;
+import java.util.Locale;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.fxml.FXMLLoader;
@@ -120,6 +121,28 @@ public class DashboardTunnelStatusTest extends ApplicationTest {
 
     private Circle statusCircle() {
         return lookup("#statusCircle").query();
+    }
+
+    /**
+     * Switching the language repaints the card. Its title is set once per
+     * state change rather than bound, so a switch left it in the language the
+     * app started in until something else moved the state -- and on a healthy
+     * tunnel nothing does, so it stayed wrong for the whole session.
+     */
+    @Test
+    void switchingTheLanguageRepaintsTheCard() {
+        showTunnel(ConnectionState.CONNECTED, TunnelHealth.HEALTHY);
+        String english = titleText();
+
+        try {
+            interact(() -> I18n.setLocale(Locale.of("ru")));
+
+            assertThat(titleText())
+                    .isEqualTo(I18n.get("state.connected"))
+                    .isNotEqualTo(english);
+        } finally {
+            interact(() -> I18n.setLocale(Locale.ENGLISH));
+        }
     }
 
     @Test
