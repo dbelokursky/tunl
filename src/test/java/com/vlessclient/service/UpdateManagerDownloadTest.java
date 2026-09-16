@@ -117,7 +117,8 @@ class UpdateManagerDownloadTest {
         byte[] payload = "a genuine-looking installer".getBytes(StandardCharsets.UTF_8);
         RoutingHttpClient client = new RoutingHttpClient(Map.of(
                 URL, new Canned(200, payload),
-                URL + ReleaseSignature.SIGNATURE_SUFFIX, new Canned(404, new byte[0])));
+                URL + ReleaseSignature.MANIFEST_SIGNATURE_SUFFIX,
+                new Canned(404, new byte[0])));
 
         Path result = managerFor(dir, client).fetchAndStage(URL, sha256Of(payload));
 
@@ -127,6 +128,30 @@ class UpdateManagerDownloadTest {
                 .isEmpty();
     }
 
+    /**
+     * The signature covered the digest and nothing else, so anyone who could
+     * publish a release without holding the key could put an old, still-signed
+     * installer under a new version tag: the digest matched, the signature
+     * verified, and installs "updated" backwards into a build whose holes the
+     * one they ran had already fixed. The download must ask for the signature
+     * that covers the version and the asset as well.
+     */
+    @Test
+    void theDownloadRequiresTheSignatureThatCoversTheVersion(@TempDir Path dir)
+            throws Exception {
+        byte[] payload = "a genuine-looking installer".getBytes(StandardCharsets.UTF_8);
+        RoutingHttpClient client = new RoutingHttpClient(Map.of(
+                URL, new Canned(200, payload),
+                URL + ReleaseSignature.SIGNATURE_SUFFIX, new Canned(404, new byte[0]),
+                URL + ".manifest.sig", new Canned(404, new byte[0])));
+
+        managerFor(dir, client).fetchAndStage(URL, sha256Of(payload));
+
+        assertThat(client.requests())
+                .as("the digest-only signature is not enough to authorise a version")
+                .contains(URL + ".manifest.sig");
+    }
+
     @Test
     void aWrongSignatureDeletesTheInstaller(@TempDir Path dir) throws Exception {
         byte[] payload = "a genuine-looking installer".getBytes(StandardCharsets.UTF_8);
@@ -134,7 +159,7 @@ class UpdateManagerDownloadTest {
                 .encodeToString(new byte[64]);
         RoutingHttpClient client = new RoutingHttpClient(Map.of(
                 URL, new Canned(200, payload),
-                URL + ReleaseSignature.SIGNATURE_SUFFIX,
+                URL + ReleaseSignature.MANIFEST_SIGNATURE_SUFFIX,
                 new Canned(200, notASignature.getBytes(StandardCharsets.UTF_8))));
 
         Path result = managerFor(dir, client).fetchAndStage(URL, sha256Of(payload));
@@ -158,6 +183,11 @@ class UpdateManagerDownloadTest {
 
         RoutingHttpClient(Map<String, Canned> replies) {
             this.replies = replies;
+        }
+
+        /** Every URI this client was asked for, in order. */
+        java.util.List<String> requests() {
+            return java.util.List.copyOf(requests);
         }
 
         @Override

@@ -11,7 +11,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Optional;
-import java.util.function.BiPredicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.core.JacksonException;
@@ -38,7 +37,7 @@ public final class UpdateStaging {
     private static final String MARKER_NAME = "pending.json";
 
     private final Path dir;
-    private final BiPredicate<String, String> signatureCheck;
+    private final ReleaseCheck signatureCheck;
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
     /** Stages updates under the per-user data directory. */
@@ -47,7 +46,19 @@ public final class UpdateStaging {
     }
 
     UpdateStaging(Path dir) {
-        this(dir, ReleaseSignature::verifyDigest);
+        this(dir, ReleaseSignature::verifyRelease);
+    }
+
+    /**
+     * How a staged update's signature is checked. It covers the version and
+     * the asset name as well as the digest, so a signature made for one
+     * release cannot authorise another.
+     */
+    @FunctionalInterface
+    interface ReleaseCheck {
+
+        /** Whether {@code signatureBase64} authorises this asset of this version. */
+        boolean test(String version, String assetName, String digest, String signatureBase64);
     }
 
     /**
@@ -56,7 +67,7 @@ public final class UpdateStaging {
      * they inject the verdict. The case that matters most needs no key and
      * uses the real check: a forged signature must be rejected.
      */
-    UpdateStaging(Path dir, BiPredicate<String, String> signatureCheck) {
+    UpdateStaging(Path dir, ReleaseCheck signatureCheck) {
         this.dir = dir;
         this.signatureCheck = signatureCheck;
     }
@@ -196,6 +207,16 @@ public final class UpdateStaging {
     }
 
     /**
+     * The installer's file name, as a release names that asset. A path with no
+     * file name -- a filesystem root -- verifies against nothing, which is the
+     * right answer for a staged update that cannot say what it is.
+     */
+    private static String assetNameOf(PendingUpdate update) {
+        Path name = update.installer() == null ? null : update.installer().getFileName();
+        return name == null ? "" : name.toString();
+    }
+
+    /**
      * Re-checks the staged installer against the digest recorded with it.
      *
      * <p>The bytes were already verified when they were downloaded. They are
@@ -211,7 +232,8 @@ public final class UpdateStaging {
         // hash comparison below only proves the file matches the marker, and
         // the marker is as writable as the installer next to it.
         if (ReleaseSignature.enforced()
-                && !signatureCheck.test(update.digest(), stagedSignature())) {
+                && !signatureCheck.test(update.version(), assetNameOf(update),
+                        update.digest(), stagedSignature())) {
             log.error("Staged update {} has no valid release signature for its "
                     + "digest; refusing to run it", update.version());
             return false;

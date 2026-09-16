@@ -457,7 +457,8 @@ public class UpdateManager {
 
             String signature = "";
             if (ReleaseSignature.enforced()) {
-                signature = fetchValidSignature(url, actualDigest);
+                signature = fetchValidSignature(url, versionFromReleaseUrl(url),
+                        extractFileName(url), actualDigest);
                 if (signature == null) {
                     // Same rule as a digest mismatch: an installer that fails a
                     // check must not be left where it could still be run.
@@ -510,8 +511,9 @@ public class UpdateManager {
      * @param digest the {@code sha256:<hex>} of the downloaded bytes
      * @return true when a valid signature was found
      */
-    private String fetchValidSignature(String url, String digest) {
-        String signatureUrl = url + ReleaseSignature.SIGNATURE_SUFFIX;
+    private String fetchValidSignature(String url, String version, String assetName,
+                                       String digest) {
+        String signatureUrl = url + ReleaseSignature.MANIFEST_SIGNATURE_SUFFIX;
         try {
             HttpResponse<String> response = httpClient.send(
                     HttpRequest.newBuilder()
@@ -526,7 +528,8 @@ public class UpdateManager {
                         signatureUrl, response.statusCode());
                 return null;
             }
-            if (!ReleaseSignature.verifyDigest(digest, response.body())) {
+            if (!ReleaseSignature.verifyRelease(version, assetName, digest,
+                    response.body())) {
                 log.error("Update rejected: signature does not match {}", url);
                 return null;
             }

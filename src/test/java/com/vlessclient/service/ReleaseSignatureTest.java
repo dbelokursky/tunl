@@ -46,6 +46,26 @@ class ReleaseSignatureTest {
         return Base64.getEncoder().encodeToString(signer.sign());
     }
 
+    /**
+     * A signature covers the release it was made for. Over the digest alone it
+     * said only "these bytes came from the publisher": an old, still-signed
+     * installer could be republished under a new version, the digest would
+     * match, the signature would verify, and installs would move backwards.
+     */
+    @Test
+    void aSignatureIsBoundToItsVersionAndAsset() throws Exception {
+        String message = ReleaseSignature.manifestFor("1.19.1", "tunl_1.19.1.dmg", DIGEST);
+        String signature = sign(message);
+
+        assertThat(ReleaseSignature.verify(publicKeyBase64, message, signature)).isTrue();
+        assertThat(ReleaseSignature.verify(publicKeyBase64,
+                ReleaseSignature.manifestFor("99.0.0", "tunl_1.19.1.dmg", DIGEST), signature))
+                .as("the same bytes offered as a newer release").isFalse();
+        assertThat(ReleaseSignature.verify(publicKeyBase64,
+                ReleaseSignature.manifestFor("1.19.1", "tunl_1.19.1.msi", DIGEST), signature))
+                .as("the same version, a different asset").isFalse();
+    }
+
     @Test
     void acceptsASignatureOverTheDigestItWasMadeFor() throws Exception {
         assertThat(ReleaseSignature.verify(publicKeyBase64, DIGEST, sign(DIGEST))).isTrue();
