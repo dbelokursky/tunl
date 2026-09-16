@@ -653,6 +653,28 @@ class HealthCheckCoordinatorTest {
     }
 
     /**
+     * Every row has a "✕", and a symbol gave a screen reader nothing to read.
+     * Each names the service it removes, and Tab reaches it like any other
+     * button.
+     */
+    @Test
+    void eachRemoveButtonNamesItsServiceAndTakesTheFocus() throws Exception {
+        healthSettings(false,
+                new HealthCheckTarget("a", "https://a"), new HealthCheckTarget("b", "https://b"));
+        HealthCheckCoordinator coordinator = coordinatorWith(new EchoChecker());
+        connectAndCheck(coordinator);
+
+        assertThat(removeButtons())
+                .extracting(Button::getAccessibleText)
+                .as("the names a screen reader reads for the rows' remove buttons")
+                .containsExactly(I18n.get("health.target.remove.named", "a"),
+                        I18n.get("health.target.remove.named", "b"));
+        assertThat(removeButtons())
+                .as("whether Tab reaches each remove button")
+                .allMatch(Button::isFocusTraversable);
+    }
+
+    /**
      * The dashboard is cached, so another page takes the card out of the scene
      * while the probes go on. Their verdicts still reach the rest of the app;
      * the card shows the latest of them once it is back.

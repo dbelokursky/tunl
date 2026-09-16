@@ -2,6 +2,7 @@ package com.vlessclient.ui.view;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ServerConfig;
@@ -12,10 +13,15 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import javafx.fxml.FXMLLoader;
+import javafx.scene.AccessibleAction;
+import javafx.scene.AccessibleRole;
+import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.ButtonBase;
 import javafx.scene.control.Label;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
@@ -206,6 +212,41 @@ public class DashboardTrafficHistoryTest extends ApplicationTest {
                 .as("the panel reads the history; deleting it is a Settings action")
                 .filteredOn(ButtonBase.class::isInstance)
                 .isEmpty();
+    }
+
+    /**
+     * The session total is the one way into the history, and it answered the
+     * pointer only. It takes the focus, is announced as a button with a hint,
+     * and Enter, Space and a screen reader's press open and close the panel.
+     */
+    @Test
+    void theSessionTotalOpensTheHistoryFromTheKeyboardAndForAScreenReader() {
+        Region panel = lookup("#trafficHistoryPanel").query();
+        Label total = lookup("#sessionTotalLabel").query();
+
+        assertThat(total.isFocusTraversable())
+                .as("whether Tab reaches the session total")
+                .isTrue();
+        assertThat(total.getAccessibleRole())
+                .as("what a screen reader announces it as")
+                .isEqualTo(AccessibleRole.BUTTON);
+        assertThat(total.getAccessibleHelp())
+                .as("the hint a screen reader reads for it")
+                .isEqualTo(I18n.get("dashboard.traffic.history.help"));
+
+        press(total, KeyCode.ENTER);
+        assertThat(panel.isVisible()).as("the panel after Enter").isTrue();
+        press(total, KeyCode.SPACE);
+        assertThat(panel.isVisible()).as("the panel after Space").isFalse();
+        interact(() -> total.executeAccessibleAction(AccessibleAction.FIRE));
+        WaitForAsyncUtils.waitForFxEvents();
+        assertThat(panel.isVisible()).as("the panel after a screen reader's press").isTrue();
+    }
+
+    private void press(Node target, KeyCode key) {
+        interact(() -> target.fireEvent(
+                new KeyEvent(KeyEvent.KEY_PRESSED, "", "", key, false, false, false, false)));
+        WaitForAsyncUtils.waitForFxEvents();
     }
 
     private static ServerConfig server() {
