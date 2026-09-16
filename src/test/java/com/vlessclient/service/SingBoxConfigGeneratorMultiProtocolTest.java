@@ -245,6 +245,24 @@ class SingBoxConfigGeneratorMultiProtocolTest {
     }
 
     @Test
+    void shadowsocks_carriesThePluginToTheCore() throws Exception {
+        ServerConfig server = new ServerConfig();
+        server.setProtocol(Protocol.SHADOWSOCKS);
+        server.setAddress("ss.example.com");
+        server.setPort(8388);
+        server.setUuid("ss-password-123");
+        server.setEncryption("aes-256-gcm");
+        server.setPlugin("obfs-local");
+        server.setPluginOpts("obfs=http;obfs-host=bing.com");
+
+        JsonNode proxy = proxyOutbound(server);
+
+        assertThat(proxy.get("plugin").asString()).isEqualTo("obfs-local");
+        assertThat(proxy.get("plugin_opts").asString())
+                .isEqualTo("obfs=http;obfs-host=bing.com");
+    }
+
+    @Test
     void shadowsocks_noTlsSection() throws Exception {
         ServerConfig server = new ServerConfig();
         server.setProtocol(Protocol.SHADOWSOCKS);

@@ -191,6 +191,15 @@ public class ShareLinkExporter {
         sb.append(config.getAddress());
         sb.append(":");
         sb.append(config.getPort());
+        // The plugin goes back into the link: exporting without it produced a
+        // link that looked fine and connected to nothing.
+        if (config.getPlugin() != null && !config.getPlugin().isBlank()) {
+            String plugin = config.getPlugin();
+            if (config.getPluginOpts() != null && !config.getPluginOpts().isBlank()) {
+                plugin = plugin + ";" + config.getPluginOpts();
+            }
+            sb.append("/?plugin=").append(URLEncoder.encode(plugin, StandardCharsets.UTF_8));
+        }
 
         String name = config.getName();
         if (name != null && !name.isBlank()) {
