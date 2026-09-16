@@ -40,7 +40,7 @@ public final class WireguardEndpointBuilder {
 
         if (server.getFlow() != null && !server.getFlow().isBlank()) {
             ArrayNode address = mapper.createArrayNode();
-            address.add(server.getFlow().trim());
+            address.add(CoreSettings.interfaceAddress(server.getFlow().trim()));
             endpoint.set("address", address);
         }
 

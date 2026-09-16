@@ -36,6 +36,8 @@ import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.function.Supplier;
 import javafx.application.Platform;
+import javafx.collections.ObservableList;
+import javafx.collections.transformation.FilteredList;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
 import javafx.scene.Scene;
@@ -238,19 +240,6 @@ public class ViewDialogThemeTest extends ApplicationTest {
     }
 
     @Test
-    void theWarningAboutAnEmptyRule() {
-        ServiceLocator.register(RoutingService.class, TestRoutingServices.at(freshDir("routing")));
-        mount("RoutingView", "dark");
-        DialogPane form = open(button("#addRuleButton")::fire);
-
-        DialogPane warning = open(((Button) form.lookupButton(ButtonType.OK))::fire);
-
-        assertThat(warning.getHeaderText())
-                .isEqualTo(I18n.get("error.field.required", I18n.get("routing.rule.value")));
-        assertBelongsToTheWindow(warning, "dark");
-    }
-
-    @Test
     void theRuleDeleteConfirmation() {
         RoutingService routing = TestRoutingServices.at(freshDir("routing"));
         routing.addRule(new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "example.com",
@@ -283,20 +272,6 @@ public class ViewDialogThemeTest extends ApplicationTest {
                 .as("the values typed and the whole warning")
                 .contains("Provider", "http://provider.example/sub",
                         I18n.get("subscriptions.http.warning"));
-    }
-
-    @Test
-    void theWarningAboutAnIncompleteSubscription() {
-        ServiceLocator.register(SubscriptionService.class,
-                TestSubscriptionServices.quiet(freshDir("subscriptions")));
-        mount("SubscriptionsView", "dark");
-        DialogPane form = open(button("#addSubscriptionButton")::fire);
-
-        DialogPane warning = open(((Button) form.lookupButton(ButtonType.OK))::fire);
-
-        assertThat(warning.getHeaderText())
-                .isEqualTo(I18n.get("subscriptions.name.url.required"));
-        assertBelongsToTheWindow(warning, "dark");
     }
 
     @Test
@@ -389,6 +364,41 @@ public class ViewDialogThemeTest extends ApplicationTest {
         assertThat(confirm.getHeaderText())
                 .isEqualTo(I18n.get("settings.traffic.history.clear.confirm"));
         assertBelongsToTheWindow(confirm, "dark");
+    }
+
+    @Test
+    void theTokenRegenerationConfirmation() {
+        mount("SettingsView", "dark");
+        Button regenerate = lookup("#mcpRegenButton").query();
+
+        DialogPane confirm = open(regenerate::fire);
+
+        assertThat(confirm.getHeaderText())
+                .isEqualTo(I18n.get("settings.mcp.regenerate.confirm"));
+        assertBelongsToTheWindow(confirm, "dark");
+    }
+
+    // ===== Logs =====
+
+    @Test
+    void theClearLogsConfirmation() {
+        mount("LogsView", "dark");
+        ListView<String> list = lookup("#logListView").query();
+        Await.until("the log list to be live",
+                () -> onFx(() -> list.getItems() instanceof FilteredList), PATIENCE);
+        interact(() -> logSource(list).add("INFO[0000] sing-box started"));
+        Button clear = lookup("#clearButton").query();
+
+        DialogPane confirm = open(clear::fire);
+
+        assertThat(confirm.getHeaderText()).isEqualTo(I18n.get("logs.clear.confirm"));
+        assertBelongsToTheWindow(confirm, "dark");
+    }
+
+    /** The log's own list, behind the view's filtered one. */
+    @SuppressWarnings("unchecked")
+    private static ObservableList<String> logSource(ListView<String> list) {
+        return (ObservableList<String>) ((FilteredList<String>) list.getItems()).getSource();
     }
 
     // ===== Opening and reading dialogs =====

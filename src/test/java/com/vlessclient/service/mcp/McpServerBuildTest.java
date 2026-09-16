@@ -33,6 +33,8 @@ class McpServerBuildTest {
     void setUp() {
         control = new FakeAppControlService();
         ConfigStore store = new ConfigStore(tempDir);
+        // These tests are about the tools, so they turn on what a new install leaves off.
+        store.getSettings().setMcpAllowMutations(true);
         service = new McpServerService(store, control);
     }
 
@@ -84,6 +86,25 @@ class McpServerBuildTest {
         tools.forEach(t -> names.add(t.path("name").asString()));
         assertThat(names).contains("get_status").doesNotContain("connect", "add_server",
                 "delete_server");
+    }
+
+    /**
+     * An agent can be steered by what it reads, and the change tools let it add
+     * a server and send traffic through it, in TUN mode too: the confirm it has
+     * to pass is one it supplies itself. A new install therefore offers only the
+     * read tools until the user allows configuration changes.
+     */
+    @Test
+    void buildServer_offersOnlyReadToolsUntilTheUserAllowsChanges() {
+        McpServerService fresh = new McpServerService(
+                new ConfigStore(tempDir.resolve("fresh-install")), control);
+
+        JsonNode tools = call(fresh.buildServer(), "tools/list", null)
+                .path("result").path("tools");
+        List<String> names = new ArrayList<>();
+        tools.forEach(t -> names.add(t.path("name").asString()));
+        assertThat(names).contains("get_status", "list_servers")
+                .doesNotContain("connect", "add_server", "set_setting", "delete_server");
     }
 
     @Test

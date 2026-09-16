@@ -42,10 +42,11 @@ public final class MacTunLauncher implements TunLauncher {
             }
         }
 
-        Process process = PrivilegeHelper.isConfigured(binary)
+        boolean withoutPrompt = PrivilegeHelper.isConfigured(binary);
+        Process process = withoutPrompt
                 ? startViaSudoNoPassword(binary, configFile, stopSignalFile)
                 : startViaOsascriptPrompt(binary, configFile, stopSignalFile);
-        return new Launched(process, stopSignalFile);
+        return new Launched(process, stopSignalFile, !withoutPrompt);
     }
 
     /**
@@ -109,7 +110,8 @@ public final class MacTunLauncher implements TunLauncher {
      * file) the re-parented wrapper would otherwise loop forever, leaving a
      * root-owned core holding the TUN up. Trap TERM/INT as well as EXIT: the
      * engine stops us with SIGTERM, and a signal-killed shell skips an
-     * EXIT-only trap.</p>
+     * EXIT-only trap. The trap is set before the core starts, so no signal
+     * can land between the two and leave the core orphaned.</p>
      */
     static String sudoWrapperCommand(Path elevatedBinary, Path publishedConfig,
                                      Path stopSignalFile) {
@@ -119,8 +121,8 @@ public final class MacTunLauncher implements TunLauncher {
         String stopPath = shellQuote(stopSignalFile.toAbsolutePath().toString());
 
         return String.format(
-                "sudo -n %s run -c %s & SBPID=$!; "
-                        + "trap 'kill $SBPID 2>/dev/null; exit 0' EXIT INT TERM; "
+                "trap 'kill ${SBPID:-$!} 2>/dev/null; exit 0' EXIT INT TERM; "
+                        + "sudo -n %s run -c %s & SBPID=$!; "
                         + "while kill -0 $SBPID 2>/dev/null "
                         + "&& kill -0 %d 2>/dev/null "
                         + "&& [ ! -f %s ]; do sleep 0.3; done; "
@@ -166,8 +168,8 @@ public final class MacTunLauncher implements TunLauncher {
         String stopPath = shellQuote(stopSignalFile.toAbsolutePath().toString());
 
         return String.format(
-                "%s run -c %s & SBPID=$!; "
-                        + "trap 'kill $SBPID 2>/dev/null; exit 0' EXIT INT TERM; "
+                "trap 'kill ${SBPID:-$!} 2>/dev/null; exit 0' EXIT INT TERM; "
+                        + "%s run -c %s & SBPID=$!; "
                         + "while kill -0 $SBPID 2>/dev/null "
                         + "&& kill -0 %d 2>/dev/null "
                         + "&& [ ! -f %s ]; do sleep 0.3; done; "

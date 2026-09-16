@@ -42,9 +42,11 @@ jobs:
           # the arch-aware bundling (linux-arm64 sing-box) with the same gates.
           - { name: linux-arm, os: ubuntu-24.04-arm }
     runs-on: ${{ matrix.os }}
-    # A leg takes 2-4 minutes. The smoke suite runs the real core, including
-    # TUN probes where the runner allows; a hang there would otherwise sit on
-    # the 6-hour default, on every leg, until someone noticed.
+    # A leg takes 4 to 11 minutes, macOS the longest; the Windows and Linux
+    # legs add about two to package and smoke-test their installer. The smoke
+    # suite runs the real core, including TUN probes where the runner allows;
+    # a hang there would otherwise sit on the 6-hour default, on every leg,
+    # until someone noticed.
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -71,6 +73,50 @@ jobs:
         # the same on every OS, and one leg is enough to notice a gap.
         if: matrix.name == 'linux'
         run: scripts/verify-runtime-modules.sh
+      # The installer of each leg that can build one on a PR, checked on the
+      # runner that built it and inside the required check. A package job of
+      # its own ran after the tests without being required, and PRs merged
+      # minutes before it finished, so a broken MSI install or DEB launch
+      # merged green. The suite above already built the JAR these package.
+      - name: Package MSI
+        if: matrix.name == 'windows'
+        # pwsh is the Windows default; naming it tells actionlint the step is
+        # not a bash script, which runs-on from the matrix does not.
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1 -Version "1.0.0-dev-$($env:GITHUB_SHA.Substring(0,7))" -MsiVersion "1.0.${{ github.run_number }}"
+      - name: Smoke-test MSI install and uninstall
+        if: matrix.name == 'windows'
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-msi-smoke.ps1 -MsiPath "dist\*.msi" -ExpectedVersion "1.0.0-dev-$($env:GITHUB_SHA.Substring(0,7))"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: matrix.name == 'windows'
+        with:
+          name: vless-client-windows-${{ github.sha }}
+          path: dist/*.msi
+          retention-days: 14
+          if-no-files-found: error
+      - name: Package DEB
+        if: matrix.name == 'linux'
+        run: scripts/package-linux.sh "1.0.0-dev-${GITHUB_SHA:0:7}" "1.0.0+dev${{ github.run_number }}"
+      - name: Smoke-test DEB install, launch and uninstall
+        if: matrix.name == 'linux'
+        # Installs the .deb on the runner, runs /opt/tunl/bin/tunl under Xvfb
+        # until the app writes "Tunl started" to its own log, then removes
+        # the package. The libraries are the set scripts/linux-qa.sh needs to
+        # render JavaFX without a GPU.
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
+            xvfb xauth libgtk-3-0t64 libglib2.0-0t64 libxtst6 libxi6 libxrender1 libxrandr2 \
+            libfreetype6 fontconfig libasound2t64 libgl1 libpango-1.0-0 libcairo2 fonts-dejavu-core
+          scripts/linux-deb-smoke.sh dist/*.deb "1.0.0-dev-${GITHUB_SHA:0:7}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: matrix.name == 'linux'
+        with:
+          name: vless-client-linux-${{ github.sha }}
+          path: dist/*.deb
+          retention-days: 14
+          if-no-files-found: error
 
   # Early warning for the JDK 27 move (#216): the same suite, smoke included,
   # on the next runtime — months before anyone has to care.
@@ -106,13 +152,15 @@ jobs:
       - run: mvn -B clean verify -Psmoke
 
   # ========= Packaging: after that OS's tests ==============================
-  # Each produces an installable artifact (14 days) so any main commit can be
-  # tried without cutting a release, and each installer is checked on the
-  # runner that built it: the MSI is installed and uninstalled, the DEB is
-  # installed, launched under Xvfb and removed, the DMG is mounted and its
-  # app bundle inspected. Windows and Linux amd64 also package on PRs so
-  # their install/uninstall smoke checks run before merge. Tagged releases build
-  # and check their installers in release.yml through the same scripts.
+  # Each installer is uploaded as an artifact (14 days) so any main commit can
+  # be tried without cutting a release, and each is checked on the runner that
+  # built it: the MSI is installed and uninstalled, the DEB is installed,
+  # launched under Xvfb and removed, the DMG is mounted and its app bundle
+  # inspected. The MSI and the amd64 DEB are built and checked inside
+  # test-windows and test-linux above, on PRs as well, so a broken installer
+  # fails a required check; the DMG and the arm64 DEB are built here, on main
+  # only. Tagged releases build and check their installers in release.yml
+  # through the same scripts.
 
   package-macos:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -151,83 +199,6 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-  package-windows:
-    needs: test
-    runs-on: windows-latest
-    # jpackage plus the MSI install/uninstall smoke; both are quick, WiX is not.
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-          cache: 'maven'
-      # The sing-box tarballs are fetched at generate-resources on every build
-      # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
-      # pins both the version and the SHA-256s, so a bump misses the cache and
-      # re-downloads; bundle-singbox.sh verifies the checksum either way.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.cache/vless-client-build
-          key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
-      - run: mvn -B package -DskipTests
-      - name: Package MSI
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1 -Version "1.0.0-dev-$($env:GITHUB_SHA.Substring(0,7))" -MsiVersion "1.0.${{ github.run_number }}"
-      - name: Smoke-test MSI install and uninstall
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-msi-smoke.ps1 -MsiPath "dist\*.msi" -ExpectedVersion "1.0.0-dev-$($env:GITHUB_SHA.Substring(0,7))"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: vless-client-windows-${{ github.sha }}
-          path: dist/*.msi
-          retention-days: 14
-          if-no-files-found: error
-
-  package-linux:
-    # Exercise the DEB maintainer scripts before merge as well as on main.
-    needs: test
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-          cache: 'maven'
-      # The sing-box tarballs are fetched at generate-resources on every build
-      # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
-      # pins both the version and the SHA-256s, so a bump misses the cache and
-      # re-downloads; bundle-singbox.sh verifies the checksum either way.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.cache/vless-client-build
-          key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
-      - run: mvn -B package -DskipTests
-      - name: Package DEB
-        run: scripts/package-linux.sh "1.0.0-dev-${GITHUB_SHA:0:7}" "1.0.0+dev${{ github.run_number }}"
-      - name: Smoke-test DEB install, launch and uninstall
-        # Installs the .deb on the runner, runs /opt/tunl/bin/tunl under Xvfb
-        # until the app writes "Tunl started" to its own log, then removes
-        # the package. The libraries are the set scripts/linux-qa.sh needs to
-        # render JavaFX without a GPU.
-        run: |
-          sudo apt-get update -q
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
-            xvfb xauth libgtk-3-0t64 libglib2.0-0t64 libxtst6 libxi6 libxrender1 libxrandr2 \
-            libfreetype6 fontconfig libasound2t64 libgl1 libpango-1.0-0 libcairo2 fonts-dejavu-core
-          scripts/linux-deb-smoke.sh dist/*.deb "1.0.0-dev-${GITHUB_SHA:0:7}"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: vless-client-linux-${{ github.sha }}
-          path: dist/*.deb
-          retention-days: 14
-          if-no-files-found: error
-
   package-linux-arm:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test
@@ -253,6 +224,15 @@ jobs:
       - run: mvn -B package -DskipTests
       - name: Package DEB (arm64)
         run: scripts/package-linux.sh "1.0.0-dev-${GITHUB_SHA:0:7}" "1.0.0+dev${{ github.run_number }}"
+      - name: Smoke-test DEB install, launch and uninstall (arm64)
+        # The check test-linux runs on the amd64 package: install the .deb,
+        # launch it under Xvfb until "Tunl started" is logged, uninstall.
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
+            xvfb xauth libgtk-3-0t64 libglib2.0-0t64 libxtst6 libxi6 libxrender1 libxrandr2 \
+            libfreetype6 fontconfig libasound2t64 libgl1 libpango-1.0-0 libcairo2 fonts-dejavu-core
+          scripts/linux-deb-smoke.sh dist/*.deb "1.0.0-dev-${GITHUB_SHA:0:7}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: vless-client-linux-arm-${{ github.sha }}
@@ -263,13 +243,14 @@ jobs:
   # Rolling "dev-latest" prerelease: always holds ALL THREE installers
   # (DMG + MSI + DEB) of the newest merge at a stable URL on the Releases page
   # (downloadable without a GitHub login, never expires). Runs after every
-  # packaging job so the release is never half-populated. Delete+recreate
+  # job that builds an installer, the Windows and Linux test legs included,
+  # so the release is never half-populated. Delete+recreate
   # replaces the previous merge's assets; the tag is force-moved so the
   # release's source link points at the commit that was actually built. Real
   # releases stay untouched — a prerelease is never marked "Latest".
   dev-release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [package-macos, package-windows, package-linux, package-linux-arm]
+    needs: [test, package-macos, package-linux-arm]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

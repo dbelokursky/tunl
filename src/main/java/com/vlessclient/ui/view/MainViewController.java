@@ -8,12 +8,14 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.TextField;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
@@ -38,6 +40,8 @@ public class MainViewController {
     @FXML private HBox persistenceBanner;
     @FXML private Label persistenceMessage;
     @FXML private Button retrySavingButton;
+    @FXML private HBox unreadableBanner;
+    @FXML private Label unreadableMessage;
     private PersistenceState persistence;
 
     @FXML private Button btnDashboard;
@@ -50,6 +54,8 @@ public class MainViewController {
     private final Map<String, Node> viewCache = new HashMap<>();
     private final Map<String, Object> controllerCache = new HashMap<>();
     private Button activeButton;
+    /** The page on screen, for Shortcut+F to find its search field in. */
+    private Node currentView;
     private boolean acceleratorsRegistered;
 
     /**
@@ -80,6 +86,12 @@ public class MainViewController {
             persistence = store.getPersistenceState();
             persistenceBanner.visibleProperty().bind(persistence.unsavedProperty());
             persistenceBanner.managedProperty().bind(persistenceBanner.visibleProperty());
+            unreadableMessage.textProperty().bind(Bindings.createStringBinding(
+                    () -> I18n.get("persistence.unreadable",
+                            persistence.unreadableFilesProperty().get()),
+                    I18n.localeProperty(), persistence.unreadableFilesProperty()));
+            unreadableBanner.visibleProperty().bind(persistence.hasUnreadableProperty());
+            unreadableBanner.managedProperty().bind(unreadableBanner.visibleProperty());
         });
     }
 
@@ -161,11 +173,25 @@ public class MainViewController {
         accelerators.put(KeyCombination.keyCombination("Shortcut+Comma"), this::showSettings);
 
         accelerators.put(KeyCombination.keyCombination("Shortcut+N"), this::onShortcutAddServer);
+        accelerators.put(KeyCombination.keyCombination("Shortcut+F"), this::focusSearchField);
         accelerators.put(KeyCombination.keyCombination("Shortcut+Shift+C"),
                 this::onShortcutToggleConnection);
         accelerators.put(KeyCombination.keyCombination("Shortcut+W"), this::onShortcutHideWindow);
 
         log.info("Registered {} keyboard shortcuts", accelerators.size());
+    }
+
+    /**
+     * Shortcut+F: the search field of the page on screen, its text selected so
+     * typing replaces it. The Servers and Logs pages each have one, and only
+     * the pointer reached it.
+     */
+    private void focusSearchField() {
+        if (currentView != null
+                && currentView.lookup("#searchField") instanceof TextField search) {
+            search.requestFocus();
+            search.selectAll();
+        }
     }
 
     private void onShortcutAddServer() {
@@ -272,6 +298,7 @@ public class MainViewController {
                 // Every view is mounted in the shared scroll wrapper; see
                 // ContentScrollPane for the sizing policy it enforces.
                 contentArea.getChildren().setAll(new ContentScrollPane(view));
+                currentView = view;
                 setActiveButton(navButton);
                 // Cached views are re-shown without re-initializing; give the
                 // controller a chance to refresh state that went stale.

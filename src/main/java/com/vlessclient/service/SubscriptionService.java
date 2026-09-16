@@ -19,6 +19,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
@@ -74,6 +75,19 @@ public class SubscriptionService {
     private final ShareLinkParser shareLinkParser;
     private final HttpClient httpClient;
     private final SecretSealer sealer;
+
+    /**
+     * The last URL sealed under each subscription id, and the tag it produced.
+     * Every save used to seal every URL again, one secret-tool process each on
+     * macOS, and a refresh saves the list. Loading fills it with the tags the
+     * file already holds. Guarded by this object's monitor.
+     */
+    private final Map<String, SealedUrl> urlSealCache = new HashMap<>();
+
+    /** A sealed URL and the plaintext that produced it. */
+    private record SealedUrl(String plaintext, String tag) {
+    }
+
     private final Object lifecycleLock = new Object();
     /**
      * Serializes refreshSubscription's apply stage against removeSubscription
@@ -249,6 +263,9 @@ public class SubscriptionService {
                 subscriptions.remove(sub);
             }
         });
+        synchronized (this) {
+            urlSealCache.remove(sub.getId());
+        }
         saveSubscriptions();
         Thread.startVirtualThread(() -> sealer.delete(urlSecretKey(sub.getId())));
         log.info("Removed subscription '{}' and {} servers",
@@ -311,7 +328,7 @@ public class SubscriptionService {
             } else {
                 // The list was read fine; it just holds nothing this client
                 // can connect to. Say so rather than hinting at expiry.
-                sub.setLastError("Every link in the response uses a protocol this "
+                sub.setLastError("Every link in the response asks for something this "
                         + "app does not support (" + parsed.unsupportedSummary() + ").");
             }
             saveSubscriptions();
@@ -694,11 +711,16 @@ public class SubscriptionService {
                 continue;
             }
             try {
-                ServerConfig server = shareLinkParser.parse(trimmedLine);
+                ServerConfig server = shareLinkParser.parseForImport(trimmedLine);
                 servers.add(server);
             } catch (ShareLinkParser.UnsupportedSchemeException e) {
                 unsupported.add(e.scheme());
                 log.debug("Leaving out a {} link: protocol not supported", e.scheme());
+            } catch (ShareLinkParser.UnsupportedFeatureException e) {
+                // Well-formed, but the core would refuse it: like a protocol this
+                // client lacks, and unlike a line the parser could not read.
+                unsupported.add(e.feature());
+                log.debug("Leaving out a link the core would refuse: {}", e.feature());
             } catch (Exception e) {
                 skipped++;
                 // Scrubbed: the line is a share link and a parser message may
@@ -776,6 +798,7 @@ public class SubscriptionService {
                     objectMapper.valueToTree(serializableSubscriptions()));
             SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(envelope));
             configStore.getPersistenceState().saved(SUBSCRIPTIONS_FILE);
+            ConfigStore.dropLegacyBackupOnceMigrated(file, objectMapper, "subscriptions");
         } catch (IOException e) {
             log.error("Failed to save subscriptions to {}", file, e);
             configStore.getPersistenceState().failed(SUBSCRIPTIONS_FILE, this::saveSubscriptions);
@@ -802,13 +825,17 @@ public class SubscriptionService {
                 out.add(live);
                 continue;
             }
-            String sealed = sealer.seal(urlSecretKey(live.getId()), url);
+            SealedUrl cached = urlSealCache.get(live.getId());
+            String sealed = cached != null && cached.plaintext().equals(url)
+                    ? cached.tag()
+                    : sealer.seal(urlSecretKey(live.getId()), url);
             if (sealed == null) {
                 log.warn("Could not seal URL for subscription '{}'; keeping plaintext",
                         live.getName());
                 out.add(live);
                 continue;
             }
+            urlSealCache.put(live.getId(), new SealedUrl(url, sealed));
             try {
                 Subscription copy = objectMapper.readValue(
                         objectMapper.writeValueAsString(live), Subscription.class);
@@ -884,7 +911,13 @@ public class SubscriptionService {
             return;
         }
         sealer.unseal(urlSecretKey(subscription.getId()), stored).ifPresentOrElse(
-                subscription::setUrl,
+                url -> {
+                    subscription.setUrl(url);
+                    // The file already holds this URL sealed; see urlSealCache.
+                    synchronized (this) {
+                        urlSealCache.put(subscription.getId(), new SealedUrl(url, stored));
+                    }
+                },
                 () -> log.error(
                         "Could not unseal the URL for subscription '{}' ({}); "
                                 + "re-add it or restore the secret backend entry",

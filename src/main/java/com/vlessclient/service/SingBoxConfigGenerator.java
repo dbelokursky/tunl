@@ -14,6 +14,7 @@ import com.vlessclient.service.outbound.TrojanOutboundBuilder;
 import com.vlessclient.service.outbound.VlessOutboundBuilder;
 import com.vlessclient.service.outbound.VmessOutboundBuilder;
 import com.vlessclient.service.outbound.WireguardEndpointBuilder;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Path;
@@ -149,6 +150,7 @@ public class SingBoxConfigGenerator {
         if (routingConfig != null) {
             ObjectNode route = buildRoute(routingConfig);
             ensureTunRouteEssentials(route, settings);
+            resolveNamesBeforeIpRules(root, route, settings, routingConfig);
             root.set("route", route);
         } else if (settings.getProxyMode() == ProxyMode.TUN) {
             // sing-box 1.13 needs a route block with default_domain_resolver
@@ -209,6 +211,15 @@ public class SingBoxConfigGenerator {
         // FATAL "detour to an empty direct outbound makes no sense".
         // Omitting detour lets the server dial through the default outbound
         // route, which for a bare system resolver address does the right thing.
+        if (!isIpLiteral(directDns.get("server").asString())) {
+            // The core refuses a server named by host that it has no way to
+            // resolve ("missing domain resolver for domain server address"),
+            // and route.default_domain_resolver does not reach DNS servers, so
+            // TUN mode never started. Resolve the name through the OS, like the
+            // other bootstrap lookups. Proxy DNS needs no resolver: it dials
+            // through the proxy, which takes the name as it is.
+            directDns.put("domain_resolver", "local-dns");
+        }
         servers.add(directDns);
 
         // Local resolver (OS/mDNS). Used only for localhost and *.local so
@@ -242,7 +253,12 @@ public class SingBoxConfigGenerator {
         // all queries through the proxy DNS by default.
         dns.put("final", "proxy-dns");
 
-        dns.put("strategy", settings.getDnsStrategy());
+        // A TUN device without an IPv6 address routes IPv4 alone, and the core
+        // drops AAAA answers only for ipv4_only: any other strategy handed the
+        // system IPv6 addresses, which it reached around the tunnel.
+        boolean tunWithoutIpv6 = settings.getProxyMode() == ProxyMode.TUN
+                && !settings.isTunIpv6Enabled();
+        dns.put("strategy", tunWithoutIpv6 ? "ipv4_only" : settings.getDnsStrategy());
 
         return dns;
     }
@@ -438,6 +454,80 @@ public class SingBoxConfigGenerator {
     }
 
     /**
+     * Behind the system proxy a browser asks for a name ({@code CONNECT
+     * host:443}), and the core matches IP rules against the destination address
+     * alone: without a lookup a country bypass or a GEOIP / IP_CIDR rule never
+     * matched named traffic. A {@code resolve} action right before the first
+     * such rule gives them an address, and rules above it still match by name
+     * without one. It names no server, so the DNS rules pick one: the system
+     * resolver for LAN names, proxy DNS for the rest, so a name bound for the
+     * tunnel is not asked of the local network. The direct outbound still
+     * resolves a name itself, so bypassed traffic keeps a nearby CDN node.
+     *
+     * <p>A name the chosen resolver cannot answer is dropped at that rule; it
+     * used to reach the proxy, which could not resolve it either. TUN mode
+     * needs none of this: its connections carry an address already.</p>
+     */
+    private void resolveNamesBeforeIpRules(ObjectNode root, ObjectNode route,
+                                           AppSettings settings, RoutingConfig routingConfig) {
+        if (settings.getProxyMode() == ProxyMode.TUN) {
+            return;
+        }
+        ArrayNode rules = (ArrayNode) route.get("rules");
+        int first = firstIpRuleBelowLanBypass(rules);
+        if (first < 0) {
+            return;
+        }
+        ObjectNode resolve = mapper.createObjectNode();
+        resolve.put("action", "resolve");
+        rules.insert(first, resolve);
+        // A LAN name only becomes a private address here, below the rule that
+        // sends private addresses direct.
+        rules.insert(first + 1, buildPrivateIpDirectRule());
+
+        ArrayNode lanSuffixes = mapper.createArrayNode();
+        lanSuffixes.add(".lan");
+        lanSuffixes.add(".home.arpa");
+        lanSuffixes.add(".internal");
+        ObjectNode lanNames = mapper.createObjectNode();
+        lanNames.set("domain_suffix", lanSuffixes);
+        lanNames.put("server", "local-dns");
+        ObjectNode dns = buildDns(settings, routingConfig);
+        ((ArrayNode) dns.get("rules")).insert(1, lanNames);
+        root.set("dns", dns);
+        // The core demands one once a dns block exists, and the OS resolver
+        // keeps the proxy server's own name off the proxy.
+        route.put("default_domain_resolver", "local-dns");
+    }
+
+    /**
+     * Index of the first rule that matches on the destination address below the
+     * universal LAN bypass, or -1. The bypass list above it is the user's own
+     * list of hosts and stays a match by name.
+     */
+    private static int firstIpRuleBelowLanBypass(ArrayNode rules) {
+        int start = 0;
+        for (int i = 0; i < rules.size(); i++) {
+            if (rules.get(i).path("ip_is_private").asBoolean()) {
+                start = i + 1;
+                break;
+            }
+        }
+        for (int i = start; i < rules.size(); i++) {
+            JsonNode rule = rules.get(i);
+            if (rule.has("ip_cidr")) {
+                return i;
+            }
+            for (JsonNode tag : rule.path("rule_set")) {
+                if (tag.asString().startsWith("geoip-")) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    /**
      * Sends {@code localhost} and any {@code *.local} (mDNS) host <em>by name</em>
      * to the direct outbound. The private-IP rule only catches local traffic
      * once it is already an IP; a bare hostname like {@code printer.local} or
@@ -505,7 +595,9 @@ public class SingBoxConfigGenerator {
     /**
      * Populates a DNS server object using the sing-box 1.13 schema. Accepts
      * both the legacy URL-style address (e.g. {@code https://1.1.1.1/dns-query})
-     * and bare IPs/hostnames.
+     * and bare IPs/hostnames. A bare address is read as a {@code udp://} one,
+     * so a port it carries ({@code 8.8.8.8:53}) is split off; left whole, it
+     * reached the core as a name that nothing could resolve.
      */
     void populateDnsServerAddress(ObjectNode server, String address) {
         if (address == null || address.isBlank()) {
@@ -513,13 +605,9 @@ public class SingBoxConfigGenerator {
             server.put("server", "1.1.1.1");
             return;
         }
-        if (!address.contains("://")) {
-            server.put("type", "udp");
-            server.put("server", address);
-            return;
-        }
+        String url = address.contains("://") ? address : "udp://" + address;
         try {
-            URI uri = new URI(address);
+            URI uri = new URI(url);
             String scheme = uri.getScheme() != null ? uri.getScheme().toLowerCase() : "udp";
             String host = uri.getHost();
             if (host == null || host.isBlank()) {
@@ -542,6 +630,22 @@ public class SingBoxConfigGenerator {
             log.warn("Could not parse DNS address {}, falling back to UDP", address);
             server.put("type", "udp");
             server.put("server", address);
+        }
+    }
+
+    /**
+     * Whether a DNS server's address is an IP literal, with or without the
+     * brackets a URL puts around IPv6, rather than a name.
+     */
+    private static boolean isIpLiteral(String server) {
+        String bare = server.startsWith("[") && server.endsWith("]")
+                ? server.substring(1, server.length() - 1)
+                : server;
+        try {
+            InetAddress.ofLiteral(bare);
+            return true;
+        } catch (IllegalArgumentException notAnIpLiteral) {
+            return false;
         }
     }
 
@@ -724,6 +828,12 @@ public class SingBoxConfigGenerator {
             group.put("tolerance", PROBE_TOLERANCE_MS);
         } else {
             group.put("default", OutboundTags.server(active));
+            // A manual switch reaches the running core through this selector.
+            // Without this, connections already open stayed on the server the
+            // user switched away from while the UI named the new one. The
+            // automatic group keeps them: it re-picks as latencies move, and
+            // cutting every connection at each re-pick would break downloads.
+            group.put("interrupt_exist_connections", true);
         }
         return group;
     }
@@ -855,8 +965,8 @@ public class SingBoxConfigGenerator {
      * to fetch the binary rule set from. Tags are used verbatim as the file
      * name ({@code <tag>.srs}) under
      * {@code github.com/SagerNet/sing-{geoip|geosite}/rule-set/}; the kind is
-     * taken from the first path segment of the tag. {@code download_detour:
-     * "direct"} makes the download bypass the (not-yet-up) proxy tunnel.
+     * taken from the first path segment of the tag. The download goes through
+     * the proxy group, by the entry's {@code http_client.detour}.
      */
     private ObjectNode buildRemoteRuleSet(String tag) {
         // Kind ('geoip' or 'geosite') is the first dash-separated segment
@@ -875,8 +985,11 @@ public class SingBoxConfigGenerator {
         // Through the tunnel: on the networks this client is for, GitHub raw
         // is often blocked or poisoned when dialed directly. The proxy
         // outbound is up by the time sing-box fetches rule-sets, and after
-        // the first success the cache_file serves them offline anyway.
-        entry.put("download_detour", "proxy");
+        // the first success the cache_file serves them offline anyway. Set on
+        // http_client: download_detour is deprecated, and a core one minor
+        // release before its removal stops at rule-set start over it, which
+        // `sing-box check` never reaches.
+        entry.putObject("http_client").put("detour", "proxy");
         return entry;
     }
 

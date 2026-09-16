@@ -576,7 +576,8 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" dist/*.deb --clobber
 
   # arm64 twin of release-linux on GitHub's free arm runners: same gates
-  # (fat JAR, real-binary smoke on the linux-arm64 core), same script —
+  # (fat JAR, real-binary smoke on the linux-arm64 core, DEB install and
+  # launch), same script —
   # jpackage derives the deb architecture from the host.
   release-linux-arm64:
     needs: create-draft
@@ -611,6 +612,15 @@ jobs:
         run: mvn -B test -Psmoke -Dtest=SingBoxRealBinarySmokeTest
       - name: Create DEB with jpackage
         run: scripts/package-linux.sh "${GITHUB_REF_NAME#v}"
+      - name: Smoke-test DEB install, launch and uninstall
+        # The same check release-linux runs, on the arm64 package: install the
+        # .deb, launch it under Xvfb until "Tunl started" is logged, uninstall.
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
+            xvfb xauth libgtk-3-0t64 libglib2.0-0t64 libxtst6 libxi6 libxrender1 libxrandr2 \
+            libfreetype6 fontconfig libasound2t64 libgl1 libpango-1.0-0 libcairo2 fonts-dejavu-core
+          scripts/linux-deb-smoke.sh dist/*.deb "${GITHUB_REF_NAME#v}"
       - name: Record the DEB checksum
         id: checksum
         run: |
@@ -678,6 +688,22 @@ jobs:
           printf '%s' "$RELEASE_SIGNING_KEY" | base64 -d > "$KEY"
           chmod 600 "$KEY"
           trap 'rm -f "$KEY"' EXIT
+
+          # Installed updaters verify these signatures against
+          # ReleaseSignature.PUBLIC_KEY as this tag builds it. The verify below
+          # derives its public key from this same secret, so a secret that does
+          # not match the sources would sign a release every installed updater
+          # refuses, and the job would still pass. Compare them before anything
+          # is downloaded or signed.
+          source_key=$(gh api -H "Accept: application/vnd.github.raw" \
+            "repos/${GH_REPO}/contents/src/main/java/com/vlessclient/service/ReleaseSignature.java?ref=${GITHUB_REF_NAME}" \
+            | sed -nE 's/.*static final String PUBLIC_KEY = "([^"]*)".*/\1/p')
+          secret_key=$(openssl pkey -in "$KEY" -pubout -outform DER | base64 -w0)
+          if [ -z "$source_key" ] || [ "$source_key" != "$secret_key" ]; then
+            echo "::error::RELEASE_SIGNING_KEY does not belong to the public key in ReleaseSignature.java at ${GITHUB_REF_NAME} (sources: '${source_key}', secret: '${secret_key}'). Every installed updater would refuse its signatures. Not signing."
+            exit 1
+          fi
+          echo "signing key matches ReleaseSignature.PUBLIC_KEY at ${GITHUB_REF_NAME}"
 
           V="${GITHUB_REF_NAME#v}"
           assets=(

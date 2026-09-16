@@ -2,6 +2,7 @@ package com.vlessclient.platform;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,11 +33,18 @@ public final class LinuxTunLauncher implements TunLauncher {
 
     private static final Logger log = LoggerFactory.getLogger(LinuxTunLauncher.class);
 
+    /**
+     * The capability grant waits on a PolicyKit password prompt. Connecting
+     * runs off the JavaFX thread, so a long wait holds no window, while a grant
+     * cut short only brings the fallback's own prompt right after it.
+     */
+    private static final Duration PROMPT_TIMEOUT = Duration.ofMinutes(5);
+
     private final CommandRunner runner;
     private final String elevator;
 
     public LinuxTunLauncher() {
-        this(CommandRunner.system(), "pkexec");
+        this(CommandRunner.system(PROMPT_TIMEOUT), "pkexec");
     }
 
     /** Test seam: inject the capability-command runner and the elevation binary. */
@@ -66,7 +74,7 @@ public final class LinuxTunLauncher implements TunLauncher {
         log.info("Started sing-box TUN via {}", direct
                 ? "cap_net_admin fast path (no elevation prompt)"
                 : elevator + " wrapper (PolicyKit prompt expected)");
-        return new Launched(process, stopSignalFile);
+        return new Launched(process, stopSignalFile, !direct);
     }
 
     /**
@@ -118,10 +126,12 @@ public final class LinuxTunLauncher implements TunLauncher {
         // Process.destroy() (SIGTERM), and dash does NOT run an EXIT-only trap
         // when killed by a signal — it would die mid-`sleep`, leaving sing-box
         // orphaned with the TUN still up. Handling TERM/INT kills the core
-        // first, then the shell exits through the loop as usual.
+        // first, then the shell exits through the loop as usual. The trap is
+        // set before the core starts: a signal between the two used to kill
+        // the shell with the core already running.
         return String.format(
-                "%s run -c %s & SBPID=$!; "
-                        + "trap 'kill $SBPID 2>/dev/null; exit 0' EXIT INT TERM; "
+                "trap 'kill ${SBPID:-$!} 2>/dev/null; exit 0' EXIT INT TERM; "
+                        + "%s run -c %s & SBPID=$!; "
                         + "while kill -0 $SBPID 2>/dev/null "
                         + "&& kill -0 %d 2>/dev/null "
                         + "&& [ ! -f %s ]; do sleep 0.3; done; "

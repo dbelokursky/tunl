@@ -8,7 +8,7 @@ import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.RoutingRule;
 import com.vlessclient.model.ServerConfig;
-import com.vlessclient.platform.CorePlatform;
+import com.vlessclient.testing.BundledCore;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
@@ -30,12 +30,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Smoke tests that execute the REAL sing-box binary bundled by
@@ -54,22 +53,14 @@ class SingBoxRealBinarySmokeTest {
     private static final String WG_PRIVATE_KEY = "xunATixZ9R2SMbEghGvNz1fen77h9i5gNCPfxxgxtWk=";
     private static final String WG_PEER_PUBLIC_KEY = "2Gl1nZ7pohiktxNLQq7rb1ZwdPN2BBaHpwA2M6dMJXM=";
     private static final String TEST_UUID = "b1c2d3e4-f5a6-7890-abcd-ef1234567890";
+    private static final int OUTPUT_TAIL_LINES = 40;
 
     private static Path binary;
     private static final SingBoxConfigGenerator generator = new SingBoxConfigGenerator();
 
     @BeforeAll
     static void locateBundledBinary() {
-        String osArch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
-        String arch = osArch.contains("aarch64") || osArch.contains("arm64")
-                ? "arm64" : "amd64";
-        CorePlatform core = CorePlatform.current();
-        binary = Path.of("target", "classes", "native",
-                        core.osKey() + "-" + arch, core.binaryName())
-                .toAbsolutePath();
-        assumeTrue(Files.isExecutable(binary),
-                "bundled sing-box not found at " + binary
-                        + " — run the generate-resources phase first");
+        binary = BundledCore.locate();
     }
 
     @Test
@@ -95,6 +86,203 @@ class SingBoxRealBinarySmokeTest {
     }
 
     /**
+     * Every transport a provider's share link can carry has to reach the core
+     * as fields that transport accepts. sing-box refuses a whole configuration
+     * over one unknown field, and every stored server is a member of the proxy
+     * group, so a single WebSocket link with a Host header — the usual CDN
+     * setup — used to stop every server from connecting. The servers come from
+     * the real parser, since that is where the fields are filled in.
+     */
+    @Test
+    void checkAcceptsEveryTransportAsShareLinksCarryIt() throws Exception {
+        ShareLinkParser parser = new ShareLinkParser();
+        List<ServerConfig> servers = transportLinks().stream().map(parser::parse).toList();
+        // Readable tags in a failure: the core names a refused outbound by its tag.
+        servers.forEach(server -> server.setId(server.getName()));
+
+        for (ProxyMode mode : ProxyMode.values()) {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(mode);
+            for (ServerConfig server : servers) {
+                assertCheckPasses(generator.generate(server, settings),
+                        server.getName() + "/" + mode);
+            }
+            // The shape a real server list produces: every server a member of
+            // the one group, where a single refused member refuses them all.
+            assertCheckPasses(generator.generate(servers, servers.get(0), settings, null),
+                    "every-transport-in-one-group/" + mode);
+        }
+    }
+
+    private static List<String> transportLinks() {
+        String tls = "security=tls&sni=example.com";
+        return List.of(
+                "vless://" + TEST_UUID + "@cdn.example.com:443?type=ws&" + tls
+                        + "&host=example.com&path=%2Fws#vless-ws",
+                "vless://" + TEST_UUID + "@example.com:443?type=grpc&" + tls
+                        + "&serviceName=grpc-svc&host=example.com#vless-grpc",
+                "vless://" + TEST_UUID + "@example.com:443?type=http&" + tls
+                        + "&host=example.com&path=%2Fh2#vless-h2",
+                "vless://" + TEST_UUID + "@example.com:443?type=httpupgrade&" + tls
+                        + "&host=example.com&path=%2Fup#vless-httpupgrade",
+                "vless://" + TEST_UUID + "@example.com:443?type=quic&" + tls
+                        + "&quicSecurity=none&key=&headerType=none#vless-quic",
+                "trojan://smoke-password@example.com:443?type=ws&" + tls
+                        + "&host=example.com&path=%2Fws#trojan-ws",
+                "trojan://smoke-password@example.com:443?type=grpc&" + tls
+                        + "&serviceName=grpc-svc#trojan-grpc",
+                vmessLink("vmess-ws", "ws", "example.com", "/ws"),
+                vmessLink("vmess-grpc", "grpc", "example.com", "grpc-svc"),
+                vmessLink("vmess-h2", "h2", "example.com", "/h2"),
+                // v2rayN keeps QUIC's header security in host and its key in path.
+                vmessLink("vmess-quic", "quic", "none", "key"));
+    }
+
+    private static String vmessLink(String name, String net, String host, String path) {
+        String json = "{\"v\":\"2\",\"ps\":\"" + name + "\",\"add\":\"example.com\","
+                + "\"port\":\"443\",\"id\":\"" + TEST_UUID + "\",\"aid\":\"0\","
+                + "\"scy\":\"auto\",\"net\":\"" + net + "\",\"type\":\"none\","
+                + "\"host\":\"" + host + "\",\"path\":\"" + path + "\","
+                + "\"tls\":\"tls\",\"sni\":\"example.com\"}";
+        return "vmess://" + Base64.getEncoder().encodeToString(
+                json.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * Settings a share link can spell in a way the core refuses, although what
+     * they mean is not in doubt. The generator corrects them for every stored
+     * server, so the core has to accept each one as generated.
+     */
+    @Test
+    void checkAcceptsSettingsLinksSpellInWaysTheCoreRefuses() throws Exception {
+        String realityKey = "WZaG00XCAiVCF2SP5fmSbKiuTbBB-lMDg_81rC8hR80";
+        String realityKeyInStandardAlphabet = "WZaG00XCAiVCF2SP5fmSbKiuTbBB+lMDg/81rC8hR80=";
+        List<ServerConfig> servers = List.of(
+                realityServer("reality-without-fingerprint", null, realityKey),
+                realityServer("fingerprint-in-capitals", "Chrome", realityKey),
+                realityServer("key-in-the-standard-alphabet", "chrome",
+                        realityKeyInStandardAlphabet),
+                wireguardServer("wireguard-v4-without-prefix", "10.0.0.2"),
+                wireguardServer("wireguard-v6-without-prefix", "fd00::2"),
+                shadowsocksServer("xray-chacha20-poly1305", "chacha20-poly1305"),
+                shadowsocksServer("xray-xchacha20-poly1305", "xchacha20-poly1305"),
+                shadowsocksServer("xray-plain", "plain"),
+                shadowsocksServer("cipher-in-capitals", "AES-256-GCM"));
+
+        for (ProxyMode mode : ProxyMode.values()) {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(mode);
+            for (ServerConfig server : servers) {
+                assertCheckPasses(generator.generate(server, settings),
+                        server.getName() + "/" + mode);
+            }
+        }
+    }
+
+    private static ServerConfig realityServer(String name, String fingerprint, String publicKey) {
+        ServerConfig server = new ServerConfig();
+        server.setId(name);
+        server.setName(name);
+        server.setProtocol(Protocol.VLESS);
+        server.setAddress("203.0.113.10");
+        server.setPort(443);
+        server.setUuid(TEST_UUID);
+        server.setFlow("xtls-rprx-vision");
+        server.getTls().setEnabled(true);
+        server.getTls().setReality(true);
+        server.getTls().setServerName("www.microsoft.com");
+        server.getTls().setFingerprint(fingerprint);
+        server.getTls().setRealityPublicKey(publicKey);
+        server.getTls().setRealityShortId("0123abcd");
+        return server;
+    }
+
+    private static ServerConfig wireguardServer(String name, String address) {
+        ServerConfig server = new ServerConfig();
+        server.setId(name);
+        server.setName(name);
+        server.setProtocol(Protocol.WIREGUARD);
+        server.setAddress("203.0.113.11");
+        server.setPort(51820);
+        server.setUuid(WG_PRIVATE_KEY);
+        server.setEncryption(WG_PEER_PUBLIC_KEY);
+        server.setFlow(address);
+        return server;
+    }
+
+    private static ServerConfig shadowsocksServer(String name, String method) {
+        ServerConfig server = new ServerConfig();
+        server.setId(name);
+        server.setName(name);
+        server.setProtocol(Protocol.SHADOWSOCKS);
+        server.setAddress("203.0.113.12");
+        server.setPort(8388);
+        server.setUuid("smoke-password");
+        server.setEncryption(method);
+        return server;
+    }
+
+    /**
+     * CoreSettings answers for the core before a server is stored, so its
+     * answers have to be the core's: for each server here, "no refusal" and
+     * "sing-box check passes" must agree, whichever way the core goes. Port 0
+     * is left out on purpose: the check lets it through, but nothing can dial
+     * it, so the import refuses it anyway.
+     */
+    @Test
+    void coreSettingsRefusesExactlyWhatTheCoreRefuses() throws Exception {
+        String realityKey = "WZaG00XCAiVCF2SP5fmSbKiuTbBB-lMDg_81rC8hR80";
+        String key16 = "AAAAAAAAAAAAAAAAAAAAAA==";
+        String key32 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        List<ServerConfig> servers = List.of(
+                realityServer("fingerprint-chrome", "chrome", realityKey),
+                realityServer("fingerprint-unknown", "randomizednoalpn", realityKey),
+                realityServer("key-too-short", "chrome", "pubkey123"),
+                with(realityServer("short-id-empty", "chrome", realityKey),
+                        server -> server.getTls().setRealityShortId("")),
+                with(realityServer("short-id-odd-length", "chrome", realityKey),
+                        server -> server.getTls().setRealityShortId("abc")),
+                with(realityServer("short-id-too-long", "chrome", realityKey),
+                        server -> server.getTls().setRealityShortId("0123456789abcdef01")),
+                with(realityServer("flow-udp443", "chrome", realityKey),
+                        server -> server.setFlow("xtls-rprx-vision-udp443")),
+                with(realityServer("port-70000", "chrome", realityKey),
+                        server -> server.setPort(70000)),
+                shadowsocksServer("cipher-chacha20", "chacha20"),
+                shadowsocksServer("cipher-rc4-md5", "rc4-md5"),
+                with(shadowsocksServer("ss2022-aes128-long-key", "2022-blake3-aes-128-gcm"),
+                        server -> server.setUuid(key32)),
+                with(shadowsocksServer("ss2022-aes128", "2022-blake3-aes-128-gcm"),
+                        server -> server.setUuid(key16)),
+                with(shadowsocksServer("ss2022-multi-user", "2022-blake3-aes-256-gcm"),
+                        server -> server.setUuid(key32 + ":" + key32)));
+
+        for (ServerConfig server : servers) {
+            boolean coreAccepts = checkPasses(generator.generate(server, new AppSettings()));
+            assertThat(com.vlessclient.service.outbound.CoreSettings.refusal(server).isEmpty())
+                    .as("%s: sing-box check %s it", server.getName(),
+                            coreAccepts ? "accepts" : "refuses")
+                    .isEqualTo(coreAccepts);
+        }
+    }
+
+    private static ServerConfig with(ServerConfig server,
+                                     java.util.function.Consumer<ServerConfig> change) {
+        change.accept(server);
+        return server;
+    }
+
+    private boolean checkPasses(String config) throws Exception {
+        Path configFile = Files.createTempFile("smoke-check-", ".json");
+        try {
+            Files.writeString(configFile, config);
+            return run(binary, "check", "-c", configFile.toString()).exitCode() == 0;
+        } finally {
+            Files.deleteIfExists(configFile);
+        }
+    }
+
+    /**
      * Every log level the Settings screen offers has to be a string the real
      * core accepts — a rejected one is not a wrong log, it is a core that
      * refuses to start at all, on the very connect the user was trying to
@@ -110,6 +298,51 @@ class SingBoxRealBinarySmokeTest {
             assertThat(config).contains("\"level\" : \"" + level.getValue() + "\"");
             assertCheckPasses(config, "log-level/" + level.getValue());
         }
+    }
+
+    /**
+     * A DNS server can be named by host, and the Settings fields take it with
+     * or without a scheme or a port. The core refused a Direct DNS it had no
+     * way to resolve, and "8.8.8.8:53" reached it as a name, so TUN mode never
+     * started with either.
+     */
+    @Test
+    void checkAcceptsDnsServersHoweverSettingsSpellThem() throws Exception {
+        List<String> addresses = List.of(
+                "https://dns.google/dns-query",
+                "tls://dns.quad9.net",
+                "quic://dns.adguard-dns.com",
+                "h3://dns.google/dns-query",
+                "dns.google",
+                "8.8.8.8:53",
+                "dns.google:53",
+                "[2001:4860:4860::8888]:53",
+                "2001:4860:4860::8888",
+                "https://[2606:4700:4700::1111]/dns-query");
+
+        for (String address : addresses) {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(ProxyMode.TUN);
+            settings.setProxyDns(address);
+            settings.setDirectDns(address);
+
+            assertCheckPasses(generator.generate(serverFor(Protocol.VLESS), settings), address);
+        }
+    }
+
+    /**
+     * TUN mode with IPv6 turned off asks the core to resolve names to IPv4
+     * only, and the core has to accept that as generated.
+     */
+    @Test
+    void checkAcceptsTunModeWithoutIpv6() throws Exception {
+        AppSettings settings = new AppSettings();
+        settings.setProxyMode(ProxyMode.TUN);
+        settings.setTunIpv6Enabled(false);
+        String config = generator.generate(serverFor(Protocol.VLESS), settings);
+
+        assertThat(config).contains("\"strategy\" : \"ipv4_only\"");
+        assertCheckPasses(config, "tun-without-ipv6");
     }
 
     /**
@@ -150,7 +383,11 @@ class SingBoxRealBinarySmokeTest {
         custom.setBypassList(List.of("*.local", "192.168.0.0/16", "example.com"));
         RoutingRule rule = new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX,
                 "corp.example.com", RoutingRule.RuleAction.DIRECT);
-        custom.setRules(List.of(rule));
+        // An IP rule makes system-proxy mode resolve names first, which brings
+        // in a dns block and a default domain resolver the core has to accept.
+        RoutingRule ipRule = new RoutingRule(RoutingRule.RuleType.IP_CIDR,
+                "203.0.113.0/24", RoutingRule.RuleAction.BLOCK);
+        custom.setRules(List.of(rule, ipRule));
 
         // Country bypass — emits remote rule_set references (verified:
         // `sing-box check` does not download them, so this is CI-safe).
@@ -213,14 +450,15 @@ class SingBoxRealBinarySmokeTest {
         String config = generator.generate(serverFor(Protocol.VLESS), settings, routing);
         Path configFile = Files.createTempFile("smoke-run-", ".json");
         Files.writeString(configFile, config);
+        Path logFile = Files.createTempFile("smoke-run-", ".log");
 
         Process proc = new ProcessBuilder(
                 binary.toString(), "run", "-c", configFile.toString())
                 .redirectErrorStream(true)
-                .redirectOutput(Files.createTempFile("smoke-run-", ".log").toFile())
+                .redirectOutput(logFile.toFile())
                 .start();
         try {
-            awaitPort(clashPort, proc);
+            awaitPort(clashPort, proc, logFile);
 
             HttpClient direct = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofSeconds(5))
@@ -255,12 +493,10 @@ class SingBoxRealBinarySmokeTest {
             assertThat(response.statusCode()).isEqualTo(200);
             assertThat(response.body()).isEqualTo("smoke");
         } finally {
-            proc.destroy();
-            if (!proc.waitFor(5, TimeUnit.SECONDS)) {
-                proc.destroyForcibly();
-            }
+            stopCore(proc);
             target.stop(0);
             Files.deleteIfExists(configFile);
+            Files.deleteIfExists(logFile);
         }
     }
 
@@ -316,7 +552,7 @@ class SingBoxRealBinarySmokeTest {
                             file.toString()).redirectErrorStream(true)
                             .redirectOutput(logs.toFile()).start();
                     try {
-                        awaitPort(settings.getClashApiPort(), process);
+                        awaitPort(settings.getClashApiPort(), process, logs);
                         long pid = process.pid();
                         assertThat(selectorTraffic(settings.getHttpPort())).isEqualTo("A");
                         assertThat(selector.select("srv-second")).isTrue();
@@ -326,10 +562,7 @@ class SingBoxRealBinarySmokeTest {
                     } catch (Throwable e) {
                         throw new AssertionError(Files.readString(logs), e);
                     } finally {
-                        process.destroy();
-                        if (!process.waitFor(5, TimeUnit.SECONDS)) {
-                            process.destroyForcibly().waitFor(5, TimeUnit.SECONDS);
-                        }
+                        stopCore(process);
                         Files.deleteIfExists(file);
                         Files.deleteIfExists(logs);
                     }
@@ -421,14 +654,15 @@ class SingBoxRealBinarySmokeTest {
         String config = generator.generate(serverFor(Protocol.VLESS), settings, routing);
         Path configFile = Files.createTempFile("smoke-clash-", ".json");
         Files.writeString(configFile, config);
+        Path logFile = Files.createTempFile("smoke-clash-", ".log");
 
         Process proc = new ProcessBuilder(
                 binary.toString(), "run", "-c", configFile.toString())
                 .redirectErrorStream(true)
-                .redirectOutput(Files.createTempFile("smoke-clash-", ".log").toFile())
+                .redirectOutput(logFile.toFile())
                 .start();
         try {
-            awaitPort(clashPort, proc);
+            awaitPort(clashPort, proc, logFile);
             HttpClient direct = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofSeconds(5))
                     .build();
@@ -446,12 +680,19 @@ class SingBoxRealBinarySmokeTest {
                     TrafficMonitor.buildTrafficRequest(clashPort, secret),
                     HttpResponse.BodyHandlers.ofInputStream());
             assertThat(authed.statusCode()).isEqualTo(200);
-        } finally {
-            proc.destroy();
-            if (!proc.waitFor(5, TimeUnit.SECONDS)) {
-                proc.destroyForcibly();
+
+            // What the TUN watchdog waits for before it reports Connected.
+            SingBoxEngine.Controller controller = SingBoxEngine.extractController(config);
+            try (HttpClient probe = SingBoxEngine.controllerProbeClient()) {
+                assertThat(SingBoxEngine.coreAnswers(probe, controller)).isTrue();
+                assertThat(SingBoxEngine.coreAnswers(probe,
+                        new SingBoxEngine.Controller(controller.version(), "another-secret")))
+                        .isFalse();
             }
+        } finally {
+            stopCore(proc);
             Files.deleteIfExists(configFile);
+            Files.deleteIfExists(logFile);
         }
     }
 
@@ -596,19 +837,12 @@ class SingBoxRealBinarySmokeTest {
                 .redirectOutput(logFile.toFile())
                 .start();
         try {
-            try {
-                awaitPort(clashPort, proc);
-            } catch (AssertionError e) {
-                throw new AssertionError(e.getMessage()
-                        + "\n--- sing-box output ---\n" + Files.readString(logFile), e);
-            }
+            awaitPort(clashPort, proc, logFile);
             assertThat(proc.isAlive()).isTrue();
         } finally {
-            proc.destroy();
-            if (!proc.waitFor(5, TimeUnit.SECONDS)) {
-                proc.destroyForcibly();
-            }
+            stopCore(proc);
             Files.deleteIfExists(configFile);
+            Files.deleteIfExists(logFile);
         }
     }
 
@@ -726,19 +960,12 @@ class SingBoxRealBinarySmokeTest {
                 .redirectOutput(logFile.toFile())
                 .start();
         try {
-            try {
-                awaitPort(clashPort, proc);
-            } catch (AssertionError e) {
-                throw new AssertionError(e.getMessage()
-                        + "\n--- sing-box output ---\n" + Files.readString(logFile), e);
-            }
+            awaitPort(clashPort, proc, logFile);
             assertThat(proc.isAlive()).isTrue();
         } finally {
-            proc.destroy();
-            if (!proc.waitFor(5, TimeUnit.SECONDS)) {
-                proc.destroyForcibly();
-            }
+            stopCore(proc);
             Files.deleteIfExists(configFile);
+            Files.deleteIfExists(logFile);
         }
     }
 
@@ -787,8 +1014,9 @@ class SingBoxRealBinarySmokeTest {
             assertThat(proc.exitValue()).isNotZero();
             assertThat(Files.readString(logFile)).contains("set system proxy");
         } finally {
-            proc.destroyForcibly();
+            stopCore(proc);
             Files.deleteIfExists(configFile);
+            Files.deleteIfExists(logFile);
         }
     }
 
@@ -805,12 +1033,18 @@ class SingBoxRealBinarySmokeTest {
         }
     }
 
-    /** Waits until the port accepts connections; fails fast if the process dies. */
-    private static void awaitPort(int port, Process proc) throws Exception {
+    /**
+     * Waits until the port accepts connections; fails fast if the process dies.
+     * Either failure ends with the core's own output, which holds the reason:
+     * the FATAL line of an early exit, or how far a core that never opened the
+     * port got.
+     */
+    private static void awaitPort(int port, Process proc, Path log) throws Exception {
         long deadline = System.currentTimeMillis() + 15_000;
         while (System.currentTimeMillis() < deadline) {
             if (!proc.isAlive()) {
-                throw new AssertionError("sing-box exited early with code " + proc.exitValue());
+                throw new AssertionError("sing-box exited early with code " + proc.exitValue()
+                        + outputTail(log));
             }
             try (Socket socket = new Socket()) {
                 socket.connect(new InetSocketAddress("127.0.0.1", port), 500);
@@ -819,7 +1053,39 @@ class SingBoxRealBinarySmokeTest {
                 Thread.sleep(200);
             }
         }
-        throw new AssertionError("clash_api port " + port + " did not open within 15s");
+        throw new AssertionError("clash_api port " + port + " did not open within 15s"
+                + outputTail(log));
+    }
+
+    /** The last {@code OUTPUT_TAIL_LINES} lines of a core's output, for a failure message. */
+    private static String outputTail(Path log) {
+        List<String> lines;
+        try {
+            // Decoded leniently: a malformed byte must not replace the failure
+            // being reported with a decoding exception.
+            lines = new String(Files.readAllBytes(log), StandardCharsets.UTF_8).lines().toList();
+        } catch (IOException e) {
+            return "\n--- sing-box output could not be read: " + e + " ---";
+        }
+        if (lines.isEmpty()) {
+            return "\n--- sing-box wrote no output ---";
+        }
+        int from = Math.max(0, lines.size() - OUTPUT_TAIL_LINES);
+        String shown = from == 0 ? "" : ", last " + (lines.size() - from) + " of " + lines.size();
+        return "\n--- sing-box output" + shown + " ---\n"
+                + String.join("\n", lines.subList(from, lines.size()));
+    }
+
+    /**
+     * Stops a core a test started and waits for it to exit. The wait matters
+     * for the cleanup that follows: Windows refuses to delete a log file while
+     * the process writing it is still alive.
+     */
+    private static void stopCore(Process proc) throws InterruptedException {
+        proc.destroy();
+        if (!proc.waitFor(5, TimeUnit.SECONDS)) {
+            proc.destroyForcibly().waitFor(5, TimeUnit.SECONDS);
+        }
     }
 
     @AfterAll

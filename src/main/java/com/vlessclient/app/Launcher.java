@@ -1,5 +1,8 @@
 package com.vlessclient.app;
 
+import com.vlessclient.platform.PlatformPaths;
+import java.nio.file.Path;
+
 /**
  * Plain-class entry point. Kept separate from {@link VlessClientApp} so the
  * launched jar can be run without pulling in JavaFX on the command line
@@ -28,6 +31,17 @@ public final class Launcher {
         // PlatformPaths for the directory itself, through
         // LogDirPropertyDefiner, so there is no property to set before the
         // first class with a static logger loads.
+
+        // One copy of the app per data directory, claimed before anything else
+        // runs. A second copy that went on would clear the running copy's
+        // system proxy at startup, write the same JSON files from its own
+        // memory, and could install a staged update underneath it. Instead it
+        // asks the running copy to show its window, and leaves.
+        Path dataDir = PlatformPaths.current().dataDir();
+        if (SingleInstance.claim(dataDir) == SingleInstance.Claim.HELD_ELSEWHERE) {
+            SingleInstance.signalRunning(dataDir);
+            return;
+        }
 
         // An update downloaded during an earlier run installs here, before
         // anything else exists to tear down. A handoff means a helper is now

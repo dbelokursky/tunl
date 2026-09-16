@@ -5,17 +5,24 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Stream;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 /**
  * Tests for the day/server bucketing in {@link TrafficHistoryStore}.
@@ -65,17 +72,40 @@ class TrafficHistoryStoreTest {
         return new TestClock(Instant.parse(isoInstant));
     }
 
+    /** Every store a test opened, so none is left writing once the test ends. */
+    private final List<TrafficHistoryStore> opened = new ArrayList<>();
+
+    /**
+     * Opens a store and remembers it. A sample that arrives a minute after the
+     * last write queues one on the store's io thread, and a test that returned
+     * before it ran had JUnit deleting the temp dir while the write landed in it.
+     */
+    private TrafficHistoryStore open(Path directory, Clock clock) {
+        TrafficHistoryStore store = new TrafficHistoryStore(directory, clock);
+        opened.add(store);
+        return store;
+    }
+
+    @AfterEach
+    void waitForTheWritesBeforeTheTempDirGoes() {
+        for (TrafficHistoryStore store : opened) {
+            assertThat(store.awaitIdle(10_000))
+                    .as("a write still on its way when JUnit deletes the temp dir")
+                    .isTrue();
+        }
+    }
+
     @Test
     void samplesSplitByServerAndSurviveAReload(@TempDir Path dir) {
         TestClock clock = clockAt("2026-09-05T10:00:00Z");
-        TrafficHistoryStore store = new TrafficHistoryStore(dir, clock);
+        TrafficHistoryStore store = open(dir, clock);
 
         store.record(server("a", "Amsterdam 01"), 1_000, 9_000);
         store.record(server("b", "Frankfurt 02"), 500, 1_500);
         store.record(server("a", "Amsterdam 01"), 0, 1_000);
         store.flush();
 
-        TrafficHistoryStore reopened = new TrafficHistoryStore(dir, clock);
+        TrafficHistoryStore reopened = open(dir, clock);
         List<TrafficHistoryStore.ServerTotal> top = reopened.topServers(5, 7);
 
         assertThat(top).extracting(TrafficHistoryStore.ServerTotal::serverName)
@@ -88,7 +118,7 @@ class TrafficHistoryStoreTest {
     @Test
     void crossingMidnightStartsANewBucket(@TempDir Path dir) {
         TestClock clock = clockAt("2026-09-05T23:59:00Z");
-        TrafficHistoryStore store = new TrafficHistoryStore(dir, clock);
+        TrafficHistoryStore store = open(dir, clock);
 
         store.record(server("a", "Amsterdam 01"), 100, 900);
         clock.advance(Duration.ofMinutes(2));
@@ -105,7 +135,7 @@ class TrafficHistoryStoreTest {
     @Test
     void idleSamplesAreNotRecorded(@TempDir Path dir) {
         TestClock clock = clockAt("2026-09-05T10:00:00Z");
-        TrafficHistoryStore store = new TrafficHistoryStore(dir, clock);
+        TrafficHistoryStore store = open(dir, clock);
 
         for (int i = 0; i < 100; i++) {
             store.record(server("a", "Amsterdam 01"), 0, 0);
@@ -123,7 +153,7 @@ class TrafficHistoryStoreTest {
     @Test
     void quietDaysComeBackAsZeroesNotAsGaps(@TempDir Path dir) {
         TestClock clock = clockAt("2026-09-05T10:00:00Z");
-        TrafficHistoryStore store = new TrafficHistoryStore(dir, clock);
+        TrafficHistoryStore store = open(dir, clock);
         store.record(server("a", "Amsterdam 01"), 1_000, 1_000);
 
         List<TrafficHistoryStore.DayTotal> week = store.lastDays(7);
@@ -137,7 +167,7 @@ class TrafficHistoryStoreTest {
     @Test
     void monthTotalsCountOnlyTheirOwnMonth(@TempDir Path dir) {
         TestClock clock = clockAt("2026-08-31T12:00:00Z");
-        TrafficHistoryStore store = new TrafficHistoryStore(dir, clock);
+        TrafficHistoryStore store = open(dir, clock);
         store.record(server("a", "Amsterdam 01"), 1_000, 1_000);
         clock.advance(Duration.ofDays(1));
         store.record(server("a", "Amsterdam 01"), 3_000, 4_000);
@@ -151,7 +181,7 @@ class TrafficHistoryStoreTest {
     @Test
     void resetClearsMemoryAndRemovesTheFile(@TempDir Path dir) throws IOException {
         TestClock clock = clockAt("2026-09-05T10:00:00Z");
-        TrafficHistoryStore store = new TrafficHistoryStore(dir, clock);
+        TrafficHistoryStore store = open(dir, clock);
         store.record(server("a", "Amsterdam 01"), 1_000, 1_000);
         store.flush();
         assertThat(dir.resolve("traffic-history.json")).exists();
@@ -163,7 +193,7 @@ class TrafficHistoryStoreTest {
                 .as("reset is the only way to clear this record, so it has to "
                         + "leave nothing behind on disk")
                 .isFalse();
-        assertThat(new TrafficHistoryStore(dir, clock).topServers(5, 7)).isEmpty();
+        assertThat(open(dir, clock).topServers(5, 7)).isEmpty();
     }
 
     @Test
@@ -172,7 +202,7 @@ class TrafficHistoryStoreTest {
                 StandardCharsets.UTF_8);
         TestClock clock = clockAt("2026-09-05T10:00:00Z");
 
-        TrafficHistoryStore store = new TrafficHistoryStore(dir, clock);
+        TrafficHistoryStore store = open(dir, clock);
 
         assertThat(store.topServers(5, 30)).isEmpty();
         store.record(server("a", "Amsterdam 01"), 1_000, 1_000);
@@ -180,10 +210,78 @@ class TrafficHistoryStoreTest {
         assertThat(store.lastDays(1).get(0).total()).isEqualTo(2_000);
     }
 
+    /**
+     * A history that would not parse was dropped in memory, and the first
+     * flush, a minute into the next tunnel, wrote over it. Nothing in it is
+     * ever pruned, so that file may have held years of days.
+     */
+    @Test
+    void aFileThatWillNotParseIsMovedAsideBeforeAnythingIsWritten(@TempDir Path dir)
+            throws IOException {
+        Files.writeString(dir.resolve("traffic-history.json"), "{ not json",
+                StandardCharsets.UTF_8);
+        TrafficHistoryStore store = open(dir, clockAt("2026-09-05T10:00:00Z"));
+
+        store.record(server("a", "Amsterdam 01"), 1_000, 1_000);
+        store.flush();
+
+        try (Stream<Path> files = Files.list(dir)) {
+            assertThat(files.filter(file -> file.getFileName().toString()
+                            .startsWith("traffic-history.json.corrupt-")))
+                    .singleElement()
+                    .satisfies(aside -> assertThat(aside).hasContent("{ not json"));
+        }
+    }
+
+    /**
+     * A file that is there but cannot be read says nothing about what it
+     * holds: an antivirus or a backup tool can have it open at startup. The
+     * first flush replaced it with a minute of traffic.
+     */
+    @Test
+    @DisabledOnOs(value = OS.WINDOWS, disabledReason = "POSIX permissions make the file unreadable")
+    void aFileThatCannotBeReadIsNotWrittenOver(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("traffic-history.json");
+        String history = """
+                {"version": 1, "days": [
+                  {"date": "2025-01-01",
+                   "servers": [{"serverId": "a", "upload": 5, "download": 5}]}
+                ]}""";
+        Files.writeString(file, history, StandardCharsets.UTF_8);
+        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("---------"));
+        assumeFalse(Files.isReadable(file), "this user can read any file");
+        TrafficHistoryStore store = open(dir, clockAt("2026-09-05T10:00:00Z"));
+
+        store.record(server("a", "Amsterdam 01"), 1_000, 1_000);
+        store.flush();
+
+        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"));
+        assertThat(file).hasContent(history);
+    }
+
+    @Test
+    @DisabledOnOs(value = OS.WINDOWS, disabledReason = "POSIX permissions make the file unreadable")
+    void clearingAFileThatCannotBeReadLetsANewRecordStart(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("traffic-history.json");
+        Files.writeString(file, "{}", StandardCharsets.UTF_8);
+        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("---------"));
+        assumeFalse(Files.isReadable(file), "this user can read any file");
+        TestClock clock = clockAt("2026-09-05T10:00:00Z");
+        TrafficHistoryStore store = open(dir, clock);
+
+        store.reset();
+        store.record(server("a", "Amsterdam 01"), 1_000, 1_000);
+        store.flush();
+
+        assertThat(open(dir, clock).lastDays(1).get(0).total())
+                .as("the file nobody could read is gone, so there is nothing left to protect")
+                .isEqualTo(2_000);
+    }
+
     @Test
     void bytesWithNoNamedServerAreKeptRatherThanDropped(@TempDir Path dir) {
         TestClock clock = clockAt("2026-09-05T10:00:00Z");
-        TrafficHistoryStore store = new TrafficHistoryStore(dir, clock);
+        TrafficHistoryStore store = open(dir, clock);
 
         store.record(null, 1_000, 2_000);
 
@@ -199,7 +297,7 @@ class TrafficHistoryStoreTest {
     @Test
     void aDayIsBrokenDownByServerWithoutTheDaysAroundIt(@TempDir Path dir) {
         TestClock clock = clockAt("2026-09-05T10:00:00Z");
-        TrafficHistoryStore store = new TrafficHistoryStore(dir, clock);
+        TrafficHistoryStore store = open(dir, clock);
 
         store.record(server("a", "Amsterdam 01"), 1_000, 1_000);
         clock.advance(Duration.ofDays(1));
@@ -225,7 +323,7 @@ class TrafficHistoryStoreTest {
     @Test
     void theWholeRecordIsTotalledFromItsFirstDay(@TempDir Path dir) {
         TestClock clock = clockAt("2026-07-30T12:00:00Z");
-        TrafficHistoryStore store = new TrafficHistoryStore(dir, clock);
+        TrafficHistoryStore store = open(dir, clock);
         assertThat(store.firstRecordedDate()).as("nothing recorded yet").isEmpty();
         assertThat(store.totalRecorded()).isZero();
 
@@ -259,7 +357,7 @@ class TrafficHistoryStoreTest {
                    "servers": [{"serverId": "a", "upload": 5, "download": 5}]}
                 ]}""", StandardCharsets.UTF_8);
 
-        TrafficHistoryStore store = new TrafficHistoryStore(dir, clockAt("2026-09-05T10:00:00Z"));
+        TrafficHistoryStore store = open(dir, clockAt("2026-09-05T10:00:00Z"));
 
         assertThat(store.firstRecordedDate()).contains(LocalDate.of(2026, 9, 1));
     }

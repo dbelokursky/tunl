@@ -65,6 +65,30 @@ class SingBoxConfigGeneratorRoutingTest {
         return false;
     }
 
+    /**
+     * The route rules without the lookup that system-proxy mode inserts ahead
+     * of the first IP rule: the resolve action and the LAN rule right after it.
+     * The preset and custom-rule tests are about the rules around it; the
+     * systemProxy_ tests below pin the lookup itself.
+     */
+    private static List<JsonNode> withoutLookup(JsonNode rules) {
+        List<JsonNode> kept = new java.util.ArrayList<>();
+        boolean afterLookup = false;
+        for (JsonNode rule : rules) {
+            if ("resolve".equals(rule.path("action").asString())) {
+                afterLookup = true;
+                continue;
+            }
+            if (afterLookup && rule.path("ip_is_private").asBoolean()) {
+                afterLookup = false;
+                continue;
+            }
+            afterLookup = false;
+            kept.add(rule);
+        }
+        return kept;
+    }
+
     @Test
     void bypassList_mergedIntoDirectRule() throws Exception {
         RoutingConfig routingConfig = new RoutingConfig();
@@ -139,7 +163,7 @@ class SingBoxConfigGeneratorRoutingTest {
         assertThat(route).isNotNull();
         assertThat(route.get("final").asString()).isEqualTo("proxy");
         assertThat(route.get("auto_detect_interface").asBoolean()).isTrue();
-        JsonNode rules = route.get("rules");
+        List<JsonNode> rules = withoutLookup(route.get("rules"));
         assertThat(rules).isNotNull();
         // route_all still emits the unconditional local-bypass rules — local
         // services must stay reachable even in "everything via proxy".
@@ -179,7 +203,7 @@ class SingBoxConfigGeneratorRoutingTest {
         assertThat(route).isNotNull();
 
         // [ local-domain, private-ip, geosite-category-ru, geoip-ru ] — all direct.
-        JsonNode rules = route.get("rules");
+        List<JsonNode> rules = withoutLookup(route.get("rules"));
         assertThat(rules.size()).isEqualTo(4);
 
         assertThat(isLocalDomainRule(rules.get(0))).isTrue();
@@ -203,8 +227,13 @@ class SingBoxConfigGeneratorRoutingTest {
                 .isEqualTo("https://raw.githubusercontent.com/SagerNet/sing-geosite/"
                         + "rule-set/geosite-category-ru.srs");
         // Through the tunnel: GitHub raw is often blocked when dialed
-        // directly on the networks this client is for.
-        assertThat(ruleSet.get(0).get("download_detour").asString()).isEqualTo("proxy");
+        // directly on the networks this client is for. Set on http_client:
+        // download_detour is deprecated, and a newer core stops at rule-set
+        // start over it while `check` still passes.
+        for (JsonNode entry : ruleSet) {
+            assertThat(entry.path("http_client").path("detour").asString()).isEqualTo("proxy");
+            assertThat(entry.has("download_detour")).isFalse();
+        }
         assertThat(ruleSet.get(1).get("tag").asString()).isEqualTo("geoip-ru");
         assertThat(ruleSet.get(1).get("url").asString())
                 .isEqualTo("https://raw.githubusercontent.com/SagerNet/sing-geoip/"
@@ -239,7 +268,7 @@ class SingBoxConfigGeneratorRoutingTest {
         String json = generator.generate(createVlessServer(), defaultSettings, routingConfig);
         JsonNode route = parse(json).get("route");
 
-        JsonNode rules = route.get("rules");
+        List<JsonNode> rules = withoutLookup(route.get("rules"));
         // [ local-domain, private-ip, geoip-de ]
         assertThat(rules.size()).isEqualTo(3);
         assertThat(isLocalDomainRule(rules.get(0))).isTrue();
@@ -264,7 +293,7 @@ class SingBoxConfigGeneratorRoutingTest {
         JsonNode route = parse(json).get("route");
 
         // [ local-domain, private-ip, geosite (ru+cn), geoip (ru+kz+cn) ]
-        JsonNode rules = route.get("rules");
+        List<JsonNode> rules = withoutLookup(route.get("rules"));
         assertThat(rules.size()).isEqualTo(4);
 
         JsonNode geositeRule = rules.get(2);
@@ -312,7 +341,7 @@ class SingBoxConfigGeneratorRoutingTest {
         String json = generator.generate(createVlessServer(), defaultSettings, routingConfig);
         JsonNode root = parse(json);
 
-        JsonNode rules = root.get("route").get("rules");
+        List<JsonNode> rules = withoutLookup(root.get("route").get("rules"));
         // 7 user-defined rules + local-domain + private-ip prepended.
         assertThat(rules.size()).isEqualTo(9);
 
@@ -469,7 +498,7 @@ class SingBoxConfigGeneratorRoutingTest {
         ));
 
         String json = generator.generate(createVlessServer(), defaultSettings, routingConfig);
-        JsonNode rules = parse(json).get("route").get("rules");
+        List<JsonNode> rules = withoutLookup(parse(json).get("route").get("rules"));
 
         assertThat(rules.size()).isEqualTo(3);
         assertThat(isLocalDomainRule(rules.get(0))).isTrue();
@@ -506,11 +535,12 @@ class SingBoxConfigGeneratorRoutingTest {
         routingConfig.setBypassCountries(List.of("ru"));
 
         String json = generator.generate(createVlessServer(), defaultSettings, routingConfig);
-        JsonNode rules = parse(json).get("route").get("rules");
+        // The LAN rule system-proxy mode repeats after its lookup is not the preset's.
+        List<JsonNode> rules = withoutLookup(parse(json).get("route").get("rules"));
 
         int privateCount = 0;
-        for (int i = 0; i < rules.size(); i++) {
-            JsonNode privateFlag = rules.get(i).get("ip_is_private");
+        for (JsonNode rule : rules) {
+            JsonNode privateFlag = rule.get("ip_is_private");
             if (privateFlag != null && privateFlag.asBoolean()) {
                 privateCount++;
             }
@@ -527,11 +557,115 @@ class SingBoxConfigGeneratorRoutingTest {
         String json = generator.generate(createVlessServer(), defaultSettings, routingConfig);
         JsonNode route = parse(json).get("route");
 
-        JsonNode rules = route.get("rules");
+        List<JsonNode> rules = withoutLookup(route.get("rules"));
         assertThat(rules.size()).isEqualTo(2);
         assertThat(isLocalDomainRule(rules.get(0))).isTrue();
         assertThat(rules.get(1).get("ip_is_private").asBoolean()).isTrue();
         assertThat(rules.get(1).get("outbound").asString()).isEqualTo("direct");
         assertThat(route.get("final").asString()).isEqualTo("proxy");
+    }
+
+    // ===== system-proxy mode: names get an address before the IP rules =====
+
+    /**
+     * A browser behind the system proxy asks for a name, and the core compares
+     * IP rules with the destination address alone, so "bypass DE" never matched
+     * www.spiegel.de. The lookup goes right before the first IP rule, and the
+     * name rules above it still match without one.
+     */
+    @Test
+    void systemProxy_resolvesNamesRightBeforeTheFirstIpRule() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "corp.example.com",
+                        RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.IP_CIDR, "203.0.113.0/24",
+                        RoutingRule.RuleAction.BLOCK)));
+
+        String json = generator.generate(createVlessServer(), defaultSettings, routingConfig);
+        JsonNode rules = parse(json).get("route").get("rules");
+
+        // [ local-domain, private-ip, corp.example.com, resolve, private-ip, 203.0.113.0/24 ]
+        assertThat(rules.size()).isEqualTo(6);
+        assertThat(rules.get(2).get("domain_suffix").get(0).asString())
+                .isEqualTo("corp.example.com");
+        assertThat(rules.get(3).path("action").asString()).isEqualTo("resolve");
+        assertThat(rules.get(3).has("server"))
+                .as("no server of its own: the DNS rules pick one, so LAN names stay local")
+                .isFalse();
+        assertThat(rules.get(4).path("ip_is_private").asBoolean())
+                .as("a name that resolves to a LAN address still goes direct")
+                .isTrue();
+        assertThat(rules.get(4).path("outbound").asString()).isEqualTo("direct");
+        assertThat(rules.get(5).path("ip_cidr").path(0).asString()).isEqualTo("203.0.113.0/24");
+    }
+
+    /**
+     * The lookup needs resolvers: proxy DNS for a name bound for the tunnel, so
+     * the local network is not asked; the system for LAN names. The core also
+     * demands a default domain resolver once a dns block exists, which keeps
+     * the proxy server's own name off the proxy.
+     */
+    @Test
+    void systemProxy_countryBypassBringsItsOwnResolvers() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setBypassCountries(List.of("de"));
+
+        String json = generator.generate(createVlessServer(), defaultSettings, routingConfig);
+        JsonNode root = parse(json);
+
+        JsonNode dns = root.path("dns");
+        assertThat(dns.path("final").asString()).isEqualTo("proxy-dns");
+        assertThat(dns.path("rules").toString())
+                .contains("\".lan\"").contains("\".home.arpa\"").contains("\".internal\"");
+        assertThat(root.path("route").path("default_domain_resolver").asString())
+                .isEqualTo("local-dns");
+        JsonNode rules = root.path("route").path("rules");
+        assertThat(rules.path(rules.size() - 3).path("action").asString()).isEqualTo("resolve");
+        assertThat(rules.path(rules.size() - 1).path("rule_set").path(0).asString())
+                .isEqualTo("geoip-de");
+    }
+
+    @Test
+    void systemProxy_withoutIpRulesLooksNothingUp() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setBypassList(List.of("example.com", "192.168.0.0/16"));
+        routingConfig.setRules(List.of(new RoutingRule(RoutingRule.RuleType.DOMAIN,
+                "internal.example.com", RoutingRule.RuleAction.DIRECT)));
+
+        String json = generator.generate(createVlessServer(), defaultSettings, routingConfig);
+        JsonNode root = parse(json);
+
+        assertThat(root.path("route").path("rules").toString()).doesNotContain("\"resolve\"");
+        assertThat(root.has("dns")).isFalse();
+        assertThat(root.path("route").has("default_domain_resolver")).isFalse();
+    }
+
+    @Test
+    void tunMode_ipRulesNeedNoLookup() throws Exception {
+        AppSettings settings = new AppSettings();
+        settings.setProxyMode(com.vlessclient.model.ProxyMode.TUN);
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setBypassCountries(List.of("de"));
+
+        String json = generator.generate(createVlessServer(), settings, routingConfig);
+
+        assertThat(parse(json).path("route").path("rules").toString())
+                .as("TUN connections carry an address already")
+                .doesNotContain("\"resolve\"");
+    }
+
+    /** IPv4-only answers are for a TUN device without IPv6, not for the system proxy. */
+    @Test
+    void systemProxy_keepsTheChosenDnsStrategy() throws Exception {
+        AppSettings settings = new AppSettings();
+        settings.setTunIpv6Enabled(false);
+        settings.setDnsStrategy("prefer_ipv6");
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setBypassCountries(List.of("de"));
+
+        String json = generator.generate(createVlessServer(), settings, routingConfig);
+
+        assertThat(parse(json).path("dns").path("strategy").asString()).isEqualTo("prefer_ipv6");
     }
 }

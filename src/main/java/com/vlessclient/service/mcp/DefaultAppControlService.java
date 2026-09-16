@@ -218,7 +218,10 @@ public class DefaultAppControlService implements AppControlService {
 
     private SubscriptionSummary toSummary(Subscription sub) {
         int count = sub.getServerIds() != null ? sub.getServerIds().size() : 0;
-        return new SubscriptionSummary(sub.getId(), sub.getName(), sub.getUrl(),
+        // Scheme and host only, as the Subscriptions tab shows it: the path or
+        // query holds the account token, which get_logs and the event stream
+        // already keep from agents, and this read tool works with changes off.
+        return new SubscriptionSummary(sub.getId(), sub.getName(), Redact.url(sub.getUrl()),
                 count, sub.getLastRefreshedAt());
     }
 
@@ -510,7 +513,7 @@ public class DefaultAppControlService implements AppControlService {
             throw new McpToolException("'shareLink' is required.");
         }
         try {
-            ServerConfig config = shareLinkParser.parse(shareLink.trim());
+            ServerConfig config = shareLinkParser.parseForImport(shareLink.trim());
             if (config == null) {
                 throw new McpToolException("Could not parse share link.");
             }

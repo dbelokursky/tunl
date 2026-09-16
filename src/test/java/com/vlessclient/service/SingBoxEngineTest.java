@@ -2,6 +2,7 @@ package com.vlessclient.service;
 
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
+import com.vlessclient.platform.CoreRecord;
 import com.vlessclient.testing.Await;
 import com.vlessclient.testing.FxToolkitExtension;
 import java.time.Duration;
@@ -13,6 +14,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.CleanupMode;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.io.InterruptedIOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
@@ -22,6 +26,8 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static com.vlessclient.testing.FxTestSupport.flushFxEvents;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -60,8 +66,11 @@ class SingBoxEngineTest {
                     + "echo sing-box started\r\n"
                     + "timeout /t " + sleepSeconds + " /nobreak > NUL\r\n");
         }
+        // bash, not sh: macOS's /bin/sh hands a script over to bash in the
+        // same process soon after it starts, so the executable the system
+        // reports changed under a test that records it (CoreRecord).
         return writeScript(dir, name,
-                "#!/bin/sh\n"
+                "#!/bin/bash\n"
                 + "[ \"$1\" = check ] && exit 0\n"
                 + "echo 'sing-box started'\n"
                 + "sleep " + sleepSeconds + "\n");
@@ -416,6 +425,69 @@ class SingBoxEngineTest {
         assertThat(guardCalls).isEmpty();
     }
 
+    /**
+     * The old core's monitor decided that no newer session had started, then
+     * cleared the OS proxy through slow platform commands, all without the
+     * lifecycle lock. A reconnect could start its core and register the same
+     * proxy in between, and the clear then took the new session's proxy away.
+     */
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void aStaleMonitorClearsTheProxyBeforeTheNextCoreStarts(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+        CountDownLatch clearing = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<Boolean> coreRanDuringTheClear = new AtomicReference<>();
+        CountDownLatch cleared = new CountDownLatch(1);
+        engine.setSystemProxyGuard((host, port) -> {
+            if (clearing.getCount() == 0) {
+                return;
+            }
+            clearing.countDown();
+            try {
+                release.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            // The moment a real guard switches the proxy off.
+            coreRanDuringTheClear.set(engine.isRunning());
+            cleared.countDown();
+        });
+        engine.start(SET_SYSTEM_PROXY_CONFIG, ProxyMode.SYSTEM_PROXY);
+        engine.stop();
+        assertThat(clearing.await(10, TimeUnit.SECONDS))
+                .as("the old core's monitor clears its proxy").isTrue();
+
+        CountDownLatch nextStarted = new CountDownLatch(1);
+        Thread reconnect = new Thread(() -> {
+            try {
+                engine.start(SET_SYSTEM_PROXY_CONFIG, ProxyMode.SYSTEM_PROXY);
+                nextStarted.countDown();
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }, "reconnect");
+        reconnect.start();
+        try {
+            // Long enough for a start that does not wait to launch its core.
+            nextStarted.await(2, TimeUnit.SECONDS);
+        } finally {
+            release.countDown();
+        }
+        // The record is made on the monitor's thread once it is let go.
+        assertThat(cleared.await(10, TimeUnit.SECONDS))
+                .as("the old monitor finishes its clear").isTrue();
+        reconnect.join(Duration.ofSeconds(10));
+        try {
+            assertThat(coreRanDuringTheClear.get())
+                    .as("a new core was running while the old monitor cleared the proxy")
+                    .isFalse();
+            assertThat(engine.isRunning()).as("the reconnect still starts").isTrue();
+        } finally {
+            engine.stop();
+        }
+    }
+
     @Test
     void startupCleanupClearsAStaleProxyWhenNotRunning(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
         SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
@@ -479,6 +551,128 @@ class SingBoxEngineTest {
         // The wrapper must have exited on its own after seeing the stop file
         // (exit 0) — a force-kill fallback would surface as a signal exit.
         assertThat(wrapperProc.get().exitValue()).isZero();
+    }
+
+    /**
+     * Recovery must not restart a tunnel whose launch asks for elevation every
+     * time, so the engine keeps what the last launch reported; a direct start
+     * asks for nothing.
+     */
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void theLastLaunchSaysWhetherARestartWouldPrompt(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        Path stopFile = tmp.resolve("stop.signal");
+        Path wrapper = tmp.resolve("wrapper.sh");
+        Files.writeString(wrapper, "#!/bin/sh\n"
+                + "while [ ! -f '" + stopFile + "' ]; do sleep 0.2; done\n");
+        makeExecutable(wrapper);
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+
+        for (boolean prompts : new boolean[] {true, false}) {
+            engine.setTunLauncher((binary, cfg) -> new com.vlessclient.platform.TunLauncher.Launched(
+                    new ProcessBuilder(wrapper.toString()).redirectErrorStream(true).start(),
+                    stopFile, prompts));
+            engine.start(DUMMY_CONFIG, ProxyMode.TUN);
+            try {
+                assertThat(engine.restartNeedsElevationPrompt())
+                        .as("a TUN launch that prompts each time: " + prompts)
+                        .isEqualTo(prompts);
+            } finally {
+                engine.stop();
+            }
+        }
+
+        engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+        try {
+            assertThat(engine.restartNeedsElevationPrompt()).as("a direct start").isFalse();
+        } finally {
+            engine.stop();
+        }
+    }
+
+    /**
+     * The TUN watchdog promoted a session to CONNECTED 1.8 s in whenever the
+     * launcher was alive, and the Windows launcher stays alive for as long as
+     * the UAC prompt stays open. Connected now means the core's controller
+     * answers: it listens only once the core itself runs, and a bare probe of
+     * it leaves no error in the core's log, unlike a probe of a proxy inbound.
+     */
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void tunModeIsConnectedOnlyOnceTheCoreControllerAnswers(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        Path stopFile = tmp.resolve("stop.signal");
+        Path wrapper = tmp.resolve("wrapper.sh");
+        // A launcher waiting on an elevation prompt: alive, and silent.
+        Files.writeString(wrapper, "#!/bin/sh\n"
+                + "while [ ! -f '" + stopFile + "' ]; do sleep 0.2; done\n");
+        makeExecutable(wrapper);
+        int port;
+        try (java.net.ServerSocket free = new java.net.ServerSocket(0)) {
+            port = free.getLocalPort();
+        }
+        String config = "{\"experimental\":{\"clash_api\":{\"external_controller\":\"127.0.0.1:"
+                + port + "\",\"secret\":\"this-core\"}}}";
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+        engine.setTunLauncher((binary, cfg) -> new com.vlessclient.platform.TunLauncher.Launched(
+                new ProcessBuilder(wrapper.toString()).redirectErrorStream(true).start(),
+                stopFile));
+
+        engine.start(config, ProxyMode.TUN);
+        com.sun.net.httpserver.HttpServer controller = null;
+        try {
+            Thread.sleep(2500);
+            assertThat(stateOnFxThread(engine))
+                    .as("past the old 1.8 s promotion, with nothing on the controller port yet")
+                    .isEqualTo(ConnectionState.CONNECTING);
+
+            // Then the port answers for other programs before this core does.
+            String anotherSecret = "a clash API that checks another secret";
+            String notSingBox = "a clash API without a secret that is not sing-box";
+            java.util.concurrent.atomic.AtomicReference<String> answering =
+                    new java.util.concurrent.atomic.AtomicReference<>(anotherSecret);
+            java.util.concurrent.atomic.AtomicInteger probes =
+                    new java.util.concurrent.atomic.AtomicInteger();
+            controller = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(
+                    java.net.InetAddress.getLoopbackAddress(), port), 0);
+            controller.createContext("/version", exchange -> {
+                probes.incrementAndGet();
+                String who = answering.get();
+                boolean thisSecret = "Bearer this-core"
+                        .equals(exchange.getRequestHeaders().getFirst("Authorization"));
+                int status = who.equals(notSingBox) ? 200
+                        : who.equals(anotherSecret) ? 401
+                        : thisSecret ? 200 : 401;
+                byte[] body = ("{\"meta\":true,\"version\":\""
+                        + (who.equals(notSingBox) ? "v1.19.1" : "sing-box 1.14.0") + "\"}")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(status, body.length);
+                exchange.getResponseBody().write(body);
+                exchange.close();
+            });
+            controller.start();
+            for (String other : List.of(anotherSecret, notSingBox)) {
+                answering.set(other);
+                probes.set(0);
+                // Set before the reset, so both counted probes met this program.
+                Await.until("two probes of " + other + ", or a promotion",
+                        () -> probes.get() >= 2
+                                || stateOnFxThread(engine) != ConnectionState.CONNECTING,
+                        Duration.ofSeconds(10));
+                assertThat(stateOnFxThread(engine))
+                        .as("the controller port held by " + other)
+                        .isEqualTo(ConnectionState.CONNECTING);
+            }
+
+            answering.set("this core");
+            awaitConnectionState(engine, ConnectionState.CONNECTED, AWAIT_STATE_TIMEOUT_MS);
+        } finally {
+            if (controller != null) {
+                controller.stop(0);
+            }
+            engine.stop();
+        }
     }
 
     @EnabledOnOs({OS.MAC, OS.LINUX})
@@ -750,6 +944,86 @@ class SingBoxEngineTest {
                         }
                     })
                     .toList();
+        }
+    }
+
+    /**
+     * Nothing ends a plain child when the app is killed, so a direct core
+     * outlived it with the ports the next run needs. The record the engine
+     * keeps lets the next run end that core.
+     */
+    @Test
+    void theNextRunEndsADirectCoreThisRunLeftRunning(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        Path recordFile = tmp.resolve(CoreRecord.FILE_NAME);
+        SingBoxEngine engine = new SingBoxEngine(
+                createFakeSingBox(tmp, "sing-box", 30), new CoreRecord(recordFile));
+        engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+        try {
+            // The app dies here without stopping its core, and starts again.
+            assertThat(new CoreRecord(recordFile).endLeftover())
+                    .isEqualTo(CoreRecord.Leftover.ENDED);
+
+            assertThat(engine.awaitStopped(Duration.ofSeconds(10))).isTrue();
+        } finally {
+            engine.stop();
+        }
+    }
+
+    @Test
+    void aDirectCoreStaysRecordedUntilItStops(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        CoreRecord record = new CoreRecord(tmp.resolve(CoreRecord.FILE_NAME));
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30), record);
+        engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+        try {
+            assertThat(record.read()).hasValueSatisfying(entry ->
+                    assertThat(ProcessHandle.of(entry.pid())
+                            .flatMap(ProcessHandle::parent).map(ProcessHandle::pid))
+                            .as("the recorded process is the core this JVM started")
+                            .contains(ProcessHandle.current().pid()));
+        } finally {
+            engine.stop();
+        }
+        assertThat(record.read()).isEmpty();
+    }
+
+    /**
+     * The check hid an interrupt that cut it short, and the start went on to
+     * launch the core. At quit the recovery scheduler is shut down with an
+     * interrupt, so a reconnect under way launched a core nothing stopped.
+     */
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void aStartInterruptedDuringTheCheckLaunchesNothing(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        Path checking = tmp.resolve("checking");
+        Path fake = writeScript(tmp, "sing-box",
+                "#!/bin/sh\n"
+                + "if [ \"$1\" = check ]; then touch '" + checking + "'; exec sleep 30; fi\n"
+                + "echo 'sing-box started'\n"
+                + "sleep 30\n");
+        SingBoxEngine engine = new SingBoxEngine(fake);
+        AtomicReference<Exception> failure = new AtomicReference<>();
+        AtomicBoolean stillInterrupted = new AtomicBoolean();
+        Thread starter = new Thread(() -> {
+            try {
+                engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+            } catch (Exception e) {
+                failure.set(e);
+            }
+            stillInterrupted.set(Thread.currentThread().isInterrupted());
+        }, "start-to-interrupt");
+        starter.start();
+        try {
+            Await.until("the check to run", () -> Files.exists(checking), Duration.ofSeconds(10));
+            starter.interrupt();
+            starter.join(Duration.ofSeconds(10));
+
+            assertThat(starter.isAlive()).isFalse();
+            assertThat(engine.isRunning()).as("a core was launched").isFalse();
+            assertThat(failure.get()).isInstanceOf(InterruptedIOException.class);
+            assertThat(stillInterrupted.get()).as("the interrupt is kept for the caller").isTrue();
+            awaitConnectionState(engine, ConnectionState.DISCONNECTED, AWAIT_STATE_TIMEOUT_MS);
+        } finally {
+            engine.stop();
         }
     }
 }

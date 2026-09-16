@@ -1,22 +1,34 @@
 package com.vlessclient.ui.view;
 
+import com.vlessclient.app.I18n;
+import com.vlessclient.testing.Await;
 import com.vlessclient.testing.UiTest;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
+import javafx.application.Platform;
 import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Bounds;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
+import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar;
 import javafx.scene.control.CheckBox;
+import javafx.scene.control.DialogPane;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.TextField;
 import javafx.scene.control.skin.VirtualFlow;
 import javafx.scene.layout.StackPane;
 import javafx.stage.Stage;
+import javafx.stage.Window;
 import javafx.util.Callback;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
@@ -92,6 +104,38 @@ public class LogsViewTest extends ApplicationTest {
                 source.add(logLine(100 + line));
                 source.removeFirst();
             }
+        });
+        WaitForAsyncUtils.waitForFxEvents();
+        ViewportAnchor after = firstVisibleAnchor(list);
+
+        assertThat(after.item()).isSameAs(before.item());
+        assertThat(after.offset()).isCloseTo(
+                before.offset(), org.assertj.core.data.Offset.offset(0.5));
+    }
+
+    @Test
+    void disablingAutoScrollKeepsTheViewportAnchoredWhenABatchArrives() {
+        ListView<String> list = lookup("#logListView").query();
+        CheckBox autoScroll = lookup("#autoScrollCheckBox").query();
+        ObservableList<String> source = sourceOf(list);
+
+        interact(() -> source.setAll(IntStream.range(0, 100)
+                .mapToObj(i -> logLine(i))
+                .toList()));
+        WaitForAsyncUtils.waitForFxEvents();
+
+        interact(() -> {
+            list.scrollTo(source.size() - 1);
+            autoScroll.setSelected(false);
+        });
+        WaitForAsyncUtils.waitForFxEvents();
+        ViewportAnchor before = firstVisibleAnchor(list);
+
+        // LogReader hands a burst over in one task: one addition, then one
+        // removal from the front for the lines past the buffer's size.
+        interact(() -> {
+            source.addAll(IntStream.range(100, 110).mapToObj(i -> logLine(i)).toList());
+            source.remove(0, 10);
         });
         WaitForAsyncUtils.waitForFxEvents();
         ViewportAnchor after = firstVisibleAnchor(list);
@@ -292,6 +336,60 @@ public class LogsViewTest extends ApplicationTest {
     }
 
     /** The engine keeps 1000 lines; a long-running instance always has them. */
+    /**
+     * Clear emptied the log on one click, and the log is the only copy of the
+     * core's output the app keeps. It asks first, with Cancel as the button
+     * Enter presses, and only the button named Clear clears.
+     */
+    @Test
+    void clearingTheLogAsksFirstAndOnlyItsOwnButtonClearsIt() {
+        ListView<String> list = lookup("#logListView").query();
+        ObservableList<String> source = sourceOf(list);
+        interact(() -> source.setAll(logLine(0), logLine(1)));
+        Button clear = lookup("#clearButton").query();
+        String question = I18n.get("logs.clear.confirm");
+
+        Platform.runLater(clear::fire);
+        DialogPane confirm = awaitDialogAsking(question);
+        Button cancel = buttonFor(confirm, ButtonBar.ButtonData.CANCEL_CLOSE);
+        assertThat(cancel.isDefaultButton()).as("Enter keeps the log").isTrue();
+        assertThat(buttonFor(confirm, ButtonBar.ButtonData.OK_DONE).isDefaultButton()).isFalse();
+        interact(cancel::fire);
+        WaitForAsyncUtils.waitForFxEvents();
+        assertThat(source).hasSize(2);
+
+        Platform.runLater(clear::fire);
+        DialogPane again = awaitDialogAsking(question);
+        interact(buttonFor(again, ButtonBar.ButtonData.OK_DONE)::fire);
+        WaitForAsyncUtils.waitForFxEvents();
+        assertThat(source).isEmpty();
+    }
+
+    /** The showing dialog that asks {@code question}, once one does. */
+    private DialogPane awaitDialogAsking(String question) {
+        return Await.untilValue("a dialog asking: " + question, () -> {
+            AtomicReference<DialogPane> found = new AtomicReference<>();
+            interact(() -> {
+                for (Window window : Window.getWindows()) {
+                    if (window.isShowing() && window.getScene() != null
+                            && window.getScene().getRoot() instanceof DialogPane pane
+                            && question.equals(pane.getHeaderText())) {
+                        found.set(pane);
+                    }
+                }
+            });
+            return found.get();
+        }, Objects::nonNull, Duration.ofSeconds(10));
+    }
+
+    private static Button buttonFor(DialogPane dialog, ButtonBar.ButtonData data) {
+        return dialog.getButtonTypes().stream()
+                .filter(type -> type.getButtonData() == data)
+                .map(type -> (Button) dialog.lookupButton(type))
+                .findFirst()
+                .orElseThrow();
+    }
+
     private void fillRingBuffer(ObservableList<String> source) {
         interact(() -> source.setAll(IntStream.range(0, 1000)
                 .mapToObj(i -> logLine(i))
@@ -381,5 +479,35 @@ public class LogsViewTest extends ApplicationTest {
     }
 
     private record ViewportAnchor(String item, double offset) {
+    }
+
+    /**
+     * Download, Save diagnostics and Clear show only an icon, and a screen
+     * reader read out nothing for them. Each names its action, in the current
+     * language.
+     */
+    @Test
+    void theIconButtonsCarryTheirNamesInTheCurrentLanguage() {
+        try {
+            for (Locale locale : List.of(Locale.ENGLISH, Locale.of("ru"))) {
+                interact(() -> I18n.setLocale(locale));
+                assertThat(iconButtonNames())
+                        .as("the names of Download, Save diagnostics and Clear in %s", locale)
+                        .containsExactly(I18n.get("logs.download.tooltip"),
+                                I18n.get("logs.diagnostics.tooltip"),
+                                I18n.get("logs.clear.tooltip"));
+            }
+        } finally {
+            interact(() -> I18n.setLocale(Locale.ENGLISH));
+        }
+    }
+
+    private List<String> iconButtonNames() {
+        List<String> names = new ArrayList<>();
+        for (String id : List.of("#downloadButton", "#diagnosticsButton", "#clearButton")) {
+            Button button = lookup(id).query();
+            names.add(button.getAccessibleText());
+        }
+        return names;
     }
 }

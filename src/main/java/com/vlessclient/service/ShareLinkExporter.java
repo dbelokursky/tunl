@@ -110,8 +110,12 @@ public class ShareLinkExporter {
         if (config.getTransport() != null) {
             node.put("host", config.getTransport().getHost() != null
                     ? config.getTransport().getHost() : "");
-            node.put("path", config.getTransport().getPath() != null
-                    ? config.getTransport().getPath() : "");
+            // gRPC's service name travels in path, where the parser reads it back.
+            String serviceName = config.getTransport().getServiceName();
+            String path = config.getTransport().getType() == TransportType.GRPC
+                    && serviceName != null && !serviceName.isBlank()
+                    ? serviceName : config.getTransport().getPath();
+            node.put("path", path != null ? path : "");
         } else {
             node.put("host", "");
             node.put("path", "");
@@ -187,6 +191,15 @@ public class ShareLinkExporter {
         sb.append(config.getAddress());
         sb.append(":");
         sb.append(config.getPort());
+        // The plugin goes back into the link: exporting without it produced a
+        // link that looked fine and connected to nothing.
+        if (config.getPlugin() != null && !config.getPlugin().isBlank()) {
+            String plugin = config.getPlugin();
+            if (config.getPluginOpts() != null && !config.getPluginOpts().isBlank()) {
+                plugin = plugin + ";" + config.getPluginOpts();
+            }
+            sb.append("/?plugin=").append(URLEncoder.encode(plugin, StandardCharsets.UTF_8));
+        }
 
         String name = config.getName();
         if (name != null && !name.isBlank()) {

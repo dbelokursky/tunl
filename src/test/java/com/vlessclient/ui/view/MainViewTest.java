@@ -1,10 +1,17 @@
 package com.vlessclient.ui.view;
 
+import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.model.Protocol;
+import com.vlessclient.model.ServerConfig;
+import com.vlessclient.service.ConfigStore;
 import com.vlessclient.testing.UiTest;
+import java.util.List;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.TextField;
+import javafx.scene.input.KeyCombination;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
@@ -80,6 +87,86 @@ public class MainViewTest extends ApplicationTest {
     }
 
     /**
+     * Shortcut+F takes the keyboard to the search field of the page on screen,
+     * its text selected so typing replaces it. The Servers and Logs pages each
+     * have one, and only the pointer reached it.
+     *
+     * <p>The shortcut is taken from the window's accelerators and run, as the
+     * scene runs it for the key. The focus is read as the scene's focus owner:
+     * {@code isFocused()} also needs a focused window, which a headless one may
+     * not be.</p>
+     */
+    @Test
+    void theFindShortcutFocusesTheSearchFieldOfThePageOnScreen() {
+        Button dashboard = lookup("#btnDashboard").queryButton();
+        ConfigStore store = ServiceLocator.get(ConfigStore.class);
+        ServerConfig server = server("Amsterdam 01");
+        try {
+            // With no servers the Servers page hides its search, since there
+            // is nothing to narrow, and the shortcut leaves the focus alone.
+            fireNav("#btnServers");
+            Button servers = lookup("#btnServers").queryButton();
+            interact(servers::requestFocus);
+            interact(findShortcut(servers.getScene()));
+            assertThat(servers.getScene().getFocusOwner())
+                    .as("the focus after Shortcut+F on a Servers page with no servers")
+                    .isSameAs(servers);
+
+            interact(() -> store.addServer(server));
+            for (String page : List.of("#btnServers", "#btnLogs")) {
+                fireNav(page);
+                TextField search = lookup("#searchField").queryAs(TextField.class);
+                Scene scene = search.getScene();
+                Button nav = lookup(page).queryButton();
+                interact(() -> {
+                    search.setText("vless");
+                    nav.requestFocus();
+                });
+                assertThat(scene.getFocusOwner())
+                        .as("precondition: the focus on the sidebar button of %s", page)
+                        .isSameAs(nav);
+
+                interact(findShortcut(scene));
+
+                assertThat(scene.getFocusOwner())
+                        .as("the focus after Shortcut+F on %s", page)
+                        .isSameAs(search);
+                assertThat(search.getSelectedText())
+                        .as("the search text, selected so typing replaces it")
+                        .isEqualTo("vless");
+                interact(() -> {
+                    search.clear();
+                    nav.requestFocus();
+                });
+            }
+        } finally {
+            // A field left with the focus blinks its caret on once TestFX hides
+            // the window; a sidebar button has no caret.
+            interact(() -> {
+                store.removeServer(server.getId());
+                dashboard.requestFocus();
+            });
+        }
+    }
+
+    /** The main window's Shortcut+F, as the scene runs it for the key. */
+    private static Runnable findShortcut(Scene scene) {
+        Runnable find = scene.getAccelerators().get(KeyCombination.keyCombination("Shortcut+F"));
+        assertThat(find).as("the main window's Shortcut+F").isNotNull();
+        return find;
+    }
+
+    private static ServerConfig server(String name) {
+        ServerConfig config = new ServerConfig();
+        config.setName(name);
+        config.setProtocol(Protocol.VLESS);
+        config.setAddress("203.0.113.10");
+        config.setPort(443);
+        config.setUuid("b1c2d3e4-f5a6-7890-abcd-ef1234567890");
+        return config;
+    }
+
+    /**
      * Fires the nav button's action directly instead of a robot clickOn. The
      * glass robot can miss its target under load when several TestFX suites
      * run together (headless focus contention), which made these assertions
@@ -89,6 +176,36 @@ public class MainViewTest extends ApplicationTest {
         Button button = lookup(id).query();
         interact(button::fire);
         WaitForAsyncUtils.waitForFxEvents();
+    }
+
+    /**
+     * Entries a newer build wrote are skipped rather than failing the file,
+     * which only helps if the user learns of it: the next save rewrites the
+     * file without them, so a rollback that was still recoverable stops being
+     * recoverable the moment they add a server.
+     */
+    @Test
+    void entriesANewerBuildWroteAnnounceThemselvesInTheirOwnBanner() {
+        var persistence = com.vlessclient.app.ServiceLocator
+                .get(com.vlessclient.service.ConfigStore.class).getPersistenceState();
+        try {
+            interact(() -> persistence.couldNotRead("servers.json", 2));
+
+            javafx.scene.layout.HBox banner = lookup("#unreadableBanner").queryAs(
+                    javafx.scene.layout.HBox.class);
+            javafx.scene.control.Label message = lookup("#unreadableMessage").queryAs(
+                    javafx.scene.control.Label.class);
+            interact(() -> {
+                banner.getScene().getRoot().applyCss();
+                banner.getScene().getRoot().layout();
+            });
+
+            assertThat(banner.isVisible()).isTrue();
+            assertThat(banner.isManaged()).isTrue();
+            assertThat(message.getText()).contains("servers.json");
+        } finally {
+            interact(() -> persistence.saved("servers.json"));
+        }
     }
 
     @Test

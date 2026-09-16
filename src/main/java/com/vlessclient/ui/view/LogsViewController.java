@@ -27,6 +27,7 @@ import javafx.collections.transformation.FilteredList;
 import javafx.fxml.FXML;
 import javafx.geometry.Bounds;
 import javafx.scene.Node;
+import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
@@ -139,6 +140,12 @@ public class LogsViewController {
         diagnosticsButton.setTooltip(new Tooltip(I18n.get("logs.diagnostics.tooltip")));
         clearButton.setGraphic(Icons.clear(16));
         clearButton.setTooltip(new Tooltip(I18n.get("logs.clear.tooltip")));
+        // Icon-only, so a screen reader had nothing to read for them. The name
+        // is the tooltip's text, kept in the current language.
+        downloadButton.accessibleTextProperty().bind(I18n.binding("logs.download.tooltip"));
+        diagnosticsButton.accessibleTextProperty()
+                .bind(I18n.binding("logs.diagnostics.tooltip"));
+        clearButton.accessibleTextProperty().bind(I18n.binding("logs.clear.tooltip"));
 
         SingBoxEngine engine = null;
         try {
@@ -505,7 +512,21 @@ public class LogsViewController {
 
     @FXML
     private void onClearClicked() {
+        // The list is the only copy of the core's output the app keeps, and
+        // Clear used to empty it on one click.
+        if (sourceLogLines == null || sourceLogLines.isEmpty()
+                || !Confirmations.confirmIrreversible(ownerWindow(),
+                        I18n.get("logs.clear.title"), I18n.get("logs.clear.confirm"),
+                        I18n.get("logs.clear.content"), I18n.get("logs.clear.action"))) {
+            return;
+        }
         sourceLogLines.clear();
+    }
+
+    /** The window the Clear button is in, or null while the view is in none. */
+    private Window ownerWindow() {
+        Scene scene = clearButton.getScene();
+        return scene == null ? null : scene.getWindow();
     }
 
     @FXML

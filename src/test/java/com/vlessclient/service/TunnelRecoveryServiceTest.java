@@ -23,6 +23,7 @@ class TunnelRecoveryServiceTest {
     private final AppSettings settings = new AppSettings();
     private final ManualScheduler scheduler = new ManualScheduler();
     private final AtomicInteger starts = new AtomicInteger();
+    private final AtomicBoolean restartPrompts = new AtomicBoolean();
     private TunnelRecoveryService recovery;
 
     @BeforeEach
@@ -35,7 +36,7 @@ class TunnelRecoveryServiceTest {
                 starts.incrementAndGet();
             }
             return false;
-        }, scheduler);
+        }, restartPrompts::get, scheduler);
         recovery.connectionRequested();
     }
 
@@ -114,7 +115,7 @@ class TunnelRecoveryServiceTest {
             }
             started.set(guard.getAsBoolean());
             return started.get();
-        }, other);
+        }, () -> false, other);
         recovery.connectionRequested();
         recovery.onConnectionState(ConnectionState.ERROR);
         Thread worker = Thread.startVirtualThread(other.jobs.getFirst());
@@ -137,6 +138,118 @@ class TunnelRecoveryServiceTest {
         scheduler.jobs.getFirst().raw.run();
         assertThat(starts).hasValue(0);
         assertThat(scheduler.isShutdown()).isTrue();
+    }
+
+    /**
+     * Where a restart raises an elevation prompt again (UAC always, macOS and
+     * Linux without their one-time grant), recovery used to restart anyway: a
+     * prompt nobody asked for, again at every backoff step. A tunnel that was
+     * up waits for the user's reconnect instead.
+     */
+    @Test
+    void aTunnelThatWasUpWaitsForTheUserWhereARestartWouldPrompt() {
+        restartPrompts.set(true);
+        recovery.onConnectionState(ConnectionState.CONNECTED);
+        recovery.onConnectionState(ConnectionState.ERROR);
+
+        assertThat(scheduler.jobs).as("no restart raises the prompt unasked").isEmpty();
+        assertThat(recovery.isReconnectNeeded()).isTrue();
+
+        recovery.onHealth(TunnelHealth.BROKEN);
+        assertThat(scheduler.jobs).isEmpty();
+        assertThat(starts).hasValue(0);
+    }
+
+    @Test
+    void aStartThatNeverConnectedIsNotOfferedAgainWhereARestartWouldPrompt() {
+        // A declined prompt ends the launch before the tunnel was ever up.
+        restartPrompts.set(true);
+        recovery.onConnectionState(ConnectionState.ERROR);
+
+        assertThat(scheduler.jobs).isEmpty();
+        assertThat(recovery.isReconnectNeeded())
+                .as("the user has just said no; the error keeps its own Retry")
+                .isFalse();
+    }
+
+    @Test
+    void brokenReachabilityWaitsForTheUserWhereARestartWouldPrompt() {
+        restartPrompts.set(true);
+        recovery.onConnectionState(ConnectionState.CONNECTED);
+        recovery.onHealth(TunnelHealth.BROKEN);
+
+        assertThat(scheduler.jobs).isEmpty();
+        assertThat(recovery.isReconnectNeeded()).isTrue();
+
+        recovery.onHealth(TunnelHealth.HEALTHY);
+        assertThat(recovery.isReconnectNeeded()).as("the tunnel came back by itself").isFalse();
+    }
+
+    @Test
+    void aNewConnectOrADisconnectWithdrawsTheOffer() {
+        restartPrompts.set(true);
+        recovery.onConnectionState(ConnectionState.CONNECTED);
+        recovery.onConnectionState(ConnectionState.ERROR);
+        assertThat(recovery.isReconnectNeeded()).isTrue();
+
+        recovery.connectionRequested();
+        assertThat(recovery.isReconnectNeeded()).isFalse();
+        recovery.onConnectionState(ConnectionState.ERROR);
+        assertThat(recovery.isReconnectNeeded()).as("the new start never connected").isFalse();
+
+        recovery.onConnectionState(ConnectionState.CONNECTED);
+        recovery.onConnectionState(ConnectionState.ERROR);
+        assertThat(recovery.isReconnectNeeded()).isTrue();
+        recovery.cancel();
+        assertThat(recovery.isReconnectNeeded()).isFalse();
+        assertThat(scheduler.jobs).isEmpty();
+    }
+
+    /**
+     * A configuration the core refuses is refused again by every retry. The
+     * refusal used to be logged and the same restart tried again at every
+     * backoff step, for as long as the app ran.
+     */
+    @Test
+    void aConfigurationTheCoreRefusesIsNotRetried() {
+        recovery.close();
+        ManualScheduler other = new ManualScheduler();
+        AtomicInteger tries = new AtomicInteger();
+        recovery = new TunnelRecoveryService(() -> settings, guard -> {
+            tries.incrementAndGet();
+            throw new ConfigRejectedException("unknown field \"download_detour\"");
+        }, () -> false, other);
+        recovery.connectionRequested();
+        recovery.onConnectionState(ConnectionState.ERROR);
+
+        other.jobs.getFirst().run();
+        recovery.onConnectionState(ConnectionState.ERROR);
+        recovery.onHealth(TunnelHealth.BROKEN);
+
+        assertThat(tries).as("restarts tried").hasValue(1);
+        assertThat(other.jobs)
+                .as("retries scheduled once the core refused the configuration")
+                .hasSize(1);
+    }
+
+    /** The refusal stays on record until the user's next request, which clears it. */
+    @Test
+    void aRefusalIsKeptAsTheReasonUntilTheUserConnectsAgain() {
+        recovery.close();
+        ManualScheduler other = new ManualScheduler();
+        ConfigRejectedException refusal =
+                new ConfigRejectedException("unknown field \"download_detour\"");
+        recovery = new TunnelRecoveryService(() -> settings, guard -> {
+            throw refusal;
+        }, () -> false, other);
+        recovery.connectionRequested();
+        recovery.onConnectionState(ConnectionState.ERROR);
+        other.jobs.getFirst().run();
+
+        assertThat(recovery.stopReason()).as("why recovery stopped").isEqualTo(refusal.getMessage());
+
+        recovery.connectionRequested();
+        assertThat(recovery.stopReason()).as("the reason once the user connects again").isNull();
     }
 
     private static final class ManualScheduler extends ScheduledThreadPoolExecutor {

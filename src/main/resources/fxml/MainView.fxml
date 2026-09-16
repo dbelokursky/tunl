@@ -17,13 +17,24 @@
             styleClass="root-pane">
 
     <top>
-        <HBox fx:id="persistenceBanner" spacing="12" alignment="CENTER_LEFT"
-              visible="false" managed="false" styleClass="reconnect-banner">
-            <padding><Insets top="10" right="16" bottom="10" left="16"/></padding>
-            <Label fx:id="persistenceMessage" wrapText="true" maxWidth="Infinity"
-                   HBox.hgrow="ALWAYS"/>
-            <Button fx:id="retrySavingButton" onAction="#onRetrySaving" minWidth="-Infinity"/>
-        </HBox>
+        <!-- Two banners, not one: a failed write is the user's to retry, while
+             entries this build could not read are a warning about what saving
+             would drop. Both can be true at once. -->
+        <VBox>
+            <HBox fx:id="persistenceBanner" spacing="12" alignment="CENTER_LEFT"
+                  visible="false" managed="false" styleClass="reconnect-banner">
+                <padding><Insets top="10" right="16" bottom="10" left="16"/></padding>
+                <Label fx:id="persistenceMessage" wrapText="true" maxWidth="Infinity"
+                       HBox.hgrow="ALWAYS"/>
+                <Button fx:id="retrySavingButton" onAction="#onRetrySaving" minWidth="-Infinity"/>
+            </HBox>
+            <HBox fx:id="unreadableBanner" spacing="12" alignment="CENTER_LEFT"
+                  visible="false" managed="false" styleClass="reconnect-banner">
+                <padding><Insets top="10" right="16" bottom="10" left="16"/></padding>
+                <Label fx:id="unreadableMessage" wrapText="true" maxWidth="Infinity"
+                       HBox.hgrow="ALWAYS"/>
+            </HBox>
+        </VBox>
     </top>
 
     <left>

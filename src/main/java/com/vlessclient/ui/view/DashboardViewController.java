@@ -24,6 +24,7 @@ import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.service.outbound.OutboundTags;
 import com.vlessclient.ui.view.dashboard.AddHealthTargetDialog;
 import com.vlessclient.ui.view.dashboard.HealthCheckCoordinator;
+import com.vlessclient.ui.view.dashboard.SkippedServersSection;
 import com.vlessclient.ui.view.dashboard.StatusPresenter;
 import com.vlessclient.ui.view.dashboard.TrafficDisplayBinder;
 import com.vlessclient.ui.view.dashboard.TrafficHistorySection;
@@ -96,6 +97,7 @@ public class DashboardViewController implements ViewShownAware {
     @FXML private VBox healthCard;
     @FXML private Label healthSummaryLabel;
     @FXML private Button recheckButton;
+    @FXML private Button addTargetButton;
     @FXML private Label modeLabel;
     @FXML private Label healthSectionTitle;
     @FXML private Hyperlink addServerLink;
@@ -107,6 +109,11 @@ public class DashboardViewController implements ViewShownAware {
     @FXML private Label updateBannerTitle;
     @FXML private Label updateBannerHint;
     @FXML private Button updateBannerButton;
+    @FXML private HBox skippedServersBanner;
+    @FXML private Label skippedServersLabel;
+    @FXML private HBox tunnelDroppedBanner;
+    @FXML private Label tunnelDroppedLabel;
+    @FXML private Button tunnelDroppedButton;
 
     private final ObjectProperty<ConnectionState> connectionState =
             new SimpleObjectProperty<>(ConnectionState.DISCONNECTED);
@@ -144,6 +151,13 @@ public class DashboardViewController implements ViewShownAware {
     private StatusPresenter statusPresenter;
 
     /**
+     * Why Connect is disabled. One tooltip that gets new text: the refresh
+     * runs on every server-list change and after each connect and disconnect,
+     * and a new Tooltip each time cost a popup control.
+     */
+    private final Tooltip connectBlockedTooltip = new Tooltip();
+
+    /**
      * Wires up services, the connection-state listener, traffic/latency
      * readouts, and the initial UI state. Called by the FXML loader after
      * the view's nodes are injected.
@@ -164,6 +178,8 @@ public class DashboardViewController implements ViewShownAware {
         modeLabel.textProperty().bind(I18n.binding("dashboard.mode"));
         healthSectionTitle.textProperty().bind(I18n.binding("dashboard.health.title"));
         ButtonLabels.bindStatic(recheckButton, "dashboard.health.recheck");
+        // "+" is a symbol: a screen reader read out nothing for it.
+        addTargetButton.accessibleTextProperty().bind(I18n.binding("health.target.add.title"));
         ButtonLabels.bindStatic(cancelReconnectButton, "button.cancel");
         addServerLink.textProperty().bind(I18n.binding("dashboard.cta.add.server"));
         bindInstallBannerLabels();
@@ -171,6 +187,18 @@ public class DashboardViewController implements ViewShownAware {
         updateBannerSection = new UpdateBannerSection(new UpdateBannerSection.Controls(
                 updateBanner, updateBannerTitle, updateBannerHint, updateBannerButton));
         updateBannerSection.init();
+        // Servers the core refused and the connection went ahead without.
+        ServiceLocator.find(ConnectionService.class).ifPresent(service ->
+                new SkippedServersSection(skippedServersBanner, skippedServersLabel)
+                        .bind(service.skippedServersProperty()));
+        // A dropped tunnel whose restart would ask for elevation again waits
+        // for the user rather than raising the prompt unasked.
+        tunnelDroppedLabel.textProperty().bind(I18n.binding("dashboard.tunnel.dropped"));
+        ButtonLabels.bindStatic(tunnelDroppedButton, "dashboard.tunnel.reconnect");
+        ServiceLocator.find(ConnectionService.class).ifPresent(service -> {
+            tunnelDroppedBanner.visibleProperty().bind(service.reconnectNeededProperty());
+            tunnelDroppedBanner.managedProperty().bind(service.reconnectNeededProperty());
+        });
 
         // Every collaborator is optional: a missing one degrades the card
         // rather than failing the view, and the log says which.
@@ -760,6 +788,15 @@ public class DashboardViewController implements ViewShownAware {
         Thread.startVirtualThread(() -> runConnect(service, true));
     }
 
+    /**
+     * The dropped tunnel's notice: the reconnect recovery left to the user. A
+     * reconnect rather than a connect, since a BROKEN tunnel's core still runs.
+     */
+    @FXML
+    private void onReconnectDroppedTunnelClicked() {
+        reconnect();
+    }
+
     /** Runs a connect (or reconnect) off the FX thread and reports the result. */
     private void runConnect(ConnectionService service, boolean restart) {
         runConnect(service, restart, false);
@@ -947,17 +984,22 @@ public class DashboardViewController implements ViewShownAware {
         addServerLink.setManaged(servers.isEmpty());
         if (servers.isEmpty()) {
             connectButton.setDisable(true);
-            connectButton.setTooltip(new Tooltip(I18n.get("dashboard.no.servers")));
+            explainDisabledConnect("dashboard.no.servers");
         } else if (findActiveServer() == null) {
             // Gate on activation, not list size: enabling Connect with no
             // active server turns a click into a modal error telling the
             // user to "mark it active" — a gesture the UI never offers.
             connectButton.setDisable(true);
-            connectButton.setTooltip(new Tooltip(I18n.get("dashboard.no.server")));
+            explainDisabledConnect("dashboard.no.server");
         } else {
             connectButton.setDisable(false);
             connectButton.setTooltip(null);
         }
+    }
+
+    private void explainDisabledConnect(String key) {
+        connectBlockedTooltip.setText(I18n.get(key));
+        connectButton.setTooltip(connectBlockedTooltip);
     }
 
     private TunnelHealth currentHealth() {

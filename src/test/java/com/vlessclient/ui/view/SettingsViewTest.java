@@ -6,19 +6,28 @@ import com.vlessclient.app.ThemeCss;
 import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.platform.PlatformPaths;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.testing.Await;
 import com.vlessclient.testing.UiTest;
+import java.time.Duration;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
+import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.DialogPane;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.stage.Stage;
+import javafx.stage.Window;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
+import org.testfx.util.WaitForAsyncUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -166,6 +175,52 @@ public class SettingsViewTest extends ApplicationTest {
         assertThat(lookup("#mcpCommandArea").tryQuery()).isPresent();
         assertThat(lookup("#mcpCopyButton").tryQuery()).isPresent();
         assertThat(lookup("#mcpRegenButton").tryQuery()).isPresent();
+    }
+
+    /**
+     * Regenerate replaced the token on one click, and every agent set up with
+     * the old one lost access. It asks first; Cancel, which Enter presses,
+     * leaves the token alone.
+     */
+    @Test
+    void regeneratingTheMcpTokenAsksFirstAndCancelKeepsIt() {
+        TextArea command = lookup("#mcpCommandArea").query();
+        String before = command.getText();
+        Button regenerate = lookup("#mcpRegenButton").query();
+
+        Platform.runLater(regenerate::fire);
+        DialogPane confirm = awaitDialogAsking(I18n.get("settings.mcp.regenerate.confirm"));
+        Button cancel = buttonFor(confirm, ButtonBar.ButtonData.CANCEL_CLOSE);
+        assertThat(cancel.isDefaultButton()).as("Enter keeps the token").isTrue();
+        interact(cancel::fire);
+        WaitForAsyncUtils.waitForFxEvents();
+
+        assertThat(command.getText()).isEqualTo(before);
+    }
+
+    /** The showing dialog that asks {@code question}, once one does. */
+    private DialogPane awaitDialogAsking(String question) {
+        return Await.untilValue("a dialog asking: " + question, () -> {
+            AtomicReference<DialogPane> found = new AtomicReference<>();
+            interact(() -> {
+                for (Window window : Window.getWindows()) {
+                    if (window.isShowing() && window.getScene() != null
+                            && window.getScene().getRoot() instanceof DialogPane pane
+                            && question.equals(pane.getHeaderText())) {
+                        found.set(pane);
+                    }
+                }
+            });
+            return found.get();
+        }, Objects::nonNull, Duration.ofSeconds(10));
+    }
+
+    private static Button buttonFor(DialogPane dialog, ButtonBar.ButtonData data) {
+        return dialog.getButtonTypes().stream()
+                .filter(type -> type.getButtonData() == data)
+                .map(type -> (Button) dialog.lookupButton(type))
+                .findFirst()
+                .orElseThrow();
     }
 
     @Test

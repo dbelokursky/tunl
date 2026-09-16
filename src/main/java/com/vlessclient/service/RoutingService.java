@@ -12,9 +12,11 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Loads and persists the routing configuration (bypass countries, bypass
@@ -193,7 +195,7 @@ public class RoutingService {
             return;
         }
         try {
-            this.config = objectMapper.readValue(file.toFile(), RoutingConfig.class);
+            this.config = readKeepingKnownRules(file);
             log.info("Loaded routing config from {}", file);
             migrateLegacyPreset(file);
         } catch (JacksonException e) {
@@ -203,6 +205,43 @@ public class RoutingService {
             ConfigStore.quarantineCorrupt(file);
             this.config = new RoutingConfig();
         }
+    }
+
+    /**
+     * Reads the file, keeping the rules this build understands.
+     *
+     * <p>A rule whose type or action comes from a newer build used to fail the
+     * whole read: the file went to quarantine and routing fell back to
+     * "everything through the VPN" without a word, which is the opposite of
+     * what a user with a bypass had configured. Such a rule is dropped instead
+     * of guessed at -- defaulting its action would move traffic somewhere the
+     * user never asked for -- and reported for the banner.</p>
+     */
+    private RoutingConfig readKeepingKnownRules(Path file) {
+        JsonNode tree = objectMapper.readTree(file.toFile());
+        if (!(tree instanceof ObjectNode root)) {
+            return objectMapper.treeToValue(tree, RoutingConfig.class);
+        }
+        JsonNode rules = root.remove("rules");
+        RoutingConfig loaded = objectMapper.treeToValue(root, RoutingConfig.class);
+        if (rules == null || !rules.isArray()) {
+            return loaded;
+        }
+        List<RoutingRule> kept = new ArrayList<>();
+        int unreadable = 0;
+        for (JsonNode rule : rules) {
+            try {
+                kept.add(objectMapper.treeToValue(rule, RoutingRule.class));
+            } catch (JacksonException e) {
+                unreadable++;
+                log.warn("Skipping a routing rule this build cannot read: {}", e.getMessage());
+            }
+        }
+        loaded.setRules(kept);
+        if (unreadable > 0) {
+            persistence.couldNotRead(ROUTING_FILE, unreadable);
+        }
+        return loaded;
     }
 
     /**

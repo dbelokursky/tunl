@@ -272,6 +272,60 @@ class SingBoxConfigGeneratorTunTest {
         assertThat(dns.get("strategy").asString()).isEqualTo("prefer_ipv6");
     }
 
+    /**
+     * The core refuses a DNS server named by host unless it knows how to
+     * resolve that name ("missing domain resolver for domain server address"),
+     * so a Direct DNS such as {@code tls://dns.quad9.net} kept TUN mode from
+     * starting. Proxy DNS dials through the proxy, which takes the name as it
+     * is; resolving it locally would tell the local network which resolver is
+     * in use.
+     */
+    @Test
+    void tunMode_directDnsNamedByHostResolvesThatNameThroughTheOs() throws Exception {
+        AppSettings settings = tunSettings();
+        settings.setProxyDns("https://cloudflare-dns.com/dns-query");
+        settings.setDirectDns("tls://dns.quad9.net");
+
+        JsonNode servers = parse(generator.generate(createVlessServer(), settings))
+                .get("dns").get("servers");
+
+        assertThat(servers.get(0).get("server").asString()).isEqualTo("cloudflare-dns.com");
+        assertThat(servers.get(0).has("domain_resolver")).isFalse();
+        assertThat(servers.get(1).get("type").asString()).isEqualTo("tls");
+        assertThat(servers.get(1).get("server").asString()).isEqualTo("dns.quad9.net");
+        assertThat(servers.get(1).path("domain_resolver").asString()).isEqualTo("local-dns");
+    }
+
+    @Test
+    void tunMode_directDnsGivenAsAnIpAddressNeedsNoResolver() throws Exception {
+        for (String address : List.of("https://9.9.9.9/dns-query", "77.88.8.8",
+                "https://[2606:4700:4700::1111]/dns-query", "2001:4860:4860::8888",
+                "udp://[2001:4860:4860::8888]:53")) {
+            AppSettings settings = tunSettings();
+            settings.setDirectDns(address);
+
+            JsonNode directDns = parse(generator.generate(createVlessServer(), settings))
+                    .get("dns").get("servers").get(1);
+
+            assertThat(directDns.has("domain_resolver")).as(address).isFalse();
+        }
+    }
+
+    /** "8.8.8.8:53" reached the core as a name, which nothing could resolve. */
+    @Test
+    void tunMode_aPortWithoutASchemeIsSplitOffTheAddress() throws Exception {
+        AppSettings settings = tunSettings();
+        settings.setDirectDns("8.8.8.8:53");
+
+        JsonNode directDns = parse(generator.generate(createVlessServer(), settings))
+                .get("dns").get("servers").get(1);
+
+        assertThat(directDns.get("type").asString()).isEqualTo("udp");
+        assertThat(directDns.get("server").asString()).isEqualTo("8.8.8.8");
+        assertThat(directDns.get("server_port").asInt()).isEqualTo(53);
+        assertThat(directDns.has("domain_resolver")).isFalse();
+    }
+
     @Test
     void tunMode_customTunInterfaceNameIsReflectedInConfig() throws Exception {
         AppSettings settings = tunSettings();
@@ -453,6 +507,28 @@ class SingBoxConfigGeneratorTunTest {
         assertThat(v4Only.get("address").toString())
                 .contains("172.19.0.1/30")
                 .doesNotContain(SingBoxConfigGenerator.TUN_IPV6_ADDRESS);
+    }
+
+    /**
+     * Without an IPv6 address on the device, AAAA answers still reached the
+     * system: {@code prefer_ipv4} only orders them, and the core drops them
+     * only for {@code ipv4_only}. On a dual-stack network the system then
+     * connected over IPv6, around the tunnel.
+     */
+    @Test
+    void tunMode_withoutIpv6ResolvesNamesToIpv4Only() throws Exception {
+        AppSettings settings = tunSettings();
+        settings.setDnsStrategy("prefer_ipv6");
+
+        settings.setTunIpv6Enabled(false);
+        JsonNode v4Only = parse(generator.generate(createVlessServer(), settings)).get("dns");
+        assertThat(v4Only.get("strategy").asString()).isEqualTo("ipv4_only");
+
+        settings.setTunIpv6Enabled(true);
+        JsonNode dualStack = parse(generator.generate(createVlessServer(), settings)).get("dns");
+        assertThat(dualStack.get("strategy").asString())
+                .as("with IPv6 on the device, the chosen strategy stands")
+                .isEqualTo("prefer_ipv6");
     }
 
     @Test

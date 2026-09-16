@@ -9,11 +9,17 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.outbound.OutboundTags;
 import java.io.IOException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import javafx.application.Platform;
+import javafx.beans.property.ReadOnlyObjectProperty;
+import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.beans.value.ChangeListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,6 +59,14 @@ public class ConnectionService {
      */
     private static final Duration STOP_WAIT = Duration.ofSeconds(15);
 
+    /**
+     * How many refused servers one connect leaves out before it gives up. Each
+     * one costs another {@code sing-box check}, and the core names only the
+     * first refusal it meets, so a list that is broken throughout is reported
+     * rather than worked through server by server.
+     */
+    private static final int MAX_SKIPPED = 20;
+
     /** How a connect attempt ended. */
     public enum Outcome {
         /** The core was launched. */
@@ -70,13 +84,37 @@ public class ConnectionService {
     }
 
     /**
+     * A server the core refused to build, left out of the configuration so the
+     * others could still connect.
+     *
+     * @param id     the server's id
+     * @param name   the server's name, as the list shows it
+     * @param reason what the core said about it
+     */
+    public record SkippedServer(String id, String name, String reason) {
+    }
+
+    /**
      * The result of a connect attempt.
      *
      * @param outcome what happened
      * @param server  the server the core was pointed at, or null when the
      *                attempt never got that far
+     * @param skipped the servers the core refused and the attempt went ahead
+     *                without; empty when there were none
      */
-    public record ConnectAttempt(Outcome outcome, ServerConfig server) {
+    public record ConnectAttempt(Outcome outcome, ServerConfig server,
+                                 List<SkippedServer> skipped) {
+
+        /** Keeps the list immutable and never null. */
+        public ConnectAttempt {
+            skipped = skipped == null ? List.of() : List.copyOf(skipped);
+        }
+
+        /** An attempt that left no server out. */
+        public ConnectAttempt(Outcome outcome, ServerConfig server) {
+            this(outcome, server, List.of());
+        }
 
         /** Whether the core was actually launched. */
         public boolean started() {
@@ -96,10 +134,20 @@ public class ConnectionService {
     private volatile SingBoxEngine engine;
     private final Object operations = new Object();
     private final TunnelRecoveryService recovery;
-    private final ChangeListener<ConnectionState> recoveryListener;
+    private final ChangeListener<ConnectionState> stateListener;
     private volatile ProxyMode requestedMode;
     private volatile LiveSelector liveSelector;
     private ProxyMode runningMode;
+
+    /** What the running core was started without, for the UI; changed on the FX thread. */
+    private final ReadOnlyObjectWrapper<List<SkippedServer>> skippedServers =
+            new ReadOnlyObjectWrapper<>(List.of());
+
+    /**
+     * The ids behind {@link #skippedServers}, readable from any thread: a live
+     * switch compares against the configuration the core actually loaded.
+     */
+    private volatile Set<String> skippedIds = Set.of();
 
 
     /**
@@ -119,8 +167,14 @@ public class ConnectionService {
         this.routingService = routingService;
         this.recovery = new TunnelRecoveryService(
                 () -> configStore != null ? configStore.getSettings() : new AppSettings(),
-                this::recover);
-        this.recoveryListener = (obs, old, state) -> recovery.onConnectionState(state);
+                this::recover, this::restartNeedsTheUser);
+        this.stateListener = (obs, old, state) -> {
+            // A notice about what the core was started without ends with it.
+            if (state == ConnectionState.DISCONNECTED || state == ConnectionState.ERROR) {
+                skippedServers.set(List.of());
+            }
+            recovery.onConnectionState(state);
+        };
         bindEngine(engine);
     }
 
@@ -137,11 +191,11 @@ public class ConnectionService {
     private void bindEngine(SingBoxEngine engine) {
         FxExecutor.run(() -> {
             if (this.engine != null) {
-                this.engine.connectionStateProperty().removeListener(recoveryListener);
+                this.engine.connectionStateProperty().removeListener(stateListener);
             }
             this.engine = engine;
             if (engine != null) {
-                engine.connectionStateProperty().addListener(recoveryListener);
+                engine.connectionStateProperty().addListener(stateListener);
             }
         });
     }
@@ -151,9 +205,46 @@ public class ConnectionService {
         return recovery;
     }
 
+    /**
+     * Whether a tunnel that dropped waits for the user's reconnect, for the
+     * Dashboard; see {@link TunnelRecoveryService#isReconnectNeeded()}.
+     *
+     * @return the observable offer
+     */
+    public javafx.beans.property.ReadOnlyBooleanProperty reconnectNeededProperty() {
+        return recovery.reconnectNeededProperty();
+    }
+
+    /**
+     * Whether recovering the tunnel would raise an elevation prompt: the restart
+     * runs in TUN mode and the core's last launch went through a prompt that
+     * every launch raises again.
+     */
+    boolean restartNeedsTheUser() {
+        SingBoxEngine current = engine;
+        if (current == null || configStore == null) {
+            return false;
+        }
+        // The mode recover() would restart in.
+        ProxyMode mode = requestedMode != null
+                ? requestedMode : configStore.getSettings().getProxyMode();
+        return mode == ProxyMode.TUN && current.restartNeedsElevationPrompt();
+    }
+
     /** The engine currently driven, or null when no binary is available. */
     public SingBoxEngine getEngine() {
         return engine;
+    }
+
+    /**
+     * The servers the running core was started without because it refused
+     * their settings. Empty when there are none or no core is running; changes
+     * on the JavaFX thread.
+     *
+     * @return the refused servers of the current session
+     */
+    public ReadOnlyObjectProperty<List<SkippedServer>> skippedServersProperty() {
+        return skippedServers.getReadOnlyProperty();
     }
 
     /** Whether a core is running right now. Safe from any thread. */
@@ -176,13 +267,21 @@ public class ConnectionService {
      * Connects to the active server.
      *
      * <p>Every configured server is passed to the generator as a candidate; the
-     * generator includes them in the manual or automatic group. Any
-     * previous core is waited out first, because {@code start} refuses while one
-     * is alive — that is what makes the reconnect paths (server switch, health
-     * auto-reconnect) work.</p>
+     * generator includes them in the manual or automatic group. A previous core
+     * that is being stopped is waited out first, because {@code start} refuses
+     * while one is alive — that is what makes the reconnect paths (server
+     * switch, health auto-reconnect) work. A core that is running with no stop
+     * under way is reported as {@link Outcome#ALREADY_RUNNING} at once.</p>
+     *
+     * <p>A server the core refuses to build is left out and the start is tried
+     * again without it, since one broken entry in a subscription used to block
+     * connecting to every other server. The refusal of the active server still
+     * fails the connect: connecting through a server the user did not pick is
+     * not a fallback.</p>
      *
      * @param modeOverride proxy mode to use, or null to take it from settings
-     * @return what happened, and the server the core was pointed at
+     * @return what happened, the server the core was pointed at, and the
+     *     servers it was started without
      * @throws IOException           if the core could not be started
      * @throws IllegalStateException if called on the JavaFX thread
      */
@@ -217,33 +316,80 @@ public class ConnectionService {
 
         AppSettings settings = configStore.getSettings();
         ProxyMode mode = modeOverride != null ? modeOverride : settings.getProxyMode();
-        final String configJson =
-                configGenerator.generate(candidates, active, settings, safeRoutingConfig());
 
+        if (current.isRunning() && !current.isStopping()) {
+            // Nothing is stopping this core, so waiting for it would only run
+            // out STOP_WAIT under the lock a Disconnect needs, and the start
+            // would be refused anyway.
+            return new ConnectAttempt(Outcome.ALREADY_RUNNING, active);
+        }
         log.info("Connecting to server: {} ({})", active.getName(), mode);
         current.awaitStopped(STOP_WAIT);
         if (!allowed.getAsBoolean()) {
             return new ConnectAttempt(Outcome.CANCELLED, active);
         }
+        List<ServerConfig> members = candidates;
+        List<SkippedServer> skipped = new ArrayList<>();
+        RoutingConfig routing = safeRoutingConfig();
         try {
-            LiveSelector prepared = new LiveSelector(configJson);
-            LiveSelector previous = liveSelector;
-            liveSelector = prepared;
-            try {
-                current.start(prepared.config(), mode);
-                runningMode = mode;
-            } catch (ConfigRejectedException e) {
-                liveSelector = previous;
-                throw withServerName(e, prepared.config(), candidates);
-            } catch (IOException | IllegalStateException e) {
-                liveSelector = previous;
-                throw e;
+            while (true) {
+                LiveSelector prepared = new LiveSelector(
+                        configGenerator.generate(members, active, settings, routing));
+                LiveSelector previous = liveSelector;
+                liveSelector = prepared;
+                try {
+                    current.start(prepared.config(), mode);
+                    runningMode = mode;
+                    break;
+                } catch (ConfigRejectedException e) {
+                    liveSelector = previous;
+                    Refusal refusal = refusalOf(e, prepared.config(), members).orElse(null);
+                    if (refusal == null) {
+                        throw e;
+                    }
+                    ServerConfig refused = refusal.server();
+                    if (refused.getId().equals(active.getId()) || skipped.size() >= MAX_SKIPPED) {
+                        throw refusal.named(e);
+                    }
+                    log.warn("sing-box refused server '{}' ({}); connecting without it",
+                            refused.getName(), refusal.detail());
+                    skipped.add(new SkippedServer(
+                            refused.getId(), refused.getName(), refusal.detail()));
+                    members = members.stream()
+                            .filter(server -> !server.getId().equals(refused.getId()))
+                            .toList();
+                    if (!allowed.getAsBoolean()) {
+                        return new ConnectAttempt(Outcome.CANCELLED, active);
+                    }
+                } catch (IOException | IllegalStateException e) {
+                    liveSelector = previous;
+                    throw e;
+                }
             }
         } catch (IllegalStateException e) {
             log.warn("sing-box already running: {}", e.getMessage());
             return new ConnectAttempt(Outcome.ALREADY_RUNNING, active);
         }
-        return new ConnectAttempt(Outcome.STARTED, active);
+        publishSkipped(skipped);
+        return new ConnectAttempt(Outcome.STARTED, active, skipped);
+    }
+
+    /**
+     * Records what the core was just started without. The ids are set at once
+     * for the live switch; the list reaches the UI through the FX queue, after
+     * the not-started state each refused attempt queued, so that state cannot
+     * clear it again.
+     */
+    private void publishSkipped(List<SkippedServer> skipped) {
+        List<SkippedServer> snapshot = List.copyOf(skipped);
+        skippedIds = snapshot.stream()
+                .map(SkippedServer::id)
+                .collect(Collectors.toUnmodifiableSet());
+        try {
+            Platform.runLater(() -> skippedServers.set(snapshot));
+        } catch (IllegalStateException toolkitNotRunning) {
+            skippedServers.set(snapshot);
+        }
     }
 
     /**
@@ -261,6 +407,7 @@ public class ConnectionService {
 
     private void stopCurrent() {
         liveSelector = null;
+        skippedIds = Set.of();
         SingBoxEngine current = engine;
         if (current != null) {
             log.info("Disconnecting");
@@ -317,7 +464,16 @@ public class ConnectionService {
             }
             AppSettings settings = configStore.getSettings();
             ProxyMode mode = requestedMode != null ? requestedMode : settings.getProxyMode();
-            String generated = configGenerator.generate(candidates, active,
+            // The loaded configuration left out the servers the core refused, so
+            // compare against the same set. Picking one of those does not match
+            // and restarts, where its refusal is reported by name.
+            Set<String> skippedNow = skippedIds;
+            List<ServerConfig> members = skippedNow.contains(active.getId())
+                    ? candidates
+                    : candidates.stream()
+                            .filter(server -> !skippedNow.contains(server.getId()))
+                            .toList();
+            String generated = configGenerator.generate(members, active,
                     settings, safeRoutingConfig());
             LiveSelector selector = liveSelector;
             if (isRunning() && runningMode == mode && selector != null
@@ -346,45 +502,61 @@ public class ConnectionService {
         }
     }
 
-    /** An outbound as the core quotes it: "initialize outbound[3]: " or "outbounds[3].". */
-    private static final Pattern OUTBOUND_POSITION =
-            Pattern.compile("(?:initialize )?outbounds?\\[(\\d+)\\](?::\\s*|\\.)");
+    /**
+     * A group member as the core quotes it: "initialize outbound[3]: ",
+     * "outbounds[3].", and the same for a WireGuard endpoint.
+     */
+    private static final Pattern MEMBER_POSITION =
+            Pattern.compile("(?:initialize )?(outbound|endpoint)s?\\[(\\d+)\\](?::\\s*|\\.)");
 
     /**
-     * Names the server behind the outbound a refusal quotes. The core counts
-     * outbounds by position, which tells nobody which of forty subscription
-     * servers is broken; and every server is part of the configuration, so one
-     * broken entry blocks connecting to all of them.
+     * A refusal traced back to the server behind it.
+     *
+     * @param server the server whose outbound or endpoint the core quoted
+     * @param detail the core's reason without the position, e.g.
+     *               {@code unsupported flow: xtls-rprx-direct}
+     */
+    private record Refusal(ServerConfig server, String detail) {
+
+        /** The refusal as a message naming the server. */
+        ConfigRejectedException named(ConfigRejectedException rejected) {
+            return new ConfigRejectedException(
+                    I18n.get("engine.config.rejected.server", server.getName(), detail),
+                    rejected.reason());
+        }
+    }
+
+    /**
+     * Finds the server behind the member a refusal quotes. The core counts
+     * outbounds and endpoints by position, which tells nobody which of forty
+     * subscription servers is broken.
      *
      * @param rejected   the refusal as the engine reported it
      * @param configJson the configuration the core refused
      * @param servers    the servers that configuration was built from
-     * @return a refusal naming the server, or {@code rejected} when the quoted
-     *     outbound belongs to no server
+     * @return the server and the core's reason, or empty when the refusal
+     *     quotes no member or one that belongs to no server
      */
-    private static ConfigRejectedException withServerName(ConfigRejectedException rejected,
-                                                          String configJson,
-                                                          List<ServerConfig> servers) {
-        Matcher position = OUTBOUND_POSITION.matcher(rejected.reason());
+    private static Optional<Refusal> refusalOf(ConfigRejectedException rejected,
+                                               String configJson,
+                                               List<ServerConfig> servers) {
+        Matcher position = MEMBER_POSITION.matcher(rejected.reason());
         if (!position.find()) {
-            return rejected;
+            return Optional.empty();
         }
-        String tag = outboundTag(configJson, position.group(1));
+        String tag = memberTag(configJson, position.group(1) + "s", position.group(2));
         String detail = rejected.reason().substring(position.end());
         return servers.stream()
                 .filter(server -> OutboundTags.server(server).equals(tag))
                 .findFirst()
-                .map(server -> new ConfigRejectedException(
-                        I18n.get("engine.config.rejected.server", server.getName(), detail),
-                        rejected.reason()))
-                .orElse(rejected);
+                .map(server -> new Refusal(server, detail));
     }
 
-    /** The tag of the outbound at {@code index}, or an empty string when there is none. */
-    private static String outboundTag(String configJson, String index) {
+    /** The tag of the member at {@code index} in {@code section}, or "" when there is none. */
+    private static String memberTag(String configJson, String section, String index) {
         try {
             return JsonMapper.builder().build().readTree(configJson)
-                    .path("outbounds").path(Integer.parseInt(index))
+                    .path(section).path(Integer.parseInt(index))
                     .path("tag").asString("");
         } catch (JacksonException | NumberFormatException e) {
             return "";

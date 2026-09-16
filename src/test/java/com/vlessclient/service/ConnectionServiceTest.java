@@ -1,11 +1,13 @@
 package com.vlessclient.service;
 
 import com.vlessclient.model.AppSettings;
+import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.ServerSelection;
+import com.vlessclient.testing.Await;
 import com.vlessclient.testing.FxToolkitExtension;
 import javafx.application.Platform;
 import org.junit.jupiter.api.BeforeEach;
@@ -68,8 +70,16 @@ class ConnectionServiceTest {
         volatile boolean running;
         volatile IOException failStartWith;
         volatile boolean refuseAsAlreadyRunning;
+        /** Refuses a start, as the real check does, whenever it returns a reason. */
+        volatile java.util.function.Function<String, String> refuseWith;
         CountDownLatch awaiting;
         CountDownLatch releaseAwait;
+        /** A stop is under way, so a connect has to wait for it. */
+        volatile boolean stopping;
+        /** The stop under way finishes while a connect waits for it. */
+        volatile boolean stopFinishesWhileAwaited;
+        /** The last launch asked for elevation, so starting again would ask again. */
+        volatile boolean prompts;
 
         RecordingEngine(Path binary) {
             super(binary);
@@ -83,6 +93,10 @@ class ConnectionServiceTest {
             }
             if (refuseAsAlreadyRunning) {
                 throw new IllegalStateException("sing-box is already running");
+            }
+            String refusal = refuseWith != null ? refuseWith.apply(configJson) : null;
+            if (refusal != null) {
+                throw new ConfigRejectedException(refusal);
             }
             configs.add(configJson);
             modes.add(proxyMode);
@@ -101,8 +115,22 @@ class ConnectionServiceTest {
         }
 
         @Override
+        public boolean isStopping() {
+            return stopping;
+        }
+
+        @Override
+        public boolean restartNeedsElevationPrompt() {
+            return prompts;
+        }
+
+        @Override
         public boolean awaitStopped(Duration timeout) {
             calls.add("await");
+            if (stopFinishesWhileAwaited) {
+                running = false;
+                stopping = false;
+            }
             if (awaiting != null) {
                 awaiting.countDown();
                 try {
@@ -124,6 +152,88 @@ class ConnectionServiceTest {
 
     private RecordingEngine engine() {
         return new RecordingEngine(tempDir.resolve("sing-box"));
+    }
+
+    @Test
+    void recoveryLeavesTheReconnectToTheUserOnlyWhereARestartWouldPrompt() {
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        try {
+            store.getSettings().setProxyMode(ProxyMode.TUN);
+            engine.prompts = true;
+            assertThat(service.restartNeedsTheUser()).as("TUN, launched through a prompt").isTrue();
+
+            store.getSettings().setProxyMode(ProxyMode.SYSTEM_PROXY);
+            assertThat(service.restartNeedsTheUser())
+                    .as("the system proxy asks for no elevation")
+                    .isFalse();
+
+            store.getSettings().setProxyMode(ProxyMode.TUN);
+            engine.prompts = false;
+            assertThat(service.restartNeedsTheUser())
+                    .as("TUN through the sudoers rule or cap_net_admin asks for nothing")
+                    .isFalse();
+        } finally {
+            service.getRecoveryService().close();
+        }
+    }
+
+    /**
+     * A crash is recovered by stopping what is left of the core and starting it
+     * again, through the service. {@code recover()} had no test of its own: the
+     * recovery loop was tested with a stand-in restart only.
+     */
+    @Test
+    void aCrashIsRecoveredByRestartingTheCore() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.getSettings().setHealthCheckAutoReconnect(true);
+        store.getSettings().setHealthCheckDelaySeconds(1);
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        try {
+            assertThat(service.connect().started()).as("the first start").isTrue();
+            engine.running = false;
+
+            service.getRecoveryService().onConnectionState(ConnectionState.ERROR);
+
+            Await.until("recovery to start the core again",
+                    () -> starts(engine) >= 2, Duration.ofSeconds(10));
+            assertThat(engine.calls)
+                    .as("what the restart asked of the engine")
+                    .containsSubsequence("start", "stop", "await", "start");
+        } finally {
+            service.getRecoveryService().close();
+        }
+    }
+
+    /** A disconnect during the wait before a restart keeps the core stopped. */
+    @Test
+    void aDisconnectDuringTheWaitBeforeARestartKeepsTheCoreStopped() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.getSettings().setHealthCheckAutoReconnect(true);
+        store.getSettings().setHealthCheckDelaySeconds(1);
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        try {
+            assertThat(service.connect().started()).as("the first start").isTrue();
+            engine.running = false;
+            service.getRecoveryService().onConnectionState(ConnectionState.ERROR);
+
+            service.disconnect();
+            // Absence has no event to wait for: sleep past the one-second
+            // wait, twice over, and count.
+            Thread.sleep(2_000);
+
+            assertThat(starts(engine))
+                    .as("starts, after a disconnect during the wait before a restart")
+                    .isEqualTo(1);
+        } finally {
+            service.getRecoveryService().close();
+        }
+    }
+
+    private static long starts(RecordingEngine engine) {
+        return engine.calls.stream().filter("start"::equals).count();
     }
 
     /** Refuses every start the way the real check does, with a reason built from the config. */
@@ -155,20 +265,106 @@ class ConnectionServiceTest {
         throw new AssertionError("no outbound tagged " + tag + " in " + configJson);
     }
 
+    /**
+     * Every server is a member of the configuration, so Frankfurt's broken
+     * entry used to stop the connect to Tokyo, the server the user picked.
+     */
     @Test
-    void aRefusalNamesTheServerBehindTheOutboundTheCoreQuotes() {
+    void aServerTheCoreRefusesIsLeftOutSoTheOthersStillConnect() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(server("srv-2", "Frankfurt"));
+        RecordingEngine engine = engine();
+        engine.refuseWith = config -> config.contains(tag("srv-2"))
+                ? "initialize outbound[" + outboundIndex(config, "srv-2")
+                        + "]: unsupported flow: xtls-rprx-direct"
+                : null;
+        ConnectionService service = service(engine);
+
+        ConnectionService.ConnectAttempt attempt = service.connect();
+
+        assertThat(attempt.started()).isTrue();
+        assertThat(attempt.server().getId()).isEqualTo("srv-1");
+        assertThat(attempt.skipped()).containsExactly(new ConnectionService.SkippedServer(
+                "srv-2", "Frankfurt", "unsupported flow: xtls-rprx-direct"));
+        assertThat(engine.configs).singleElement().asString()
+                .contains(tag("srv-1"))
+                .doesNotContain(tag("srv-2"));
+        assertThat(skippedAsTheUiSeesThem(service))
+                .extracting(ConnectionService.SkippedServer::name)
+                .containsExactly("Frankfurt");
+    }
+
+    @Test
+    void aRefusedWireGuardEndpointIsLeftOutToo() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(wireguard("srv-wg", "Warp"));
+        RecordingEngine engine = engine();
+        engine.refuseWith = config -> config.contains(tag("srv-wg"))
+                ? "endpoints[" + endpointIndex(config, "srv-wg")
+                        + "].address: netip.ParsePrefix(\"10.0.0.2\"): no '/'"
+                : null;
+
+        ConnectionService.ConnectAttempt attempt = service(engine).connect();
+
+        assertThat(attempt.started()).isTrue();
+        assertThat(attempt.skipped()).singleElement().satisfies(skipped -> {
+            assertThat(skipped.name()).isEqualTo("Warp");
+            assertThat(skipped.reason()).startsWith("address: ");
+        });
+    }
+
+    /** Connecting through a server the user did not pick is not a fallback. */
+    @Test
+    void aRefusalOfTheActiveServerStillFailsAndNamesIt() {
         store.addServer(server("srv-1", "Tokyo"));
         store.addServer(server("srv-2", "Frankfurt"));
         ConnectionService service = service(new RefusingEngine(tempDir.resolve("sing-box"),
-                config -> "initialize outbound[" + outboundIndex(config, "srv-2")
+                config -> "initialize outbound[" + outboundIndex(config, "srv-1")
                         + "]: unsupported flow: xtls-rprx-direct"));
 
-        // Frankfurt is not even the active server: every server is in the
-        // configuration, so its broken entry blocks connecting to Tokyo too.
         assertThatThrownBy(service::connect)
                 .isInstanceOf(ConfigRejectedException.class)
-                .hasMessage("sing-box rejected the settings of server \"Frankfurt\": "
+                .hasMessage("sing-box rejected the settings of server \"Tokyo\": "
                         + "unsupported flow: xtls-rprx-direct");
+    }
+
+    private static String tag(String serverId) {
+        return com.vlessclient.service.outbound.OutboundTags.server(serverId);
+    }
+
+    private ServerConfig wireguard(String id, String name) {
+        ServerConfig s = server(id, name);
+        s.setProtocol(Protocol.WIREGUARD);
+        s.setPort(51820);
+        s.setUuid("xunATixZ9R2SMbEghGvNz1fen77h9i5gNCPfxxgxtWk=");
+        s.setEncryption("2Gl1nZ7pohiktxNLQq7rb1ZwdPN2BBaHpwA2M6dMJXM=");
+        s.setFlow("10.0.0.2");
+        return s;
+    }
+
+    /** The position the core would quote for this server's WireGuard endpoint. */
+    private static int endpointIndex(String configJson, String serverId) {
+        var endpoints = tools.jackson.databind.json.JsonMapper.builder().build()
+                .readTree(configJson).path("endpoints");
+        for (int i = 0; i < endpoints.size(); i++) {
+            if (tag(serverId).equals(endpoints.path(i).path("tag").asString(""))) {
+                return i;
+            }
+        }
+        throw new AssertionError("no endpoint tagged " + tag(serverId) + " in " + configJson);
+    }
+
+    /** The list as a UI listener reads it, once the queued update has landed. */
+    private static List<ConnectionService.SkippedServer> skippedAsTheUiSeesThem(
+            ConnectionService service) throws InterruptedException {
+        AtomicReference<List<ConnectionService.SkippedServer>> seen = new AtomicReference<>();
+        CountDownLatch read = new CountDownLatch(1);
+        Platform.runLater(() -> {
+            seen.set(service.skippedServersProperty().get());
+            read.countDown();
+        });
+        assertThat(read.await(5, TimeUnit.SECONDS)).isTrue();
+        return seen.get();
     }
 
     @Test
@@ -404,6 +600,40 @@ class ConnectionServiceTest {
 
         assertThat(attempt.started()).isTrue();
         assertThat(engine.calls).containsExactly("stop", "await", "start");
+    }
+
+    /**
+     * A connect while the core is already up waited out the whole stop timeout
+     * for a stop nobody had asked for, holding the lock a Disconnect needs, and
+     * then reported the core as already running anyway.
+     */
+    @Test
+    void connectWhileTheCoreRunsReportsItAtOnce() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        RecordingEngine engine = engine();
+        engine.running = true;
+        engine.refuseAsAlreadyRunning = true;
+
+        ConnectionService.ConnectAttempt attempt = service(engine).connect();
+
+        assertThat(attempt.outcome()).isEqualTo(ConnectionService.Outcome.ALREADY_RUNNING);
+        assertThat(engine.calls)
+                .as("no wait for a stop nobody asked for, and no second start")
+                .isEmpty();
+    }
+
+    @Test
+    void connectWhileTheCoreIsStoppingWaitsForItToExit() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        RecordingEngine engine = engine();
+        engine.running = true;
+        engine.stopping = true;
+        engine.stopFinishesWhileAwaited = true;
+
+        ConnectionService.ConnectAttempt attempt = service(engine).connect();
+
+        assertThat(attempt.started()).isTrue();
+        assertThat(engine.calls).containsExactly("await", "start");
     }
 
     @Test

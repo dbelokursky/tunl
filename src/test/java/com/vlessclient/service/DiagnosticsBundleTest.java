@@ -1,7 +1,10 @@
 package com.vlessclient.service;
 
+import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
+import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.model.TransportType;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -127,6 +130,90 @@ class DiagnosticsBundleTest {
         assertThat(config).doesNotContain(SERVER_SECRET);
         assertThat(config).doesNotContain(store.getSettings().getClashApiSecret());
         assertThat(config).contains(Redact.REDACTED);
+    }
+
+    /**
+     * A server is named wherever its protocol's schema puts the name, not
+     * only in {@code server}: a WireGuard peer's address, key and reserved
+     * bytes and the interface address it hands out, a REALITY key and short
+     * id, a gRPC service name.
+     */
+    @Test
+    void theGeneratedConfigNamesNoServerWhereverItsProtocolKeepsTheName() throws IOException {
+        ServerConfig wireguard = new ServerConfig();
+        wireguard.setName("WARP");
+        wireguard.setProtocol(Protocol.WIREGUARD);
+        wireguard.setAddress("203.0.113.44");
+        wireguard.setPort(2408);
+        wireguard.setUuid("xunATixZ9R2SMbEghGvNz1fen77h9i5gNCPfxxgxtWk=");
+        wireguard.setEncryption("bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=");
+        wireguard.setFlow("172.16.0.2");
+        wireguard.getTls().setServerName("11,22,33");
+        store.addServer(wireguard);
+        ServerConfig reality = new ServerConfig();
+        reality.setName("Reality");
+        reality.setProtocol(Protocol.VLESS);
+        reality.setAddress("203.0.113.45");
+        reality.setPort(443);
+        reality.setUuid(SERVER_SECRET);
+        reality.getTls().setEnabled(true);
+        reality.getTls().setReality(true);
+        reality.getTls().setServerName("www.microsoft.com");
+        reality.getTls().setRealityPublicKey("WZaG00XCAiVCF2SP5fmSbKiuTbBB-lMDg_81rC8hR80");
+        reality.getTls().setRealityShortId("6ba85179e30d4fc2");
+        reality.getTransport().setType(TransportType.GRPC);
+        reality.getTransport().setServiceName("private-grpc-service");
+        store.addServer(reality);
+
+        String config = unzip(write()).get("sing-box.json");
+
+        assertThat(config).contains("\"wireguard\"").contains("\"grpc\"");
+        assertThat(config)
+                .doesNotContain("203.0.113.44")
+                .doesNotContain("bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=")
+                .doesNotContain("172.16.0.2")
+                .doesNotContainPattern("\\[\\s*11\\s*,\\s*22\\s*,\\s*33\\s*]")
+                .doesNotContain("WZaG00XCAiVCF2SP5fmSbKiuTbBB-lMDg_81rC8hR80")
+                .doesNotContain("6ba85179e30d4fc2")
+                .doesNotContain("private-grpc-service");
+    }
+
+    /**
+     * A private resolver carries the account it belongs to in its URL, the
+     * way NextDNS and AdGuard DNS spell theirs, and in TUN mode the generated
+     * configuration quotes that resolver back.
+     */
+    @Test
+    void aPrivateResolverLosesItsAccountInTheGeneratedConfig() throws IOException {
+        AppSettings settings = store.getSettings();
+        settings.setProxyMode(ProxyMode.TUN);
+        settings.setDirectDns("https://dns.adguard-dns.com/dns-query/abc123account");
+        store.saveSettings(settings);
+
+        String config = unzip(write()).get("sing-box.json");
+
+        assertThat(config).contains("\"dns\"").doesNotContain("abc123account");
+    }
+
+    /** settings.json and routing.json went into the bundle exactly as they were on disk. */
+    @Test
+    void theCopiedFilesKeepOnlyTheHostOfEachUrl() throws IOException {
+        AppSettings settings = store.getSettings();
+        settings.setProxyDns("https://dns.nextdns.io/abc123account");
+        store.saveSettings(settings);
+        Files.writeString(store.getDataDir().resolve("routing.json"),
+                "{\"rules\": [], \"bypass_list\": "
+                        + "[\"https://intranet.example/login?token=def456account\"]}",
+                StandardCharsets.UTF_8);
+
+        Map<String, String> entries = unzip(write());
+
+        assertThat(entries.get("settings.json"))
+                .doesNotContain("abc123account")
+                .contains("https://dns.nextdns.io/");
+        assertThat(entries.get("routing.json"))
+                .doesNotContain("def456account")
+                .contains("https://intranet.example/");
     }
 
     @Test

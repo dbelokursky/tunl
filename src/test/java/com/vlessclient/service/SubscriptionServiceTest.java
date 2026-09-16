@@ -199,6 +199,46 @@ class SubscriptionServiceTest {
     }
 
     /**
+     * A link the core would refuse is not a server this client can use, and it
+     * is not a line the parser failed to read either. Counted as unreadable,
+     * one xhttp link among twenty working ones kept every later refresh from
+     * removing a withdrawn server; stored, a REALITY server with a broken key
+     * was left out of every connect.
+     */
+    @Test
+    void parseContent_linksTheCoreWouldRefuseAreUnsupportedNotUnreadable() {
+        String content = "vless://uuid1@server1.com:443?security=tls&type=tcp#Good\n"
+                + "vless://uuid2@server2.com:443?security=tls&type=xhttp&path=%2Fx#Xhttp\n"
+                + "vless://uuid3@server3.com:443?security=reality&sni=example.com"
+                + "&fp=chrome&pbk=pubkey123&sid=0123abcd#BrokenKey\n";
+
+        SubscriptionService.ParsedContent parsed = service.parseContent(content);
+
+        assertThat(parsed.servers()).extracting(ServerConfig::getName).containsExactly("Good");
+        assertThat(parsed.skipped()).isZero();
+        assertThat(parsed.unsupportedSchemes())
+                .containsExactly("transport xhttp", "REALITY public key");
+    }
+
+    @Test
+    void refreshSubscription_linksTheCoreWouldRefuseDoNotPinWithdrawnServers() {
+        service.setFetchedContent("vless://uuid1@server1.com:443?security=tls&type=tcp#Server1\n"
+                + "vless://uuid2@server2.com:443?security=tls&type=tcp#Server2\n");
+        service.addSubscription("Mixed", "https://example.com/sub");
+        Subscription sub = service.getSubscriptions().get(0);
+
+        service.setFetchedContent("vless://uuid2@server2.com:443?security=tls&type=tcp#Server2\n"
+                + "vless://uuid3@server3.com:443?security=tls&type=xhttp#Xhttp\n");
+        service.refreshSubscription(sub.getId());
+
+        assertThat(sub.getLastError()).isNull();
+        assertThat(configStore.getServers())
+                .extracting(ServerConfig::getAddress)
+                .as("server1 was withdrawn by the provider and must go")
+                .containsExactly("server2.com");
+    }
+
+    /**
      * servers.json, settings.json and routing.json all move an unreadable
      * file aside; subscriptions.json used to log and carry on, so the next
      * save overwrote the only copy — including the sealed URLs the keychain

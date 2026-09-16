@@ -76,6 +76,38 @@ class SingBoxConfigGeneratorSelectionTest {
         assertThat(group.get("interval").asString()).isNotBlank();
     }
 
+    /**
+     * A manual switch goes through the running core's selector, and sing-box
+     * keeps connections already open on the previous server unless the
+     * selector interrupts them. The card, the tray and MCP then named the new
+     * server while a browser's long-lived connection still left through the
+     * old one, the very mismatch the switch exists to end.
+     */
+    @Test
+    void aManualSelectorInterruptsTheConnectionsOfTheServerItSwitchesAwayFrom() throws Exception {
+        List<ServerConfig> servers = List.of(server("A"), server("B"));
+        settings.setServerSelection(ServerSelection.SINGLE);
+
+        JsonNode group = group(servers, servers.get(0));
+
+        assertThat(group.path("interrupt_exist_connections").asBoolean(false)).isTrue();
+    }
+
+    /**
+     * The automatic group re-picks on its own as latencies move. Cutting every
+     * open connection at each re-pick would break downloads and calls over a
+     * few milliseconds of latency, so it keeps them.
+     */
+    @Test
+    void theAutomaticGroupKeepsOpenConnectionsWhenItRepicks() throws Exception {
+        List<ServerConfig> servers = List.of(server("A"), server("B"));
+        settings.setServerSelection(ServerSelection.AUTO_BEST);
+
+        JsonNode group = group(servers, servers.get(0));
+
+        assertThat(group.has("interrupt_exist_connections")).isFalse();
+    }
+
     @Test
     void autoModeEmitsAnOutboundForEveryMember() throws Exception {
         List<ServerConfig> servers = List.of(server("A"), server("B"));

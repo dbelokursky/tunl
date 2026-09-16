@@ -10,9 +10,12 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
 import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
 import javafx.geometry.Pos;
@@ -39,7 +42,7 @@ import org.slf4j.LoggerFactory;
  * new ones, and refreshes them (individually or all at once) off the FX thread
  * so a slow fetch never blocks the UI.
  */
-public class SubscriptionsViewController {
+public class SubscriptionsViewController implements ViewShownAware {
 
     private static final Logger log = LoggerFactory.getLogger(SubscriptionsViewController.class);
     private static final DateTimeFormatter TIME_FORMAT =
@@ -56,6 +59,12 @@ public class SubscriptionsViewController {
     @FXML private Button refreshAllButton;
 
     private SubscriptionService subscriptionService;
+
+    /** Ids of the subscriptions this view is refreshing; FX thread only. */
+    private final Set<String> refreshing = new HashSet<>();
+
+    /** Whether Refresh All is running; FX thread only. */
+    private boolean refreshingAll;
 
     /**
      * Binds the subscription list to the service and keeps the empty-state
@@ -76,6 +85,16 @@ public class SubscriptionsViewController {
         subs.addListener((javafx.collections.ListChangeListener<Subscription>) change ->
                 updateEmptyState(subs));
         updateEmptyState(subs);
+    }
+
+    /**
+     * Redraws the rows. A refresh records its outcome in the subscription
+     * itself, and the hourly one tells no view, so rows this cached view drew
+     * earlier went on showing an old timestamp and no error.
+     */
+    @Override
+    public void onViewShown() {
+        subscriptionListView.refresh();
     }
 
     /**
@@ -127,16 +146,30 @@ public class SubscriptionsViewController {
 
     /** Runs a service call off the FX thread and reports a failure in a dialog. */
     private void runOffFxThread(Runnable action, String failureHeaderKey) {
+        runOffFxThread(action, failureHeaderKey, () -> { });
+    }
+
+    /**
+     * Runs a service call off the FX thread and reports a failure in a dialog.
+     * Either way {@code whenDone} then runs on the FX thread, and the rows are
+     * redrawn.
+     */
+    private void runOffFxThread(Runnable action, String failureHeaderKey, Runnable whenDone) {
         // Taken while the view is on screen: the failure can land after the
         // user has gone to another page, which takes this view out of the window.
         Window owner = ownerWindow();
         Thread.startVirtualThread(() -> {
             try {
                 action.run();
-                Platform.runLater(() -> subscriptionListView.refresh());
+                Platform.runLater(() -> {
+                    whenDone.run();
+                    subscriptionListView.refresh();
+                });
             } catch (Exception e) {
                 log.error("Subscription change failed", e);
                 Platform.runLater(() -> {
+                    whenDone.run();
+                    subscriptionListView.refresh();
                     Alert alert = new Alert(Alert.AlertType.ERROR);
                     alert.setTitle(I18n.get("dialog.error"));
                     alert.setHeaderText(I18n.get(failureHeaderKey));
@@ -151,7 +184,7 @@ public class SubscriptionsViewController {
     /**
      * The add/edit form, prefilled with {@code name} and {@code url}.
      *
-     * @return what the user entered, or empty when cancelled or incomplete
+     * @return what the user entered, or empty when cancelled
      */
     private Optional<Entry> showSubscriptionDialog(String title, String header,
                                                    String name, String url) {
@@ -209,6 +242,13 @@ public class SubscriptionsViewController {
 
         dialog.getDialogPane().setContent(grid);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        // OK waits for both fields. They used to be checked after the dialog
+        // closed: OK on an incomplete form put up a warning and dropped what
+        // had been typed, a pasted URL included.
+        dialog.getDialogPane().lookupButton(ButtonType.OK).disableProperty().bind(
+                Bindings.createBooleanBinding(
+                        () -> nameField.getText().isBlank() || urlField.getText().isBlank(),
+                        nameField.textProperty(), urlField.textProperty()));
         dialog.initOwner(ownerWindow());
 
         Platform.runLater(nameField::requestFocus);
@@ -217,32 +257,32 @@ public class SubscriptionsViewController {
         if (result.isEmpty() || result.get() != ButtonType.OK) {
             return Optional.empty();
         }
-        String enteredName = nameField.getText().trim();
-        String enteredUrl = urlField.getText().trim();
-        if (enteredName.isEmpty() || enteredUrl.isEmpty()) {
-            Alert alert = new Alert(Alert.AlertType.WARNING);
-            alert.setTitle(I18n.get("subscriptions.invalid.input"));
-            alert.setHeaderText(I18n.get("subscriptions.name.url.required"));
-            alert.initOwner(ownerWindow());
-            alert.showAndWait();
-            return Optional.empty();
-        }
-        return Optional.of(new Entry(enteredName, enteredUrl));
+        return Optional.of(new Entry(nameField.getText().trim(), urlField.getText().trim()));
     }
 
+    // Both refreshes ran on a bare thread: an exception ended it without a
+    // word, and every click while one ran started another.
     @FXML
     private void onRefreshAllClicked() {
-        Thread.startVirtualThread(() -> {
-            subscriptionService.refreshAll();
-            Platform.runLater(() -> subscriptionListView.refresh());
+        if (refreshingAll) {
+            return;
+        }
+        refreshingAll = true;
+        refreshAllButton.setDisable(true);
+        subscriptionListView.refresh();
+        runOffFxThread(subscriptionService::refreshAll, "subscriptions.refresh.failed", () -> {
+            refreshingAll = false;
+            refreshAllButton.setDisable(false);
         });
     }
 
     private void refreshSubscription(Subscription sub) {
-        Thread.startVirtualThread(() -> {
-            subscriptionService.refreshSubscription(sub.getId());
-            Platform.runLater(() -> subscriptionListView.refresh());
-        });
+        if (refreshingAll || !refreshing.add(sub.getId())) {
+            return;
+        }
+        subscriptionListView.refresh();
+        runOffFxThread(() -> subscriptionService.refreshSubscription(sub.getId()),
+                "subscriptions.refresh.failed", () -> refreshing.remove(sub.getId()));
     }
 
     private void deleteSubscription(Subscription sub) {
@@ -255,8 +295,12 @@ public class SubscriptionsViewController {
 
         Optional<ButtonType> result = confirm.showAndWait();
         if (result.isPresent() && result.get() == ButtonType.OK) {
-            subscriptionService.removeSubscription(sub.getId());
-            log.info("Deleted subscription: {}", sub.getName());
+            // Off the FX thread like add and edit: removing waits for the lock a
+            // refresh holds while that refresh waits for the FX thread.
+            runOffFxThread(() -> {
+                subscriptionService.removeSubscription(sub.getId());
+                log.info("Deleted subscription: {}", sub.getName());
+            }, "subscriptions.delete.failed");
         }
     }
 
@@ -341,6 +385,7 @@ public class SubscriptionsViewController {
             Button refreshBtn = new Button(I18n.get("button.refresh"));
             refreshBtn.getStyleClass().add("secondary-button");
             refreshBtn.setOnAction(e -> refreshSubscription(sub));
+            refreshBtn.setDisable(refreshingAll || refreshing.contains(sub.getId()));
 
             Button editBtn = new Button(I18n.get("button.edit"));
             editBtn.getStyleClass().add("secondary-button");

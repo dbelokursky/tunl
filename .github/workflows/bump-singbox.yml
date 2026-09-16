@@ -20,32 +20,35 @@ on:
         required: false
         type: string
 
+# Each job asks for what it needs; nothing is granted by default.
 permissions:
-  contents: write
-  pull-requests: write
-  # For the dispatch below, which is what gets the pull request's checks
-  # running without a personal access token.
-  actions: write
+  contents: read
 
 jobs:
-  bump:
+  # Runs another project's code: bump-singbox.sh downloads the release and
+  # executes the host binary to confirm its version. So this job holds no
+  # secret and cannot write to the repository. On a hosted runner that code
+  # runs with passwordless sudo, and a token handed to any later step of the
+  # same job would be one git hook or wrapper away from being read — and a
+  # personal token that can push reaches main and a signed release without a
+  # review.
+  pin:
     runs-on: ubuntu-latest
     # bump-singbox.sh downloads and hashes five core archives; minutes, not hours.
     timeout-minutes: 20
-    # Via job env, not the secrets context: `secrets` is not available in a
-    # step's `if:`, which is the same trap release.yml notes for its signing
-    # and certificate steps.
-    env:
-      BUMP_TOKEN: ${{ secrets.BUMP_TOKEN }}
+    permissions:
+      contents: read
+      # For `gh pr list` below.
+      pull-requests: read
+    outputs:
+      changed: ${{ steps.target.outputs.changed }}
+      have: ${{ steps.target.outputs.have }}
+      want: ${{ steps.target.outputs.want }}
+      branch: ${{ steps.target.outputs.branch }}
     steps:
-      # BUMP_TOKEN, when it exists, is what makes the whole chore hands-free:
-      # a pull request opened by a PAT gets an ordinary pull_request run,
-      # while one opened by GITHUB_TOKEN gets a run parked in
-      # "action_required" until a human approves it. Everything below works
-      # either way; only that last click differs.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          token: ${{ secrets.BUMP_TOKEN || github.token }}
+          persist-credentials: false
 
       - name: Decide whether there is anything to do
         id: target
@@ -61,6 +64,13 @@ jobs:
             want="$(gh api repos/SagerNet/sing-box/releases/latest --jq .tag_name)"
           fi
           want="${want#v}"
+          # The tag name is written by another project, and a git tag may hold
+          # characters a shell would run, or a newline that forges an output.
+          # Nothing but a plain x.y.z leaves this step.
+          if ! [[ "$want" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The requested or latest sing-box tag is not a plain x.y.z version; not pinning it."
+            exit 1
+          fi
           have="$(sed -n 's/^singbox\.version=//p' src/main/resources/singbox.properties)"
           branch="chore/singbox-$want"
 
@@ -90,20 +100,90 @@ jobs:
         # different paths for the same bytes, so a tampered download fails
         # the bump instead of getting pinned. Then runs the host's own binary
         # to confirm it reports the version being pinned.
-        run: scripts/bump-singbox.sh "${{ steps.target.outputs.want }}"
-
-      - name: Push the branch
-        if: steps.target.outputs.changed == 'true'
         env:
-          BRANCH: ${{ steps.target.outputs.branch }}
           WANT: ${{ steps.target.outputs.want }}
+        run: scripts/bump-singbox.sh "$WANT"
+
+      - name: Hand the pin to the job that proposes it
+        if: steps.target.outputs.changed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: singbox-pin
+          path: src/main/resources/singbox.properties
+          if-no-files-found: error
+          retention-days: 1
+
+  # Holds the token and runs nothing that was downloaded: it checks the file
+  # the pin job handed over, commits it, pushes the branch and opens the pull
+  # request.
+  propose:
+    needs: pin
+    if: needs.pin.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      # For the dispatch below, which is what gets the pull request's checks
+      # running without a personal access token.
+      actions: write
+    env:
+      # Whether BUMP_TOKEN exists, as "true" or "false": a step's `if:` cannot
+      # read the secrets context, the same trap release.yml notes for its
+      # signing and certificate steps. The token itself goes only to the two
+      # steps that push and open the pull request.
+      HAVE_BUMP_TOKEN: ${{ secrets.BUMP_TOKEN != '' }}
+      HAVE: ${{ needs.pin.outputs.have }}
+      WANT: ${{ needs.pin.outputs.want }}
+      BRANCH: ${{ needs.pin.outputs.branch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: singbox-pin
+          path: pin
+
+      - name: Check the pinned file before committing it
+        # It comes from the job that ran the downloaded core, so it is checked
+        # rather than trusted: apart from the version and the digests it must
+        # be the file main has, and those must be a plain version (the one the
+        # tag named) and hex digests.
+        run: |
+          set -euo pipefail
+          [[ "$WANT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          current=src/main/resources/singbox.properties
+          pinned=pin/singbox.properties
+          assets='(darwin-(arm64|amd64)|windows-amd64|linux-(amd64|arm64))'
+          keys="^singbox\.(version|sha256\.$assets)="
+          diff <(grep -vE "$keys" "$current") <(grep -vE "$keys" "$pinned")
+          grep -qx "singbox.version=$WANT" "$pinned"
+          if grep -E "$keys" "$pinned" \
+              | grep -vE "^singbox\.(version=[0-9]+\.[0-9]+\.[0-9]+|sha256\.$assets=[0-9a-f]{64})$"; then
+            echo "::error::The pinned file holds a version or a digest in an unexpected form."
+            exit 1
+          fi
+          cp "$pinned" "$current"
+          rm -rf pin
+
+      # BUMP_TOKEN, when it exists, is what makes the whole chore hands-free:
+      # a pull request opened by a PAT gets an ordinary pull_request run,
+      # while one opened by GITHUB_TOKEN gets a run parked in
+      # "action_required" until a human approves it. Everything below works
+      # either way; only that last click differs.
+      - name: Push the branch
+        env:
+          PUSH_TOKEN: ${{ secrets.BUMP_TOKEN || github.token }}
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git checkout -b "$BRANCH"
           git commit -am "chore(singbox): pin the core at $WANT"
-          git push -u origin "$BRANCH"
+          # On the command line, because checkout left no credentials behind.
+          git push "https://x-access-token:${PUSH_TOKEN}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git" "$BRANCH"
 
       # Only without a PAT, and only to answer the question early. With
       # BUMP_TOKEN the pull request gets a real pull_request run and this
@@ -123,24 +203,18 @@ jobs:
       # those are only ever satisfied by the pull_request run, which is parked
       # until approved. Verified by experiment, not assumed.
       - name: Start the checks early
-        if: steps.target.outputs.changed == 'true' && env.BUMP_TOKEN == ''
+        if: env.HAVE_BUMP_TOKEN != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          BRANCH: ${{ steps.target.outputs.branch }}
         run: gh workflow run build.yml --ref "$BRANCH"
 
       - name: Open the pull request
-        if: steps.target.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.BUMP_TOKEN || github.token }}
-          HAVE: ${{ steps.target.outputs.have }}
-          WANT: ${{ steps.target.outputs.want }}
-          BRANCH: ${{ steps.target.outputs.branch }}
-          HAVE_PAT: ${{ secrets.BUMP_TOKEN != '' }}
         run: |
           set -euo pipefail
           note=''
-          if [ "$HAVE_PAT" != "true" ]; then
+          if [ "$HAVE_BUMP_TOKEN" != "true" ]; then
             note=$'\n> This pull request\x27s checks are awaiting approval because GitHub requires approval for pull requests opened by `GITHUB_TOKEN`. Select **Approve and run**. The same four checks have already run against the branch in Actions.\n'
           fi
 

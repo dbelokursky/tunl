@@ -3,10 +3,13 @@ package com.vlessclient.service;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
+import com.vlessclient.service.outbound.CoreSettings;
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -22,6 +25,9 @@ public class ShareLinkParser {
 
     private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
 
+    /** U+FEFF, which a file or a response saved with a byte order mark starts with. */
+    private static final char BYTE_ORDER_MARK = 0xFEFF;
+
     /**
      * Parses a share link URI, dispatching by its scheme.
      *
@@ -34,19 +40,43 @@ public class ShareLinkParser {
         if (uri == null || uri.isBlank()) {
             throw new IllegalArgumentException("URI must not be null or blank");
         }
-        int schemeEnd = uri.indexOf("://");
+        // A list saved with a byte order mark hands it over with its first
+        // link, and trimming the line leaves it there. It read as part of the
+        // scheme, so the first server counted as an unsupported protocol.
+        String link = uri.charAt(0) == BYTE_ORDER_MARK ? uri.substring(1) : uri;
+        int schemeEnd = link.indexOf("://");
         if (schemeEnd < 0) {
             throw new IllegalArgumentException("Share link URI must contain ://");
         }
-        String scheme = uri.substring(0, schemeEnd).toLowerCase(Locale.ROOT);
+        String scheme = link.substring(0, schemeEnd).toLowerCase(Locale.ROOT);
         return switch (scheme) {
-            case "vless" -> parseVless(uri);
-            case "vmess" -> parseVmess(uri);
-            case "trojan" -> parseTrojan(uri);
-            case "ss" -> parseShadowsocks(uri);
-            case "hysteria2", "hy2" -> parseHysteria2(uri);
+            case "vless" -> parseVless(link);
+            case "vmess" -> parseVmess(link);
+            case "trojan" -> parseTrojan(link);
+            case "ss" -> parseShadowsocks(link);
+            case "hysteria2", "hy2" -> parseHysteria2(link);
             default -> throw new UnsupportedSchemeException(scheme);
         };
+    }
+
+    /**
+     * Parses a share link for a server that is about to be stored: like
+     * {@link #parse}, and also refuses one the core would refuse however its
+     * settings are spelled ({@link CoreSettings#refusal}). Such a server used
+     * to be stored and then left out of every connect.
+     *
+     * @param uri the share link URI to parse
+     * @return the parsed server configuration
+     * @throws UnsupportedFeatureException if the core would refuse the server
+     * @throws IllegalArgumentException    if {@code uri} does not parse
+     */
+    public ServerConfig parseForImport(String uri) {
+        ServerConfig server = parse(uri);
+        CoreSettings.Refusal refusal = CoreSettings.refusal(server).orElse(null);
+        if (refusal != null) {
+            throw new UnsupportedFeatureException(refusal.feature(), refusal.reason());
+        }
+        return server;
     }
 
     /** Longest display name kept from a link; anything past it is noise. */
@@ -76,6 +106,37 @@ public class ShareLinkParser {
     private static String displayName(String fragment, String host, int port) {
         String cleaned = cleanName(fragment);
         return cleaned.isEmpty() ? host + ":" + port : cleaned;
+    }
+
+    /**
+     * Decodes a link's fragment, its display name, the way a form value is
+     * decoded: {@code %XX} escapes as UTF-8, and {@code +} as a space. A
+     * {@code %} that starts no escape is kept as it is. URLDecoder threw on
+     * one, so a server named "100%" rejected the whole link.
+     *
+     * @param fragment the fragment as it appears in the link
+     * @return the decoded name
+     */
+    static String decodeName(String fragment) {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream(fragment.length());
+        StringBuilder text = new StringBuilder();
+        int i = 0;
+        while (i < fragment.length()) {
+            char c = fragment.charAt(i);
+            if (c == '%' && i + 2 < fragment.length()
+                    && HexFormat.isHexDigit(fragment.charAt(i + 1))
+                    && HexFormat.isHexDigit(fragment.charAt(i + 2))) {
+                bytes.writeBytes(text.toString().getBytes(StandardCharsets.UTF_8));
+                text.setLength(0);
+                bytes.write(HexFormat.fromHexDigits(fragment, i + 1, i + 3));
+                i += 3;
+            } else {
+                text.append(c == '+' ? ' ' : c);
+                i++;
+            }
+        }
+        bytes.writeBytes(text.toString().getBytes(StandardCharsets.UTF_8));
+        return bytes.toString(StandardCharsets.UTF_8);
     }
 
     /**
@@ -136,6 +197,37 @@ public class ShareLinkParser {
     }
 
     /**
+     * A link that parses but asks for something this client cannot run: a
+     * transport sing-box does not implement, or a setting the core refuses
+     * however it is spelled.
+     *
+     * <p>Counted with {@link UnsupportedSchemeException} rather than with
+     * unreadable lines, for the same reason: a provider that also hands out
+     * xhttp servers has not sent a truncated list, and treating it as one
+     * stopped every later refresh from removing a withdrawn server.</p>
+     */
+    public static final class UnsupportedFeatureException extends IllegalArgumentException {
+
+        private final String feature;
+
+        /**
+         * Creates the exception.
+         *
+         * @param feature what the link asks for, e.g. {@code transport xhttp}
+         * @param message the sentence to show for this link
+         */
+        public UnsupportedFeatureException(String feature, String message) {
+            super(message);
+            this.feature = feature;
+        }
+
+        /** What the link asks for, short enough for a list, e.g. {@code transport xhttp}. */
+        public String feature() {
+            return feature;
+        }
+    }
+
+    /**
      * Parses a {@code vless://} share link URI.
      *
      * @param uri the VLESS share link URI
@@ -151,7 +243,7 @@ public class ShareLinkParser {
         String fragment = null;
         int fragmentIndex = uri.indexOf('#');
         if (fragmentIndex >= 0) {
-            fragment = URLDecoder.decode(uri.substring(fragmentIndex + 1), StandardCharsets.UTF_8);
+            fragment = decodeName(uri.substring(fragmentIndex + 1));
         }
 
         // Parse the URI using a workaround: replace vless:// with http:// so java.net.URI can parse it
@@ -262,7 +354,13 @@ public class ShareLinkParser {
 
         String path = getJsonString(node, "path", "");
         if (!path.isBlank()) {
-            config.getTransport().setPath(path);
+            // A VMess link has no service-name field: v2rayN writes gRPC's
+            // service name into path, and the core reads it as service_name.
+            if (transportType == TransportType.GRPC) {
+                config.getTransport().setServiceName(path);
+            } else {
+                config.getTransport().setPath(path);
+            }
         }
 
         String host = getJsonString(node, "host", "");
@@ -313,7 +411,7 @@ public class ShareLinkParser {
         String fragment = null;
         int fragmentIndex = uri.indexOf('#');
         if (fragmentIndex >= 0) {
-            fragment = URLDecoder.decode(uri.substring(fragmentIndex + 1), StandardCharsets.UTF_8);
+            fragment = decodeName(uri.substring(fragmentIndex + 1));
         }
 
         String httpUri = "http://" + uri.substring("trojan://".length());
@@ -354,35 +452,12 @@ public class ShareLinkParser {
         Map<String, String> params = parseQueryParams(parsed.getRawQuery());
         applyTransportParams(config, params);
 
-        // Security / TLS - trojan defaults to TLS enabled
-        String security = params.getOrDefault("security", "tls");
-        if ("tls".equals(security)) {
-            config.getTls().setEnabled(true);
-        } else if ("reality".equals(security)) {
-            config.getTls().setEnabled(true);
-            config.getTls().setReality(true);
-        }
-
-        String sni = params.get("sni");
-        if (sni != null && !sni.isBlank()) {
-            config.getTls().setServerName(sni);
-        }
-
-        String fp = params.get("fp");
-        if (fp != null && !fp.isBlank()) {
-            config.getTls().setFingerprint(fp);
-        }
-
-        String alpn = params.get("alpn");
-        if (alpn != null && !alpn.isBlank()) {
-            config.getTls().setAlpn(alpn);
-        }
-
-        // Both spellings circulate: allowInsecure=1 (v2rayN, Xray) and
-        // insecure=1 (sing-box-flavoured links).
-        if ("1".equals(params.get("allowInsecure")) || "1".equals(params.get("insecure"))) {
-            config.getTls().setAllowInsecure(true);
-        }
+        // Security / TLS: a Trojan link is TLS unless it says otherwise, and it
+        // carries REALITY the same way a VLESS link does. This was a copy of
+        // applyTlsParams that had drifted -- it read security and sni but
+        // neither pbk nor sid, so the app could not import the REALITY links
+        // its own export wrote.
+        applyTlsParams(config, params, "tls");
 
         return config;
     }
@@ -405,7 +480,7 @@ public class ShareLinkParser {
         String fragment = null;
         int fragmentIndex = rest.indexOf('#');
         if (fragmentIndex >= 0) {
-            fragment = URLDecoder.decode(rest.substring(fragmentIndex + 1), StandardCharsets.UTF_8);
+            fragment = decodeName(rest.substring(fragmentIndex + 1));
             rest = rest.substring(0, fragmentIndex);
         }
 
@@ -413,6 +488,7 @@ public class ShareLinkParser {
         int port;
         String method;
         String password;
+        String query = null;
 
         // SIP002 format: BASE64(method:password)@host:port/?plugin=...
         // Legacy format: BASE64(method:password@host:port)
@@ -420,7 +496,7 @@ public class ShareLinkParser {
         if (atSign >= 0) {
             // SIP002: userinfo is base64, then @host:port
             String userInfoEncoded = rest.substring(0, atSign);
-            String userInfo = decodeBase64(userInfoEncoded);
+            String userInfo = decodeUserInfo(userInfoEncoded);
             int colonIndex = userInfo.indexOf(':');
             if (colonIndex < 0) {
                 throw new IllegalArgumentException("Invalid Shadowsocks userinfo format");
@@ -429,9 +505,10 @@ public class ShareLinkParser {
             password = userInfo.substring(colonIndex + 1);
 
             String hostPort = rest.substring(atSign + 1);
-            // Remove query string if present
+            // The query carries the SIP003 plugin, which the server needs.
             int queryIndex = hostPort.indexOf('?');
             if (queryIndex >= 0) {
+                query = hostPort.substring(queryIndex + 1);
                 hostPort = hostPort.substring(0, queryIndex);
             }
             // Remove trailing slash
@@ -478,8 +555,58 @@ public class ShareLinkParser {
         config.setAddress(host);
         config.setPort(port);
         config.setName(displayName(fragment, host, port));
+        applyPlugin(config, query);
 
         return config;
+    }
+
+    /**
+     * Reads SIP002 userinfo: either base64 of {@code method:password}, or that
+     * pair itself with the password percent-encoded.
+     *
+     * <p>The 2022 ciphers require the second form -- their key is base64
+     * already, and wrapping the pair in another base64 is what breaks
+     * interoperability -- and the app used to reject it outright. A base64
+     * blob never contains a colon, so the colon tells the two apart. {@code +}
+     * is left alone rather than read as a space: in a 2022 key it is a base64
+     * character, and decoding it as a space would corrupt the credential.</p>
+     */
+    private static String decodeUserInfo(String encoded) {
+        if (encoded.indexOf(':') >= 0) {
+            return URLDecoder.decode(encoded.replace("+", "%2B"), StandardCharsets.UTF_8);
+        }
+        return decodeBase64(encoded);
+    }
+
+    /**
+     * Keeps the SIP003 plugin a link names: {@code plugin=<name>;<options>},
+     * percent-encoded as one value, which sing-box takes as two fields.
+     *
+     * <p>Both are kept verbatim -- the core is what validates them. Dropping
+     * them silently was worse than refusing the link: the server answers only
+     * through its plugin, so the app reported a connected tunnel that carried
+     * nothing.</p>
+     */
+    private static void applyPlugin(ServerConfig config, String query) {
+        if (query == null || query.isBlank()) {
+            return;
+        }
+        for (String pair : query.split("&")) {
+            int eq = pair.indexOf('=');
+            if (eq < 0 || !"plugin".equalsIgnoreCase(pair.substring(0, eq))) {
+                continue;
+            }
+            String value = URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8);
+            if (value.isBlank()) {
+                return;
+            }
+            int semicolon = value.indexOf(';');
+            config.setPlugin(semicolon < 0 ? value : value.substring(0, semicolon));
+            if (semicolon >= 0 && semicolon + 1 < value.length()) {
+                config.setPluginOpts(value.substring(semicolon + 1));
+            }
+            return;
+        }
     }
 
     /**
@@ -499,7 +626,7 @@ public class ShareLinkParser {
         String fragment = null;
         int fragmentIndex = uri.indexOf('#');
         if (fragmentIndex >= 0) {
-            fragment = URLDecoder.decode(uri.substring(fragmentIndex + 1), StandardCharsets.UTF_8);
+            fragment = decodeName(uri.substring(fragmentIndex + 1));
         }
 
         String httpUri = "http://" + uri.substring(schemeEnd + 3);
@@ -570,9 +697,11 @@ public class ShareLinkParser {
         TransportType transportType = parseTransportType(type);
         config.getTransport().setType(transportType);
 
+        // Decoded once already, with the rest of the query. A second pass
+        // turned an encoded + into a space and threw on an encoded %.
         String path = params.get("path");
         if (path != null && !path.isBlank()) {
-            config.getTransport().setPath(URLDecoder.decode(path, StandardCharsets.UTF_8));
+            config.getTransport().setPath(path);
         }
 
         String transportHost = params.get("host");
@@ -587,7 +716,20 @@ public class ShareLinkParser {
     }
 
     private void applyTlsParams(ServerConfig config, Map<String, String> params) {
-        String security = params.getOrDefault("security", "none");
+        applyTlsParams(config, params, "none");
+    }
+
+    /**
+     * Applies the TLS and REALITY query parameters that every protocol
+     * carrying them shares.
+     *
+     * <p>{@code defaultSecurity} is what a link means when it names none: a
+     * VLESS link is plain unless it says otherwise, a Trojan link is TLS by
+     * definition.</p>
+     */
+    private void applyTlsParams(ServerConfig config, Map<String, String> params,
+                                String defaultSecurity) {
+        String security = params.getOrDefault("security", defaultSecurity);
         if ("tls".equals(security)) {
             config.getTls().setEnabled(true);
         } else if ("reality".equals(security)) {
@@ -628,9 +770,10 @@ public class ShareLinkParser {
     }
 
     private String mapVmessNet(String net) {
-        return switch (net.toLowerCase()) {
+        return switch (net.toLowerCase(Locale.ROOT)) {
             case "h2" -> "http";
-            case "kcp" -> "tcp";
+            // sing-box has no mKCP, and dialling a KCP server over TCP never connects.
+            case "kcp" -> throw unsupportedTransport("kcp");
             default -> net;
         };
     }
@@ -668,7 +811,18 @@ public class ShareLinkParser {
                 return t;
             }
         }
-        throw new IllegalArgumentException("Unknown transport type: " + type);
+        throw unsupportedTransport(type);
+    }
+
+    /**
+     * A transport sing-box does not implement, such as Xray's xhttp. The link
+     * itself is well-formed, so a list holding it is neither truncated nor
+     * corrupt.
+     */
+    private static UnsupportedFeatureException unsupportedTransport(String type) {
+        String name = type.toLowerCase(Locale.ROOT);
+        return new UnsupportedFeatureException("transport " + name,
+                "sing-box does not support the " + name + " transport.");
     }
 
     private Map<String, String> parseQueryParams(String query) {

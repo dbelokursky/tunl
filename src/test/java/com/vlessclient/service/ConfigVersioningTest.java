@@ -2,6 +2,7 @@ package com.vlessclient.service;
 
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.CoreLogLevel;
+import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
 import java.net.http.HttpClient;
 import java.nio.file.Files;
@@ -47,9 +48,39 @@ class ConfigVersioningTest {
 
         String raw = Files.readString(tempDir.resolve("servers.json"));
         assertThat(raw).contains("\"config_version\" : 1").contains("\"servers\"");
-        // The backup still holds the pre-envelope bytes for downgrades.
-        assertThat(Files.readString(tempDir.resolve("servers.json.v0.bak")))
-                .isEqualTo(LEGACY_SERVERS);
+        // The backup covered the window between reading the old file and
+        // writing the new one. It holds credentials in the clear, from the
+        // builds before sealing, so it goes as soon as the new file is there.
+        assertThat(tempDir.resolve("servers.json.v0.bak")).doesNotExist();
+    }
+
+    /**
+     * The backup is the only copy of the old file until the new one lands, so
+     * a save that failed must not take it: disk full, a locked file, a
+     * read-only directory all end here.
+     */
+    @Test
+    void aFailedSaveKeepsTheLegacyBackup() throws Exception {
+        Files.writeString(tempDir.resolve("servers.json"), LEGACY_SERVERS);
+        ConfigStore store = store();
+        assertThat(tempDir.resolve("servers.json.v0.bak")).exists();
+
+        // A directory where the file belongs: the write cannot land.
+        Files.delete(tempDir.resolve("servers.json"));
+        Files.createDirectory(tempDir.resolve("servers.json"));
+        Files.writeString(tempDir.resolve("servers.json").resolve("blocker"), "not a file");
+
+        ServerConfig added = new ServerConfig();
+        added.setName("new");
+        added.setAddress("192.0.2.2");
+        added.setPort(443);
+        added.setUuid("u2");
+        store.addServer(added);
+
+        assertThat(store.getPersistenceState().failedFiles()).contains("servers.json");
+        assertThat(tempDir.resolve("servers.json.v0.bak"))
+                .as("the only copy of the old file, while the new one is not there")
+                .exists();
     }
 
     @Test
@@ -124,6 +155,20 @@ class ConfigVersioningTest {
                 .contains("\"core_log_level\" : \"warn\"");
     }
 
+    /**
+     * A new install starts with MCP configuration changes off. A settings file
+     * that already allows them keeps them: that may be the old default rather
+     * than a choice, but an agent set up on it must not stop working on update.
+     */
+    @Test
+    void mcpChangesAreOffUnlessTheSettingsFileAllowsThem() throws Exception {
+        assertThat(store().getSettings().isMcpAllowMutations()).isFalse();
+
+        Files.writeString(tempDir.resolve("settings.json"), "{ \"mcp_allow_mutations\": true }");
+
+        assertThat(store().getSettings().isMcpAllowMutations()).isTrue();
+    }
+
     @Test
     void unknownCoreLogLevelFallsBackToInfo() throws Exception {
         // A level this build does not know — a hand-edited file, or one
@@ -133,6 +178,52 @@ class ConfigVersioningTest {
                 "{ \"config_version\": 1, \"core_log_level\": \"verbose\" }");
 
         assertThat(store().getSettings().getCoreLogLevel()).isEqualTo(CoreLogLevel.INFO);
+    }
+
+    /**
+     * A servers.json from a newer build can name a protocol, or a transport,
+     * this one has never heard of. Jackson failed the whole list on that one
+     * entry, the file went to quarantine and the user was left with no servers
+     * at all. The path is real today: run dev-latest, roll back to a release.
+     */
+    @Test
+    void anEntryFromANewerBuildIsSkippedAndTheOthersStillLoad() throws Exception {
+        Files.writeString(tempDir.resolve("servers.json"), """
+                { "config_version": 1, "servers": [
+                    { "id": "s-1", "name": "known", "protocol": "vless",
+                      "address": "192.0.2.1", "port": 443, "uuid": "u-1" },
+                    { "id": "s-2", "name": "newer protocol", "protocol": "tuic",
+                      "address": "192.0.2.2", "port": 443, "uuid": "u-2" },
+                    { "id": "s-3", "name": "newer transport", "protocol": "vless",
+                      "transport": "xhttp", "address": "192.0.2.3", "port": 443,
+                      "uuid": "u-3" },
+                    { "id": "s-4", "name": "also known", "protocol": "trojan",
+                      "address": "192.0.2.4", "port": 443, "password": "p" } ] }""");
+
+        ConfigStore store = store();
+
+        assertThat(store.getServers()).extracting(ServerConfig::getName)
+                .containsExactly("known", "also known");
+        assertThat(tempDir.resolve("servers.json"))
+                .as("the file still reads, so nothing is quarantined").exists();
+    }
+
+    /**
+     * The same for a scalar: a proxy mode this build does not know must not
+     * cost the user every other setting in the file. The system proxy is the
+     * safe reading -- it is the default and needs no elevation.
+     */
+    @Test
+    void anUnknownProxyModeFallsBackToTheSystemProxyAndKeepsTheFile() throws Exception {
+        Files.writeString(tempDir.resolve("settings.json"),
+                "{ \"config_version\": 1, \"proxy_mode\": \"split_tunnel\","
+                        + " \"language\": \"ru\" }");
+
+        ConfigStore store = store();
+
+        assertThat(store.getSettings().getProxyMode()).isEqualTo(ProxyMode.SYSTEM_PROXY);
+        assertThat(store.getSettings().getLanguage())
+                .as("the rest of the file survives the unknown value").isEqualTo("ru");
     }
 
     @Test
@@ -151,5 +242,7 @@ class ConfigVersioningTest {
         service.saveSubscriptions();
         String raw = Files.readString(tempDir.resolve("subscriptions.json"));
         assertThat(raw).contains("\"config_version\" : 1").contains("\"subscriptions\"");
+        // Subscription URLs carry the account token, so the same applies here.
+        assertThat(tempDir.resolve("subscriptions.json.v0.bak")).doesNotExist();
     }
 }

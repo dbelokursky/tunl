@@ -67,7 +67,8 @@ class WindowsDpapiTest {
     void aNonAsciiValueFromAPowershellBuildStillOpens() {
         String secret = "legacy-äöü-" + UUID.randomUUID();
         String blob = powershell(LEGACY_PROTECT, secret).trim();
-        WindowsDpapiSecretSealer sealer = new WindowsDpapiSecretSealer(dpapi, SecretSealers::run);
+        WindowsDpapiSecretSealer sealer =
+                new WindowsDpapiSecretSealer(dpapi, SecretSealers.system());
 
         assertThat(sealer.unseal("k", V1 + blob)).contains(secret);
     }
@@ -75,7 +76,8 @@ class WindowsDpapiTest {
     @Test
     void anAsciiValueSealedInProcessStillOpensInAPowershellBuild() {
         String secret = "downgrade-" + UUID.randomUUID();
-        String stored = new WindowsDpapiSecretSealer(dpapi, SecretSealers::run).seal("k", secret);
+        String stored = new WindowsDpapiSecretSealer(dpapi, SecretSealers.system())
+                .seal("k", secret);
 
         assertThat(stored).startsWith(V1);
         assertThat(powershell(LEGACY_UNPROTECT, stored.substring(V1.length())))
@@ -83,7 +85,7 @@ class WindowsDpapiTest {
     }
 
     private static String powershell(String script, String stdin) {
-        return SecretSealers.run(
+        return SecretSealers.system().run(
                         new String[] {
                             "powershell", "-NoProfile", "-NonInteractive", "-Command", script
                         },
