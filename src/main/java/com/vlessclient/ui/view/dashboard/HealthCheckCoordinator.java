@@ -166,8 +166,9 @@ public final class HealthCheckCoordinator {
             });
         }
         if (recovery != null) {
-            recovery.retryProperty().addListener((obs, old, next) -> renderRetry(next));
-            renderRetry(recovery.retryProperty().get());
+            recovery.retryProperty().addListener((obs, old, next) -> renderRecovery());
+            recovery.stopReasonProperty().addListener((obs, old, next) -> renderRecovery());
+            renderRecovery();
         } else {
             hideReconnectBanner();
         }
@@ -378,18 +379,28 @@ public final class HealthCheckCoordinator {
         }
     }
 
-    private void renderRetry(TunnelRecoveryService.Retry next) {
-        if (next == null) {
-            hideReconnectBanner();
-            if (engine() != null
-                    && engine().connectionStateProperty().get() != ConnectionState.CONNECTED
-                    && (recovery == null || !recovery.isRecovering())) {
-                setHealthCardVisible(false);
-            }
-        } else {
+    /**
+     * Draws what recovery is doing in the banner: the countdown to a pending
+     * retry, or why recovery stopped. A refused configuration used to leave
+     * only the countdown, while the same restart failed at every step.
+     */
+    private void renderRecovery() {
+        TunnelRecoveryService.Retry next = recovery.retryProperty().get();
+        String stopped = recovery.stopReasonProperty().get();
+        if (next != null) {
             setHealthCardVisible(true);
             showReconnectBanner(I18n.get("dashboard.reconnect.banner",
                     String.valueOf(next.delaySeconds()), String.valueOf(next.attempt())));
+        } else if (stopped != null) {
+            setHealthCardVisible(true);
+            showReconnectBanner(I18n.get("dashboard.reconnect.stopped", stopped));
+        } else {
+            hideReconnectBanner();
+            if (engine() != null
+                    && engine().connectionStateProperty().get() != ConnectionState.CONNECTED
+                    && !recovery.isRecovering()) {
+                setHealthCardVisible(false);
+            }
         }
     }
 
@@ -408,7 +419,7 @@ public final class HealthCheckCoordinator {
         showOnCard(List.of(), () -> "—");
         setHealthCardVisible(false);
         if (recovery != null) {
-            renderRetry(recovery.retryProperty().get());
+            renderRecovery();
         }
     }
 
@@ -534,7 +545,6 @@ public final class HealthCheckCoordinator {
             Region spacer = new Region();
             HBox.setHgrow(spacer, Priority.ALWAYS);
             remove.getStyleClass().setAll("icon-button", "destructive");
-            remove.setFocusTraversable(false);
             remove.setTooltip(removeTooltip);
             remove.setOnAction(e -> removeHealthTarget(url));
             box.getChildren().addAll(dot, nameLabel, spacer, resultLabel, remove);
@@ -550,6 +560,8 @@ public final class HealthCheckCoordinator {
             remove.setVisible(removable);
             remove.setManaged(removable);
             removeTooltip.setText(I18n.get("health.target.remove"));
+            // "✕" is a symbol; a screen reader reads which service it removes.
+            remove.setAccessibleText(I18n.get("health.target.remove.named", content.name()));
         }
     }
 

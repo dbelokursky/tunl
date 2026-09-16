@@ -65,7 +65,9 @@ public class SingBoxEngine {
      * ports and, in SYSTEM_PROXY mode, the OS proxy registration, invisible to
      * stop() and the shutdown hook (both only ever act on the tracked process).
      * Holding the lock also publishes the non-volatile session fields below
-     * across the caller threads.
+     * across the caller threads. The process monitor takes it too, to decide
+     * whether a newer session has started and to clean up after its own, so no
+     * start runs in between.
      */
     private final Object lifecycle = new Object();
 
@@ -675,19 +677,26 @@ public class SingBoxEngine {
                 } catch (IOException ignored) {
                     // best-effort cleanup
                 }
-                Process current = process;
-                boolean noSuccessor = current == null || current == proc;
-                if (sessionProxyTarget != null && noSuccessor) {
-                    systemProxyGuard.clearIfPointsAt(
-                            sessionProxyTarget.host(), sessionProxyTarget.port());
-                }
-                // The launcher's published config carries credentials and,
-                // unlike sessionConfigFile above, lives at a fixed path — so
-                // it needs the same successor guard as the OS proxy: a stale
-                // monitor must not delete the config a newer session is
-                // running on.
-                if (sessionUsedTun && noSuccessor) {
-                    tunLauncher.cleanupSession();
+                // Decided and done under the lifecycle lock. The guard runs
+                // slow platform commands, and without the lock a reconnect's
+                // core could start and register the same proxy between the
+                // decision and the clear. Now a start that comes first is seen
+                // here as the successor, and one that comes second waits.
+                synchronized (lifecycle) {
+                    Process current = process;
+                    boolean noSuccessor = current == null || current == proc;
+                    if (sessionProxyTarget != null && noSuccessor) {
+                        systemProxyGuard.clearIfPointsAt(
+                                sessionProxyTarget.host(), sessionProxyTarget.port());
+                    }
+                    // The launcher's published config carries credentials and,
+                    // unlike sessionConfigFile above, lives at a fixed path — so
+                    // it needs the same successor guard as the OS proxy: a stale
+                    // monitor must not delete the config a newer session is
+                    // running on.
+                    if (sessionUsedTun && noSuccessor) {
+                        tunLauncher.cleanupSession();
+                    }
                 }
                 // No successor guard here: the record is cleared only while
                 // it still names this session's core.

@@ -5,6 +5,7 @@ import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.SingBoxConfigGenerator;
+import com.vlessclient.testing.BundledCore;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -18,7 +19,6 @@ import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -43,16 +43,7 @@ class LinuxTunLauncherSmokeTest {
 
     @BeforeAll
     static void locateBundledBinary() {
-        String osArch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
-        String arch = osArch.contains("aarch64") || osArch.contains("arm64")
-                ? "arm64" : "amd64";
-        CorePlatform core = CorePlatform.current();
-        binary = Path.of("target", "classes", "native",
-                        core.osKey() + "-" + arch, core.binaryName())
-                .toAbsolutePath();
-        assumeTrue(Files.isExecutable(binary),
-                "bundled sing-box not found at " + binary
-                        + " — run the generate-resources phase first");
+        binary = BundledCore.locate();
         assumeTrue(promptlessSudo(),
                 "needs non-interactive sudo (CI runner) for the TUN probes");
     }
