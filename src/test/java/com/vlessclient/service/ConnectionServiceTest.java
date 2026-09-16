@@ -16,6 +16,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -431,6 +433,52 @@ class ConnectionServiceTest {
      * the active server alone, which silently collapsed automatic selection to a
      * one-member group.
      */
+    /**
+     * A local port another program holds failed every start with "address
+     * already in use", and recovery repeated that failure for as long as the
+     * other program lived, notifying each time. The run moves to a free port
+     * instead; the file keeps what the user chose, so the next start tries
+     * their port again.
+     */
+    @Test
+    void aTakenLocalPortMovesToAFreeOneForTheRun() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        try (ServerSocket taken = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            int busy = taken.getLocalPort();
+            store.getSettings().setSocksPort(busy);
+            store.saveSettings(store.getSettings());
+
+            RecordingEngine engine = engine();
+            assertThat(service(engine).connect().started()).isTrue();
+
+            assertThat(store.getSettings().getSocksPort())
+                    .as("the run listens somewhere it can actually bind")
+                    .isNotEqualTo(busy);
+            assertThat(new ConfigStore(tempDir).getSettings().getSocksPort())
+                    .as("the file keeps the user's choice: this is a fallback, not a preference")
+                    .isEqualTo(busy);
+        }
+    }
+
+    /**
+     * Two inbounds must not be moved onto the same port: the second bind would
+     * fail for the same reason the first one moved.
+     */
+    @Test
+    void portsMovedOutOfTheWayDoNotLandOnEachOther() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        try (ServerSocket taken = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            int busy = taken.getLocalPort();
+            store.getSettings().setSocksPort(busy);
+            store.getSettings().setHttpPort(busy + 1);
+
+            assertThat(service(engine()).connect().started()).isTrue();
+
+            assertThat(store.getSettings().getSocksPort())
+                    .isNotEqualTo(store.getSettings().getHttpPort());
+        }
+    }
+
     @Test
     void connectPassesEveryCandidateToTheGenerator() throws Exception {
         store.addServer(server("srv-1", "Tokyo"));
