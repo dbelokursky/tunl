@@ -2,6 +2,7 @@ package com.vlessclient.service;
 
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.CoreLogLevel;
+import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
 import java.net.http.HttpClient;
 import java.nio.file.Files;
@@ -147,6 +148,52 @@ class ConfigVersioningTest {
                 "{ \"config_version\": 1, \"core_log_level\": \"verbose\" }");
 
         assertThat(store().getSettings().getCoreLogLevel()).isEqualTo(CoreLogLevel.INFO);
+    }
+
+    /**
+     * A servers.json from a newer build can name a protocol, or a transport,
+     * this one has never heard of. Jackson failed the whole list on that one
+     * entry, the file went to quarantine and the user was left with no servers
+     * at all. The path is real today: run dev-latest, roll back to a release.
+     */
+    @Test
+    void anEntryFromANewerBuildIsSkippedAndTheOthersStillLoad() throws Exception {
+        Files.writeString(tempDir.resolve("servers.json"), """
+                { "config_version": 1, "servers": [
+                    { "id": "s-1", "name": "known", "protocol": "vless",
+                      "address": "192.0.2.1", "port": 443, "uuid": "u-1" },
+                    { "id": "s-2", "name": "newer protocol", "protocol": "tuic",
+                      "address": "192.0.2.2", "port": 443, "uuid": "u-2" },
+                    { "id": "s-3", "name": "newer transport", "protocol": "vless",
+                      "transport": "xhttp", "address": "192.0.2.3", "port": 443,
+                      "uuid": "u-3" },
+                    { "id": "s-4", "name": "also known", "protocol": "trojan",
+                      "address": "192.0.2.4", "port": 443, "password": "p" } ] }""");
+
+        ConfigStore store = store();
+
+        assertThat(store.getServers()).extracting(ServerConfig::getName)
+                .containsExactly("known", "also known");
+        assertThat(tempDir.resolve("servers.json"))
+                .as("the file still reads, so nothing is quarantined").exists();
+    }
+
+    /**
+     * The same for a scalar: a proxy mode this build does not know must not
+     * cost the user every other setting in the file. The system proxy is the
+     * safe reading -- it is the default and needs no elevation.
+     */
+    @Test
+    void anUnknownProxyModeFallsBackToTheSystemProxyAndKeepsTheFile() throws Exception {
+        Files.writeString(tempDir.resolve("settings.json"),
+                "{ \"config_version\": 1, \"proxy_mode\": \"split_tunnel\","
+                        + " \"language\": \"ru\" }");
+
+        ConfigStore store = store();
+
+        assertThat(store.getSettings().getProxyMode()).isEqualTo(ProxyMode.SYSTEM_PROXY);
+        assertThat(store.getSettings().getLanguage())
+                .as("the rest of the file survives the unknown value").isEqualTo("ru");
     }
 
     @Test

@@ -178,6 +178,36 @@ public class MainViewTest extends ApplicationTest {
         WaitForAsyncUtils.waitForFxEvents();
     }
 
+    /**
+     * Entries a newer build wrote are skipped rather than failing the file,
+     * which only helps if the user learns of it: the next save rewrites the
+     * file without them, so a rollback that was still recoverable stops being
+     * recoverable the moment they add a server.
+     */
+    @Test
+    void entriesANewerBuildWroteAnnounceThemselvesInTheirOwnBanner() {
+        var persistence = com.vlessclient.app.ServiceLocator
+                .get(com.vlessclient.service.ConfigStore.class).getPersistenceState();
+        try {
+            interact(() -> persistence.couldNotRead("servers.json", 2));
+
+            javafx.scene.layout.HBox banner = lookup("#unreadableBanner").queryAs(
+                    javafx.scene.layout.HBox.class);
+            javafx.scene.control.Label message = lookup("#unreadableMessage").queryAs(
+                    javafx.scene.control.Label.class);
+            interact(() -> {
+                banner.getScene().getRoot().applyCss();
+                banner.getScene().getRoot().layout();
+            });
+
+            assertThat(banner.isVisible()).isTrue();
+            assertThat(banner.isManaged()).isTrue();
+            assertThat(message.getText()).contains("servers.json");
+        } finally {
+            interact(() -> persistence.saved("servers.json"));
+        }
+    }
+
     @Test
     void failedSaveShowsAFittingBannerAndRetryClearsIt() {
         var persistence = com.vlessclient.app.ServiceLocator
