@@ -278,6 +278,30 @@ class SubscriptionRefreshSafetyTest {
     }
 
     /** Guards the batch contract the refresh now depends on. */
+    /**
+     * The provider moved the picked server to a new address and a new name, so
+     * nothing ties the new entry to the old one: the old is withdrawn, the new
+     * added. The refresh left no server picked.
+     */
+    @Test
+    @DisplayName("a refresh that replaces the picked server leaves one picked")
+    void aRefreshThatReplacesThePickedServerLeavesOnePicked() {
+        Subscription sub = withTwoServersImported();
+        assertThat(configStore.getServers().get(0).isActive()).isTrue();
+
+        service.serve("vless://uuid9@server9.example:443?security=tls&type=tcp#Nine\n"
+                + "vless://uuid2@server2.example:443?security=tls&type=tcp#Two\n");
+        service.refreshSubscription(sub.getId());
+
+        assertThat(configStore.getServers()).extracting(ServerConfig::getAddress)
+                .containsExactlyInAnyOrder("server9.example", "server2.example");
+        assertThat(configStore.getServers()).filteredOn(ServerConfig::isActive)
+                .as("the picked server after the refresh")
+                .singleElement()
+                .extracting(ServerConfig::getAddress)
+                .isEqualTo("server9.example");
+    }
+
     @Nested
     @DisplayName("applyServerBatch")
     class Batch {
@@ -308,6 +332,29 @@ class SubscriptionRefreshSafetyTest {
 
             assertThat(configStore.getServers()).hasSize(1);
             assertThat(configStore.getServers().get(0).getName()).isEqualTo("renamed");
+        }
+
+        /**
+         * Upserts went first and activated a newcomer only while nothing was
+         * active; the active server was removed after that, so a batch that
+         * replaced it left no server picked. The running core kept the
+         * withdrawn server, and the next recovery stopped it and found
+         * nothing to connect to.
+         */
+        @Test
+        @DisplayName("a batch that removes the picked server picks its replacement")
+        void removingThePickedServerPicksTheReplacement() {
+            ServerConfig old = server("old");
+            configStore.applyServerBatch(List.of(old), List.of());
+            assertThat(old.isActive()).isTrue();
+            ServerConfig replacement = server("replacement");
+
+            configStore.applyServerBatch(List.of(replacement), List.of(old.getId()));
+
+            assertThat(configStore.getServers()).singleElement().satisfies(server -> {
+                assertThat(server.getId()).isEqualTo(replacement.getId());
+                assertThat(server.isActive()).isTrue();
+            });
         }
 
         @Test
