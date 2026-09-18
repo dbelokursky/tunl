@@ -84,6 +84,10 @@ public class SettingsViewController implements ViewShownAware {
     @FXML private ComboBox<ProxyMode> proxyModeCombo;
     @FXML private CheckBox systemProxyAutoConfigCheck;
     @FXML private CheckBox storeSecretsCheck;
+    @FXML private Label deviceIdLabel;
+    @FXML private Label deviceIdValue;
+    @FXML private Button deviceIdResetButton;
+    @FXML private Label deviceIdHint;
     @FXML private TextField proxyDnsField;
     @FXML private TextField directDnsField;
     @FXML private TextField tunInterfaceNameField;
@@ -203,6 +207,8 @@ public class SettingsViewController implements ViewShownAware {
             settings.setTunInterfaceName(text);
             saveSettings(settings);
         });
+
+        deviceIdValue.setText(configStore.deviceId());
 
         storeSecretsCheck.setSelected(settings.isStoreSecretsSecurely());
         storeSecretsCheck.selectedProperty().addListener((obs, oldVal, newVal) -> {
@@ -501,6 +507,9 @@ public class SettingsViewController implements ViewShownAware {
         systemProxyAutoConfigCheck.textProperty()
                 .bind(I18n.binding("settings.proxy.autoconfig"));
         storeSecretsCheck.textProperty().bind(I18n.binding("settings.store.secrets"));
+        deviceIdLabel.textProperty().bind(I18n.binding("settings.device.id"));
+        deviceIdHint.textProperty().bind(I18n.binding("settings.device.id.hint"));
+        ButtonLabels.bindStatic(deviceIdResetButton, "settings.device.id.reset");
         healthCheckLabel.textProperty().bind(I18n.binding("settings.health.check"));
         healthCheckEnabledCheck.textProperty().bind(I18n.binding("settings.health.check.enabled"));
         healthCheckAutoReconnectCheck.textProperty()
@@ -675,6 +684,25 @@ public class SettingsViewController implements ViewShownAware {
         ClipboardContent content = new ClipboardContent();
         content.putString(mcpServerService.claudeAddCommand());
         clipboard.setContent(content);
+    }
+
+    /**
+     * Draws a new device id, after asking: a provider that limits devices per
+     * plan counts the new one as another device.
+     */
+    @FXML
+    private void onResetDeviceId() {
+        if (configStore == null || !Confirmations.confirmIrreversible(mcpDialogOwner(),
+                I18n.get("settings.device.id.reset.title"),
+                I18n.get("settings.device.id.reset.confirm"),
+                I18n.get("settings.device.id.reset.content"),
+                I18n.get("settings.device.id.reset.action"))) {
+            return;
+        }
+        AppSettings settings = configStore.getSettings();
+        settings.setDeviceId(ConfigStore.newDeviceId());
+        saveSettings(settings);
+        deviceIdValue.setText(settings.getDeviceId());
     }
 
     @FXML

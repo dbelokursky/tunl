@@ -131,6 +131,48 @@ public class ConfigStore {
         settings.setClashApiSecret(newClashApiSecret());
     }
 
+    /**
+     * This install's device id, drawn the first time it is asked for: when a
+     * subscription is first fetched, or Settings first shows it. Saved at once,
+     * so a restart does not draw another and look like a second device to a
+     * provider that limits them.
+     *
+     * @return the id
+     */
+    public String deviceId() {
+        String id = settings.getDeviceId();
+        if (id != null && !id.isBlank()) {
+            // Most calls: no need to wait for this store's monitor, which a
+            // background import holds while it seals credentials.
+            return id;
+        }
+        synchronized (this) {
+            // Through getSettings(), as every other reader goes: the field
+            // read directly under this monitor tipped SpotBugs' share of
+            // locked reads of it over the line where it reports the rest as
+            // inconsistent synchronization.
+            AppSettings current = getSettings();
+            id = current.getDeviceId();
+            if (id == null || id.isBlank()) {
+                id = newDeviceId();
+                current.setDeviceId(id);
+                saveSettings(current);
+            }
+            return id;
+        }
+    }
+
+    /**
+     * A new random device id, for a new install or a reset in Settings. A
+     * UUID, which the {@code x-hwid} pattern panels accept
+     * ({@code [a-zA-Z0-9=-]{10,64}}).
+     *
+     * @return the id
+     */
+    public static String newDeviceId() {
+        return UUID.randomUUID().toString();
+    }
+
     private static String newClashApiSecret() {
         byte[] bytes = new byte[24];
         CLASH_API_RANDOM.nextBytes(bytes);

@@ -198,6 +198,38 @@ public class SettingsViewTest extends ApplicationTest {
         assertThat(command.getText()).isEqualTo(before);
     }
 
+    /**
+     * The device id providers see is shown, and a new one is drawn only after
+     * asking: a provider that limits devices counts the new one as another
+     * device.
+     */
+    @Test
+    void theDeviceIdIsShownAndANewOneIsDrawnAfterAsking() {
+        ConfigStore store = ServiceLocator.get(ConfigStore.class);
+        String before = store.deviceId();
+        Label value = lookup("#deviceIdValue").query();
+        assertThat(before).isNotBlank();
+        assertThat(value.getText()).isEqualTo(before);
+
+        Button reset = lookup("#deviceIdResetButton").query();
+        Platform.runLater(reset::fire);
+        DialogPane confirm = awaitDialogAsking(I18n.get("settings.device.id.reset.confirm"));
+        Button cancel = buttonFor(confirm, ButtonBar.ButtonData.CANCEL_CLOSE);
+        assertThat(cancel.isDefaultButton()).as("Enter keeps the id").isTrue();
+        interact(cancel::fire);
+        WaitForAsyncUtils.waitForFxEvents();
+        assertThat(store.getSettings().getDeviceId()).as("after Cancel").isEqualTo(before);
+
+        Platform.runLater(reset::fire);
+        confirm = awaitDialogAsking(I18n.get("settings.device.id.reset.confirm"));
+        interact(buttonFor(confirm, ButtonBar.ButtonData.OK_DONE)::fire);
+        WaitForAsyncUtils.waitForFxEvents();
+
+        String after = store.getSettings().getDeviceId();
+        assertThat(after).as("after Reset").isNotBlank().isNotEqualTo(before);
+        assertThat(value.getText()).isEqualTo(after);
+    }
+
     /** The showing dialog that asks {@code question}, once one does. */
     private DialogPane awaitDialogAsking(String question) {
         return Await.untilValue("a dialog asking: " + question, () -> {
