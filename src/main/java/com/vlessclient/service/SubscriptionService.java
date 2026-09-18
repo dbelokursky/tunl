@@ -306,6 +306,19 @@ public class SubscriptionService {
             return;
         }
 
+        // An answer that is not the provider's list, though it came with a
+        // 200: a panel declining this request, or a list of messages. Taken
+        // for the list, it deleted every server of this subscription, or put
+        // the messages in their place, and reported success.
+        Declined declined = declined(headers, content, parsed.servers());
+        if (declined != null) {
+            log.warn("Subscription '{}' answered without its servers ({}); keeping the {} "
+                    + "stored", sub.getName(), declined.key(), sub.getServerIds().size());
+            sub.recordFailure(declined.key(), declined.args());
+            saveSubscriptions();
+            return;
+        }
+
         // A body we could not make sense of is a failure, not an empty
         // subscription. diffAndApply removes everything the fetch did not
         // return, so without this a captive portal, an HTML "token expired"
@@ -313,10 +326,9 @@ public class SubscriptionService {
         // subscription — and then reported success, because lastError was
         // cleared and lastRefreshedAt bumped a few lines below. It runs
         // hourly in the background, so the user need not be watching.
-        //
-        // A genuinely empty body is left alone: a provider really can shut all
-        // its servers down, and that case has no ambiguity to protect against.
-        List<ServerConfig> fetchedServers = parsed.servers();
+        List<ServerConfig> fetchedServers = parsed.servers().stream()
+                .filter(server -> !isMessageEntry(server))
+                .toList();
         if (fetchedServers.isEmpty() && content != null && !content.isBlank()) {
             log.warn("Subscription '{}' returned {} bytes with no usable "
                     + "server links; keeping the {} server(s) already stored",
@@ -391,6 +403,100 @@ public class SubscriptionService {
             log.info("Refreshed subscription '{}': {} servers",
                     sub.getName(), sub.getServerIds().size());
         }
+    }
+
+    /**
+     * A refresh that got an answer but not the provider's list: the key and
+     * arguments of the failure to record.
+     */
+    record Declined(String key, List<String> args) {
+    }
+
+    /** Longest provider message kept for the subscription's status line. */
+    private static final int MAX_PROVIDER_MESSAGE = 300;
+
+    /**
+     * Why an answer is not the provider's server list, or null when it is.
+     *
+     * <p>A panel that declines a request does not always say so with its
+     * status. With its device limit on, Remnawave answers HTTP 200: with an
+     * empty body, or with entries that only carry a message, and says why in
+     * {@code x-hwid-*} headers; an expired or disabled account gets message
+     * entries too. A message entry is a link to {@code 0.0.0.0}, which is
+     * not a server anyone can reach.</p>
+     *
+     * <p>An empty answer is declined as well, even with no header to explain
+     * it. A provider really can shut down, but the user can delete a
+     * subscription that has ended, and a refresh runs hourly with nobody
+     * watching.</p>
+     */
+    static Declined declined(HttpHeaders headers, String content, List<ServerConfig> fetched) {
+        if (headerIsTrue(headers, "x-hwid-max-devices-reached")) {
+            String announce = announce(headers);
+            return announce.isEmpty()
+                    ? new Declined("subscriptions.error.device.limit.plain", List.of())
+                    : new Declined("subscriptions.error.device.limit", List.of(announce));
+        }
+        if (headerIsTrue(headers, "x-hwid-not-supported")) {
+            return new Declined("subscriptions.error.device.id", List.of());
+        }
+        if (!fetched.isEmpty() && fetched.stream().allMatch(SubscriptionService::isMessageEntry)) {
+            String messages = fetched.stream()
+                    .map(ServerConfig::getName)
+                    .filter(name -> name != null && !name.isBlank())
+                    .distinct()
+                    .collect(java.util.stream.Collectors.joining("; "));
+            return new Declined("subscriptions.error.message", List.of(bounded(messages)));
+        }
+        if (content == null || content.isBlank()) {
+            return new Declined("subscriptions.error.empty", List.of());
+        }
+        return null;
+    }
+
+    /**
+     * Whether an entry is a message rather than a server: a link to the
+     * unspecified address, which Remnawave builds to carry a line of text
+     * ("App not supported", "Subscription expired") where clients show names.
+     */
+    static boolean isMessageEntry(ServerConfig server) {
+        String address = server.getAddress() == null ? "" : server.getAddress().strip();
+        return address.equals("0.0.0.0") || address.equals("::")
+                || address.equals("[::]") || address.equals("0:0:0:0:0:0:0:0");
+    }
+
+    private static boolean headerIsTrue(HttpHeaders headers, String name) {
+        return headers != null && headers.firstValue(name)
+                .map(value -> value.strip().equalsIgnoreCase("true"))
+                .orElse(false);
+    }
+
+    /**
+     * The provider's {@code announce} header, which panels send base64
+     * encoded behind a {@code base64:} prefix, as one clean line; empty when
+     * there is none.
+     */
+    static String announce(HttpHeaders headers) {
+        if (headers == null) {
+            return "";
+        }
+        String value = headers.firstValue("announce").orElse("").strip();
+        if (value.regionMatches(true, 0, "base64:", 0, "base64:".length())) {
+            try {
+                value = Base64Lenient.decodeUtf8(value.substring("base64:".length()).strip());
+            } catch (IllegalArgumentException e) {
+                return "";
+            }
+        }
+        return bounded(value);
+    }
+
+    /** One line of provider text, safe to store and show, and not too long. */
+    private static String bounded(String text) {
+        String cleaned = text.replaceAll("[\\p{Cntrl}\\u2028\\u2029]", " ").strip();
+        return cleaned.length() > MAX_PROVIDER_MESSAGE
+                ? cleaned.substring(0, MAX_PROVIDER_MESSAGE - 1) + "…"
+                : cleaned;
     }
 
     /**
