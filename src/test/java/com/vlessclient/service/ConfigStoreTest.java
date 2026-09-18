@@ -246,4 +246,35 @@ class ConfigStoreTest {
         server.setPort(443);
         return server;
     }
+
+    /**
+     * A new install spoke English whatever the system's language, while its
+     * theme already followed the system; most people who install Tunl read
+     * Russian. It now takes the system's language when that is one the app
+     * has. An existing settings file keeps what it says.
+     */
+    @Test
+    void aNewInstallSpeaksTheLanguageOfTheSystem(@TempDir Path fresh) throws Exception {
+        java.util.Locale before = java.util.Locale.getDefault();
+        try {
+            java.util.Locale.setDefault(java.util.Locale.of("ru", "RU"));
+            assertThat(new ConfigStore(fresh.resolve("ru")).getSettings().getLanguage())
+                    .isEqualTo("ru");
+
+            java.util.Locale.setDefault(java.util.Locale.GERMANY);
+            assertThat(new ConfigStore(fresh.resolve("de")).getSettings().getLanguage())
+                    .as("a language the app does not have")
+                    .isEqualTo("en");
+
+            java.util.Locale.setDefault(java.util.Locale.of("ru", "RU"));
+            java.nio.file.Files.createDirectories(fresh.resolve("existing"));
+            java.nio.file.Files.writeString(fresh.resolve("existing").resolve("settings.json"),
+                    "{\"config_version\": 1, \"theme\": \"auto\"}");
+            assertThat(new ConfigStore(fresh.resolve("existing")).getSettings().getLanguage())
+                    .as("an install that saved settings before")
+                    .isEqualTo("en");
+        } finally {
+            java.util.Locale.setDefault(before);
+        }
+    }
 }

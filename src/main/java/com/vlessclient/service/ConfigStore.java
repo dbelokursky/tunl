@@ -714,6 +714,9 @@ public class ConfigStore {
         Path file = dataDir.resolve(SETTINGS_FILE);
         if (!Files.exists(file)) {
             log.info("No settings file found at {}, using defaults", file);
+            // A new install speaks the system's language when the app has it,
+            // as its theme already follows the system; it always spoke English.
+            settings.setLanguage(AppSettings.languageFor(java.util.Locale.getDefault()));
             return;
         }
         SecureFiles.restrictExisting(file);
