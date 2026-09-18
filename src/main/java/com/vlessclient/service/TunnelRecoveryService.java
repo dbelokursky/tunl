@@ -45,6 +45,8 @@ public final class TunnelRecoveryService implements AutoCloseable {
     /** Why recovery stopped for the current request, or null while it has not. */
     private String stoppedBecause;
     private ConnectionState lastState = ConnectionState.DISCONNECTED;
+    /** The last reachability verdict, to re-arm a retry a request cancelled. */
+    private TunnelHealth lastHealth = TunnelHealth.UNMONITORED;
 
     /** The retry displayed by the UI; a null property value means no retry is pending. */
     public record Retry(int attempt, int delaySeconds) {
@@ -127,6 +129,29 @@ public final class TunnelRecoveryService implements AutoCloseable {
         return ++generation;
     }
 
+    /**
+     * Records that a request left the tunnel up without restarting it: a
+     * server switched through the running core, or a connect to a core that
+     * was already running.
+     *
+     * <p>No state change follows such a request, and taking it cleared both
+     * "connected since the request" and any retry that was waiting. So a
+     * tunnel that dropped afterwards neither retried nor offered the
+     * reconnect where a restart needs an elevation prompt, and a tunnel whose
+     * verdict was already broken lost its retry for good.</p>
+     *
+     * @param request the request, as {@link #connectionRequested()} returned it
+     */
+    public synchronized void keptUp(long request) {
+        if (generation != request || lastState != ConnectionState.CONNECTED) {
+            return;
+        }
+        connectedSinceRequest = true;
+        if (lastHealth == TunnelHealth.BROKEN) {
+            schedule();
+        }
+    }
+
     /** Whether a captured request still represents the user's intent. */
     public synchronized boolean isWanted(long request) {
         return wanted && !closed && generation == request;
@@ -172,6 +197,7 @@ public final class TunnelRecoveryService implements AutoCloseable {
 
     /** Receives the shared reachability verdict. A successful verdict resets the backoff. */
     public synchronized void onHealth(TunnelHealth health) {
+        lastHealth = health;
         if (health == TunnelHealth.BROKEN) {
             schedule();
         } else if (health == TunnelHealth.HEALTHY || health == TunnelHealth.DEGRADED) {
