@@ -376,6 +376,32 @@ class SingBoxRealBinarySmokeTest {
         }
     }
 
+    /**
+     * A REALITY short ID longer than 16 hex digits gets no refusal from the
+     * core: sing-box 1.14 panics in {@code check}, and the last line of a panic
+     * is a frame of its stack trace ("main.go:8 +0x24"), which was reported as
+     * the reason. Whether the core panics or, some day, refuses, the reason
+     * has to be words, not a frame.
+     */
+    @Test
+    void aCheckThatPanicsIsReportedInWordsNotByAStackFrame() throws Exception {
+        SingBoxConfigCheck check = new SingBoxConfigCheck(Duration.ofSeconds(30));
+        ServerConfig server = with(realityServer("short-id-too-long", "chrome",
+                        "WZaG00XCAiVCF2SP5fmSbKiuTbBB-lMDg_81rC8hR80"),
+                s -> s.getTls().setRealityShortId("0123456789abcdef01"));
+        Path config = Files.createTempFile("smoke-check-panic-", ".json");
+        try {
+            Files.writeString(config, generator.generate(server, new AppSettings()));
+            assertThat(check.rejection(binary, config)).hasValueSatisfying(reason ->
+                    assertThat(reason)
+                            .as("the reason sing-box check gave")
+                            .doesNotContain("+0x")
+                            .doesNotStartWith("github.com/"));
+        } finally {
+            Files.deleteIfExists(config);
+        }
+    }
+
     @Test
     void checkAcceptsRoutingConfigs() throws Exception {
         // Custom rules + user bypass list.

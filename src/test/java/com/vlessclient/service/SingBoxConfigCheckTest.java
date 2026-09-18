@@ -51,6 +51,30 @@ class SingBoxConfigCheckTest {
                 .isEqualTo("unexpected end");
     }
 
+    /**
+     * A Go panic has no FATAL line and ends with a stack trace, so the last
+     * line used to be read as the reason: "main.go:8 +0x24" says nothing about
+     * what went wrong. Output of sing-box 1.14.1 for a REALITY short ID of 18
+     * hex digits, shortened.
+     */
+    @Test
+    void aPanicIsReportedByItsOwnLineRatherThanTheLastFrame() {
+        String output = """
+                panic: runtime error: index out of range [8] with length 8
+
+                goroutine 1 [running]:
+                encoding/hex.Decode({0x688b5911d860?, 0x688b58d46e10?, 0x2b?}, {0x688b590d9860?})
+                \tencoding/hex/hex.go:101 +0x15c
+                github.com/sagernet/sing-box/common/tls.newRealityClient({_, _}, {_, _})
+                \tgithub.com/sagernet/sing-box/common/tls/reality_client.go:79 +0x200
+                main.main()
+                \tgithub.com/sagernet/sing-box/cmd/sing-box/main.go:8 +0x24
+                """;
+
+        assertThat(SingBoxConfigCheck.describe(output, 2, CONFIG))
+                .isEqualTo("panic: runtime error: index out of range [8] with length 8");
+    }
+
     @Test
     void silenceIsReportedAsTheExitCode() {
         assertThat(SingBoxConfigCheck.describe("\n   \n", 3, CONFIG)).isEqualTo("exit code 3");
