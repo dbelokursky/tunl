@@ -193,6 +193,74 @@ class ServerBackupServiceTest {
         assertThat(store.getServers()).extracting(ServerConfig::getName).containsExactly("ok");
     }
 
+    /**
+     * A restored backup is the one way in that skipped the core's rules: an
+     * entry with a REALITY short ID of 18 hex digits was stored, and the core
+     * panics on it.
+     */
+    @Test
+    void aBackupEntryTheCoreWouldRefuseIsSkippedWithTheReason() throws IOException {
+        Path file = tempDir.resolve("backup.json");
+        Files.writeString(file, """
+                {"config_version": 1, "servers": [
+                  {"name": "ok", "protocol": "vless", "address": "198.51.100.7",
+                   "port": 443, "uuid": "11111111-2222-3333-4444-555555555555"},
+                  {"name": "long-short-id", "protocol": "vless", "address": "198.51.100.8",
+                   "port": 443, "uuid": "11111111-2222-3333-4444-555555555555",
+                   "tls": {"enabled": true, "server_name": "example.com", "reality": true,
+                           "reality_public_key": "WZaG00XCAiVCF2SP5fmSbKiuTbBB-lMDg_81rC8hR80",
+                           "reality_short_id": "0123456789abcdef01"}}
+                ]}
+                """, StandardCharsets.UTF_8);
+
+        ServerBackupService.ImportResult result = backup.importFile(file);
+
+        assertThat(result.added()).isEqualTo(1);
+        assertThat(result.skipped()).singleElement().satisfies(skip -> {
+            assertThat(skip.entry()).isEqualTo("long-short-id");
+            assertThat(skip.reason()).contains("short ID");
+        });
+        assertThat(store.getServers()).extracting(ServerConfig::getName).containsExactly("ok");
+    }
+
+    /** Without a protocol an entry made every connect fail with a NullPointerException. */
+    @Test
+    void aBackupEntryWithoutAProtocolIsSkipped() throws IOException {
+        Path file = tempDir.resolve("backup.json");
+        Files.writeString(file, """
+                [{"name": "ok", "protocol": "vless", "address": "198.51.100.7",
+                  "port": 443, "uuid": "11111111-2222-3333-4444-555555555555"},
+                 {"name": "no-protocol", "address": "198.51.100.8", "port": 443,
+                  "uuid": "11111111-2222-3333-4444-555555555555"}]
+                """, StandardCharsets.UTF_8);
+
+        ServerBackupService.ImportResult result = backup.importFile(file);
+
+        assertThat(result.added()).isEqualTo(1);
+        assertThat(result.skipped()).singleElement()
+                .satisfies(skip -> assertThat(skip.entry()).isEqualTo("no-protocol"));
+        assertThat(store.getServers()).extracting(ServerConfig::getName).containsExactly("ok");
+    }
+
+    /**
+     * The name goes into the log on every connect. A link's name is cleaned of
+     * control characters so it cannot forge a log line; a restored one was not.
+     */
+    @Test
+    void aRestoredNameIsCleanedLikeTheNameOfALink() throws IOException {
+        Path file = tempDir.resolve("backup.json");
+        Files.writeString(file, """
+                [{"name": "Tokyo\\nINFO forged line", "protocol": "vless",
+                  "address": "198.51.100.7", "port": 443,
+                  "uuid": "11111111-2222-3333-4444-555555555555"}]
+                """, StandardCharsets.UTF_8);
+
+        backup.importFile(file);
+
+        assertThat(store.getServers()).extracting(ServerConfig::getName)
+                .containsExactly("Tokyo INFO forged line");
+    }
+
     @Test
     void aCorruptFileFailsLoudlyAndChangesNothing() throws IOException {
         store.addServer(server("Netherlands 01", Protocol.VLESS, "vless-secret-uuid"));

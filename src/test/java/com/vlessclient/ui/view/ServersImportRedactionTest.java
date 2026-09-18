@@ -48,10 +48,10 @@ import org.testfx.util.WaitForAsyncUtils;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * A malformed share link's credential stays out of {@code tunl.log} on the two
- * imports that log why a link failed: the link dialog, and a link list
- * imported from a file. The clipboard import logs counts only, and has its
- * own test.
+ * A malformed share link's credential stays out of {@code tunl.log} and out of
+ * the dialogs: on the link dialog, which reads links the way the clipboard
+ * import does and logs counts only, and on a link list imported from a file,
+ * which logs why the first link failed.
  *
  * <p>Both logged the parser's message, and the parser's message quoted the
  * link: {@link java.net.URI} ends its complaint with the whole input, here
@@ -137,9 +137,11 @@ public class ServersImportRedactionTest extends ApplicationTest {
 
         assertNoCredential(log, "alpha7", "omega9");
         assertThat(log)
-                .as("the failure is still logged, with the parser's reason")
-                .contains("Could not import share link")
-                .contains("Illegal character in authority");
+                .as("the skipped link is counted")
+                .contains("Imported no servers from text: 1 link(s) skipped");
+        assertThat(String.join("\n", dialogTexts))
+                .as("the report says why")
+                .contains("Missing password in Trojan URI");
         assertNoCredential(String.join("\n", dialogTexts), "alpha7", "omega9");
     }
 
@@ -158,22 +160,23 @@ public class ServersImportRedactionTest extends ApplicationTest {
     }
 
     @Test
-    void whatTheParserQuotesIsScrubbedBeforeTheLinkDialogLogsIt() {
+    void whatTheParserQuotesIsScrubbedBeforeTheLinkDialogShowsIt() {
         String log = logWhile(() -> {
-            ServiceLocator.register(ShareLinkParser.class,
-                    parserFailingWith(link -> new IllegalArgumentException("Cannot read " + link)));
+            ServiceLocator.register(ServerBackupService.class, new ServerBackupService(store,
+                    parserFailingWith(link -> new IllegalArgumentException("Cannot read " + link))));
             importThroughTheLinkDialog(WELL_FORMED);
-            ServiceLocator.register(ShareLinkParser.class,
-                    parserFailingWith(link -> new IllegalStateException("Cannot read " + link)));
+            ServiceLocator.register(ServerBackupService.class, new ServerBackupService(store,
+                    parserFailingWith(link -> new IllegalStateException("Cannot read " + link))));
             importThroughTheLinkDialog(WELL_FORMED);
         });
 
         assertNoCredential(log, UUID_CREDENTIAL);
-        assertThat(log)
-                .as("bad input and an unexpected failure are both logged, the link cut to its host")
-                .contains("Could not import share link: Cannot read " + WELL_FORMED_REDACTED)
-                .contains("Failed to import server: java.lang.IllegalStateException: "
-                        + "Cannot read " + WELL_FORMED_REDACTED);
+        assertNoCredential(String.join("\n", dialogTexts), UUID_CREDENTIAL);
+        assertThat(dialogTexts)
+                .as("bad input and an unexpected failure are both reported, the link cut to its host")
+                .hasSize(2)
+                .allSatisfy(text -> assertThat(text)
+                        .contains("Cannot read " + WELL_FORMED_REDACTED));
     }
 
     @Test
@@ -237,7 +240,7 @@ public class ServersImportRedactionTest extends ApplicationTest {
 
     /**
      * Types {@code text} into the link dialog, confirms it, and closes the
-     * error the import ends with.
+     * report of what could not be imported.
      */
     private void importThroughTheLinkDialog(String text) {
         MenuItem linkItem = menuItem("#importMenuButton", "importLinkItem");
@@ -248,7 +251,7 @@ public class ServersImportRedactionTest extends ApplicationTest {
             ((TextArea) input.getContent()).setText(text);
             ((Button) input.lookupButton(ButtonType.OK)).fire();
         });
-        closeError("servers.import.error.header");
+        closeError("servers.import.clipboard.nothing");
     }
 
     /** Imports {@code file} from the backup menu and closes the failure it ends with. */
@@ -259,7 +262,7 @@ public class ServersImportRedactionTest extends ApplicationTest {
         closeError("servers.backup.import.failed");
     }
 
-    /** Waits for the error dialog with this header, keeps its text and closes it. */
+    /** Waits for the dialog with this header, keeps its text and closes it. */
     private void closeError(String headerKey) {
         DialogPane error = awaitDialog("the error dialog",
                 pane -> I18n.get(headerKey).equals(pane.getHeaderText()));

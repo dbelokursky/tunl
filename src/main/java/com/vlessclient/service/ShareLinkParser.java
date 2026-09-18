@@ -1,5 +1,6 @@
 package com.vlessclient.service;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
@@ -186,7 +187,8 @@ public class ShareLinkParser {
          * @param scheme the lower-cased scheme of the rejected link
          */
         public UnsupportedSchemeException(String scheme) {
-            super("Unsupported protocol scheme: " + scheme);
+            // Shown in the import report, so worded in the language of the UI.
+            super(I18n.get("import.scheme.unsupported", scheme));
             this.scheme = scheme;
         }
 
@@ -822,7 +824,7 @@ public class ShareLinkParser {
     private static UnsupportedFeatureException unsupportedTransport(String type) {
         String name = type.toLowerCase(Locale.ROOT);
         return new UnsupportedFeatureException("transport " + name,
-                "sing-box does not support the " + name + " transport.");
+                I18n.get("refusal.transport", name));
     }
 
     private Map<String, String> parseQueryParams(String query) {

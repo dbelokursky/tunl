@@ -1,7 +1,9 @@
 package com.vlessclient.service;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.platform.SecureFiles;
+import com.vlessclient.service.outbound.CoreSettings;
 import java.io.IOException;
 import java.nio.charset.MalformedInputException;
 import java.nio.charset.StandardCharsets;
@@ -231,12 +233,36 @@ public class ServerBackupService {
         for (int i = 0; i < items.size(); i++) {
             JsonNode item = items.get(i);
             try {
-                parsed.add(objectMapper.convertValue(item, ServerConfig.class));
+                ServerConfig server = objectMapper.convertValue(item, ServerConfig.class);
+                String refusal = admissionRefusal(server);
+                if (refusal == null) {
+                    parsed.add(server);
+                } else {
+                    skipped.add(new Skip(entryName(item, i), refusal));
+                }
             } catch (IllegalArgumentException | JacksonException e) {
                 skipped.add(new Skip(entryName(item, i), e.getMessage()));
             }
         }
         return parsed;
+    }
+
+    /**
+     * Holds a restored server to what a link has to pass, since a backup is
+     * edited by hand as often as it is exported. An entry without a protocol
+     * made every connect fail, one the core refuses was stored and then left
+     * out of every connect, and its name went into the log as it was, where a
+     * link's name is cleaned of control characters first.
+     *
+     * @return why the server cannot be stored, or null when it can; the name
+     *     is cleaned either way
+     */
+    private static String admissionRefusal(ServerConfig server) {
+        server.setName(ShareLinkParser.cleanName(server.getName()));
+        if (server.getProtocol() == null) {
+            return I18n.get("servers.backup.import.no.protocol");
+        }
+        return CoreSettings.refusal(server).map(CoreSettings.Refusal::reason).orElse(null);
     }
 
     /** The name a skipped JSON entry is reported under; never a credential. */

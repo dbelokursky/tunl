@@ -1,5 +1,6 @@
 package com.vlessclient.service.outbound;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TlsConfig;
@@ -60,7 +61,8 @@ public final class CoreSettings {
      *
      * @param feature what the server asks for, short enough for a list of them,
      *                e.g. {@code flow xtls-rprx-vision-udp443}
-     * @param reason  the sentence to show for one server
+     * @param reason  the sentence to show for one server, in the language of
+     *                the UI when the refusal was made
      */
     public record Refusal(String feature, String reason) {
     }
@@ -150,13 +152,12 @@ public final class CoreSettings {
     public static Optional<Refusal> refusal(ServerConfig server) {
         int port = server.getPort();
         if (port < 1 || port > 65535) {
-            return refused("port " + port, "Port " + port + " is outside 1 to 65535.");
+            return refused("port " + port, "refusal.port", String.valueOf(port));
         }
         String flow = server.getFlow() == null ? "" : server.getFlow().strip();
         if (server.getProtocol() == Protocol.VLESS && !flow.isEmpty()
                 && !VISION_FLOW.equals(flow)) {
-            return refused("flow " + flow,
-                    "sing-box does not support the VLESS flow " + flow + ".");
+            return refused("flow " + flow, "refusal.flow", flow);
         }
         TlsConfig tls = server.getTls();
         if (tls != null && tls.isEnabled()) {
@@ -175,20 +176,18 @@ public final class CoreSettings {
         String fingerprint = fingerprint(tls);
         if (fingerprint != null && !FINGERPRINTS.contains(fingerprint)) {
             return refused("uTLS fingerprint " + fingerprint,
-                    "sing-box does not know the uTLS fingerprint " + fingerprint + ".");
+                    "refusal.fingerprint", fingerprint);
         }
         if (!tls.isReality()) {
             return Optional.empty();
         }
         String key = tls.getRealityPublicKey() == null ? "" : tls.getRealityPublicKey();
         if (decodedLength(key) != REALITY_KEY_BYTES) {
-            return refused("REALITY public key",
-                    "The REALITY public key has to be 32 bytes in base64.");
+            return refused("REALITY public key", "refusal.reality.key");
         }
         String shortId = tls.getRealityShortId() == null ? "" : tls.getRealityShortId().strip();
         if (!SHORT_ID.matcher(shortId).matches()) {
-            return refused("REALITY short ID",
-                    "The REALITY short ID has to be whole bytes in hex, at most 16 digits.");
+            return refused("REALITY short ID", "refusal.reality.short.id");
         }
         return Optional.empty();
     }
@@ -196,8 +195,7 @@ public final class CoreSettings {
     private static Optional<Refusal> shadowsocksRefusal(ServerConfig server) {
         String method = shadowsocksMethod(server.getEncryption());
         if (method == null || !SHADOWSOCKS_METHODS.contains(method)) {
-            return refused("cipher " + method,
-                    "sing-box does not know the cipher " + method + ".");
+            return refused("cipher " + method, "refusal.cipher", method);
         }
         if (!method.startsWith("2022-")) {
             return Optional.empty();
@@ -207,8 +205,8 @@ public final class CoreSettings {
         // A multi-user server is given the server key and the user key, colon-separated.
         for (String key : password.split(":", -1)) {
             if (decodedLength(key) != bytes) {
-                return refused("Shadowsocks 2022 key",
-                        "A " + method + " key has to be " + bytes + " bytes in base64.");
+                return refused("Shadowsocks 2022 key", "refusal.ss2022.key",
+                        method, String.valueOf(bytes));
             }
         }
         return Optional.empty();
@@ -223,7 +221,12 @@ public final class CoreSettings {
         }
     }
 
-    private static Optional<Refusal> refused(String feature, String reason) {
-        return Optional.of(new Refusal(feature, reason));
+    /**
+     * A refusal whose reason is worded in the language of the UI, since it is
+     * shown to the user: in the import report, the server form and the
+     * Dashboard. The feature stays English, for the log.
+     */
+    private static Optional<Refusal> refused(String feature, String reasonKey, Object... args) {
+        return Optional.of(new Refusal(feature, I18n.get(reasonKey, args)));
     }
 }

@@ -2,8 +2,11 @@ package com.vlessclient.service.outbound;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
+import java.util.List;
+import java.util.Locale;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 
@@ -107,6 +110,37 @@ class CoreSettingsTest {
         assertThat(CoreSettings.refusal(
                 shadowsocks("2022-blake3-aes-256-gcm", KEY_32_BYTES + ":password")))
                 .isPresent();
+    }
+
+    /**
+     * The reason is shown to the user: in the import report, in the server
+     * form and on the Dashboard among the servers left out. It was an English
+     * sentence in every language; the feature stays English, for the log.
+     */
+    @Test
+    void theReasonIsWordedInTheLanguageOfTheUi() {
+        Locale before = I18n.getLocale();
+        try {
+            I18n.setLocale(Locale.of("ru"));
+            List<ServerConfig> refused = List.of(
+                    reality(server -> server.setPort(70000)),
+                    reality(server -> server.setFlow("xtls-rprx-vision-udp443")),
+                    reality(server -> server.getTls().setFingerprint("randomizednoalpn")),
+                    reality(server -> server.getTls().setRealityPublicKey("pubkey123")),
+                    reality(server -> server.getTls().setRealityShortId("0123456789abcdef01")),
+                    shadowsocks("chacha20", "password"),
+                    shadowsocks("2022-blake3-aes-128-gcm", KEY_32_BYTES));
+            for (ServerConfig server : refused) {
+                assertThat(CoreSettings.refusal(server)).hasValueSatisfying(refusal -> {
+                    assertThat(refusal.reason()).as(refusal.feature())
+                            .containsPattern("\\p{IsCyrillic}");
+                    assertThat(refusal.feature()).as(refusal.feature())
+                            .doesNotContainPattern("\\p{IsCyrillic}");
+                });
+            }
+        } finally {
+            I18n.setLocale(before);
+        }
     }
 
     static ServerConfig reality(Consumer<ServerConfig> change) {
