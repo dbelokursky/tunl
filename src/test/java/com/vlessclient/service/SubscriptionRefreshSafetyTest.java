@@ -93,18 +93,20 @@ class SubscriptionRefreshSafetyTest {
     class ParseableBody {
 
         @Test
-        @DisplayName("an empty response really does clear the subscription")
-        void emptyBodyStillClears() {
+        @DisplayName("an empty response keeps the servers and says so")
+        void emptyBodyKeepsTheServers() {
             Subscription sub = withTwoServersImported();
 
-            // No ambiguity here: the provider returned nothing, so it has
-            // nothing. This is the case the guard must not swallow.
+            // Once read as "the provider has nothing", which it can mean; but a
+            // panel declining a request answers the same way (Remnawave's
+            // device limit does), and the user can delete a subscription that
+            // has really ended. SubscriptionProviderSignalsTest has the rest.
             service.serve("");
             service.refreshSubscription(sub.getId());
 
-            assertThat(configStore.getServers()).isEmpty();
-            assertThat(sub.getServerIds()).isEmpty();
-            assertThat(sub.getLastError()).isNull();
+            assertThat(configStore.getServers()).hasSize(2);
+            assertThat(sub.getServerIds()).hasSize(2);
+            assertThat(sub.getLastErrorKey()).isEqualTo("subscriptions.error.empty");
         }
 
         @Test
