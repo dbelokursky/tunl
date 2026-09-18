@@ -10,8 +10,8 @@ import com.vlessclient.service.LatencyTester;
 import com.vlessclient.service.Redact;
 import com.vlessclient.service.ServerBackupService;
 import com.vlessclient.service.ShareLinkExporter;
-import com.vlessclient.service.ShareLinkParser;
 import com.vlessclient.service.WireguardConfigParser;
+import com.vlessclient.service.outbound.CoreSettings;
 import java.io.File;
 import java.io.IOException;
 import java.time.LocalDate;
@@ -441,24 +441,73 @@ public class ServersViewController {
             if (text == null || text.isBlank()) {
                 return;
             }
-            try {
-                ServerConfig server = parseImport(text.trim());
-                configStore.addServer(server);
-                log.info("Imported server: {}", server.getName());
-            } catch (IllegalArgumentException e) {
-                // Bad input: the parser's message is the explanation, and a
-                // stack trace for a typo would only bury real errors. Scrubbed,
-                // because the text is a link and a message may quote it back.
-                log.warn("Could not import share link: {}", Redact.urlsIn(e.getMessage()));
-                showImportError(e);
-            } catch (RuntimeException e) {
-                // Not the exception itself: its trace prints the message as it
-                // is. toString() keeps the type, which is what sets an
-                // unexpected failure apart from bad input.
-                log.error("Failed to import server: {}", Redact.urlsIn(e.toString()));
-                showImportError(e);
+            if (text.toLowerCase(Locale.ROOT).contains("[interface]")) {
+                importWireguardConfig(text.trim());
+            } else {
+                importLinks(text);
             }
         });
+    }
+
+    /**
+     * Stores the WireGuard {@code .conf} given to the link dialog. It is one
+     * server, so a failure is reported as one, in an error dialog; a setting
+     * the core refuses is a failure too, rather than a server stored and then
+     * left out of every connect.
+     */
+    private void importWireguardConfig(String text) {
+        try {
+            ServerConfig server = new WireguardConfigParser().parse(text);
+            CoreSettings.Refusal refusal = CoreSettings.refusal(server).orElse(null);
+            if (refusal != null) {
+                throw new IllegalArgumentException(refusal.reason());
+            }
+            configStore.addServer(server);
+            log.info("Imported server: {}", server.getName());
+        } catch (IllegalArgumentException e) {
+            // Bad input: the parser's message is the explanation, and a stack
+            // trace for a typo would only bury real errors. Scrubbed, because a
+            // message may quote the text back.
+            log.warn("Could not import WireGuard config: {}", Redact.urlsIn(e.getMessage()));
+            showImportError(e);
+        } catch (RuntimeException e) {
+            // Not the exception itself: its trace prints the message as it is.
+            // toString() keeps the type, which is what sets an unexpected
+            // failure apart from bad input.
+            log.error("Failed to import server: {}", Redact.urlsIn(e.toString()));
+            showImportError(e);
+        }
+    }
+
+    /**
+     * Imports the share links given to the link dialog the way the clipboard's
+     * are read: a server per link, the core's rules checked, and what could
+     * not be used reported without its credential. Read as one link, two
+     * pasted links became one server whose name held the second link,
+     * credential included, and a link the core refuses was stored.
+     *
+     * <p>One link that went in needs no report: the list shows it, as it
+     * always did.</p>
+     */
+    private void importLinks(String text) {
+        ServerBackupService backup = optionalService(ServerBackupService.class);
+        if (backup == null) {
+            return;
+        }
+        ServerBackupService.ImportResult result;
+        try {
+            result = backup.importShareLinks(text);
+        } catch (RuntimeException e) {
+            // Scrubbed: a message from anywhere below may quote a link.
+            log.error("Failed to import share links: {}",
+                    Redact.urlsIn(String.valueOf(e.getMessage())));
+            showImportError(e);
+            return;
+        }
+        if (result.added() + result.updated() == 1 && result.skipped().isEmpty()) {
+            return;
+        }
+        showImportReport(result, "dialog.import.link", "servers.import.link.no.links");
     }
 
     private void showImportError(RuntimeException e) {
@@ -526,27 +575,32 @@ public class ServersViewController {
             showImportError(e);
             return;
         }
-        showClipboardImport(result);
+        showImportReport(result, "servers.import.clipboard", "servers.import.clipboard.no.links");
     }
 
     /**
-     * Reports a clipboard import in the dialog an import from a file ends
-     * with. When nothing came in it says why, because the usual causes need
-     * different next steps: the clipboard held no links at all; it held a
-     * subscription URL, which belongs on the Subscriptions page (no import here
-     * fetches a URL, the link dialog included); or its links were broken.
+     * Reports an import of links from the clipboard or the link dialog in the
+     * dialog an import from a file ends with. When nothing came in it says
+     * why, because the usual causes need different next steps: there were no
+     * links at all; there was a subscription URL, which belongs on the
+     * Subscriptions page (no import here fetches a URL); or the links were
+     * broken.
      *
      * <p>Shown without waiting, since nothing depends on it being closed.</p>
+     *
+     * @param titleKey   the title when nothing came in: where the links came from
+     * @param noLinksKey what to say when the text held no link at all
      */
-    private void showClipboardImport(ServerBackupService.ImportResult result) {
+    private void showImportReport(ServerBackupService.ImportResult result,
+                                  String titleKey, String noLinksKey) {
         int imported = result.added() + result.updated();
         int skipped = result.skipped().size();
         Alert report = new Alert(Alert.AlertType.INFORMATION);
         report.initOwner(ownerWindow());
         if (imported == 0) {
-            report.setTitle(I18n.get("servers.import.clipboard"));
+            report.setTitle(I18n.get(titleKey));
             report.setHeaderText(I18n.get("servers.import.clipboard.nothing"));
-            report.setContentText(nothingImportedReason(result));
+            report.setContentText(nothingImportedReason(result, noLinksKey));
         } else if (skipped == 0) {
             report.setTitle(I18n.get("servers.backup.import.done.title"));
             report.setHeaderText(I18n.get("servers.import.clipboard.done", imported));
@@ -558,10 +612,11 @@ public class ServersViewController {
         report.show();
     }
 
-    /** Why a clipboard import brought nothing in, in words the user can act on. */
-    private static String nothingImportedReason(ServerBackupService.ImportResult result) {
+    /** Why an import of links brought nothing in, in words the user can act on. */
+    private static String nothingImportedReason(ServerBackupService.ImportResult result,
+                                                String noLinksKey) {
         if (result.skipped().isEmpty()) {
-            return I18n.get("servers.import.clipboard.no.links");
+            return I18n.get(noLinksKey);
         }
         if (result.skipped().stream().allMatch(ServersViewController::isWebAddress)) {
             return I18n.get("servers.import.clipboard.subscription");
@@ -776,14 +831,6 @@ public class ServersViewController {
         tooltip.setText(I18n.get(result.throughProxy()
                 ? "dashboard.latency.via.proxy" : "dashboard.latency.via.tcp"));
         return true;
-    }
-
-    /** Picks the parser from the text's own shape rather than asking the user. */
-    private ServerConfig parseImport(String text) {
-        if (text.toLowerCase(java.util.Locale.ROOT).contains("[interface]")) {
-            return new WireguardConfigParser().parse(text);
-        }
-        return ServiceLocator.get(ShareLinkParser.class).parse(text);
     }
 
     private void openServerForm(ServerConfig existingServer) {

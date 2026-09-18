@@ -194,7 +194,10 @@ public class ViewDialogThemeTest extends ApplicationTest {
         serverStore();
         mount("ServersView", "dark");
         DialogPane form = open(importMenuItem("importLinkItem")::fire);
-        interact(() -> ((TextArea) form.lookup(".text-area")).setText("not a link"));
+        // A .conf is one server, so its failure is an error rather than a line
+        // in the report the share links end with.
+        interact(() -> ((TextArea) form.lookup(".text-area"))
+                .setText("[Interface]\nPrivateKey = not-a-key\n"));
 
         DialogPane error = open(((Button) form.lookupButton(ButtonType.OK))::fire);
 

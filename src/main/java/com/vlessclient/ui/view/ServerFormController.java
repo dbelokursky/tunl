@@ -6,6 +6,7 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TlsConfig;
 import com.vlessclient.model.TransportConfig;
 import com.vlessclient.model.TransportType;
+import com.vlessclient.service.outbound.CoreSettings;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -242,9 +243,32 @@ public class ServerFormController {
         if (!validate()) {
             return;
         }
+        // Checked on a draft: the server being edited is the one in the list,
+        // and a refused edit must not change it on the way to being refused.
+        ServerConfig draft = new ServerConfig();
+        writeFormInto(draft);
+        CoreSettings.Refusal refusal = CoreSettings.refusal(draft).orElse(null);
+        if (refusal != null) {
+            log.warn("Server form refused: {}", refusal.feature());
+            showValidationErrors(List.of(refusal.reason()));
+            return;
+        }
 
-        Protocol protocol = protocolCombo.getValue();
         ServerConfig server = editingServer != null ? editingServer : new ServerConfig();
+        writeFormInto(server);
+        if (onSave != null) {
+            onSave.accept(server);
+        }
+    }
+
+    /**
+     * Writes what the form holds into {@code server}. A setting the core
+     * refuses however it is spelled, such as a REALITY short ID of more than 16
+     * hex digits, is checked before the real server gets it; the core panicked
+     * on that one, and every connect failed with it.
+     */
+    private void writeFormInto(ServerConfig server) {
+        Protocol protocol = protocolCombo.getValue();
         server.setName(nameField.getText().trim());
         server.setProtocol(protocol);
         server.setAddress(addressField.getText().trim());
@@ -290,10 +314,6 @@ public class ServerFormController {
             tls.setAllowInsecure(allowInsecureCheck.isSelected());
         }
         server.setTls(tls);
-
-        if (onSave != null) {
-            onSave.accept(server);
-        }
     }
 
     @FXML

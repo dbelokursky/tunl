@@ -328,6 +328,34 @@ class ShareLinkParserEdgeCaseTest {
                             e -> assertThat(e.feature()).isEqualTo("transport xhttp"));
         }
 
+        /**
+         * The message is what the import report shows for the link, so it is
+         * worded in the language of the UI; the feature stays English, for
+         * the log and the subscription's summary.
+         */
+        @Test
+        void anUnsupportedTransportOrSchemeIsReportedInTheLanguageOfTheUi() {
+            java.util.Locale before = com.vlessclient.app.I18n.getLocale();
+            try {
+                com.vlessclient.app.I18n.setLocale(java.util.Locale.of("ru"));
+                String json = "{\"add\":\"h.example\",\"id\":\"u\",\"port\":443,\"net\":\"xhttp\"}";
+
+                assertThatThrownBy(() -> parser.parse("vmess://" + b64(json)))
+                        .isInstanceOfSatisfying(ShareLinkParser.UnsupportedFeatureException.class,
+                                e -> {
+                                    assertThat(e.getMessage()).contains("xhttp")
+                                            .containsPattern("\\p{IsCyrillic}");
+                                    assertThat(e.feature()).isEqualTo("transport xhttp");
+                                });
+                assertThatThrownBy(() -> parser.parse("tuic://u@h.example:443"))
+                        .isInstanceOfSatisfying(ShareLinkParser.UnsupportedSchemeException.class,
+                                e -> assertThat(e.getMessage()).contains("tuic")
+                                        .containsPattern("\\p{IsCyrillic}"));
+            } finally {
+                com.vlessclient.app.I18n.setLocale(before);
+            }
+        }
+
         @Test
         void uppercaseTlsValueEnablesTls() {
             String json = "{\"add\":\"h.example\",\"id\":\"u\",\"port\":443,\"tls\":\"TLS\"}";
