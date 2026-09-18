@@ -330,6 +330,69 @@ class ConnectionServiceTest {
                         + "unsupported flow: xtls-rprx-direct");
     }
 
+    /**
+     * A REALITY short ID of more than 16 hex digits does not get a refusal
+     * from the core: {@code sing-box check} panics, and a panic quotes no
+     * outbound, so the refused member could not be found and every connect
+     * failed, to whichever server, with a line from the stack trace. The
+     * import rules already knew such a server; it only has to be left out
+     * before the core sees it, as it can be stored by an older build, the
+     * server form or a restored backup.
+     */
+    @Test
+    void aStoredServerTheCoreWouldRefuseIsLeftOutBeforeTheCheck() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(withShortId(server("srv-2", "Frankfurt"), "0123456789abcdef01"));
+        RecordingEngine engine = engine();
+        engine.refuseWith = config -> config.contains("0123456789abcdef01")
+                ? "github.com/sagernet/sing-box/cmd/sing-box/main.go:8 +0x24"
+                : null;
+        ConnectionService service = service(engine);
+
+        ConnectionService.ConnectAttempt attempt = service.connect();
+
+        assertThat(attempt.started()).isTrue();
+        assertThat(attempt.server().getId()).isEqualTo("srv-1");
+        assertThat(attempt.skipped()).singleElement().satisfies(skipped -> {
+            assertThat(skipped.id()).isEqualTo("srv-2");
+            assertThat(skipped.name()).isEqualTo("Frankfurt");
+            assertThat(skipped.reason()).contains("short ID");
+        });
+        assertThat(starts(engine)).as("starts, with nothing for the core to refuse").isEqualTo(1);
+        assertThat(engine.configs).singleElement().asString()
+                .contains(tag("srv-1"))
+                .doesNotContain(tag("srv-2"));
+    }
+
+    @Test
+    void anActiveServerTheCoreWouldRefuseFailsBeforeTheCheckAndIsNamed() {
+        store.addServer(withShortId(server("srv-1", "Tokyo"), "0123456789abcdef01"));
+        store.addServer(server("srv-2", "Frankfurt"));
+        RecordingEngine engine = engine();
+        engine.refuseWith = config -> config.contains("0123456789abcdef01")
+                ? "github.com/sagernet/sing-box/cmd/sing-box/main.go:8 +0x24"
+                : null;
+        ConnectionService service = service(engine);
+
+        assertThatThrownBy(service::connect)
+                .isInstanceOf(ConfigRejectedException.class)
+                .hasMessageStartingWith("sing-box rejected the settings of server \"Tokyo\": ")
+                .hasMessageContaining("short ID");
+        assertThat(engine.calls).as("what the engine was asked to do").doesNotContain("start");
+    }
+
+    /** A REALITY server with the given short ID and an otherwise valid key. */
+    private static ServerConfig withShortId(ServerConfig server, String shortId) {
+        com.vlessclient.model.TlsConfig tls = new com.vlessclient.model.TlsConfig();
+        tls.setEnabled(true);
+        tls.setServerName("www.example.com");
+        tls.setReality(true);
+        tls.setRealityPublicKey("jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0");
+        tls.setRealityShortId(shortId);
+        server.setTls(tls);
+        return server;
+    }
+
     private static String tag(String serverId) {
         return com.vlessclient.service.outbound.OutboundTags.server(serverId);
     }

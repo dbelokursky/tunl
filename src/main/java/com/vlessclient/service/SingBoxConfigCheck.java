@@ -100,7 +100,8 @@ final class SingBoxConfigCheck {
 
     /**
      * The line someone can act on: the core stops at its first FATAL line, after
-     * any deprecation ERROR lines, so the last FATAL line is the reason. Colour
+     * any deprecation ERROR lines, so the last FATAL line is the reason; a core
+     * that panicked instead is reported by its {@code panic:} line. Colour
      * codes, the log-level prefix and the path of our temporary file are
      * removed; the path is noise, and it names a file that is already gone.
      *
@@ -117,9 +118,14 @@ final class SingBoxConfigCheck {
         if (lines.isEmpty()) {
             return I18n.get("engine.config.rejected.exit", String.valueOf(exitCode));
         }
+        // A panic prints no FATAL line and ends with its stack trace, whose
+        // last frame ("main.go:8 +0x24") says nothing; its own line does.
         String line = lines.reversed().stream()
                 .filter(candidate -> candidate.startsWith("FATAL"))
                 .findFirst()
+                .or(() -> lines.stream()
+                        .filter(candidate -> candidate.startsWith("panic:"))
+                        .findFirst())
                 .orElse(lines.getLast());
         String path = config.toAbsolutePath().toString();
         Path fileName = config.getFileName();

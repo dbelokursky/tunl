@@ -6,6 +6,7 @@ import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.service.outbound.CoreSettings;
 import com.vlessclient.service.outbound.OutboundTags;
 import java.io.IOException;
 import java.net.InetAddress;
@@ -63,10 +64,11 @@ public class ConnectionService {
     private static final Duration STOP_WAIT = Duration.ofSeconds(15);
 
     /**
-     * How many refused servers one connect leaves out before it gives up. Each
-     * one costs another {@code sing-box check}, and the core names only the
-     * first refusal it meets, so a list that is broken throughout is reported
-     * rather than worked through server by server.
+     * How many servers the core refuses before one connect gives up. Each one
+     * costs another {@code sing-box check}, and the core names only the first
+     * refusal it meets, so a list that is broken throughout is reported rather
+     * than worked through server by server. Servers left out before the check,
+     * which cost nothing, do not count.
      */
     private static final int MAX_SKIPPED = 20;
 
@@ -338,8 +340,9 @@ public class ConnectionService {
             // ports upward for no reason.
             moveTakenListenPortsAside(settings);
         }
-        List<ServerConfig> members = candidates;
         List<SkippedServer> skipped = new ArrayList<>();
+        List<ServerConfig> members = withoutRefused(candidates, active, skipped);
+        int refusedByTheCore = 0;
         RoutingConfig routing = safeRoutingConfig();
         try {
             while (true) {
@@ -358,9 +361,11 @@ public class ConnectionService {
                         throw e;
                     }
                     ServerConfig refused = refusal.server();
-                    if (refused.getId().equals(active.getId()) || skipped.size() >= MAX_SKIPPED) {
+                    if (refused.getId().equals(active.getId())
+                            || refusedByTheCore >= MAX_SKIPPED) {
                         throw refusal.named(e);
                     }
+                    refusedByTheCore++;
                     log.warn("sing-box refused server '{}' ({}); connecting without it",
                             refused.getName(), refusal.detail());
                     skipped.add(new SkippedServer(
@@ -382,6 +387,42 @@ public class ConnectionService {
         }
         publishSkipped(skipped);
         return new ConnectAttempt(Outcome.STARTED, active, skipped);
+    }
+
+    /**
+     * The servers the core can build; the others go into {@code skipped}.
+     *
+     * <p>{@link CoreSettings#refusal} knows some servers the core cannot build
+     * before the core does, and for some of those the core never says which
+     * server it was: a REALITY short ID longer than 16 hex digits makes
+     * {@code sing-box check} panic, a panic quotes no member, and every
+     * connect failed over one spare server, whichever server was picked.
+     * Import refuses such a server, but an older build, the server form or a
+     * restored backup may still have stored one.</p>
+     *
+     * @throws ConfigRejectedException if the active server is one of them:
+     *     connecting through a server the user did not pick is no fallback
+     */
+    private static List<ServerConfig> withoutRefused(List<ServerConfig> candidates,
+            ServerConfig active, List<SkippedServer> skipped) throws ConfigRejectedException {
+        CoreSettings.Refusal own = CoreSettings.refusal(active).orElse(null);
+        if (own != null) {
+            throw new ConfigRejectedException(
+                    I18n.get("engine.config.rejected.server", active.getName(), own.reason()),
+                    own.reason());
+        }
+        List<ServerConfig> members = new ArrayList<>();
+        for (ServerConfig server : candidates) {
+            CoreSettings.Refusal refusal = CoreSettings.refusal(server).orElse(null);
+            if (refusal == null) {
+                members.add(server);
+                continue;
+            }
+            log.warn("sing-box cannot build server '{}' ({}); connecting without it",
+                    server.getName(), refusal.feature());
+            skipped.add(new SkippedServer(server.getId(), server.getName(), refusal.reason()));
+        }
+        return members;
     }
 
     /**
