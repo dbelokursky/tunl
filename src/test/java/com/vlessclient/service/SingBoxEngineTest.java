@@ -56,15 +56,11 @@ class SingBoxEngineTest {
      */
     private Path createFakeSingBox(Path dir, String name, int sleepSeconds) throws Exception {
         if (WINDOWS) {
-            // timeout is the stock Windows sleep; /t counts seconds and /nobreak
-            // stops a stray keypress from cutting it short. Redirecting from NUL
-            // keeps it from failing when stdin is not a console, which is how
-            // ProcessBuilder starts it.
             return writeScript(dir, name,
                     "@echo off\r\n"
                     + "if \"%1\"==\"check\" exit /b 0\r\n"
                     + "echo sing-box started\r\n"
-                    + "timeout /t " + sleepSeconds + " /nobreak > NUL\r\n");
+                    + windowsSleep(sleepSeconds));
         }
         // bash, not sh: macOS's /bin/sh hands a script over to bash in the
         // same process soon after it starts, so the executable the system
@@ -74,6 +70,19 @@ class SingBoxEngineTest {
                 + "[ \"$1\" = check ] && exit 0\n"
                 + "echo 'sing-box started'\n"
                 + "sleep " + sleepSeconds + "\n");
+    }
+
+    /**
+     * A sleep for a Windows fake core. {@code timeout} is the stock one, but it
+     * exits at once, with an error, when its stdin is not a console, and
+     * ProcessBuilder gives it a pipe: the fake "core" was gone before a test
+     * could see it running, which failed
+     * theNextRunEndsADirectCoreThisRunLeftRunning on test-windows (NONE, not
+     * ENDED) and kept two tests off Windows. ping waits whatever stdin is; it
+     * sends one echo a second, the first at once.
+     */
+    private static String windowsSleep(int seconds) {
+        return "ping -n " + (seconds + 1) + " 127.0.0.1 > NUL\r\n";
     }
 
     /**
@@ -111,7 +120,7 @@ class SingBoxEngineTest {
                     + "exit /b 1\r\n"
                     + ":run\r\n"
                     + "echo sing-box started\r\n"
-                    + "timeout /t 30 /nobreak > NUL\r\n");
+                    + windowsSleep(30));
         }
         return writeScript(dir, name,
                 "#!/bin/sh\n"
@@ -238,11 +247,6 @@ class SingBoxEngineTest {
         assertThat(engine.awaitStopped(java.time.Duration.ofSeconds(1))).isTrue();
     }
 
-    // Mac/Linux only: this asserts the fake core is still alive after 200ms,
-    // but the Windows fake (`timeout` with redirected stdin) exits immediately,
-    // so "still running" cannot hold there. awaitStopped itself is OS-agnostic
-    // and is covered on every platform by the idle case above.
-    @EnabledOnOs({OS.MAC, OS.LINUX})
     @Test
     void awaitStoppedTimesOutWhileRunningThenSucceedsAfterStop(
             @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
@@ -908,8 +912,7 @@ class SingBoxEngineTest {
                 .isEqualTo(ConnectionState.DISCONNECTED);
     }
 
-    // Unix only: a Windows .cmd cannot sleep reliably on the redirected stdin
-    // ProcessBuilder hands it (see awaitStoppedTimesOutWhileRunningThenSucceedsAfterStop).
+    // Unix only: the hanging check is a shell script of its own.
     @EnabledOnOs({OS.MAC, OS.LINUX})
     @Test
     void aCheckThatCannotFinishDoesNotKeepTheCoreFromStarting(
