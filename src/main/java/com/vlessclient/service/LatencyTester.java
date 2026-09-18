@@ -117,10 +117,18 @@ public class LatencyTester {
         ApiEndpoint endpoint = endpointSupplier.get();
         if (endpoint != null) {
             String tag = com.vlessclient.service.outbound.OutboundTags.server(server);
-            java.util.Optional<Long> throughProxy =
-                    delayProbe.measure(endpoint.port(), endpoint.secret(), tag);
-            if (throughProxy.isPresent()) {
-                return new Result(throughProxy.get(), true);
+            switch (delayProbe.measure(endpoint.port(), endpoint.secret(), tag)) {
+                case ClashApiDelayProbe.Answer.Delay delay -> {
+                    return new Result(delay.millis(), true);
+                }
+                case ClashApiDelayProbe.Answer.Failed failed -> {
+                    // Tried through the proxy, and it does not work: a TCP
+                    // connect would only say the address is up.
+                    return new Result(-1, true);
+                }
+                case ClashApiDelayProbe.Answer.NoAnswer none -> {
+                    // The core cannot test this one; the address is all there is.
+                }
             }
         }
         return new Result(measureLatency(server), false);
