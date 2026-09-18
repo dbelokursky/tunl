@@ -224,7 +224,7 @@ public class SubscriptionsViewTest extends ApplicationTest {
 
         interact(() -> ((ViewShownAware) controller).onViewShown());
 
-        assertThat(showsLabel(shown)).isTrue();
+        awaitLabel(shown);
     }
 
     /**
@@ -241,8 +241,8 @@ public class SubscriptionsViewTest extends ApplicationTest {
 
         interact(() -> ((ViewShownAware) controller).onViewShown());
 
-        assertThat(showsLabel(I18n.get("subscriptions.last.error",
-                I18n.get("subscriptions.error.no.links")))).isTrue();
+        awaitLabel(I18n.get("subscriptions.last.error",
+                I18n.get("subscriptions.error.no.links")));
     }
 
     private Button rowRefreshButton() {
@@ -260,6 +260,18 @@ public class SubscriptionsViewTest extends ApplicationTest {
                 () -> lookup((Node node) -> node instanceof Button button
                         && text.equals(button.getText())).tryQueryAs(Button.class).orElse(null),
                 Objects::nonNull, Duration.ofSeconds(10));
+    }
+
+    /**
+     * Waits for a label with this text. Shown again, the view asks its list to
+     * refresh, and a ListView redraws its cells in the next layout pass rather
+     * than at once: checked straight after, the row still had its old text
+     * on a loaded macOS runner (test-macos of #324), as #310 found for the
+     * row's buttons.
+     */
+    private void awaitLabel(String text) {
+        Await.until("a label reading \"" + text + "\"", () -> showsLabel(text),
+                Duration.ofSeconds(10));
     }
 
     private boolean showsLabel(String text) {
