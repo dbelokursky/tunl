@@ -356,6 +356,32 @@ class ShareLinkParserEdgeCaseTest {
             }
         }
 
+        /**
+         * Xray calls TCP "raw" since v24.9, and Marzban writes the inbound's
+         * network into the link as it is; "h2" is the name HTTP/2 went by.
+         * Both were refused as transports sing-box lacks, and in a
+         * subscription that is only an info line, so the servers went missing
+         * without a word.
+         */
+        @Test
+        void rawAndH2AreOtherNamesForTransportsTheCoreHas() {
+            String uuid = "11111111-2222-3333-4444-555555555555";
+            ServerConfig raw = parser.parse("vless://" + uuid + "@h.example:443"
+                    + "?type=raw&security=reality&sni=h.example&fp=chrome"
+                    + "&pbk=WZaG00XCAiVCF2SP5fmSbKiuTbBB-lMDg_81rC8hR80&sid=0123abcd"
+                    + "&flow=xtls-rprx-vision#raw");
+            assertThat(raw.getTransport().getType()).isEqualTo(TransportType.TCP);
+
+            ServerConfig h2 = parser.parse("vless://" + uuid + "@h.example:443"
+                    + "?type=h2&security=tls&sni=h.example&path=%2Fh2&host=h.example#h2");
+            assertThat(h2.getTransport().getType()).isEqualTo(TransportType.HTTP2);
+            assertThat(h2.getTransport().getPath()).isEqualTo("/h2");
+
+            String vmess = "{\"add\":\"h.example\",\"id\":\"u\",\"port\":443,\"net\":\"raw\"}";
+            assertThat(parser.parse("vmess://" + b64(vmess)).getTransport().getType())
+                    .isEqualTo(TransportType.TCP);
+        }
+
         @Test
         void uppercaseTlsValueEnablesTls() {
             String json = "{\"add\":\"h.example\",\"id\":\"u\",\"port\":443,\"tls\":\"TLS\"}";

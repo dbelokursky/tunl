@@ -808,6 +808,21 @@ public class ShareLinkParser {
     }
 
     private TransportType parseTransportType(String type) {
+        // Other names for transports the core has. Xray calls TCP "raw" since
+        // v24.9, and Marzban writes the inbound's network into the link as it
+        // is; "h2" is the name HTTP/2 went by. Both were refused as missing
+        // transports, which a subscription reports in the log only.
+        switch (type.strip().toLowerCase(Locale.ROOT)) {
+            case "raw" -> {
+                return TransportType.TCP;
+            }
+            case "h2" -> {
+                return TransportType.HTTP2;
+            }
+            default -> {
+                // Looked up by its own name below.
+            }
+        }
         for (TransportType t : TransportType.values()) {
             if (t.getValue().equalsIgnoreCase(type)) {
                 return t;
