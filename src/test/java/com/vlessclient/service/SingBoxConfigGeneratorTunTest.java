@@ -539,8 +539,35 @@ class SingBoxConfigGeneratorTunTest {
         // networks that block it before the tunnel even came up.
         String json = generator.generate(createVlessServer(), tunSettings());
 
-        assertThat(parse(json).get("route").get("default_domain_resolver").asString())
+        assertThat(parse(json).get("route").get("default_domain_resolver")
+                .path("server").asString())
                 .isEqualTo("local-dns");
+    }
+
+    /**
+     * With IPv6 off on the device, the names apps look up resolve to IPv4 only,
+     * and the proxy server's own name went the same way: a resolver given
+     * without a strategy takes the dns block's, so a server with only an AAAA
+     * record could not be reached ("lookup …: empty result", sing-box 1.14.1).
+     * The server is dialled on the physical network, not through the tunnel,
+     * so its name keeps the strategy the user chose.
+     */
+    @Test
+    void tunMode_withoutIpv6TheServerNameKeepsTheChosenStrategy() throws Exception {
+        AppSettings settings = tunSettings();
+        settings.setTunIpv6Enabled(false);
+        settings.setDnsStrategy("prefer_ipv4");
+
+        JsonNode config = parse(generator.generate(createVlessServer(), settings));
+
+        assertThat(config.get("dns").get("strategy").asString())
+                .as("what apps look up")
+                .isEqualTo("ipv4_only");
+        JsonNode resolver = config.get("route").get("default_domain_resolver");
+        assertThat(resolver.isObject()).as("the resolver names its own strategy: %s", resolver)
+                .isTrue();
+        assertThat(resolver.get("server").asString()).isEqualTo("local-dns");
+        assertThat(resolver.get("strategy").asString()).isEqualTo("prefer_ipv4");
     }
 
     @Test

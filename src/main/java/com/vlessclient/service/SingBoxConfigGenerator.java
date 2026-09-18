@@ -356,7 +356,9 @@ public class SingBoxConfigGenerator {
      *   <li>{@code default_domain_resolver} — so outbound dial targets can be
      *       resolved. Points at {@code local-dns} (the OS resolver): no DNS
      *       loop through the proxy, and no dependence on a public DoH the
-     *       local network might block.</li>
+     *       local network might block. It carries the user's DNS strategy,
+     *       not the dns block's, which is IPv4 only without IPv6 on the
+     *       device.</li>
      *   <li>{@code auto_detect_interface: true} — lets sing-box pick the
      *       physical network interface for outbound dial and DNS, so those
      *       connections escape the TUN device instead of looping back.</li>
@@ -375,7 +377,17 @@ public class SingBoxConfigGenerator {
             // whatever network the machine is on, unlike a hardcoded public
             // DoH that local networks may block — a 223.5.5.5 timeout here
             // used to kill TUN startup before the tunnel even came up.
-            route.put("default_domain_resolver", "local-dns");
+            //
+            // With a strategy of its own: named alone, the resolver takes the
+            // dns block's, which is ipv4_only when the device has no IPv6, and
+            // a server with only an AAAA record could not be reached. The
+            // server is dialled on the physical network, not through the
+            // tunnel, so its name keeps the strategy the user chose.
+            ObjectNode resolver = route.putObject("default_domain_resolver");
+            resolver.put("server", "local-dns");
+            String strategy = settings.getDnsStrategy();
+            resolver.put("strategy",
+                    strategy == null || strategy.isBlank() ? "prefer_ipv4" : strategy);
         }
         if (!route.has("auto_detect_interface")) {
             route.put("auto_detect_interface", true);
