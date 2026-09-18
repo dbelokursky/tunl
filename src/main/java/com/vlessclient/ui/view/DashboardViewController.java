@@ -234,7 +234,7 @@ public class DashboardViewController implements ViewShownAware {
                 }
                 return ServiceLocator.find(AppSettings.class)
                         .map(settings -> new LatencyTester.ApiEndpoint(
-                                settings.getClashApiPort(), settings.getClashApiSecret()))
+                                settings.listenClashApiPort(), settings.getClashApiSecret()))
                         .orElse(null);
             });
         }
@@ -362,7 +362,7 @@ public class DashboardViewController implements ViewShownAware {
             AppSettings settings = ServiceLocator.find(AppSettings.class).orElse(null);
             if (settings != null) {
                 ConnectionService service = connectionService();
-                groupMonitor.start(settings.getClashApiPort(), settings.getClashApiSecret(),
+                groupMonitor.start(settings.listenClashApiPort(), settings.getClashApiSecret(),
                         service != null ? service.getProxyGroupTag() : OutboundTags.PROXY);
             }
         } else if (state == ConnectionState.DISCONNECTED || state == ConnectionState.ERROR) {
@@ -584,7 +584,7 @@ public class DashboardViewController implements ViewShownAware {
             // As a String: MessageFormat would render an int through
             // NumberFormat and turn port 8080 into "8,080".
             return I18n.get("settings.proxy.system.unsupported",
-                    String.valueOf(settings.getHttpPort()));
+                    String.valueOf(settings.listenHttpPort()));
         }
         return null;
     }

@@ -723,14 +723,14 @@ public class SingBoxConfigGenerator {
         socks.put("type", "socks");
         socks.put("tag", "socks-in");
         socks.put("listen", "127.0.0.1");
-        socks.put("listen_port", settings.getSocksPort());
+        socks.put("listen_port", settings.listenSocksPort());
         inbounds.add(socks);
 
         ObjectNode http = mapper.createObjectNode();
         http.put("type", "http");
         http.put("tag", "http-in");
         http.put("listen", "127.0.0.1");
-        http.put("listen_port", settings.getHttpPort());
+        http.put("listen_port", settings.listenHttpPort());
         // In SYSTEM_PROXY mode sing-box itself registers this inbound as the
         // OS proxy on start and restores the previous state on a graceful
         // stop — one cross-platform mechanism (networksetup on macOS, WinINET
@@ -749,7 +749,7 @@ public class SingBoxConfigGenerator {
                 // "it says connected but nothing is proxied".
                 log.warn("Host has no usable OS proxy store: traffic is not "
                         + "proxied system-wide. Point clients at the HTTP proxy "
-                        + "on 127.0.0.1:{}", settings.getHttpPort());
+                        + "on 127.0.0.1:{}", settings.listenHttpPort());
             }
         }
         inbounds.add(http);
@@ -1133,7 +1133,7 @@ public class SingBoxConfigGenerator {
         ObjectNode experimental = mapper.createObjectNode();
 
         ObjectNode clashApi = mapper.createObjectNode();
-        clashApi.put("external_controller", "127.0.0.1:" + settings.getClashApiPort());
+        clashApi.put("external_controller", "127.0.0.1:" + settings.listenClashApiPort());
         // Require a token so another local user can't read traffic stats or
         // control the core over 127.0.0.1:<port>. TrafficMonitor sends it.
         String clashSecret = settings.getClashApiSecret();

@@ -298,7 +298,7 @@ public final class TrafficDisplayBinder {
                 // Read on the FX thread: AppSettings is the shared instance the
                 // UI mutates, and the queue below runs elsewhere.
                 AppSettings settings = ServiceLocator.get(AppSettings.class);
-                port = settings.getClashApiPort();
+                port = settings.listenClashApiPort();
                 secret = settings.getClashApiSecret();
             } catch (IllegalArgumentException e) {
                 log.warn("Could not get AppSettings for TrafficMonitor");

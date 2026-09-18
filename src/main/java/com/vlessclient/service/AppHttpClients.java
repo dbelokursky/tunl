@@ -98,7 +98,7 @@ public final class AppHttpClients {
                     current.connectionStateProperty().get(), health.get())) {
                 return OptionalInt.empty();
             }
-            return OptionalInt.of(settings.get().getHttpPort());
+            return OptionalInt.of(settings.get().listenHttpPort());
         });
         BROKEN_WHILE_CONNECTED.set(() -> {
             SingBoxEngine current = engine.get();
