@@ -14,6 +14,9 @@ import com.vlessclient.service.WireguardConfigParser;
 import com.vlessclient.service.outbound.CoreSettings;
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
@@ -73,6 +76,9 @@ import org.slf4j.LoggerFactory;
 public class ServersViewController {
 
     private static final Logger log = LoggerFactory.getLogger(ServersViewController.class);
+
+    /** Largest file the import reads: far more than any list of servers. */
+    private static final long MAX_IMPORT_FILE_BYTES = 1024 * 1024;
 
     /** Cmd+V on macOS, Ctrl+V elsewhere: the platform's paste. */
     private static final KeyCombination PASTE =
@@ -176,6 +182,69 @@ public class ServersViewController {
             // drawn: the rows get their flags when it lands, not on a scroll.
             resolver.onDatabaseReady(() -> Platform.runLater(serverListView::refresh));
         }
+    }
+
+    /**
+     * Imports what a file holds: a WireGuard {@code .conf}, or share links,
+     * one per line. A file had no way in: a {@code .conf} had to be opened and
+     * its text copied into the link dialog.
+     *
+     * @param file the file to read
+     */
+    void importFile(Path file) {
+        String text;
+        try {
+            if (Files.size(file) > MAX_IMPORT_FILE_BYTES) {
+                showImportError(new IllegalArgumentException(I18n.get(
+                        "servers.import.file.too.large",
+                        String.valueOf(MAX_IMPORT_FILE_BYTES / 1024))));
+                return;
+            }
+            text = Files.readString(file, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            // Not the path: it names the user's folders.
+            log.warn("Could not read the file to import: {}", e.getClass().getSimpleName());
+            showImportError(new IllegalArgumentException(
+                    I18n.get("servers.import.file.unreadable")));
+            return;
+        }
+        importText(text);
+    }
+
+    private void onImportFileClicked() {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle(I18n.get("servers.import.file.title"));
+        chooser.getExtensionFilters().setAll(
+                new FileChooser.ExtensionFilter(
+                        I18n.get("servers.import.file.filter.conf"), "*.conf"),
+                new FileChooser.ExtensionFilter(
+                        I18n.get("servers.import.file.filter.text"), "*.txt"),
+                new FileChooser.ExtensionFilter(
+                        I18n.get("servers.import.file.filter.all"), "*"));
+        File chosen = chooser.showOpenDialog(ownerWindow());
+        if (chosen != null) {
+            importFile(chosen.toPath());
+        }
+    }
+
+    /**
+     * Imports text that is either a WireGuard {@code .conf} or share links: a
+     * {@code .conf} always has an {@code [Interface]} section, and a share
+     * link never does.
+     */
+    private void importText(String text) {
+        if (text == null || text.isBlank()) {
+            return;
+        }
+        if (isWireguardConfig(text)) {
+            importWireguardConfig(text.trim());
+        } else {
+            importLinks(text);
+        }
+    }
+
+    private static boolean isWireguardConfig(String text) {
+        return text != null && text.toLowerCase(Locale.ROOT).contains("[interface]");
     }
 
     /** Replaces the clipboard the import reads; for tests, which have none. */
@@ -302,7 +371,10 @@ public class ServersViewController {
             emptyStateTitle.textProperty().bind(I18n.binding("servers.empty.title"));
         }
         if (emptyStateHint != null) {
-            emptyStateHint.textProperty().bind(I18n.binding("servers.empty.hint"));
+            // With the paste shortcut and subscriptions: the list said neither.
+            emptyStateHint.textProperty().bind(Bindings.createStringBinding(
+                    () -> I18n.get("servers.empty.hint", PASTE.getDisplayText()),
+                    I18n.localeProperty()));
         }
     }
 
@@ -445,16 +517,7 @@ public class ServersViewController {
 
         dialog.initOwner(ownerWindow());
 
-        dialog.showAndWait().ifPresent(text -> {
-            if (text == null || text.isBlank()) {
-                return;
-            }
-            if (text.toLowerCase(Locale.ROOT).contains("[interface]")) {
-                importWireguardConfig(text.trim());
-            } else {
-                importLinks(text);
-            }
-        });
+        dialog.showAndWait().ifPresent(this::importText);
     }
 
     /**
@@ -542,7 +605,11 @@ public class ServersViewController {
         linkItem.setId("importLinkItem");
         linkItem.textProperty().bind(I18n.binding("servers.import.link"));
         linkItem.setOnAction(event -> onImportLinkClicked());
-        importMenuButton.getItems().setAll(clipboardItem, linkItem);
+        MenuItem fileItem = new MenuItem();
+        fileItem.setId("importFileItem");
+        fileItem.textProperty().bind(I18n.binding("servers.import.file"));
+        fileItem.setOnAction(event -> onImportFileClicked());
+        importMenuButton.getItems().setAll(clipboardItem, linkItem, fileItem);
     }
 
     /**
@@ -569,13 +636,20 @@ public class ServersViewController {
      * from a file.</p>
      */
     private void importFromClipboard() {
+        String text = clipboardText.get();
+        if (isWireguardConfig(text)) {
+            // A .conf copied whole: read line by line as share links, it
+            // brought nothing in.
+            importWireguardConfig(text.trim());
+            return;
+        }
         ServerBackupService backup = optionalService(ServerBackupService.class);
         if (backup == null) {
             return;
         }
         ServerBackupService.ImportResult result;
         try {
-            result = backup.importShareLinks(clipboardText.get());
+            result = backup.importShareLinks(text);
         } catch (RuntimeException e) {
             // Scrubbed: a message from anywhere below may quote a link.
             log.error("Failed to import from the clipboard: {}",
