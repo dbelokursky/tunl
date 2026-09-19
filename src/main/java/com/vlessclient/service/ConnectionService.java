@@ -295,7 +295,13 @@ public class ConnectionService {
         requestedMode = modeOverride;
         long request = recovery.connectionRequested();
         synchronized (operations) {
-            return connectInternal(modeOverride, () -> recovery.isWanted(request));
+            ConnectAttempt attempt =
+                    connectInternal(modeOverride, () -> recovery.isWanted(request));
+            if (attempt.outcome() == Outcome.ALREADY_RUNNING) {
+                // Nothing restarted, so no state change will tell recovery.
+                recovery.keptUp(request);
+            }
+            return attempt;
         }
     }
 
@@ -533,6 +539,8 @@ public class ConnectionService {
                 if (!recovery.isWanted(request)) {
                     return new ConnectAttempt(Outcome.CANCELLED, active);
                 }
+                // The core kept running, so no state change will tell recovery.
+                recovery.keptUp(request);
                 return new ConnectAttempt(Outcome.SWITCHED, active);
             }
             if (!recovery.isWanted(request)) {

@@ -181,6 +181,95 @@ class ConnectionServiceTest {
     }
 
     /**
+     * A server picked while connected is switched through the running core,
+     * which publishes no state change. The switch still counted as a new
+     * request, and a new request clears "the tunnel was up since the request",
+     * so a tunnel that dropped afterwards, in a mode whose restart needs an
+     * elevation prompt, neither retried nor offered the reconnect.
+     */
+    @Test
+    void aTunnelSwitchedLiveStillOffersTheReconnectWhenItDrops() throws Exception {
+        store.getSettings().setProxyMode(ProxyMode.TUN);
+        store.getSettings().setHealthCheckAutoReconnect(true);
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(server("srv-2", "Frankfurt"));
+        RecordingEngine engine = engine();
+        engine.prompts = true;
+        ConnectionService service = service(engine);
+        com.sun.net.httpserver.HttpServer api = null;
+        try {
+            assertThat(service.connect().started()).isTrue();
+            service.getRecoveryService().onConnectionState(ConnectionState.CONNECTED);
+            api = fakeClashApi(store.getSettings().getClashApiPort());
+            store.setActiveServer("srv-2");
+
+            assertThat(service.switchToActiveServer().outcome())
+                    .isEqualTo(ConnectionService.Outcome.SWITCHED);
+            service.getRecoveryService().onHealth(com.vlessclient.model.TunnelHealth.BROKEN);
+
+            assertThat(service.getRecoveryService().isReconnectNeeded())
+                    .as("the reconnect offered once the switched tunnel dropped")
+                    .isTrue();
+        } finally {
+            service.getRecoveryService().close();
+            if (api != null) {
+                api.stop(0);
+            }
+        }
+    }
+
+    /**
+     * A connect to a core that is already running changes nothing, but it
+     * counted as a new request, which cancelled a retry waiting for a broken
+     * tunnel; the verdict stayed broken with no new event, so nothing
+     * re-armed it. An agent's connect over MCP did exactly that.
+     */
+    @Test
+    void aConnectToARunningCoreKeepsTheRetryOfABrokenTunnel() throws Exception {
+        store.getSettings().setHealthCheckAutoReconnect(true);
+        store.getSettings().setHealthCheckDelaySeconds(1);
+        store.addServer(server("srv-1", "Tokyo"));
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        try {
+            assertThat(service.connect().started()).isTrue();
+            service.getRecoveryService().onConnectionState(ConnectionState.CONNECTED);
+            service.getRecoveryService().onHealth(com.vlessclient.model.TunnelHealth.BROKEN);
+
+            assertThat(service.connect().outcome())
+                    .isEqualTo(ConnectionService.Outcome.ALREADY_RUNNING);
+
+            Await.until("the retry to restart the broken tunnel",
+                    () -> starts(engine) >= 2, Duration.ofSeconds(10));
+        } finally {
+            service.getRecoveryService().close();
+        }
+    }
+
+    /** Stands in for the core's control endpoint: a selector switch always works. */
+    private static com.sun.net.httpserver.HttpServer fakeClashApi(int port) throws IOException {
+        com.sun.net.httpserver.HttpServer api = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", port), 0);
+        AtomicReference<String> selected = new AtomicReference<>("");
+        api.createContext("/proxies/", exchange -> {
+            if (exchange.getRequestMethod().equals("PUT")) {
+                selected.set(tools.jackson.databind.json.JsonMapper.builder().build()
+                        .readTree(exchange.getRequestBody().readAllBytes())
+                        .path("name").asString());
+                exchange.sendResponseHeaders(204, -1);
+            } else {
+                byte[] body = ("{\"now\":\"" + selected.get() + "\"}")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(200, body.length);
+                exchange.getResponseBody().write(body);
+            }
+            exchange.close();
+        });
+        api.start();
+        return api;
+    }
+
+    /**
      * A crash is recovered by stopping what is left of the core and starting it
      * again, through the service. {@code recover()} had no test of its own: the
      * recovery loop was tested with a stand-in restart only.
