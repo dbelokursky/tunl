@@ -97,8 +97,9 @@ Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -Path staging, dist
 New-Item -ItemType Directory -Force -Path staging | Out-Null
 Copy-Item $jarPath staging/
 
-# Per-user install: lands in %LOCALAPPDATA%\Programs without an admin
-# prompt, matching how the app manages everything else per-user.
+# Per-user install: lands in %LOCALAPPDATA%\Tunl without an admin prompt
+# (where windows-msi-smoke.ps1 looks for it), matching how the app manages
+# everything else per-user.
 & jpackage `
     --type msi `
     --name 'Tunl' `
