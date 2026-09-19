@@ -141,7 +141,19 @@ public class RoutingService {
         saveConfig(config);
     }
 
+    /**
+     * Adds a rule and persists the change, unless the core would refuse its
+     * value: sing-box refuses a whole configuration over one such rule, so it
+     * stopped every server from connecting until it was found and deleted.
+     *
+     * @param rule the rule to add
+     * @throws IllegalArgumentException with the reason, worded in the language
+     *     of the UI, when the core would refuse the rule's value
+     */
     public synchronized void addRule(RoutingRule rule) {
+        RoutingRuleCheck.problem(rule.getType(), rule.getValue()).ifPresent(reason -> {
+            throw new IllegalArgumentException(reason);
+        });
         config.getRules().add(rule);
         saveConfig(config);
     }

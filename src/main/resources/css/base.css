@@ -1384,6 +1384,12 @@
     -fx-text-fill: -c-warn-text;
 }
 
+/* Add-rule dialog: why the core would refuse the value typed. */
+.routing-rule-problem {
+    -fx-font-size: 11px;
+    -fx-text-fill: -c-danger-fg;
+}
+
 /* Country flags: a hairline keeps light bands from bleeding into the row. */
 .flag-border {
     -fx-stroke: -c-border-strong;

@@ -4,6 +4,7 @@ import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.app.ThemeCss;
 import com.vlessclient.model.RoutingRule;
+import com.vlessclient.service.RoutingRuleCheck;
 import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.SubscriptionService;
 import com.vlessclient.service.TestRoutingServices;
@@ -24,7 +25,9 @@ import javafx.fxml.FXMLLoader;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.DialogPane;
+import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.StackPane;
 import javafx.stage.Stage;
@@ -136,6 +139,56 @@ public class FormDialogsWaitForInputTest extends ApplicationTest {
                         .map(RoutingRule::getValue)
                         .anyMatch("example.com"::equals),
                 PATIENCE);
+    }
+
+    /**
+     * A value the core would refuse is explained under the field, and OK
+     * waits: sing-box refuses a whole configuration over one such rule, so it
+     * stopped every server from connecting until it was found and deleted.
+     */
+    @Test
+    void theRuleFormExplainsAValueTheCoreWouldRefuse() {
+        RoutingService routing = TestRoutingServices.at(freshDir("routing"));
+        ServiceLocator.register(RoutingService.class, routing);
+        mount("RoutingView");
+        DialogPane form = open(button("#addRuleButton")::fire);
+
+        setRuleType(form, RoutingRule.RuleType.DOMAIN_REGEX);
+        setRuleValue(form, "(");
+
+        assertThat(okDisabled(form)).as("OK with an unclosed bracket").isTrue();
+        assertThat(problemShown(form)).as("the reason under the value")
+                .isEqualTo(RoutingRuleCheck.problem(RoutingRule.RuleType.DOMAIN_REGEX, "(")
+                        .orElseThrow());
+        assertThat(onFx(() -> {
+            Label reason = (Label) form.lookup(".routing-rule-problem");
+            return reason.getHeight() + 0.5 >= reason.prefHeight(reason.getWidth());
+        })).as("the reason as tall as its lines, in the dialog it grew").isTrue();
+
+        setRuleValue(form, "^(.+\\.)?example\\.com$");
+        assertThat(okDisabled(form)).as("OK with an expression the core takes").isFalse();
+        assertThat(problemShown(form)).as("the reason once the value is fine").isNull();
+        pressOk(form);
+
+        Await.until("the rule to be added",
+                () -> routing.getConfig().getRules().stream()
+                        .anyMatch(rule -> rule.getType() == RoutingRule.RuleType.DOMAIN_REGEX),
+                PATIENCE);
+    }
+
+    private void setRuleType(DialogPane form, RoutingRule.RuleType type) {
+        interact(() -> {
+            @SuppressWarnings("unchecked")
+            ComboBox<RoutingRule.RuleType> types =
+                    (ComboBox<RoutingRule.RuleType>) form.lookup(".combo-box");
+            types.setValue(type);
+        });
+    }
+
+    /** The reason shown under the rule's value, or null while none is shown. */
+    private String problemShown(DialogPane form) {
+        return onFx(() -> form.lookup(".routing-rule-problem") instanceof Label reason
+                && reason.isVisible() ? reason.getText() : null);
     }
 
     /**

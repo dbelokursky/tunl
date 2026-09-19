@@ -4,12 +4,14 @@ import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.RoutingRule;
+import com.vlessclient.service.RoutingRuleCheck;
 import com.vlessclient.service.RoutingService;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
+import javafx.beans.binding.ObjectBinding;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
@@ -301,12 +303,51 @@ public class RoutingViewController {
             }
         });
 
+        // Why the core would refuse the value, under it, and OK waits until
+        // there is no reason left. sing-box refuses a whole configuration
+        // over one rule it cannot parse, so a stray bracket in a regular
+        // expression stopped every server from connecting until the rule was
+        // found and deleted.
+        Label problemLabel = new Label();
+        problemLabel.getStyleClass().add("routing-rule-problem");
+        problemLabel.setWrapText(true);
+        problemLabel.setMaxWidth(300);
+        // Never shorter than its wrapped lines: a window sized to its scene
+        // measures the dialog without a width, which makes this label one line.
+        problemLabel.setMinHeight(Region.USE_PREF_SIZE);
+        problemLabel.setVisible(false);
+        problemLabel.setManaged(false);
+        ObjectBinding<Optional<String>> problem = Bindings.createObjectBinding(
+                () -> RoutingRuleCheck.problem(typeCombo.getValue(), valueField.getText().strip()),
+                typeCombo.valueProperty(), valueField.textProperty());
+        problem.addListener((obs, was, now) -> {
+            // A blank value is left to the disabled OK: nothing to explain yet.
+            String reason = valueField.getText().isBlank() ? "" : now.orElse("");
+            problemLabel.setText(reason);
+            boolean show = !reason.isEmpty();
+            valueField.getStyleClass().remove("field-error");
+            if (show) {
+                valueField.getStyleClass().add("field-error");
+            }
+            if (show == problemLabel.isVisible()) {
+                return;
+            }
+            problemLabel.setVisible(show);
+            problemLabel.setManaged(show);
+            // A shown dialog keeps the size it opened with.
+            Window window = dialog.getDialogPane().getScene().getWindow();
+            if (window.isShowing()) {
+                window.sizeToScene();
+            }
+        });
+
         grid.add(new Label(I18n.get("form.type") + ":"), 0, 0);
         grid.add(typeCombo, 1, 0);
         grid.add(new Label(I18n.get("routing.rule.value") + ":"), 0, 1);
         grid.add(valueField, 1, 1);
-        grid.add(new Label(I18n.get("routing.rule.action") + ":"), 0, 2);
-        grid.add(actionCombo, 1, 2);
+        grid.add(problemLabel, 1, 2);
+        grid.add(new Label(I18n.get("routing.rule.action") + ":"), 0, 3);
+        grid.add(actionCombo, 1, 3);
 
         dialog.getDialogPane().setContent(grid);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
@@ -314,8 +355,7 @@ public class RoutingViewController {
         // OK waits for a value. It used to be checked after the dialog closed,
         // which put up a warning and dropped the type and action chosen.
         dialog.getDialogPane().lookupButton(ButtonType.OK).disableProperty().bind(
-                Bindings.createBooleanBinding(() -> valueField.getText().isBlank(),
-                        valueField.textProperty()));
+                Bindings.createBooleanBinding(() -> problem.get().isPresent(), problem));
         dialog.initOwner(ownerWindow());
 
         Platform.runLater(valueField::requestFocus);

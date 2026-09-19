@@ -198,6 +198,30 @@ class RoutingServiceTest {
         assertThat(loaded.getRules().get(1).getAction()).isEqualTo(RoutingRule.RuleAction.DIRECT);
     }
 
+    /**
+     * The one way a rule gets in, for the Routing screen and MCP alike. A rule
+     * the core refuses used to be stored, and then no server connected.
+     */
+    @Test
+    void addRule_refusesAValueTheCoreWouldRefuseAndStoresNothing() {
+        RoutingRule regex = new RoutingRule(RoutingRule.RuleType.DOMAIN_REGEX, "(",
+                RoutingRule.RuleAction.PROXY);
+        RoutingRule cidr = new RoutingRule(RoutingRule.RuleType.IP_CIDR, "999.1.1.1/8",
+                RoutingRule.RuleAction.DIRECT);
+
+        for (RoutingRule rule : List.of(regex, cidr)) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> routingService.addRule(rule))
+                    .as(rule.getValue())
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage(RoutingRuleCheck.problem(rule.getType(), rule.getValue())
+                            .orElseThrow());
+        }
+
+        assertThat(routingService.getConfig().getRules()).isEmpty();
+        assertThat(new RoutingService(tempDir).getConfig().getRules())
+                .as("the file").isEmpty();
+    }
+
     @Test
     void addRule_appendsToExistingRules() {
         RoutingRule rule1 = new RoutingRule(RoutingRule.RuleType.DOMAIN, "example.com",
