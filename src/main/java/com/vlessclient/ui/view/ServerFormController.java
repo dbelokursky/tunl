@@ -1,11 +1,14 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
+import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.model.Subscription;
 import com.vlessclient.model.TlsConfig;
 import com.vlessclient.model.TransportConfig;
 import com.vlessclient.model.TransportType;
+import com.vlessclient.service.SubscriptionService;
 import com.vlessclient.service.outbound.CoreSettings;
 import java.util.ArrayList;
 import java.util.List;
@@ -46,6 +49,7 @@ public class ServerFormController {
     // fx:id purely so the bundle can reach them; the text= in the FXML is a
     // design-time placeholder that binding overwrites at load.
     @FXML private Label formTitleLabel;
+    @FXML private Label subscriptionNoticeLabel;
     @FXML private Label protocolLabel;
     @FXML private Label nameLabel;
     @FXML private Label addressLabel;
@@ -165,6 +169,27 @@ public class ServerFormController {
     }
 
     /**
+     * Says so when a subscription owns the server. A refresh stores the server
+     * the provider sends in place of the one in the list, keeping only its id
+     * and whether it is picked, so every edit made here, a new name included,
+     * was gone after the next refresh, hourly by default, and nothing had said
+     * so.
+     */
+    private void showSubscriptionNotice(ServerConfig server) {
+        String owner = ServiceLocator.find(SubscriptionService.class)
+                .flatMap(service -> service.getSubscriptions().stream()
+                        .filter(subscription -> subscription.getServerIds() != null
+                                && subscription.getServerIds().contains(server.getId()))
+                        .map(Subscription::getName)
+                        .findFirst())
+                .orElse(null);
+        boolean owned = owner != null;
+        subscriptionNoticeLabel.setText(owned ? I18n.get("form.subscription.notice", owner) : "");
+        subscriptionNoticeLabel.setVisible(owned);
+        subscriptionNoticeLabel.setManaged(owned);
+    }
+
+    /**
      * Loads an existing server into the form for editing, selecting its
      * protocol and filling every field (transport, TLS, and Reality included)
      * from the given config.
@@ -173,6 +198,7 @@ public class ServerFormController {
      */
     public void setServerConfig(ServerConfig server) {
         this.editingServer = server;
+        showSubscriptionNotice(server);
 
         Protocol protocol = server.getProtocol() != null ? server.getProtocol() : Protocol.VLESS;
         protocolCombo.setValue(protocol);
