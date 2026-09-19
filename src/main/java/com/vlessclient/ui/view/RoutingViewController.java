@@ -310,6 +310,7 @@ public class RoutingViewController {
 
         dialog.getDialogPane().setContent(grid);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        Dialogs.localizeButtons(dialog.getDialogPane());
         // OK waits for a value. It used to be checked after the dialog closed,
         // which put up a warning and dropped the type and action chosen.
         dialog.getDialogPane().lookupButton(ButtonType.OK).disableProperty().bind(
@@ -334,7 +335,7 @@ public class RoutingViewController {
      * servers and subscriptions, which both ask first.
      */
     private void deleteRule(RoutingRule rule) {
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        Alert confirm = Dialogs.alert(Alert.AlertType.CONFIRMATION);
         confirm.setTitle(I18n.get("routing.rule.delete.title"));
         confirm.setHeaderText(I18n.get("routing.rule.delete.header",
                 formatRuleType(rule.getType()) + " " + rule.getValue()));

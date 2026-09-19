@@ -170,7 +170,7 @@ public class SubscriptionsViewController implements ViewShownAware {
                 Platform.runLater(() -> {
                     whenDone.run();
                     subscriptionListView.refresh();
-                    Alert alert = new Alert(Alert.AlertType.ERROR);
+                    Alert alert = Dialogs.alert(Alert.AlertType.ERROR);
                     alert.setTitle(I18n.get("dialog.error"));
                     alert.setHeaderText(I18n.get(failureHeaderKey));
                     alert.setContentText(e.getMessage());
@@ -255,6 +255,7 @@ public class SubscriptionsViewController implements ViewShownAware {
 
         dialog.getDialogPane().setContent(grid);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        Dialogs.localizeButtons(dialog.getDialogPane());
         // OK waits for both fields. They used to be checked after the dialog
         // closed: OK on an incomplete form put up a warning and dropped what
         // had been typed, a pasted URL included.
@@ -299,7 +300,7 @@ public class SubscriptionsViewController implements ViewShownAware {
     }
 
     private void deleteSubscription(Subscription sub) {
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        Alert confirm = Dialogs.alert(Alert.AlertType.CONFIRMATION);
         confirm.setTitle(I18n.get("subscriptions.delete.title"));
         confirm.setHeaderText(I18n.get("subscriptions.delete.confirm", sub.getName()));
         confirm.setContentText(I18n.get("subscriptions.delete.content",
