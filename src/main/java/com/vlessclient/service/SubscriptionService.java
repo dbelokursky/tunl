@@ -370,6 +370,8 @@ public class SubscriptionService {
                         + "discarding the fetched result", sub.getName());
                 return;
             }
+            // Before the servers take the name as their prefix.
+            nameIfUnnamed(sub, headers);
             // A line the parser could not read looks exactly like a server the
             // provider withdrew, and diffAndApply would delete it. That is the
             // same "silently loses servers and reports success" shape the empty
@@ -409,6 +411,7 @@ public class SubscriptionService {
             if (headers != null) {
                 applyUserInfo(sub, headers);
             }
+            sub.setAnnounce(announce(headers));
             sub.setLastRefreshedAt(System.currentTimeMillis());
             saveSubscriptions();
             log.info("Refreshed subscription '{}': {} servers",
@@ -579,10 +582,20 @@ public class SubscriptionService {
      * there is none.
      */
     static String announce(HttpHeaders headers) {
+        return providerText(headers, "announce");
+    }
+
+    /**
+     * A header of provider text, such as {@code announce} or
+     * {@code profile-title}, which panels send plain or base64 encoded
+     * behind a {@code base64:} prefix: as one clean line, empty when there is
+     * none.
+     */
+    static String providerText(HttpHeaders headers, String name) {
         if (headers == null) {
             return "";
         }
-        String value = headers.firstValue("announce").orElse("").strip();
+        String value = headers.firstValue(name).orElse("").strip();
         if (value.regionMatches(true, 0, "base64:", 0, "base64:".length())) {
             try {
                 value = Base64Lenient.decodeUtf8(value.substring("base64:".length()).strip());
@@ -591,6 +604,29 @@ public class SubscriptionService {
             }
         }
         return bounded(value);
+    }
+
+    /**
+     * Names a subscription that was added without a name: after the
+     * provider's {@code profile-title}, or after the host of its URL when the
+     * provider sends none. A name the user gave stays as it is.
+     */
+    static void nameIfUnnamed(Subscription sub, HttpHeaders headers) {
+        if (sub.getName() != null && !sub.getName().isBlank()) {
+            return;
+        }
+        String title = providerText(headers, "profile-title");
+        if (!title.isEmpty()) {
+            sub.setName(title);
+            return;
+        }
+        // hostOf answers "?" for a URL it cannot read. That is a placeholder
+        // for an error line, not a name: leave the subscription unnamed and
+        // let the row show what it shows for one.
+        String host = hostOf(sub.getUrl());
+        if (!"?".equals(host)) {
+            sub.setName(host);
+        }
     }
 
     /** One line of provider text, safe to store and show, and not too long. */

@@ -45,8 +45,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * complete.
  *
  * <p>Both used to check their fields only after closing. OK on an incomplete
- * form closed it, put up a warning, and dropped what had been typed: a long
- * subscription URL pasted before the name, or the rule type and action
+ * form closed it, put up a warning, and dropped what had been typed: a
+ * subscription's name typed before its URL, or the rule type and action
  * already chosen.</p>
  *
  * <p>As in {@link SubscriptionsHttpWarningTest}, the views show these dialogs
@@ -93,23 +93,29 @@ public class FormDialogsWaitForInputTest extends ApplicationTest {
         });
     }
 
+    /**
+     * A URL is all the subscription form needs: a name left empty is the
+     * provider's own ({@code profile-title}), or the host's. A name without a
+     * URL keeps the form open, with what was typed.
+     */
     @Test
-    void theSubscriptionFormStaysOpenWithAUrlAndNoName() {
+    void theSubscriptionFormNeedsAUrlAndNotAName() {
         ServiceLocator.register(SubscriptionService.class,
                 TestSubscriptionServices.quiet(freshDir("subscriptions")));
         mount("SubscriptionsView");
         DialogPane form = open(button("#addSubscriptionButton")::fire);
         Window window = windowOf(form);
 
-        fillSubscription(form, "", URL);
+        fillSubscription(form, "Provider", "   ");
         pressOk(form);
 
-        assertThat(isShowing(window)).as("the form after OK with a URL and no name").isTrue();
-        assertThat(subscriptionUrl(form)).as("the URL pasted into it").isEqualTo(URL);
-        assertThat(okDisabled(form)).as("OK with a URL and no name").isTrue();
-
-        fillSubscription(form, "Provider", "   ");
+        assertThat(isShowing(window)).as("the form after OK with a name and a blank URL")
+                .isTrue();
         assertThat(okDisabled(form)).as("OK with a name and a blank URL").isTrue();
+
+        fillSubscription(form, "", URL);
+        assertThat(okDisabled(form)).as("OK with a URL and no name").isFalse();
+        assertThat(subscriptionUrl(form)).as("the URL pasted into it").isEqualTo(URL);
 
         fillSubscription(form, "Provider", URL);
         assertThat(okDisabled(form)).as("OK with a name and a URL").isFalse();

@@ -5,6 +5,7 @@ import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.Subscription;
 import com.vlessclient.service.Redact;
 import com.vlessclient.service.SubscriptionService;
+import java.net.URI;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -255,13 +256,13 @@ public class SubscriptionsViewController implements ViewShownAware {
         dialog.getDialogPane().setContent(grid);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
         Dialogs.localizeButtons(dialog.getDialogPane());
-        // OK waits for both fields. They used to be checked after the dialog
+        // OK waits for the URL. The fields used to be checked after the dialog
         // closed: OK on an incomplete form put up a warning and dropped what
-        // had been typed, a pasted URL included.
+        // had been typed. A name left empty is the provider's own
+        // (profile-title), or the host's, from the first refresh.
         dialog.getDialogPane().lookupButton(ButtonType.OK).disableProperty().bind(
                 Bindings.createBooleanBinding(
-                        () -> nameField.getText().isBlank() || urlField.getText().isBlank(),
-                        nameField.textProperty(), urlField.textProperty()));
+                        () -> urlField.getText().isBlank(), urlField.textProperty()));
         dialog.initOwner(ownerWindow());
 
         Platform.runLater(nameField::requestFocus);
@@ -301,7 +302,7 @@ public class SubscriptionsViewController implements ViewShownAware {
     private void deleteSubscription(Subscription sub) {
         Alert confirm = Dialogs.alert(Alert.AlertType.CONFIRMATION);
         confirm.setTitle(I18n.get("subscriptions.delete.title"));
-        confirm.setHeaderText(I18n.get("subscriptions.delete.confirm", sub.getName()));
+        confirm.setHeaderText(I18n.get("subscriptions.delete.confirm", shownName(sub)));
         int servers = sub.getServerIds().size();
         // Nothing to add for a subscription without servers: "all 0 servers".
         confirm.setContentText(servers == 0 ? null
@@ -323,6 +324,23 @@ public class SubscriptionsViewController implements ViewShownAware {
     private Window ownerWindow() {
         Scene scene = subscriptionListView.getScene();
         return scene == null ? null : scene.getWindow();
+    }
+
+    /**
+     * The name a row shows: the subscription's, or its host's until the
+     * first refresh names a subscription that was added without one.
+     */
+    static String shownName(Subscription sub) {
+        String name = sub.getName();
+        if (name != null && !name.isBlank()) {
+            return name;
+        }
+        try {
+            String host = sub.getUrl() == null ? null : URI.create(sub.getUrl().strip()).getHost();
+            return host == null ? "" : host;
+        } catch (IllegalArgumentException e) {
+            return "";
+        }
     }
 
     /**
@@ -359,7 +377,7 @@ public class SubscriptionsViewController implements ViewShownAware {
             row.getStyleClass().add("server-list-item");
             row.setAlignment(Pos.CENTER_LEFT);
 
-            Label nameLabel = new Label(sub.getName());
+            Label nameLabel = new Label(shownName(sub));
             nameLabel.getStyleClass().add("server-name");
 
             // Scheme and host only: the path and query carry the account
@@ -381,6 +399,15 @@ public class SubscriptionsViewController implements ViewShownAware {
 
             VBox info = new VBox(2);
             info.getChildren().addAll(nameLabel, urlLabel, statusLabel);
+
+            // What the provider tells its users, as its last answer said it.
+            if (!sub.getAnnounce().isEmpty()) {
+                Label announceLabel = new Label(
+                        I18n.get("subscriptions.announce", sub.getAnnounce()));
+                announceLabel.getStyleClass().add("server-address");
+                announceLabel.setWrapText(true);
+                info.getChildren().add(announceLabel);
+            }
 
             // A failed refresh is otherwise invisible: the row keeps showing an
             // old timestamp and looks the same as a healthy subscription.

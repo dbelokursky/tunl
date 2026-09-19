@@ -91,6 +91,29 @@ public class SubscriptionsViewTest extends ApplicationTest {
         stage.show();
     }
 
+    /**
+     * A subscription added without a name shows its host until the provider
+     * names it, and what the provider tells its users shows on its row. The
+     * row showed an empty name, and the provider's message only when it
+     * declined a device.
+     */
+    @Test
+    void aRowShowsTheHostOfAnUnnamedSubscriptionAndTheProvidersAnnouncement() {
+        service.addSubscription("", "https://provider.example/sub?token=0123456789abcdef");
+        WaitForAsyncUtils.waitForFxEvents();
+        Subscription sub = service.getSubscriptions().getFirst();
+        ListView<Subscription> list = lookup("#subscriptionListView").query();
+
+        interact(() -> {
+            sub.setAnnounce("Продлите подписку до 1 октября");
+            list.refresh();
+        });
+
+        assertThat(lookup(".label").queryAllAs(Label.class)).extracting(Label::getText)
+                .contains("provider.example",
+                        I18n.get("subscriptions.announce", "Продлите подписку до 1 октября"));
+    }
+
     @Test
     void controlsExist() {
         assertThat(lookup("#subscriptionListView").tryQuery()).isPresent();
