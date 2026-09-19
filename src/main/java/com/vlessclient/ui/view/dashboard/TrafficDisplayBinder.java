@@ -7,6 +7,7 @@ import com.vlessclient.model.ConnectionState;
 import com.vlessclient.service.DaemonThreads;
 import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.ui.view.OnScreen;
+import com.vlessclient.ui.view.TrafficText;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -252,7 +253,7 @@ public final class TrafficDisplayBinder {
             return;
         }
         boolean idle = bytesPerSec == 0;
-        readout.speed().setText(TrafficMonitor.formatSpeed(bytesPerSec));
+        readout.speed().setText(TrafficText.speed(bytesPerSec));
         readout.speed().getStyleClass().setAll("speed-value",
                 idle ? "speed-value-idle" : activeSpeedClass);
         if (readout.icon() != null) {
@@ -271,14 +272,14 @@ public final class TrafficDisplayBinder {
         }
         long total = lastTotalUpload + lastTotalDownload;
         sessionTotalLabel.setText(
-                I18n.get("dashboard.traffic.session", TrafficMonitor.formatBytes(total)));
+                I18n.get("dashboard.traffic.session", TrafficText.bytes(total)));
         if (sessionSplit == null) {
             sessionSplit = new Tooltip();
             sessionTotalLabel.setTooltip(sessionSplit);
         }
         sessionSplit.setText(I18n.get("dashboard.traffic.session.split",
-                TrafficMonitor.formatBytes(lastTotalUpload),
-                TrafficMonitor.formatBytes(lastTotalDownload)));
+                TrafficText.bytes(lastTotalUpload),
+                TrafficText.bytes(lastTotalDownload)));
     }
 
     /**

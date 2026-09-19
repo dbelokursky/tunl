@@ -167,7 +167,7 @@ public class DashboardTrafficHistoryTest extends ApplicationTest {
                 .isTrue();
         assertThat(total.getText())
                 .as("and the line now counts the month, not a session that never ran")
-                .contains("4.9 KB");
+                .contains(TrafficText.bytes(1_000 + 4_000));
     }
 
     @Test

@@ -980,7 +980,7 @@ public class DashboardViewController implements ViewShownAware {
         long total = historyStore.totalForMonth(java.time.YearMonth.now());
         return total == 0 ? null
                 : I18n.get("dashboard.traffic.history.month",
-                        TrafficMonitor.formatBytes(total));
+                        TrafficText.bytes(total));
     }
 
     private void persistTrafficHistoryExpanded(boolean expanded) {

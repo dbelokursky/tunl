@@ -2,9 +2,9 @@ package com.vlessclient.ui.view.settings;
 
 import com.vlessclient.app.I18n;
 import com.vlessclient.service.TrafficHistoryStore;
-import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.ui.view.Confirmations;
 import com.vlessclient.ui.view.Icons;
+import com.vlessclient.ui.view.TrafficText;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.FormatStyle;
@@ -90,7 +90,7 @@ public final class TrafficHistorySettingsSection {
             controls.summary().setText(I18n.get("settings.traffic.history.empty"));
         } else {
             controls.summary().setText(I18n.get("settings.traffic.history.summary",
-                    TrafficMonitor.formatBytes(total),
+                    TrafficText.bytes(total),
                     since.get().format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
                             .withLocale(I18n.getLocale()))));
         }

@@ -2,7 +2,7 @@ package com.vlessclient.ui.view.dashboard;
 
 import com.vlessclient.app.I18n;
 import com.vlessclient.service.TrafficHistoryStore;
-import com.vlessclient.service.TrafficMonitor;
+import com.vlessclient.ui.view.TrafficText;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.FormatStyle;
@@ -202,11 +202,11 @@ public final class TrafficDayPopover {
         show(separator, !quiet && !servers.isEmpty());
 
         total.set(I18n.get("dashboard.traffic.history.day.total"),
-                TrafficMonitor.formatBytes(day.total()));
+                TrafficText.bytes(day.total()));
         upload.set(I18n.get("dashboard.traffic.history.day.upload"),
-                TrafficMonitor.formatBytes(day.upload()));
+                TrafficText.bytes(day.upload()));
         download.set(I18n.get("dashboard.traffic.history.day.download"),
-                TrafficMonitor.formatBytes(day.download()));
+                TrafficText.bytes(day.download()));
         fillServers(quiet ? List.of() : servers);
     }
 
@@ -229,13 +229,13 @@ public final class TrafficDayPopover {
                 long rest = servers.subList(named, servers.size()).stream()
                         .mapToLong(TrafficHistoryStore.ServerTotal::total).sum();
                 row.set(I18n.get("dashboard.traffic.history.day.others"),
-                        TrafficMonitor.formatBytes(rest));
+                        TrafficText.bytes(rest));
             } else {
                 TrafficHistoryStore.ServerTotal server = servers.get(i);
                 String name = server.serverName() == null || server.serverName().isBlank()
                         ? I18n.get("dashboard.traffic.history.unknown.server")
                         : server.serverName();
-                row.set(name, TrafficMonitor.formatBytes(server.total()));
+                row.set(name, TrafficText.bytes(server.total()));
             }
         }
     }

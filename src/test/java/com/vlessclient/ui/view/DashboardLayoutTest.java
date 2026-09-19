@@ -267,9 +267,9 @@ public class DashboardLayoutTest extends ApplicationTest {
             // The FXML placeholder is "0 B/s", four characters narrower than a
             // real reading. Measuring the placeholder would leave the block a
             // pixel from fitting and call that a pass; these are the widest
-            // strings TrafficMonitor.formatSpeed can produce in practice.
-            ((Label) lookup("#uploadSpeedLabel").query()).setText("128.4 MB/s");
-            ((Label) lookup("#downloadSpeedLabel").query()).setText("128.4 MB/s");
+            // strings TrafficText.speed can produce in practice.
+            ((Label) lookup("#uploadSpeedLabel").query()).setText(TrafficText.speed(134_637_158L));
+            ((Label) lookup("#downloadSpeedLabel").query()).setText(TrafficText.speed(134_637_158L));
             subtitle.setText("Routing traffic through [amsterdam] mac-dima-exit-node-01");
         });
 

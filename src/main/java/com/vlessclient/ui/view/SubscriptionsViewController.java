@@ -5,7 +5,6 @@ import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.Subscription;
 import com.vlessclient.service.Redact;
 import com.vlessclient.service.SubscriptionService;
-import com.vlessclient.service.TrafficMonitor;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -334,8 +333,8 @@ public class SubscriptionsViewController implements ViewShownAware {
         List<String> parts = new ArrayList<>();
         if (sub.getTotalBytes() > 0) {
             parts.add(I18n.get("subscriptions.traffic",
-                    TrafficMonitor.formatBytes(sub.getUploadBytes() + sub.getDownloadBytes()),
-                    TrafficMonitor.formatBytes(sub.getTotalBytes())));
+                    TrafficText.bytes(sub.getUploadBytes() + sub.getDownloadBytes()),
+                    TrafficText.bytes(sub.getTotalBytes())));
         }
         if (sub.getExpiresAt() > 0) {
             String date = DATE_FORMAT.format(Instant.ofEpochSecond(sub.getExpiresAt()));

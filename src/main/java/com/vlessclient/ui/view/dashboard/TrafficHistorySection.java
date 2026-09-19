@@ -2,10 +2,10 @@ package com.vlessclient.ui.view.dashboard;
 
 import com.vlessclient.app.I18n;
 import com.vlessclient.service.TrafficHistoryStore;
-import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.ui.view.FxTimer;
 import com.vlessclient.ui.view.OnScreen;
 import com.vlessclient.ui.view.PressableLabel;
+import com.vlessclient.ui.view.TrafficText;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.YearMonth;
@@ -228,7 +228,7 @@ public final class TrafficHistorySection {
             bar.getStyleClass().setAll(i == barNodes.size() - 1
                     ? "traffic-history-bar-today" : "traffic-history-bar");
             barTooltips.get(i).setText(day.date().format(dayFormat)
-                    + " — " + TrafficMonitor.formatBytes(day.total()));
+                    + " — " + TrafficText.bytes(day.total()));
         }
 
         long windowTotal = days.stream().mapToLong(TrafficHistoryStore.DayTotal::total).sum();
@@ -237,12 +237,12 @@ public final class TrafficHistorySection {
                 : I18n.get("dashboard.traffic.history.range",
                         days.get(0).date().format(dayFormat)));
         controls.month().setText(I18n.get("dashboard.traffic.history.month",
-                TrafficMonitor.formatBytes(store.totalForMonth(YearMonth.now()))));
+                TrafficText.bytes(store.totalForMonth(YearMonth.now()))));
         controls.servers().setText(store.topServers(TOP_SERVERS, WINDOW_DAYS).stream()
                 .map(server -> (server.serverName() == null || server.serverName().isBlank()
                         ? I18n.get("dashboard.traffic.history.unknown.server")
                         : server.serverName())
-                        + " — " + TrafficMonitor.formatBytes(server.total()))
+                        + " — " + TrafficText.bytes(server.total()))
                 .collect(Collectors.joining(" · ")));
 
         // The open day is re-read from the same list: today's bar is still

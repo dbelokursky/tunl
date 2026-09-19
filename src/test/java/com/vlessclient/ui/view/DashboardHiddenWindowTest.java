@@ -281,7 +281,7 @@ public class DashboardHiddenWindowTest extends ApplicationTest {
     void theSpeedsCatchUpWhenTheWindowComesBack() throws Exception {
         connect();
         String shownBeforeHiding = uploadSpeed.getText();
-        String latest = TrafficMonitor.formatSpeed(123_456);
+        String latest = TrafficText.speed(123_456);
         assertThat(shownBeforeHiding).as("precondition").isNotEqualTo(latest);
 
         interact(stage::hide);
