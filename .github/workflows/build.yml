@@ -5,10 +5,13 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
-# Superseded PR pushes cancel their older runs; merge builds on main always
-# run to completion so every merge yields its own installers.
+# Superseded PR pushes cancel their older runs. Every push to main gets a
+# group of its own, so every merge is built: in one shared group GitHub keeps
+# a single pending run and cancels the one before it, and a merge that landed
+# while another was building went unbuilt (#318's 1ec98cf, cancelled before
+# any job started). dev-release below takes the uploads one at a time.
 concurrency:
-  group: build-${{ github.ref }}
+  group: build-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
@@ -233,11 +236,20 @@ jobs:
     needs: [test, package-macos, package-linux-arm]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # One upload at a time: two merges replacing the release at once could
+    # leave it half deleted. Merges build in parallel, so an older one can
+    # reach this job last; the step below keeps it from undoing a newer one.
+    concurrency:
+      group: dev-release
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
       # Keeps the persisted token: this is the job that pushes the tag below.
+      # The whole history, for the check that no newer merge is published.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: vless-client-*
@@ -249,6 +261,12 @@ jobs:
         run: |
           ls -la dist/
           TAG=dev-latest
+          PUBLISHED=$(git rev-list -n 1 "$TAG" 2>/dev/null || true)
+          if [ -n "$PUBLISHED" ] && [ "$PUBLISHED" != "$GITHUB_SHA" ] \
+              && git merge-base --is-ancestor "$GITHUB_SHA" "$PUBLISHED"; then
+            echo "$TAG already holds ${PUBLISHED:0:7}, a merge after ${GITHUB_SHA:0:7}; leaving it."
+            exit 0
+          fi
           git tag -f "$TAG"
           git push --force origin "$TAG"
           {
