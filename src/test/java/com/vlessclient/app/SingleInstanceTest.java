@@ -48,6 +48,23 @@ class SingleInstanceTest {
         assertThat(launchSecondCopy(dir)).isEqualTo("refused");
     }
 
+    /**
+     * The lock was taken, then the loopback listener or its port file failed,
+     * and the failure path let the lock go: this copy ran on unguarded while
+     * the directory looked free. A later launch took it, and its startup reap
+     * ended this copy's core. The listener only lets a second launch bring
+     * this window forward; failing that must not cost the lock.
+     */
+    @Test
+    void aListenerThatCannotStartKeepsTheLock() throws Exception {
+        // A directory where the port file goes: writing the file fails.
+        Files.createDirectories(dir.resolve(SingleInstance.PORT_FILE));
+
+        assertThat(SingleInstance.claim(dir)).isEqualTo(SingleInstance.Claim.CLAIMED);
+
+        assertThat(launchSecondCopy(dir)).isEqualTo("refused");
+    }
+
     @Test
     void theDirectoryIsFreeAgainOnceTheRunningCopyStops() throws Exception {
         SingleInstance.acquire(dir).orElseThrow().close();

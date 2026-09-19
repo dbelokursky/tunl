@@ -105,14 +105,17 @@ final class SingleInstance {
                 channel.close();
                 return Claim.HELD_ELSEWHERE;
             }
-            ServerSocket server = new ServerSocket();
-            server.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
+            // The directory is this copy's from here on. The listener only lets a
+            // second launch bring this window forward: a failure to start it
+            // used to fall through to the catch below, which let the lock go
+            // and left this copy running unguarded.
             String token = newToken();
             Path portFile = dataDir.resolve(PORT_FILE);
-            SecureFiles.writePrivately(portFile, (server.getLocalPort() + " " + token + "\n")
-                    .getBytes(StandardCharsets.US_ASCII));
+            ServerSocket server = startListener(portFile, token);
             SingleInstance instance = new SingleInstance(channel, lock, server, token, portFile);
-            instance.listen();
+            if (server != null) {
+                instance.listen();
+            }
             releaseOnExit(instance);
             current = instance;
             return Claim.CLAIMED;
@@ -123,6 +126,27 @@ final class SingleInstance {
                     e.getMessage());
             closeQuietly(channel);
             return Claim.UNAVAILABLE;
+        }
+    }
+
+    /**
+     * Opens the loopback listener a second launch signals, and tells where it
+     * is; null when it cannot be started, which leaves a second launch unable
+     * to bring this window forward but changes nothing else.
+     */
+    private static ServerSocket startListener(Path portFile, String token) {
+        ServerSocket server = null;
+        try {
+            server = new ServerSocket();
+            server.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
+            SecureFiles.writePrivately(portFile, (server.getLocalPort() + " " + token + "\n")
+                    .getBytes(StandardCharsets.US_ASCII));
+            return server;
+        } catch (IOException e) {
+            log.warn("A second launch will not be able to bring this window forward: {}",
+                    e.getMessage());
+            closeQuietly(server);
+            return null;
         }
     }
 
