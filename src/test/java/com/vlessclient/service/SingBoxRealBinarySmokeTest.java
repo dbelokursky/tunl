@@ -149,6 +149,30 @@ class SingBoxRealBinarySmokeTest {
     }
 
     /**
+     * The "Fastest" mode's group as the generator writes it for a long list:
+     * thirty members, probed every ten minutes, resting when idle. The core
+     * refuses a whole configuration over a field it does not know.
+     */
+    @Test
+    void checkAcceptsTheFastestGroupOfALongList() throws Exception {
+        List<ServerConfig> servers = new java.util.ArrayList<>();
+        for (int i = 0; i < 40; i++) {
+            ServerConfig server = serverFor(Protocol.VLESS);
+            server.setId("fastest-" + i);
+            server.setName("fastest-" + i);
+            servers.add(server);
+        }
+        AppSettings settings = new AppSettings();
+        settings.setServerSelection(com.vlessclient.model.ServerSelection.AUTO_BEST);
+
+        String config = generator.generate(servers, servers.getFirst(), settings, null);
+
+        assertThat(config).contains("\"idle_timeout\"")
+                .containsPattern("\"interval\"\\s*:\\s*\"10m\"");
+        assertCheckPasses(config, "fastest group");
+    }
+
+    /**
      * Every transport a provider's share link can carry has to reach the core
      * as fields that transport accepts. sing-box refuses a whole configuration
      * over one unknown field, and every stored server is a member of the proxy

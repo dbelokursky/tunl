@@ -109,7 +109,12 @@ public class ServiceLocator {
         ThemeManager themeManager = new ThemeManager();
         register(ThemeManager.class, themeManager);
 
-        SingBoxConfigGenerator configGenerator = new SingBoxConfigGenerator();
+        LatencyTester latencyTester = new LatencyTester();
+        register(LatencyTester.class, latencyTester);
+
+        // The "Fastest" mode probes the servers that last answered fastest.
+        SingBoxConfigGenerator configGenerator = new SingBoxConfigGenerator(
+                latencyTester::lastLatency);
         register(SingBoxConfigGenerator.class, configGenerator);
 
         ShareLinkParser shareLinkParser = new ShareLinkParser();
@@ -139,8 +144,6 @@ public class ServiceLocator {
         // only way the dashboard can name the server an automatic mode picked.
         register(ProxyGroupMonitor.class, new ProxyGroupMonitor());
 
-        LatencyTester latencyTester = new LatencyTester();
-        register(LatencyTester.class, latencyTester);
 
         ServiceReachabilityChecker reachabilityChecker = new ServiceReachabilityChecker();
         register(ServiceReachabilityChecker.class, reachabilityChecker);
