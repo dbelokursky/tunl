@@ -109,6 +109,16 @@ public class StatusPresenter {
         // the title and subtitle in the old one until the state next moved --
         // and on a healthy tunnel nothing moves for hours.
         I18n.localeProperty().addListener((observable, oldLocale, newLocale) -> repaintWording());
+        // A first launch downloads the country database in the background: a
+        // tunnel that came up before it landed gets its flag when it does.
+        ServiceLocator.find(CountryResolver.class).ifPresent(resolver ->
+                resolver.onDatabaseReady(() -> Platform.runLater(() -> {
+                    SingBoxEngine current = engine.get();
+                    if (current != null && current.connectionStateProperty().get()
+                            == ConnectionState.CONNECTED) {
+                        showStatusFlag(routed());
+                    }
+                })));
     }
 
     private ServerConfig routed() {

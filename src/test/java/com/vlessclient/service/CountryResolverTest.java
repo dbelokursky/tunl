@@ -117,6 +117,78 @@ class CountryResolverTest {
         assertThat(resolver.countryOf(server(null))).isEmpty();
     }
 
+    /** A database that is not there until {@link #arrive()}, as on a first launch. */
+    private static class ArrivingDatabase extends GeoIpDatabase {
+        private final String answer;
+        private volatile boolean arrived;
+        final AtomicInteger lookups = new AtomicInteger();
+
+        ArrivingDatabase(Path dir, String answer) {
+            super(dir.resolve("downloading.mmdb"), HttpClient.newHttpClient());
+            this.answer = answer;
+        }
+
+        void arrive() {
+            arrived = true;
+        }
+
+        @Override
+        public boolean isAvailable() {
+            return arrived;
+        }
+
+        @Override
+        public Optional<String> lookup(String address) {
+            lookups.incrementAndGet();
+            return arrived ? Optional.of(answer) : Optional.empty();
+        }
+
+        @Override
+        public boolean ensureDownloaded() {
+            arrive();
+            return true;
+        }
+    }
+
+    /**
+     * On a first launch the database is still downloading while the server
+     * list asks for flags. Those lookups found nothing and were remembered as
+     * unknown, so no flag appeared until the app was started again.
+     */
+    @Test
+    void aLookupMadeBeforeTheDatabaseArrivesIsAskedAgainOnceItHas() throws Exception {
+        ArrivingDatabase database = new ArrivingDatabase(tempDir, "NL");
+        CountryResolver resolver = new CountryResolver(database);
+        ServerConfig server = server("vpn.example.com");
+
+        resolver.resolveAsync(server, code -> { });
+        Await.until("the first lookup to land", () -> database.lookups.get() > 0,
+                Duration.ofSeconds(5));
+        database.arrive();
+
+        CountDownLatch resolved = new CountDownLatch(1);
+        resolver.resolveAsync(server, code -> resolved.countDown());
+        assertThat(resolved.await(5, TimeUnit.SECONDS))
+                .as("the country, asked for again once the database is there").isTrue();
+        assertThat(resolver.countryOf(server)).contains("NL");
+    }
+
+    /**
+     * The views redraw their flags when the download lands, instead of on
+     * the next scroll or connect.
+     */
+    @Test
+    void theDownloadLandingIsAnnounced() throws Exception {
+        ArrivingDatabase database = new ArrivingDatabase(tempDir, "NL");
+        CountryResolver resolver = new CountryResolver(database);
+        CountDownLatch ready = new CountDownLatch(1);
+        resolver.onDatabaseReady(ready::countDown);
+
+        resolver.warmUp();
+
+        assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+    }
+
     /**
      * The whole feature is decoration: with no database downloaded the list
      * must render exactly as before, not error out.

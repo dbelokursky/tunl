@@ -169,6 +169,13 @@ public class ServersViewController {
         });
 
         updateEmptyState(servers);
+
+        CountryResolver resolver = optionalService(CountryResolver.class);
+        if (resolver != null) {
+            // A first launch downloads the country database while the list is
+            // drawn: the rows get their flags when it lands, not on a scroll.
+            resolver.onDatabaseReady(() -> Platform.runLater(serverListView::refresh));
+        }
     }
 
     /** Replaces the clipboard the import reads; for tests, which have none. */
