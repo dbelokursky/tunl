@@ -220,6 +220,57 @@ public class AppSettings {
         this.autoConnect = autoConnect;
     }
 
+    /**
+     * Ports this run listens on in place of chosen ones another program held,
+     * or null where the run uses the chosen port. Runtime only: settings are
+     * saved whole, and a moved port written into the chosen one became the
+     * user's choice at the next save of anything. The file keeps what the user
+     * chose, and the next start tries it again.
+     *
+     * <p>Plain fields, like every other one here: the connect thread sets them
+     * before the core starts, and the readers get to them through the same
+     * hand-offs that carry the rest of the settings between threads. A
+     * volatile field makes SpotBugs treat the whole class as shared state and
+     * flag each of its primitive setters.</p>
+     */
+    @JsonIgnore
+    private Integer runSocksPort;
+    @JsonIgnore
+    private Integer runHttpPort;
+    @JsonIgnore
+    private Integer runClashApiPort;
+
+    /** The SOCKS port this run listens on: the chosen one, or where it moved. */
+    public int listenSocksPort() {
+        Integer run = runSocksPort;
+        return run != null ? run : socksPort;
+    }
+
+    /** The HTTP port this run listens on: the chosen one, or where it moved. */
+    public int listenHttpPort() {
+        Integer run = runHttpPort;
+        return run != null ? run : httpPort;
+    }
+
+    /** The control port this run listens on: the chosen one, or where it moved. */
+    public int listenClashApiPort() {
+        Integer run = runClashApiPort;
+        return run != null ? run : clashApiPort;
+    }
+
+    /**
+     * Sets the ports this run listens on, leaving the chosen ones as they are.
+     *
+     * @param socks    the SOCKS port for the run
+     * @param http     the HTTP port for the run
+     * @param clashApi the control port for the run
+     */
+    public void listenOn(int socks, int http, int clashApi) {
+        runSocksPort = socks == socksPort ? null : socks;
+        runHttpPort = http == httpPort ? null : http;
+        runClashApiPort = clashApi == clashApiPort ? null : clashApi;
+    }
+
     public int getSocksPort() {
         return socksPort;
     }

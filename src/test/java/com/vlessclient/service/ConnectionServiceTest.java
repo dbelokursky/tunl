@@ -603,7 +603,7 @@ class ConnectionServiceTest {
             RecordingEngine engine = engine();
             assertThat(service(engine).connect().started()).isTrue();
 
-            assertThat(store.getSettings().getSocksPort())
+            assertThat(store.getSettings().listenSocksPort())
                     .as("the run listens somewhere it can actually bind")
                     .isNotEqualTo(busy);
             assertThat(new ConfigStore(tempDir).getSettings().getSocksPort())
@@ -626,9 +626,87 @@ class ConnectionServiceTest {
 
             assertThat(service(engine()).connect().started()).isTrue();
 
-            assertThat(store.getSettings().getSocksPort())
-                    .isNotEqualTo(store.getSettings().getHttpPort());
+            assertThat(store.getSettings().listenSocksPort())
+                    .isNotEqualTo(store.getSettings().listenHttpPort());
         }
+    }
+
+    /**
+     * The move was made on the settings object every save writes out, so it
+     * stayed in memory only until the first save: expanding the traffic
+     * history, any Settings change or an MCP edit made the moved port the
+     * user's choice for good.
+     */
+    @Test
+    void aMovedPortStaysOutOfTheFileWhenTheSettingsAreSavedLater() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        try (ServerSocket taken = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            int busy = taken.getLocalPort();
+            store.getSettings().setSocksPort(busy);
+            store.saveSettings(store.getSettings());
+            assertThat(service(engine()).connect().started()).isTrue();
+
+            // What the traffic-history toggle does, among others.
+            store.saveSettings(store.getSettings());
+
+            assertThat(new ConfigStore(tempDir).getSettings().getSocksPort())
+                    .as("the file after a later save")
+                    .isEqualTo(busy);
+            assertThat(store.getSettings().getSocksPort())
+                    .as("the port the user chose, as Settings shows it")
+                    .isEqualTo(busy);
+        }
+    }
+
+    /**
+     * A taken port moved to the next free one without regard for the ports
+     * the other inbounds were about to take: with the defaults, a taken 1080
+     * moved SOCKS onto 1081, the HTTP port, and HTTP to 1082, so a browser set
+     * to the HTTP proxy on 1081 reached a SOCKS inbound.
+     */
+    @Test
+    void aTakenPortDoesNotMoveOntoAnotherInboundsChosenPort() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        int base = freeBlockOf(3);
+        try (ServerSocket taken = new ServerSocket(base, 1, InetAddress.getLoopbackAddress())) {
+            store.getSettings().setSocksPort(base);
+            store.getSettings().setHttpPort(base + 1);
+
+            assertThat(service(engine()).connect().started()).isTrue();
+
+            assertThat(store.getSettings().listenHttpPort())
+                    .as("HTTP keeps the port the user chose, which is free")
+                    .isEqualTo(base + 1);
+            assertThat(store.getSettings().listenSocksPort())
+                    .as("SOCKS moves past it")
+                    .isNotIn(base, base + 1);
+        }
+    }
+
+    /** The first of {@code count} consecutive loopback ports that are all free. */
+    private static int freeBlockOf(int count) throws IOException {
+        for (int attempt = 0; attempt < 50; attempt++) {
+            int base;
+            try (ServerSocket probe = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+                base = probe.getLocalPort();
+            }
+            if (base + count > 65535) {
+                continue;
+            }
+            boolean free = true;
+            for (int port = base; port < base + count && free; port++) {
+                try (ServerSocket probe = new ServerSocket(port, 1,
+                        InetAddress.getLoopbackAddress())) {
+                    free = probe.getLocalPort() == port;
+                } catch (IOException taken) {
+                    free = false;
+                }
+            }
+            if (free) {
+                return base;
+            }
+        }
+        throw new AssertionError("no free block of " + count + " loopback ports");
     }
 
     @Test

@@ -628,16 +628,33 @@ public class ConnectionService {
      *
      * <p>The core refuses to start on a port it cannot bind, and recovery then
      * repeated that refusal for as long as the other program lived, with a
-     * notification every time. Only the in-memory settings move: the file
-     * keeps what the user chose, so the next start tries their port again, and
-     * the ports the app shows are the ones it is really listening on, because
-     * every reader takes them from here.</p>
+     * notification every time. The ports move for the run only
+     * ({@link AppSettings#listenOn}): the chosen ones, which are what gets
+     * saved, stay as they are, so the next start tries them again, and what
+     * listens, connects or shows a port reads the run's.</p>
      */
     private static void moveTakenListenPortsAside(AppSettings settings) {
-        Set<Integer> taken = new LinkedHashSet<>();
-        settings.setSocksPort(freePortFrom(settings.getSocksPort(), "SOCKS", taken));
-        settings.setHttpPort(freePortFrom(settings.getHttpPort(), "HTTP", taken));
-        settings.setClashApiPort(freePortFrom(settings.getClashApiPort(), "control", taken));
+        int[] chosen = {settings.getSocksPort(), settings.getHttpPort(),
+            settings.getClashApiPort()};
+        String[] what = {"SOCKS", "HTTP", "control"};
+        // The chosen ports that are free are kept first, so a port that moves
+        // cannot land on one: a taken 1080 used to move SOCKS onto 1081, the
+        // HTTP port, and HTTP on to 1082.
+        Set<Integer> reserved = new LinkedHashSet<>();
+        boolean[] kept = new boolean[chosen.length];
+        for (int i = 0; i < chosen.length; i++) {
+            kept[i] = !reserved.contains(chosen[i]) && canBind(chosen[i]);
+            if (kept[i]) {
+                reserved.add(chosen[i]);
+            }
+        }
+        int[] listen = chosen.clone();
+        for (int i = 0; i < chosen.length; i++) {
+            if (!kept[i]) {
+                listen[i] = freePortFrom(chosen[i], what[i], reserved);
+            }
+        }
+        settings.listenOn(listen[0], listen[1], listen[2]);
     }
 
     /**
