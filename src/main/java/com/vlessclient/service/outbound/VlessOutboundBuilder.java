@@ -28,7 +28,7 @@ public final class VlessOutboundBuilder extends OutboundBuilder {
             outbound.put("flow", server.getFlow());
         }
 
-        addTlsIfEnabled(outbound, server.getTls());
+        addTlsIfEnabled(outbound, server);
         addTransportIfNeeded(outbound, server.getTransport());
 
         return outbound;

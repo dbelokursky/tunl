@@ -40,7 +40,8 @@ public abstract class OutboundBuilder {
     public abstract ObjectNode build(ServerConfig server, String tag);
 
     /** Adds the {@code tls} block (server name, ALPN, uTLS, Reality) when TLS is enabled. */
-    protected final void addTlsIfEnabled(ObjectNode outbound, TlsConfig tls) {
+    protected final void addTlsIfEnabled(ObjectNode outbound, ServerConfig server) {
+        TlsConfig tls = server.getTls();
         if (tls == null || !tls.isEnabled()) {
             return;
         }
@@ -60,7 +61,7 @@ public abstract class OutboundBuilder {
             tlsNode.set("alpn", alpnArray);
         }
 
-        String fingerprint = CoreSettings.fingerprint(tls);
+        String fingerprint = CoreSettings.fingerprintToSend(server);
         if (fingerprint != null) {
             ObjectNode utls = mapper.createObjectNode();
             utls.put("enabled", true);

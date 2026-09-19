@@ -931,6 +931,150 @@ class SingBoxRealBinarySmokeTest {
         }
     }
 
+    /**
+     * A server whose link names no uTLS fingerprint greets like a browser:
+     * with GREASE among its cipher suites, which Go's own TLS never sends and
+     * DPI tells apart by. Over WebSocket it still offers HTTP/1.1 alone: the
+     * fingerprint's own ALPN starts with h2, and a front that picked h2 would
+     * not upgrade the connection to WebSocket.
+     */
+    @Test
+    void aServerWithoutAFingerprintGreetsLikeABrowser() throws Exception {
+        try (ServerSocket tlsFront = new ServerSocket(0, 1,
+                java.net.InetAddress.getLoopbackAddress())) {
+            ServerConfig server = new ShareLinkParser().parse("vless://" + TEST_UUID
+                    + "@127.0.0.1:" + tlsFront.getLocalPort()
+                    + "?security=tls&sni=example.com&type=ws&path=%2Fws#no-fingerprint");
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(ProxyMode.SYSTEM_PROXY);
+            settings.setSystemProxyAutoConfig(false);
+            CoreRun run = startOnFreshPorts(settings, s -> generator.generate(server, s));
+            java.util.concurrent.CompletableFuture<Void> request =
+                    java.util.concurrent.CompletableFuture.runAsync(() -> {
+                        try (HttpClient client = HttpClient.newBuilder()
+                                .proxy(ProxySelector.of(new InetSocketAddress(
+                                        "127.0.0.1", settings.getHttpPort())))
+                                .build()) {
+                            client.send(HttpRequest.newBuilder()
+                                    .uri(URI.create("http://203.0.113.10/"))
+                                    .timeout(Duration.ofSeconds(10)).GET().build(),
+                                    HttpResponse.BodyHandlers.discarding());
+                        } catch (IOException | InterruptedException ignored) {
+                            // The front never answers: only its greeting matters.
+                        }
+                    });
+            try {
+                tlsFront.setSoTimeout(15_000);
+                try (Socket greeted = tlsFront.accept()) {
+                    ClientHello hello = ClientHello.read(greeted.getInputStream());
+
+                    assertThat(hello.greases()).as("GREASE among %s", hello.cipherSuites())
+                            .isTrue();
+                    assertThat(hello.alpn()).containsExactly("http/1.1");
+                }
+            } finally {
+                request.cancel(true);
+                stopCore(run.process());
+                Files.deleteIfExists(run.configFile());
+                Files.deleteIfExists(run.logFile());
+            }
+        }
+    }
+
+    /**
+     * TLS inside QUIC, Hysteria2's and the QUIC transport's, goes without
+     * uTLS. The core passes {@code check} with uTLS there, then fails every
+     * connection with "unsupported usage for uTLS": a fingerprint by default
+     * would have cut off every such server, and one a link sets did already.
+     */
+    @Test
+    void quicServersConnectWithoutAskingForUtls() throws Exception {
+        ServerConfig hysteria2 = serverFor(Protocol.HYSTERIA2);
+        ServerConfig vlessOverQuic = new ShareLinkParser().parse("vless://" + TEST_UUID
+                + "@127.0.0.1:1?security=tls&sni=example.com&type=quic&fp=chrome#quic");
+        for (ServerConfig server : List.of(hysteria2, vlessOverQuic)) {
+            server.setAddress("127.0.0.1");
+            try (java.net.DatagramSocket deadEnd = new java.net.DatagramSocket(0,
+                    java.net.InetAddress.getLoopbackAddress())) {
+                server.setPort(deadEnd.getLocalPort());
+                server.getTls().setFingerprint("chrome");
+
+                assertThat(logOfAConnectionThrough(server))
+                        .as("the core's log for a connection through %s", server.getName())
+                        .doesNotContain("unsupported usage for uTLS");
+            }
+        }
+    }
+
+    /** Starts the core for one server, sends a request through it, and gives its log. */
+    private String logOfAConnectionThrough(ServerConfig server) throws Exception {
+        AppSettings settings = new AppSettings();
+        settings.setProxyMode(ProxyMode.SYSTEM_PROXY);
+        settings.setSystemProxyAutoConfig(false);
+        CoreRun run = startOnFreshPorts(settings, s -> generator.generate(server, s));
+        try (HttpClient client = HttpClient.newBuilder()
+                .proxy(ProxySelector.of(new InetSocketAddress("127.0.0.1", settings.getHttpPort())))
+                .build()) {
+            client.send(HttpRequest.newBuilder()
+                    .uri(URI.create("http://203.0.113.10/"))
+                    .timeout(Duration.ofSeconds(5)).GET().build(),
+                    HttpResponse.BodyHandlers.discarding());
+        } catch (IOException expected) {
+            // Nothing answers at the far end; the log says how the core tried.
+        } finally {
+            stopCore(run.process());
+        }
+        try {
+            return Files.readString(run.logFile());
+        } finally {
+            Files.deleteIfExists(run.configFile());
+            Files.deleteIfExists(run.logFile());
+        }
+    }
+
+    /** What a TLS client's first message offers: its cipher suites and ALPN protocols. */
+    private record ClientHello(List<Integer> cipherSuites, List<String> alpn) {
+
+        /** A GREASE value (RFC 8701): 0x?A?A with both bytes the same. */
+        boolean greases() {
+            return cipherSuites.stream()
+                    .anyMatch(s -> (s & 0x0f0f) == 0x0a0a && (s >> 8) == (s & 0xff));
+        }
+
+        static ClientHello read(java.io.InputStream in) throws IOException {
+            byte[] header = in.readNBytes(5);
+            int length = ((header[3] & 0xff) << 8) | (header[4] & 0xff);
+            java.nio.ByteBuffer hello = java.nio.ByteBuffer.wrap(in.readNBytes(length));
+            // Handshake header, version and random; then the session id.
+            hello.position(4 + 2 + 32);
+            int sessionIdLength = hello.get() & 0xff;
+            hello.position(hello.position() + sessionIdLength);
+            int suitesLength = hello.getShort() & 0xffff;
+            List<Integer> suites = new java.util.ArrayList<>();
+            for (int i = 0; i < suitesLength; i += 2) {
+                suites.add(hello.getShort() & 0xffff);
+            }
+            int compressionMethods = hello.get() & 0xff;
+            hello.position(hello.position() + compressionMethods);
+            int extensionsEnd = (hello.getShort() & 0xffff) + hello.position();
+            List<String> alpn = new java.util.ArrayList<>();
+            while (hello.position() + 4 <= extensionsEnd) {
+                int type = hello.getShort() & 0xffff;
+                int next = (hello.getShort() & 0xffff) + hello.position();
+                if (type == 0x0010) {
+                    int listEnd = (hello.getShort() & 0xffff) + hello.position();
+                    while (hello.position() < listEnd) {
+                        byte[] name = new byte[hello.get() & 0xff];
+                        hello.get(name);
+                        alpn.add(new String(name, StandardCharsets.US_ASCII));
+                    }
+                }
+                hello.position(next);
+            }
+            return new ClientHello(suites, alpn);
+        }
+    }
+
     private record ProcessResult(int exitCode, String output) {
     }
 

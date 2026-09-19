@@ -23,7 +23,7 @@ public final class TrojanOutboundBuilder extends OutboundBuilder {
         outbound.put("server_port", server.getPort());
         outbound.put("password", server.getUuid());
 
-        addTlsIfEnabled(outbound, server.getTls());
+        addTlsIfEnabled(outbound, server);
         addTransportIfNeeded(outbound, server.getTransport());
 
         return outbound;
