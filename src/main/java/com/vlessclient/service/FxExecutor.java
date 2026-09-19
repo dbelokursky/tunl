@@ -43,8 +43,9 @@ public final class FxExecutor {
      * caller is then the only thread touching the list.
      *
      * <p>If the FX thread has not started the task by the time the wait runs
-     * out, the task is dropped and never runs: the caller has already been
-     * told it failed. A task that has started is left to finish.</p>
+     * out, or the caller is interrupted first, the task is dropped and never
+     * runs: the caller has already been told it failed. A task that has
+     * started is left to finish.</p>
      *
      * @throws RuntimeException if the FX task fails or does not complete in time
      */
@@ -91,6 +92,12 @@ public final class FxExecutor {
             throw new RuntimeException("Timed out waiting for the UI thread", e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            // Reported as a failure, like a timeout, so the same rule holds: a
+            // task that has not started must not run after the caller gave up.
+            if (claimed.compareAndSet(false, true)) {
+                throw new RuntimeException("Interrupted waiting for the UI thread; "
+                        + "the task had not started and will not run", e);
+            }
             throw new RuntimeException("Interrupted waiting for the UI thread", e);
         } catch (Exception e) {
             Throwable cause = e.getCause() != null ? e.getCause() : e;
