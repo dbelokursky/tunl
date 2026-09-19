@@ -329,7 +329,19 @@ class SingBoxRealBinarySmokeTest {
                 with(shadowsocksServer("ss2022-aes128", "2022-blake3-aes-128-gcm"),
                         server -> server.setUuid(key16)),
                 with(shadowsocksServer("ss2022-multi-user", "2022-blake3-aes-256-gcm"),
-                        server -> server.setUuid(key32 + ":" + key32)));
+                        server -> server.setUuid(key32 + ":" + key32)),
+                withPlugin("plugin-kcptun", "kcptun", "mode=fast"),
+                withPlugin("plugin-simple-obfs", "simple-obfs", "obfs=http;obfs-host=www.bing.com"),
+                withPlugin("obfs-mode-unknown", "obfs-local", "obfs=xyz;obfs-host=www.bing.com"),
+                withPlugin("v2ray-plugin-mode-ws", "v2ray-plugin", "mode=ws;host=example.com"),
+                withPlugin("v2ray-plugin-mode-grpc", "v2ray-plugin", "mode=grpc;tls;host=example.com"),
+                withPlugin("v2ray-plugin-quic-without-tls", "v2ray-plugin",
+                        "mode=quic;host=example.com"),
+                withPlugin("v2ray-plugin-quic-tls", "v2ray-plugin", "mode=quic;tls;host=example.com"),
+                withPlugin("v2ray-plugin-websocket-tls", "v2ray-plugin",
+                        "mode=websocket;tls;host=example.com;path=/ws"),
+                quicServer("vless-quic-without-tls", false),
+                quicServer("vless-quic-tls", true));
 
         for (ServerConfig server : servers) {
             boolean coreAccepts = checkPasses(generator.generate(server, new AppSettings()));
@@ -376,6 +388,29 @@ class SingBoxRealBinarySmokeTest {
                         .isEqualTo(coreAccepts);
             }
         }
+    }
+
+    private static ServerConfig withPlugin(String name, String plugin, String options) {
+        return with(shadowsocksServer(name, "aes-256-gcm"), server -> {
+            server.setPlugin(plugin);
+            server.setPluginOpts(options);
+        });
+    }
+
+    private static ServerConfig quicServer(String name, boolean tls) {
+        ServerConfig server = new ServerConfig();
+        server.setId(name);
+        server.setName(name);
+        server.setProtocol(Protocol.VLESS);
+        server.setAddress("203.0.113.13");
+        server.setPort(443);
+        server.setUuid(TEST_UUID);
+        server.getTransport().setType(com.vlessclient.model.TransportType.QUIC);
+        server.getTls().setEnabled(tls);
+        if (tls) {
+            server.getTls().setServerName("example.com");
+        }
+        return server;
     }
 
     private static ServerConfig with(ServerConfig server,
