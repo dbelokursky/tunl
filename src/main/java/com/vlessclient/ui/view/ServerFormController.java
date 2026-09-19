@@ -532,7 +532,7 @@ public class ServerFormController {
     }
 
     private void showValidationErrors(List<String> errors) {
-        Alert alert = new Alert(Alert.AlertType.WARNING);
+        Alert alert = Dialogs.alert(Alert.AlertType.WARNING);
         if (saveButton.getScene() != null) {
             alert.initOwner(saveButton.getScene().getWindow());
         }

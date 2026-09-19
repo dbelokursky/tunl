@@ -381,7 +381,7 @@ public class ServersViewController {
             deleteServer(targets.get(0));
             return;
         }
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        Alert confirm = Dialogs.alert(Alert.AlertType.CONFIRMATION);
         confirm.setTitle(I18n.get("dialog.delete.server"));
         confirm.setHeaderText(I18n.get("servers.delete.many.header", targets.size()));
         confirm.setContentText(I18n.get("servers.delete.warning"));
@@ -425,6 +425,7 @@ public class ServersViewController {
         dialog.setTitle(I18n.get("dialog.import.link"));
         dialog.setHeaderText(I18n.get("servers.import.header"));
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        Dialogs.localizeButtons(dialog.getDialogPane());
         dialog.getDialogPane().setPrefWidth(560);
 
         // Multi-line: a .conf is a whole file, not a one-liner.
@@ -511,7 +512,7 @@ public class ServersViewController {
     }
 
     private void showImportError(RuntimeException e) {
-        Alert alert = new Alert(Alert.AlertType.ERROR);
+        Alert alert = Dialogs.alert(Alert.AlertType.ERROR);
         alert.setTitle(I18n.get("servers.import.error.title"));
         alert.setHeaderText(I18n.get("servers.import.error.header"));
         alert.setContentText(e.getMessage());
@@ -595,7 +596,7 @@ public class ServersViewController {
                                   String titleKey, String noLinksKey) {
         int imported = result.added() + result.updated();
         int skipped = result.skipped().size();
-        Alert report = new Alert(Alert.AlertType.INFORMATION);
+        Alert report = Dialogs.alert(Alert.AlertType.INFORMATION);
         report.initOwner(ownerWindow());
         if (imported == 0) {
             report.setTitle(I18n.get(titleKey));
@@ -667,7 +668,7 @@ public class ServersViewController {
         if (backup == null) {
             return;
         }
-        Alert warning = new Alert(Alert.AlertType.CONFIRMATION);
+        Alert warning = Dialogs.alert(Alert.AlertType.CONFIRMATION);
         warning.setTitle(I18n.get("servers.backup.export.title"));
         warning.setHeaderText(I18n.get("servers.backup.export.warning.header"));
         warning.setContentText(I18n.get("servers.backup.export.warning.content"));
@@ -691,7 +692,7 @@ public class ServersViewController {
             log.info("Exported {} servers", backup.exportAll(file.toPath()));
         } catch (IOException | RuntimeException e) {
             log.error("Failed to export servers", e);
-            Alert alert = new Alert(Alert.AlertType.ERROR);
+            Alert alert = Dialogs.alert(Alert.AlertType.ERROR);
             alert.setTitle(I18n.get("servers.export.error.title"));
             alert.setHeaderText(I18n.get("servers.backup.export.failed"));
             alert.setContentText(e.getMessage());
@@ -712,7 +713,7 @@ public class ServersViewController {
         }
         try {
             ServerBackupService.ImportResult result = backup.importFile(file.toPath());
-            Alert done = new Alert(Alert.AlertType.INFORMATION);
+            Alert done = Dialogs.alert(Alert.AlertType.INFORMATION);
             done.setTitle(I18n.get("servers.backup.import.done.title"));
             done.setHeaderText(I18n.get("servers.backup.import.done.header",
                     result.added(), result.updated(), result.skipped().size()));
@@ -725,7 +726,7 @@ public class ServersViewController {
             // skipped line's reason. toString() keeps the type, half of what an
             // IOException says (NoSuchFileException's message is only the path).
             log.error("Failed to import servers: {}", Redact.urlsIn(e.toString()));
-            Alert alert = new Alert(Alert.AlertType.ERROR);
+            Alert alert = Dialogs.alert(Alert.AlertType.ERROR);
             alert.setTitle(I18n.get("servers.import.error.title"));
             alert.setHeaderText(I18n.get("servers.backup.import.failed"));
             alert.setContentText(e.getMessage());
@@ -876,7 +877,7 @@ public class ServersViewController {
     }
 
     private void deleteServer(ServerConfig server) {
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        Alert confirm = Dialogs.alert(Alert.AlertType.CONFIRMATION);
         confirm.setTitle(I18n.get("dialog.delete.server"));
         confirm.setHeaderText(I18n.get("servers.delete.header", server.getName()));
         confirm.setContentText(I18n.get("servers.delete.warning"));
@@ -904,7 +905,7 @@ public class ServersViewController {
             log.info("Copied share link for: {}", server.getName());
         } catch (Exception e) {
             log.error("Failed to export share link", e);
-            Alert alert = new Alert(Alert.AlertType.ERROR);
+            Alert alert = Dialogs.alert(Alert.AlertType.ERROR);
             alert.setTitle(I18n.get("servers.export.error.title"));
             alert.setHeaderText(I18n.get("servers.export.error.header"));
             alert.setContentText(e.getMessage());

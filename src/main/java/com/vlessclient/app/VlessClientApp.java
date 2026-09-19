@@ -12,6 +12,7 @@ import com.vlessclient.service.SingBoxInstaller;
 import com.vlessclient.service.ThemeManager;
 import com.vlessclient.service.TrayIconService;
 import com.vlessclient.service.TunnelHealthState;
+import com.vlessclient.ui.view.Dialogs;
 import com.vlessclient.ui.view.MainViewController;
 import com.vlessclient.ui.view.SingBoxInstallerDialog;
 import java.awt.Desktop;
@@ -391,7 +392,7 @@ public class VlessClientApp extends Application {
     }
 
     private void promptToReplaceLegacyRule(Stage owner) {
-        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        Alert alert = Dialogs.alert(Alert.AlertType.CONFIRMATION);
         alert.initOwner(owner);
         alert.setTitle(I18n.get("security.legacy.rule.title"));
         alert.setHeaderText(I18n.get("security.legacy.rule.header"));

@@ -730,7 +730,7 @@ public class DashboardViewController implements ViewShownAware {
     private void showError(String header, String message) {
         log.error("{}: {}", header, message);
         try {
-            Alert alert = new Alert(Alert.AlertType.ERROR);
+            Alert alert = Dialogs.alert(Alert.AlertType.ERROR);
             alert.setTitle(I18n.get("dialog.error"));
             alert.setHeaderText(header);
             alert.setContentText(message);

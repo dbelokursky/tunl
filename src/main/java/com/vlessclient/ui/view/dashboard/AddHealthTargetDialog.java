@@ -3,6 +3,7 @@ package com.vlessclient.ui.view.dashboard;
 import com.vlessclient.app.I18n;
 import com.vlessclient.model.HealthCheckTarget;
 import com.vlessclient.service.ServiceReachabilityChecker;
+import com.vlessclient.ui.view.Dialogs;
 import java.net.URI;
 import java.net.URISyntaxException;
 import javafx.application.Platform;
@@ -29,6 +30,7 @@ public final class AddHealthTargetDialog extends Dialog<HealthCheckTarget> {
     public AddHealthTargetDialog() {
         setTitle(I18n.get("health.target.add.title"));
         getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        Dialogs.localizeButtons(getDialogPane());
 
         TextField nameField = new TextField();
         nameField.setPromptText(I18n.get("health.target.name"));

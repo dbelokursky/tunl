@@ -562,7 +562,7 @@ public class LogsViewController {
             log.info("Saved {} log lines to {}", sourceLogLines.size(), file);
         } catch (IOException e) {
             log.error("Failed to save log to {}", file, e);
-            Alert alert = new Alert(Alert.AlertType.ERROR);
+            Alert alert = Dialogs.alert(Alert.AlertType.ERROR);
             alert.setTitle(I18n.get("dialog.error"));
             alert.setHeaderText(I18n.get("logs.save.failed"));
             alert.setContentText(e.getMessage());
@@ -609,7 +609,7 @@ public class LogsViewController {
             bundle.writeTo(file.toPath());
         } catch (IOException | RuntimeException e) {
             log.error("Failed to write the diagnostics bundle to {}", file, e);
-            Alert alert = new Alert(Alert.AlertType.ERROR);
+            Alert alert = Dialogs.alert(Alert.AlertType.ERROR);
             alert.setTitle(I18n.get("dialog.error"));
             alert.setHeaderText(I18n.get("logs.diagnostics.failed"));
             alert.setContentText(e.getMessage());
@@ -617,7 +617,7 @@ public class LogsViewController {
             alert.showAndWait();
             return;
         }
-        Alert done = new Alert(Alert.AlertType.INFORMATION);
+        Alert done = Dialogs.alert(Alert.AlertType.INFORMATION);
         done.setTitle(I18n.get("logs.diagnostics.done.title"));
         done.setHeaderText(I18n.get("logs.diagnostics.done.header"));
         done.setContentText(I18n.get("logs.diagnostics.done.content", file.getName()));
