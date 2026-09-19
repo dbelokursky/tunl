@@ -734,6 +734,37 @@ class ConnectionServiceTest {
                 .containsExactlyInAnyOrder("srv-1", "srv-2");
     }
 
+    /**
+     * The control API's secret lasted the whole app run. While a TUN start
+     * waits for the admin prompt, the watchdog sends it to whatever answers on
+     * the control port, so a program squatting there kept a token that stayed
+     * good for every later core of the run. Each core gets one of its own.
+     */
+    @Test
+    void eachCoreGetsAControlSecretOfItsOwn() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+
+        assertThat(service.connect().started()).isTrue();
+        service.disconnect();
+        assertThat(service.connect().started()).isTrue();
+
+        List<String> secrets = engine.configs.stream()
+                .map(ConnectionServiceTest::controlSecret)
+                .toList();
+        assertThat(secrets).hasSize(2).doesNotHaveDuplicates()
+                .allSatisfy(secret -> assertThat(secret).matches("[0-9a-f]{48}"));
+        assertThat(store.getSettings().getClashApiSecret())
+                .as("what the monitors and the latency probe send to the running core")
+                .isEqualTo(secrets.getLast());
+    }
+
+    private static String controlSecret(String configJson) {
+        return tools.jackson.databind.json.JsonMapper.builder().build().readTree(configJson)
+                .path("experimental").path("clash_api").path("secret").asString("");
+    }
+
     @Test
     void connectUsesTheProxyModeFromSettings() throws Exception {
         store.addServer(server("srv-1", "Tokyo"));
