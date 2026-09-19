@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javafx.application.Platform;
@@ -91,6 +92,8 @@ public class TrayIconService {
     private final FailureNotices failureNotices;
 
     private TrayIcon trayIcon;
+    /** Puts up a system notification: a title and a body. */
+    private volatile BiConsumer<String, String> notifier = this::displayError;
     private PopupMenu popupMenu;
     private MenuItem toggleConnectItem;
     private MenuItem statusItem;
@@ -326,6 +329,11 @@ public class TrayIconService {
         this.awtInvoker = invoker;
     }
 
+    /** Test seam: replaces the system notification a failed connect puts up. */
+    void setNotifier(BiConsumer<String, String> notifier) {
+        this.notifier = notifier;
+    }
+
     private void applyTrayState() {
         if (trayIcon == null) {
             return;
@@ -462,7 +470,8 @@ public class TrayIconService {
         Thread.startVirtualThread(this::toggleConnection);
     }
 
-    private void toggleConnection() {
+    /** Connects or disconnects, off the FX thread; package-private for a test. */
+    void toggleConnection() {
         try {
             if (connectionService.isRunning()) {
                 connectionService.disconnect();
@@ -476,15 +485,29 @@ public class TrayIconService {
                 }
                 case NO_ENGINE -> {
                     log.warn("Tray connect clicked but SingBoxEngine is not available");
+                    notifier.accept(I18n.get("error.singbox.not.found"),
+                            I18n.get("dashboard.error.singbox.body"));
+                    showMainWindow();
                 }
                 case ALREADY_RUNNING -> log.debug("sing-box already running");
                 default -> log.info("Connected from tray to {}", attempt.server().getName());
             }
         } catch (IOException e) {
+            // Said, not only logged: the tray is where a user with the window
+            // hidden connects, and a failed start left the icon grey and
+            // nothing else, while the Dashboard puts up the same reason.
             log.error("Failed to start sing-box from tray", e);
+            notifier.accept(I18n.get("dashboard.error.start.title"), reasonOf(e));
         } catch (Exception e) {
             log.error("Unexpected error toggling connection from tray", e);
+            notifier.accept(I18n.get("dashboard.error.start.title"),
+                    I18n.get("error.connection.failed", reasonOf(e)));
         }
+    }
+
+    private static String reasonOf(Exception e) {
+        return e.getMessage() != null && !e.getMessage().isBlank()
+                ? e.getMessage() : e.toString();
     }
 
     private void showMainWindow() {
@@ -555,6 +578,18 @@ public class TrayIconService {
         try {
             icon.displayMessage(I18n.get("tray.notify.failed.title"), body,
                     TrayIcon.MessageType.ERROR);
+        } catch (RuntimeException e) {
+            log.debug("Could not show the tray notification: {}", e.toString());
+        }
+    }
+
+    private void displayError(String title, String body) {
+        TrayIcon icon = trayIcon;
+        if (icon == null) {
+            return;
+        }
+        try {
+            icon.displayMessage(title, body, TrayIcon.MessageType.ERROR);
         } catch (RuntimeException e) {
             log.debug("Could not show the tray notification: {}", e.toString());
         }
