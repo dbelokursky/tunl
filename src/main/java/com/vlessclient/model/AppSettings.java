@@ -193,6 +193,17 @@ public class AppSettings {
         this.theme = theme;
     }
 
+    /**
+     * The UI language for a system locale: Russian for a Russian system,
+     * English for any other, since the app has those two.
+     *
+     * @param locale the system's locale
+     * @return {@code "ru"} or {@code "en"}
+     */
+    public static String languageFor(java.util.Locale locale) {
+        return locale != null && "ru".equals(locale.getLanguage()) ? "ru" : "en";
+    }
+
     public String getLanguage() {
         return language;
     }
