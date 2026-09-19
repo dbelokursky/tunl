@@ -252,13 +252,15 @@ public class ConfigStore {
      * already present replaces it in place, an upsert with a new id is
      * appended and inherits {@link #addServer}'s rule that the first server to
      * exist when nothing is active becomes active, and removals are applied
-     * after upserts.</p>
+     * after upserts. A batch that removes the picked server picks another, so
+     * a non-empty list always has one.</p>
      *
      * @param upserts servers to add or replace, matched by id
      * @param removalIds ids to remove; unknown ids are ignored
      */
     public void applyServerBatch(List<ServerConfig> upserts, List<String> removalIds) {
         Set<String> removed = mutateList(() -> {
+            List<ServerConfig> added = new ArrayList<>();
             for (ServerConfig incoming : upserts) {
                 int existing = indexOfServer(incoming.getId());
                 if (existing >= 0) {
@@ -268,6 +270,7 @@ public class ConfigStore {
                         incoming.setActive(true);
                     }
                     servers.add(incoming);
+                    added.add(incoming);
                 }
             }
             Set<String> gone = new HashSet<>();
@@ -277,6 +280,7 @@ public class ConfigStore {
                     evictSealCache(id);
                 }
             }
+            keepOnePicked(added, upserts);
             return gone;
         });
 
@@ -292,6 +296,27 @@ public class ConfigStore {
                 sealer.delete(secretKey(id, "flow"));
             }));
         }
+    }
+
+    /**
+     * Picks a server again when a batch removed the picked one. Upserts ran
+     * first and activated a newcomer only while nothing was active, so a
+     * subscription that moved the picked server to a new address and name
+     * (withdrawn and added, as nothing ties the two) was left with no server
+     * picked: the running core kept the withdrawn one, and the next recovery
+     * stopped it and found nothing to connect to. A server this batch added
+     * is the likeliest replacement, then one it updated, then the first.
+     */
+    private void keepOnePicked(List<ServerConfig> added, List<ServerConfig> upserts) {
+        if (servers.isEmpty() || servers.stream().anyMatch(ServerConfig::isActive)) {
+            return;
+        }
+        ServerConfig pick = added.stream().filter(servers::contains).findFirst()
+                .or(() -> upserts.stream().filter(servers::contains).findFirst())
+                .orElse(servers.getFirst());
+        pick.setActive(true);
+        servers.set(servers.indexOf(pick), pick);
+        log.info("The picked server was withdrawn; picked '{}' instead", pick.getName());
     }
 
     /**
