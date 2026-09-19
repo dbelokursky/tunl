@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test;
  */
 class TrayMenuTest {
 
-    /** Headless: the constructor only assigns fields, install() is never called. */
+    /** Headless: the constructor creates no AWT object, and install() is never called. */
     private static TrayIconService tray(List<Runnable> awtQueue) {
         TrayIconService tray = new TrayIconService(() -> null, null, null, null, null);
         tray.setAwtInvoker(awtQueue::add);

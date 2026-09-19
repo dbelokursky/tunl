@@ -21,6 +21,7 @@ import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -107,6 +108,17 @@ public class TrayIconService {
     private ServerMenu shownServerMenu;
     private javafx.beans.value.ChangeListener<ConnectionState> stateListener;
     private javafx.beans.value.ChangeListener<TunnelHealth> healthListener;
+    private MenuItem showItem;
+    private MenuItem quitItem;
+    /** The language the menu was last labeled in; a switch labels it again. */
+    private Locale labeledIn;
+    /**
+     * Queues a refresh when the UI's language changes. Held here and handed to
+     * the locale property through a weak listener, so the property does not
+     * keep this service alive.
+     */
+    private final javafx.beans.value.ChangeListener<Locale> localeListener =
+            (obs, was, is) -> requestRefresh();
 
     /**
      * Creates a tray icon service bound to the given engine, stores and stage.
@@ -134,6 +146,8 @@ public class TrayIconService {
         this.failureNotices = new FailureNotices(connectionService == null
                 ? () -> 0L
                 : () -> connectionService.getRecoveryService().currentRequest());
+        I18n.localeProperty().addListener(
+                new javafx.beans.value.WeakChangeListener<>(localeListener));
     }
 
     /**
@@ -270,7 +284,7 @@ public class TrayIconService {
     private PopupMenu buildPopupMenu() {
         PopupMenu menu = new PopupMenu();
 
-        MenuItem showItem = new MenuItem(I18n.get("tray.show"));
+        showItem = new MenuItem(I18n.get("tray.show"));
         showItem.addActionListener(e -> showMainWindow());
         menu.add(showItem);
 
@@ -291,7 +305,7 @@ public class TrayIconService {
 
         menu.addSeparator();
 
-        MenuItem quitItem = new MenuItem(I18n.get("tray.quit"));
+        quitItem = new MenuItem(I18n.get("tray.quit"));
         quitItem.addActionListener(e -> onQuit());
         menu.add(quitItem);
 
@@ -355,7 +369,32 @@ public class TrayIconService {
             toggleConnectItem.setLabel(
                     connected ? I18n.get("tray.disconnect") : I18n.get("tray.connect"));
         }
+        relabelIfLanguageChanged();
         rebuildServersMenu();
+    }
+
+    /**
+     * Labels the fixed items again when the UI's language changed since they
+     * were labeled, and has the servers submenu built again for its "no
+     * servers" and "N more" items. They were labeled once, when the menu was
+     * built, and stayed in the old language until a restart.
+     */
+    private void relabelIfLanguageChanged() {
+        Locale locale = I18n.getLocale();
+        if (locale.equals(labeledIn)) {
+            return;
+        }
+        if (showItem != null) {
+            showItem.setLabel(I18n.get("tray.show"));
+        }
+        if (serversMenu != null) {
+            serversMenu.setLabel(I18n.get("tray.servers.select"));
+        }
+        if (quitItem != null) {
+            quitItem.setLabel(I18n.get("tray.quit"));
+        }
+        shownServerMenu = null;
+        labeledIn = locale;
     }
 
     /** Most servers the tray's submenu lists; the others are counted. */
