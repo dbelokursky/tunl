@@ -318,6 +318,47 @@ class SingBoxConfigGeneratorRoutingTest {
         assertThat(ruleSet.get(4).get("tag").asString()).isEqualTo("geoip-cn");
     }
 
+    /**
+     * A stored rule the core would refuse stopped every server from
+     * connecting: sing-box refuses the whole configuration over it. It is
+     * left out, and the rules around it stay.
+     */
+    @Test
+    void aStoredRuleTheCoreWouldRefuseIsLeftOutAndTheRestStay() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_REGEX, "(",
+                        RoutingRule.RuleAction.PROXY),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "example.com",
+                        RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.IP_CIDR, "999.1.1.1/8",
+                        RoutingRule.RuleAction.DIRECT)));
+
+        String json = generator.generate(createVlessServer(), defaultSettings, routingConfig);
+
+        assertThat(json).doesNotContain("\"(\"").doesNotContain("999.1.1.1/8");
+        List<JsonNode> rules = withoutLookup(parse(json).get("route").get("rules"));
+        assertThat(rules).anySatisfy(rule -> assertThat(rule.path("domain_suffix").toString())
+                .contains("example.com"));
+        assertThat(rules).noneSatisfy(rule -> assertThat(rule.has("domain_regex")).isTrue());
+    }
+
+    /** The repository names its lists in lower case: "Google" was a 404, and no core. */
+    @Test
+    void aListNameIsWrittenInLowerCase() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.GEOSITE, "Google",
+                        RoutingRule.RuleAction.PROXY)));
+
+        JsonNode root = parse(generator.generate(createVlessServer(), defaultSettings,
+                routingConfig));
+
+        assertThat(root.get("route").get("rule_set").toString())
+                .contains("\"geosite-google\"").contains("geosite-google.srs")
+                .doesNotContain("Google");
+    }
+
     @Test
     void customRules_generateCorrectSingBoxRouteEntries() throws Exception {
         RoutingConfig routingConfig = new RoutingConfig();

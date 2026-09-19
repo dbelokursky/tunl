@@ -21,6 +21,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -303,7 +304,7 @@ public class SingBoxConfigGenerator {
         List<RoutingRule> customRules = routingConfig.getRules();
         if (customRules != null) {
             for (RoutingRule custom : customRules) {
-                if (custom.getAction() != RoutingRule.RuleAction.DIRECT) {
+                if (custom.getAction() != RoutingRule.RuleAction.DIRECT || unusable(custom)) {
                     continue;
                 }
                 ObjectNode routeRule = buildCustomRule(custom, new LinkedHashSet<>());
@@ -877,7 +878,9 @@ public class SingBoxConfigGenerator {
         List<RoutingRule> customRules = routingConfig.getRules();
         if (customRules != null) {
             for (RoutingRule rule : customRules) {
-                rules.add(buildCustomRule(rule, ruleSetTags));
+                if (!unusable(rule)) {
+                    rules.add(buildCustomRule(rule, ruleSetTags));
+                }
             }
         }
 
@@ -1062,6 +1065,19 @@ public class SingBoxConfigGenerator {
         return rule;
     }
 
+    /**
+     * Whether a stored rule is one the core would refuse. Such a rule stopped
+     * every server from connecting until it was found and deleted; the
+     * Routing screen and MCP no longer store one, and one stored before is
+     * left out of the configuration, with a warning in the log.
+     */
+    private static boolean unusable(RoutingRule rule) {
+        Optional<String> problem = RoutingRuleCheck.problem(rule.getType(), rule.getValue());
+        problem.ifPresent(reason -> log.warn("Leaving out routing rule {} ({}): {}",
+                rule.getId(), rule.getType(), reason));
+        return problem.isPresent();
+    }
+
     private ObjectNode buildCustomRule(RoutingRule rule, Set<String> ruleSetTags) {
         ObjectNode ruleNode = mapper.createObjectNode();
 
@@ -1090,7 +1106,7 @@ public class SingBoxConfigGenerator {
                 // Legacy geosite: [code] removed in 1.12 — reference a remote
                 // rule_set by a stable tag, and record the tag so the caller
                 // can emit the matching route.rule_set entry.
-                String tag = "geosite-" + rule.getValue();
+                String tag = "geosite-" + RoutingRuleCheck.ruleSetName(rule.getValue());
                 ruleSetTags.add(tag);
                 ArrayNode refs = mapper.createArrayNode();
                 refs.add(tag);
@@ -1104,7 +1120,7 @@ public class SingBoxConfigGenerator {
             case GEOIP -> {
                 // Same migration as GEOSITE — references a geoip-<code>
                 // remote rule_set instead of the retired geoip: [] matcher.
-                String tag = "geoip-" + rule.getValue();
+                String tag = "geoip-" + RoutingRuleCheck.ruleSetName(rule.getValue());
                 ruleSetTags.add(tag);
                 ArrayNode refs = mapper.createArrayNode();
                 refs.add(tag);

@@ -490,8 +490,13 @@ public class DefaultAppControlService implements AppControlService {
         if (value == null || value.isBlank()) {
             throw new McpToolException("Rule 'value' is required.");
         }
-        RoutingRule rule = new RoutingRule(parseRuleType(type), value, parseRuleAction(action));
-        routingService.addRule(rule);
+        RoutingRule rule = new RoutingRule(parseRuleType(type), value.strip(),
+                parseRuleAction(action));
+        try {
+            routingService.addRule(rule);
+        } catch (IllegalArgumentException refused) {
+            throw new McpToolException(refused.getMessage());
+        }
         ensureSaved();
         return getRouting();
     }

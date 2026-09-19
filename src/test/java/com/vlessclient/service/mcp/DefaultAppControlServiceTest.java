@@ -212,6 +212,26 @@ class DefaultAppControlServiceTest {
                 .isInstanceOf(McpToolException.class);
     }
 
+    /**
+     * An agent gets the reason, and nothing is stored: a rule the core refuses
+     * stopped every server from connecting.
+     */
+    @Test
+    void addRoutingRule_refusesAValueTheCoreWouldRefuse() {
+        RoutingService routing = com.vlessclient.service.TestRoutingServices.at(
+                tempDir.resolve("routing"));
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, null,
+                routing, null, null, new ShareLinkParser(),
+                new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        assertThatThrownBy(() -> svc.addRoutingRule("domain_regex", "(", "proxy"))
+                .isInstanceOf(McpToolException.class)
+                .hasMessage(com.vlessclient.service.RoutingRuleCheck.problem(
+                        com.vlessclient.model.RoutingRule.RuleType.DOMAIN_REGEX, "(")
+                        .orElseThrow());
+        assertThat(routing.getConfig().getRules()).isEmpty();
+    }
+
     @Test
     void addServer_parsesShareLinkAndPersists() throws Exception {
         DefaultAppControlService svc = new DefaultAppControlService(store, null, null,

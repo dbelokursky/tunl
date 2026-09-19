@@ -277,6 +277,44 @@ class SingBoxRealBinarySmokeTest {
         }
     }
 
+    /**
+     * RoutingRuleCheck answers for the core before a rule is stored, so its
+     * answers have to be the core's: for each value, "no problem" and
+     * "sing-box check passes" must agree. A space in a domain is not asked:
+     * the core takes it, and the app refuses it since no hostname has one.
+     */
+    @Test
+    void routingRuleCheckRefusesExactlyWhatTheCoreRefuses() throws Exception {
+        var regex = com.vlessclient.model.RoutingRule.RuleType.DOMAIN_REGEX;
+        var cidr = com.vlessclient.model.RoutingRule.RuleType.IP_CIDR;
+        java.util.Map<com.vlessclient.model.RoutingRule.RuleType, List<String>> values =
+                new java.util.LinkedHashMap<>();
+        values.put(regex, new java.util.ArrayList<>(RoutingRuleCheckTest.REGEXES_THE_CORE_TAKES));
+        values.get(regex).addAll(RoutingRuleCheckTest.REGEXES_THE_CORE_REFUSES);
+        values.put(cidr, new java.util.ArrayList<>(RoutingRuleCheckTest.CIDRS_THE_CORE_TAKES));
+        values.get(cidr).addAll(RoutingRuleCheckTest.CIDRS_THE_CORE_REFUSES);
+
+        tools.jackson.databind.ObjectMapper json = tools.jackson.databind.json.JsonMapper.builder()
+                .build();
+        for (var entry : values.entrySet()) {
+            for (String value : entry.getValue()) {
+                tools.jackson.databind.node.ObjectNode config = json.createObjectNode();
+                config.putObject("log").put("level", "error");
+                config.putArray("outbounds").addObject().put("type", "direct").put("tag", "direct");
+                tools.jackson.databind.node.ObjectNode rule =
+                        config.putObject("route").putArray("rules").addObject();
+                rule.putArray(entry.getKey().getValue()).add(value);
+                rule.put("outbound", "direct");
+
+                boolean coreAccepts = checkPasses(json.writeValueAsString(config));
+                assertThat(RoutingRuleCheck.problem(entry.getKey(), value).isEmpty())
+                        .as("%s %s: sing-box check %s it", entry.getKey(), value,
+                                coreAccepts ? "accepts" : "refuses")
+                        .isEqualTo(coreAccepts);
+            }
+        }
+    }
+
     private static ServerConfig with(ServerConfig server,
                                      java.util.function.Consumer<ServerConfig> change) {
         change.accept(server);
