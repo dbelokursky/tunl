@@ -179,6 +179,33 @@ class DiagnosticsBundleTest {
     }
 
     /**
+     * A Shadowsocks plugin's options name the server as much as its address
+     * does: v2ray-plugin carries the host and path the server answers on, and
+     * obfs-local the host it disguises itself as. They reached the bundle,
+     * which gets attached to public issues, as the plugin wrote them.
+     */
+    @Test
+    void aShadowsocksPluginsOptionsNameNoServer() throws IOException {
+        ServerConfig shadowsocks = new ServerConfig();
+        shadowsocks.setName("SS plugin");
+        shadowsocks.setProtocol(Protocol.SHADOWSOCKS);
+        shadowsocks.setAddress("203.0.113.46");
+        shadowsocks.setPort(8388);
+        shadowsocks.setEncryption("aes-256-gcm");
+        shadowsocks.setUuid(SERVER_SECRET);
+        shadowsocks.setPlugin("v2ray-plugin");
+        shadowsocks.setPluginOpts("tls;host=private-cdn.example;path=/private-path");
+        store.addServer(shadowsocks);
+
+        String config = unzip(write()).get("sing-box.json");
+
+        assertThat(config).contains("\"v2ray-plugin\"");
+        assertThat(config)
+                .doesNotContain("private-cdn.example")
+                .doesNotContain("/private-path");
+    }
+
+    /**
      * A private resolver carries the account it belongs to in its URL, the
      * way NextDNS and AdGuard DNS spell theirs, and in TUN mode the generated
      * configuration quotes that resolver back.

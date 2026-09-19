@@ -79,17 +79,18 @@ public class DiagnosticsBundle {
     /**
      * Field names that identify the user's server without authenticating to
      * it: the address, the SNI, the transport host, path and gRPC service, the
-     * REALITY key and short id, and for WireGuard the peer's key and reserved
-     * bytes and the interface address. Not credentials, but the bundle is what
-     * gets attached to a public issue, and {@link #appInfo} keeps the address
-     * out for the same reason. Matched only inside {@code outbounds} and
+     * REALITY key and short id, a Shadowsocks plugin's options (the host and
+     * path a v2ray-plugin server answers on), and for WireGuard the peer's key
+     * and reserved bytes and the interface address. Not credentials, but the
+     * bundle is what gets attached to a public issue, and {@link #appInfo}
+     * keeps the address out for the same reason. Matched only inside {@code outbounds} and
      * {@code endpoints}, whatever the value's type (a WireGuard address is a
      * list): the same key names elsewhere are DNS resolver tags and rule
      * references, which the bundle is there to show.
      */
     private static final Set<String> IDENTIFYING_FIELDS = Set.of(
             "server", "server_name", "host", "sni", "path", "service_name",
-            "address", "public_key", "short_id", "reserved");
+            "address", "public_key", "short_id", "reserved", "plugin_opts");
 
     private final ConfigStore configStore;
     private final SingBoxConfigGenerator configGenerator;
