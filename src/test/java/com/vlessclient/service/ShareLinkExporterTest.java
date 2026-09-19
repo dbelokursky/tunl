@@ -128,6 +128,28 @@ class ShareLinkExporterTest {
         assertThat(back.getTls().getFingerprint()).isEqualTo("chrome");
     }
 
+    /**
+     * A Trojan link without security= means TLS, which is how Trojan runs
+     * almost always, so the export left the parameter out for a server with
+     * TLS off, and the import turned TLS back on.
+     */
+    @Test
+    void exportedTrojanWithoutTlsComesBackWithoutTls() {
+        ServerConfig config = new ServerConfig();
+        config.setProtocol(Protocol.TROJAN);
+        config.setUuid("trojan-password");
+        config.setAddress("host.example");
+        config.setPort(8080);
+        config.setName("Plain");
+        config.getTls().setEnabled(false);
+
+        String link = exporter.export(config);
+        ServerConfig back = new ShareLinkParser().parse(link);
+
+        assertThat(link).contains("security=none");
+        assertThat(back.getTls().isEnabled()).as("TLS after the round trip").isFalse();
+    }
+
     @Test
     void exportShadowsocksKeepsThePluginSoTheLinkStillWorks() {
         ServerConfig config = new ServerConfig();

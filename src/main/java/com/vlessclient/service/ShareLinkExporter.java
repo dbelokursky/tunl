@@ -156,11 +156,9 @@ public class ShareLinkExporter {
             params.put("type", config.getTransport().getType().getValue());
         }
 
-        // Security - trojan defaults to tls
-        String security = resolveSecurityParam(config);
-        if (!"none".equals(security)) {
-            params.put("security", security);
-        }
+        // Written even as "none": a Trojan link without it means TLS, so
+        // leaving it out turned TLS back on for a server that runs without.
+        params.put("security", resolveSecurityParam(config));
 
         // TLS-related params
         addTlsParams(params, config);
