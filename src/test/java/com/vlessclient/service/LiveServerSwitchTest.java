@@ -44,7 +44,7 @@ class LiveServerSwitchTest {
             // that port until the core binds it, and holding it beforehand
             // now moves the app off it.
             api = HttpServer.create(new InetSocketAddress(
-                    "127.0.0.1", store.getSettings().getClashApiPort()), 0);
+                    "127.0.0.1", store.getSettings().listenClashApiPort()), 0);
             api.createContext("/proxies/", exchange -> {
                 assertThat(exchange.getRequestHeaders().getFirst("Authorization"))
                         .isEqualTo("Bearer private-test-token");

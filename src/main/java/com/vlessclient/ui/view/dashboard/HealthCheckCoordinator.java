@@ -278,7 +278,7 @@ public final class HealthCheckCoordinator {
         }
 
         final int gen = healthGeneration.incrementAndGet();
-        final int httpPort = settings.getHttpPort();
+        final int httpPort = settings.listenHttpPort();
 
         reachabilityChecker.checkAll(targets, httpPort).whenComplete((results, err) ->
                 Platform.runLater(() -> {
