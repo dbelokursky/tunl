@@ -665,6 +665,13 @@
     -fx-text-fill: -c-text-subheading;
 }
 
+/* Server form: a subscription owns the server, so its next refresh replaces
+   the edits. The warning's text colour, as under an http subscription URL. */
+.form-note {
+    -fx-font-size: 12px;
+    -fx-text-fill: -c-warn-text;
+}
+
 .form-label {
     -fx-font-size: 12px;
     -fx-text-fill: -c-text-form-label;

@@ -29,6 +29,11 @@
                  binds these to the bundle, so what ships is the translation. -->
             <Label fx:id="formTitleLabel" text="Server Configuration" styleClass="form-title"/>
 
+            <!-- Shown when a subscription owns the server being edited; the
+                 controller writes its text. -->
+            <Label fx:id="subscriptionNoticeLabel" styleClass="form-note" wrapText="true"
+                   visible="false" managed="false"/>
+
             <!-- Protocol -->
             <Label fx:id="protocolLabel" text="Protocol" styleClass="form-label"/>
             <ComboBox fx:id="protocolCombo" maxWidth="Infinity" styleClass="form-field"
