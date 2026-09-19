@@ -4,8 +4,13 @@ import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.testing.Await;
+import com.vlessclient.testing.ThreadDump;
 import com.vlessclient.testing.UiTest;
+import java.time.Duration;
 import java.util.List;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
@@ -235,12 +240,32 @@ public class MainViewTest extends ApplicationTest {
                 assertThat(message.textProperty().isBound()).isTrue();
                 retry.fire();
             });
-            com.vlessclient.testing.Await.until("successful retry hides the banner",
+            // Two waits, so a failure says which side stalled: the retry runs on
+            // a virtual thread, and the banner hides on the FX thread. Twice on
+            // the Windows runner a single 5 s wait ran out with nothing said
+            // about which.
+            awaitOrDumpThreads("the retry ran", retried::get,
+                    () -> "the retry button is disabled: " + retry.isDisabled());
+            awaitOrDumpThreads("successful retry hides the banner",
                     () -> com.vlessclient.service.FxExecutor.get(() -> !banner.isVisible()),
-                    java.time.Duration.ofSeconds(5));
-            assertThat(retried).isTrue();
+                    () -> "files still failing: " + persistence.failedFiles());
         } finally {
             interact(() -> persistence.saved("test.json"));
+        }
+    }
+
+    /**
+     * Waits for {@code condition}. On a timeout it prints every thread first,
+     * virtual ones included, and adds what {@code state} reads then.
+     */
+    private static void awaitOrDumpThreads(String what, BooleanSupplier condition,
+                                           Supplier<String> state) {
+        try {
+            Await.until(what, condition, Duration.ofSeconds(30));
+        } catch (AssertionError timedOut) {
+            System.err.println("Threads when the wait for " + what + " ran out:\n"
+                    + ThreadDump.ofAllThreads());
+            throw new AssertionError(timedOut.getMessage() + "; " + state.get(), timedOut);
         }
     }
 }
