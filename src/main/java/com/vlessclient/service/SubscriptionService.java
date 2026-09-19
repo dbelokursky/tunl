@@ -9,11 +9,15 @@ import com.vlessclient.platform.SecretSealers;
 import com.vlessclient.platform.SecureFiles;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.ConnectException;
 import java.net.URI;
+import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
+import java.nio.channels.UnresolvedAddressException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -27,6 +31,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javax.net.ssl.SSLException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.core.JacksonException;
@@ -300,8 +305,14 @@ public class SubscriptionService {
             log.error("Failed to fetch subscription '{}': {}", sub.getName(), reason);
             // Record it: a failed refresh used to be invisible in the UI, so a
             // subscription with a dead URL or an expired token silently went
-            // stale while still looking healthy.
-            sub.recordFailure(reason);
+            // stale while still looking healthy. In the app's own words where
+            // it knows the failure, the technical reason where it does not.
+            Declined worded = wordedFailure(e, sub.getUrl());
+            if (worded != null) {
+                sub.recordFailure(worded.key(), worded.args());
+            } else {
+                sub.recordFailure(reason);
+            }
             saveSubscriptions();
             return;
         }
@@ -410,6 +421,97 @@ public class SubscriptionService {
      * arguments of the failure to record.
      */
     record Declined(String key, List<String> args) {
+    }
+
+    /** A provider's answer other than 200, with its status for the worded failure. */
+    static final class HttpStatusException extends IOException {
+
+        private final int status;
+
+        HttpStatusException(int status, String message) {
+            super(message);
+            this.status = status;
+        }
+
+        int status() {
+            return status;
+        }
+    }
+
+    /** The tunnel is up but carries nothing, so the refresh was not sent outside it. */
+    static final class TunnelNotCarryingException extends IOException {
+
+        TunnelNotCarryingException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * A failed fetch in the app's own words, when it is one of the usual
+     * failures, or null to keep the technical reason. The reason used to be
+     * the exception's message as it came, in English in every language, and
+     * for a provider whose name does not resolve the JDK gives no message at
+     * all, so the row read "java.net.ConnectException".
+     *
+     * @param failure what the fetch threw
+     * @param url     the subscription's URL, for the host of a name that did
+     *                not resolve; nothing else of it is kept
+     * @return the key and arguments to record, or null
+     */
+    static Declined wordedFailure(Throwable failure, String url) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof HttpStatusException status) {
+                return httpFailure(status.status());
+            }
+            if (cause instanceof TunnelNotCarryingException) {
+                return new Declined("subscriptions.error.tunnel", List.of());
+            }
+            if (cause instanceof UnresolvedAddressException
+                    || cause instanceof UnknownHostException) {
+                return new Declined("subscriptions.error.dns", List.of(hostOf(url)));
+            }
+            if (cause instanceof HttpTimeoutException) {
+                return new Declined("subscriptions.error.timeout", List.of());
+            }
+            if (cause instanceof SSLException) {
+                return new Declined("subscriptions.error.tls", List.of());
+            }
+        }
+        // Refused or cut, once no cause above says more: the JDK wraps a name
+        // that does not resolve in a ConnectException too.
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof ConnectException) {
+                return new Declined("subscriptions.error.connect", List.of());
+            }
+        }
+        return null;
+    }
+
+    private static Declined httpFailure(int status) {
+        String code = String.valueOf(status);
+        if (status == 401 || status == 403) {
+            return new Declined("subscriptions.error.http.denied", List.of(code));
+        }
+        if (status == 404 || status == 410) {
+            return new Declined("subscriptions.error.http.gone", List.of(code));
+        }
+        if (status == 429 || status >= 500) {
+            return new Declined("subscriptions.error.http.later", List.of(code));
+        }
+        return new Declined("subscriptions.error.http", List.of(code));
+    }
+
+    /** The host of a subscription URL: the path and the query carry the token. */
+    private static String hostOf(String url) {
+        if (url == null) {
+            return "?";
+        }
+        try {
+            String host = URI.create(url.strip()).getHost();
+            return host != null ? host : "?";
+        } catch (IllegalArgumentException e) {
+            return "?";
+        }
     }
 
     /** Longest provider message kept for the subscription's status line. */
@@ -680,9 +782,9 @@ public class SubscriptionService {
             // directly also exposes the user's real address at the exact
             // moment they believe they are tunneled. Fail the refresh instead;
             // the next one runs after the tunnel recovers or is torn down.
-            throw new IOException("The tunnel is up but not carrying traffic, so the "
-                    + "subscription was not fetched outside it. Reconnect, or disconnect "
-                    + "and refresh again.");
+            throw new TunnelNotCarryingException("The tunnel is up but not carrying traffic, "
+                    + "so the subscription was not fetched outside it. Reconnect, or "
+                    + "disconnect and refresh again.");
         }
         if (isInsecureHttpUrl(url)) {
             // Host only — the path and query can carry an account token.
@@ -717,8 +819,8 @@ public class SubscriptionService {
                 // that serializableSubscriptions() deliberately seals. An expired
                 // token answering 401 is the ordinary case, so the plain URL here
                 // leaked the token into two files on the most common failure.
-                throw new IOException("HTTP " + response.statusCode()
-                        + " for URL: " + Redact.url(url));
+                throw new HttpStatusException(response.statusCode(), "HTTP "
+                        + response.statusCode() + " for URL: " + Redact.url(url));
             }
             return readBounded(body, url);
         }

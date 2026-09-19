@@ -91,12 +91,14 @@ class SubscriptionServiceRedactionTest {
         // that used to write the whole URL into subscriptions.json.
         service.addSubscription("Provider", subscriptionUrl());
 
+        // Recorded in the app's words, which carry the status and nothing of
+        // the URL; the technical reason is left empty.
         Subscription sub = service.getSubscriptions().get(0);
-        assertThat(sub.getLastError())
+        assertThat(sub.getLastErrorKey())
                 .as("the failure is still recorded, just without the secret")
-                .isNotBlank()
-                .contains("HTTP 401")
-                .doesNotContain(TOKEN);
+                .isEqualTo("subscriptions.error.http.denied");
+        assertThat(sub.getLastErrorArgs()).containsExactly("401");
+        assertThat(sub.getLastError()).isNull();
 
         // Assert on the field, not the whole file: when secure storage is off
         // or no keychain backend is available, serializableSubscriptions()
@@ -106,10 +108,14 @@ class SubscriptionServiceRedactionTest {
         JsonNode persisted = JsonMapper.builder().build()
                 .readTree(Files.readString(tempDir.resolve("subscriptions.json")))
                 .path("subscriptions").path(0);
-        assertThat(persisted.path("lastError").asString())
+        assertThat(persisted.path("lastErrorKey").asString())
                 .as("the error persisted beside the url field")
-                .contains("HTTP 401")
+                .isEqualTo("subscriptions.error.http.denied");
+        assertThat(persisted.path("lastErrorArgs").toString())
+                .isEqualTo("[\"401\"]")
                 .doesNotContain(TOKEN);
+        assertThat(persisted.path("lastError").isMissingNode()
+                || persisted.path("lastError").isNull()).isTrue();
     }
 
     @Test
