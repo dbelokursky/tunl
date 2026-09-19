@@ -7,7 +7,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
@@ -57,19 +56,46 @@ public class ClashApiDelayProbe {
         this.httpClient = httpClient;
     }
 
+    /** What the core answered about one proxy. */
+    public sealed interface Answer {
+
+        /**
+         * A request went through the proxy.
+         *
+         * @param millis how long it took
+         */
+        record Delay(long millis) implements Answer {
+        }
+
+        /**
+         * The core tried the proxy and it did not carry the request: sing-box
+         * answers 504 when the test times out and 503 when it fails, the
+         * handshake of a server whose credentials expired included.
+         */
+        record Failed() implements Answer {
+        }
+
+        /**
+         * Nothing is known about the proxy: the core is not running, does not
+         * know the tag (404), or the request was not understood.
+         */
+        record NoAnswer() implements Answer {
+        }
+    }
+
     /**
      * Measures the delay through one proxy.
      *
      * @param port   the Clash API port the core listens on
      * @param secret the API token, blank when the config has none
      * @param tag    the proxy's sing-box tag
-     * @return the delay in milliseconds, or empty when the core is not running,
-     *         does not know the tag, or the probe failed — all of which mean
-     *         "no usable answer" rather than an error to surface
+     * @return the delay; {@link Answer.Failed} when the proxy was tried and does
+     *         not work; {@link Answer.NoAnswer} when nothing is known about it,
+     *         which is not an error to surface
      */
-    public Optional<Long> measure(int port, String secret, String tag) {
+    public Answer measure(int port, String secret, String tag) {
         if (tag == null || tag.isBlank() || port < 1) {
-            return Optional.empty();
+            return new Answer.NoAnswer();
         }
         try {
             String url = "http://127.0.0.1:" + port + "/proxies/"
@@ -87,22 +113,28 @@ public class ClashApiDelayProbe {
 
             HttpResponse<String> response =
                     httpClient.send(request.build(), HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() != 200) {
-                // A timing-out proxy answers with a non-200 and a message; that
-                // is a real result ("unusable"), not a transport problem.
-                log.debug("Delay probe for {} returned HTTP {}", tag, response.statusCode());
-                return Optional.empty();
+            int status = response.statusCode();
+            if (status == 503 || status == 504) {
+                // The proxy's own answer: it was tried and does not work. Read
+                // as "no answer", it sent the caller to a TCP connect, which a
+                // server with expired credentials passes in 40 ms.
+                log.debug("Delay probe for {}: the proxy failed (HTTP {})", tag, status);
+                return new Answer.Failed();
+            }
+            if (status != 200) {
+                log.debug("Delay probe for {} returned HTTP {}", tag, status);
+                return new Answer.NoAnswer();
             }
 
             JsonNode body = mapper.readTree(response.body());
             long delay = body.path("delay").asLong(-1);
-            return delay >= 0 ? Optional.of(delay) : Optional.empty();
+            return delay >= 0 ? new Answer.Delay(delay) : new Answer.NoAnswer();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return Optional.empty();
+            return new Answer.NoAnswer();
         } catch (Exception e) {
             log.debug("Delay probe for {} failed: {}", tag, e.toString());
-            return Optional.empty();
+            return new Answer.NoAnswer();
         }
     }
 }

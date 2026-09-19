@@ -6,7 +6,6 @@ import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -63,7 +62,8 @@ class ClashApiDelayProbeTest {
     @Test
     @DisplayName("a delay is read out of the response")
     void aDelayIsReturned() {
-        assertThat(probe().measure(port, "", "proxy-tokyo")).contains(42L);
+        assertThat(probe().measure(port, "", "proxy-tokyo"))
+                .isEqualTo(new ClashApiDelayProbe.Answer.Delay(42));
         assertThat(paths).singleElement().asString()
                 .as("the tag is URL-encoded into the path")
                 .startsWith("/proxies/proxy-tokyo/delay")
@@ -81,23 +81,42 @@ class ClashApiDelayProbeTest {
         assertThat(authHeaders).singleElement().isEqualTo("");
     }
 
+    /**
+     * sing-box answers 504 when the test times out and 503 when it fails
+     * (experimental/clashapi/proxies.go): the proxy was tried and does not
+     * work, which is an answer, not the lack of one.
+     */
     @Test
-    @DisplayName("a non-200 is a result, not an error")
-    void aTimingOutProxyYieldsEmpty() {
-        status = 504;
+    @DisplayName("a proxy that timed out or failed is reported as failed")
+    void aTimingOutOrFailingProxyIsFailed() {
         body = "{\"message\":\"An error occurred in the delay test\"}";
+        for (int code : new int[] {503, 504}) {
+            status = code;
+            assertThat(probe().measure(port, "", "proxy-tokyo")).as("HTTP %d", code)
+                    .isInstanceOf(ClashApiDelayProbe.Answer.Failed.class);
+        }
+    }
 
-        assertThat(probe().measure(port, "", "proxy-tokyo")).isEmpty();
+    @Test
+    @DisplayName("a tag the core does not know is no answer, not a failure")
+    void anUnknownTagIsNoAnswer() {
+        status = 404;
+        body = "{\"message\":\"Resource not found\"}";
+
+        assertThat(probe().measure(port, "", "proxy-tokyo"))
+                .isInstanceOf(ClashApiDelayProbe.Answer.NoAnswer.class);
     }
 
     @Test
     @DisplayName("a negative or missing delay is empty, not a bogus number")
     void anUnusableDelayYieldsEmpty() {
         body = "{\"delay\":-1}";
-        assertThat(probe().measure(port, "", "proxy-tokyo")).isEmpty();
+        assertThat(probe().measure(port, "", "proxy-tokyo"))
+                .isInstanceOf(ClashApiDelayProbe.Answer.NoAnswer.class);
 
         body = "{}";
-        assertThat(probe().measure(port, "", "proxy-tokyo")).isEmpty();
+        assertThat(probe().measure(port, "", "proxy-tokyo"))
+                .isInstanceOf(ClashApiDelayProbe.Answer.NoAnswer.class);
     }
 
     @Test
@@ -105,15 +124,19 @@ class ClashApiDelayProbeTest {
     void garbageYieldsEmpty() {
         body = "<html>not json</html>";
 
-        assertThat(probe().measure(port, "", "proxy-tokyo")).isEmpty();
+        assertThat(probe().measure(port, "", "proxy-tokyo"))
+                .isInstanceOf(ClashApiDelayProbe.Answer.NoAnswer.class);
     }
 
     @Test
     @DisplayName("an unusable request never reaches the network")
     void badArgumentsShortCircuit() {
-        assertThat(probe().measure(port, "", null)).isEmpty();
-        assertThat(probe().measure(port, "", "  ")).isEmpty();
-        assertThat(probe().measure(0, "", "proxy-tokyo")).isEmpty();
+        assertThat(probe().measure(port, "", null))
+                .isInstanceOf(ClashApiDelayProbe.Answer.NoAnswer.class);
+        assertThat(probe().measure(port, "", "  "))
+                .isInstanceOf(ClashApiDelayProbe.Answer.NoAnswer.class);
+        assertThat(probe().measure(0, "", "proxy-tokyo"))
+                .isInstanceOf(ClashApiDelayProbe.Answer.NoAnswer.class);
 
         assertThat(paths).as("none of these should have been sent").isEmpty();
     }
@@ -122,9 +145,9 @@ class ClashApiDelayProbeTest {
     @DisplayName("a dead core is empty rather than an exception")
     void aClosedPortYieldsEmpty() {
         server.stop(0);
-        Optional<Long> result = probe().measure(port, "", "proxy-tokyo");
+        ClashApiDelayProbe.Answer result = probe().measure(port, "", "proxy-tokyo");
         server = null;
 
-        assertThat(result).isEmpty();
+        assertThat(result).isInstanceOf(ClashApiDelayProbe.Answer.NoAnswer.class);
     }
 }

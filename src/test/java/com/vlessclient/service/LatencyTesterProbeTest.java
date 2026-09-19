@@ -1,12 +1,14 @@
 package com.vlessclient.service;
 
+import com.sun.net.httpserver.HttpServer;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.http.HttpClient;
-import java.util.Optional;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
@@ -25,16 +27,16 @@ class LatencyTesterProbeTest {
 
     /** Stands in for the Clash API without a running core. */
     private static class StubProbe extends ClashApiDelayProbe {
-        private final Optional<Long> answer;
+        private final ClashApiDelayProbe.Answer answer;
         final AtomicReference<String> lastTag = new AtomicReference<>();
 
-        StubProbe(Optional<Long> answer) {
+        StubProbe(ClashApiDelayProbe.Answer answer) {
             super(HttpClient.newHttpClient());
             this.answer = answer;
         }
 
         @Override
-        public Optional<Long> measure(int port, String secret, String tag) {
+        public ClashApiDelayProbe.Answer measure(int port, String secret, String tag) {
             lastTag.set(tag);
             return answer;
         }
@@ -61,7 +63,7 @@ class LatencyTesterProbeTest {
 
     @Test
     void usesTheProxyProbeWhenTheCoreIsRunning() throws Exception {
-        StubProbe probe = new StubProbe(Optional.of(137L));
+        StubProbe probe = new StubProbe(new ClashApiDelayProbe.Answer.Delay(137));
         LatencyTester tester = new LatencyTester(probe);
         tester.setApiEndpointSupplier(() -> new LatencyTester.ApiEndpoint(9090, "token"));
         ServerConfig server = server();
@@ -82,7 +84,7 @@ class LatencyTesterProbeTest {
      */
     @Test
     void fallsBackToTcpWhenTheProxyIsNotKnownToTheCore() throws Exception {
-        LatencyTester tester = new LatencyTester(new StubProbe(Optional.empty()));
+        LatencyTester tester = new LatencyTester(new StubProbe(new ClashApiDelayProbe.Answer.NoAnswer()));
         tester.setApiEndpointSupplier(() -> new LatencyTester.ApiEndpoint(9090, ""));
 
         LatencyTester.Result result = tester.measure(server()).get();
@@ -92,9 +94,49 @@ class LatencyTesterProbeTest {
         assertThat(result.throughProxy()).isFalse();
     }
 
+    /**
+     * The core answers 503 when the proxy fails the test and 504 when it
+     * times out (sing-box 1.14, experimental/clashapi/proxies.go): the proxy
+     * was tried and does not work. Both used to send the tester to a TCP
+     * connect, which a server with expired credentials still passes, so it
+     * showed as a fast one and sorted to the top of the list.
+     */
+    @Test
+    void aProxyTheCoreTriedAndFoundBrokenIsUnreachable() throws Exception {
+        for (int status : new int[] {503, 504}) {
+            HttpServer core = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            core.createContext("/", exchange -> {
+                byte[] body = "{\"message\":\"An error occurred in the delay test\"}"
+                        .getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(status, body.length);
+                exchange.getResponseBody().write(body);
+                exchange.close();
+            });
+            core.start();
+            // The server's own port accepts a connection, as a server whose
+            // credentials expired still does.
+            try (ServerSocket open = new ServerSocket(0, 5, InetAddress.getLoopbackAddress())) {
+                ServerConfig server = server();
+                server.setPort(open.getLocalPort());
+                LatencyTester tester = new LatencyTester(
+                        new ClashApiDelayProbe(HttpClient.newHttpClient()));
+                tester.setApiEndpointSupplier(() -> new LatencyTester.ApiEndpoint(
+                        core.getAddress().getPort(), ""));
+
+                LatencyTester.Result result = tester.measure(server).get();
+
+                assertThat(result.reachable()).as("reachable after HTTP %d", status).isFalse();
+                assertThat(result.throughProxy()).as("through the proxy after HTTP %d", status)
+                        .isTrue();
+            } finally {
+                core.stop(0);
+            }
+        }
+    }
+
     @Test
     void staysOnTcpWhileDisconnected() throws Exception {
-        StubProbe probe = new StubProbe(Optional.of(50L));
+        StubProbe probe = new StubProbe(new ClashApiDelayProbe.Answer.Delay(50));
         LatencyTester tester = new LatencyTester(probe);
         tester.setApiEndpointSupplier(() -> null);
 
@@ -115,7 +157,7 @@ class LatencyTesterProbeTest {
      */
     @Test
     void theBulkPathAlsoGoesThroughTheProxy() throws Exception {
-        StubProbe probe = new StubProbe(Optional.of(212L));
+        StubProbe probe = new StubProbe(new ClashApiDelayProbe.Answer.Delay(212));
         LatencyTester tester = new LatencyTester(probe);
         tester.setApiEndpointSupplier(() -> new LatencyTester.ApiEndpoint(9090, "token"));
         ServerConfig server = server();
@@ -128,7 +170,7 @@ class LatencyTesterProbeTest {
 
     @Test
     void aNullServerIsUnreachableRatherThanAnError() throws Exception {
-        LatencyTester tester = new LatencyTester(new StubProbe(Optional.of(10L)));
+        LatencyTester tester = new LatencyTester(new StubProbe(new ClashApiDelayProbe.Answer.Delay(10)));
 
         LatencyTester.Result result = tester.measure(null).get();
 
