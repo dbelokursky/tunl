@@ -683,6 +683,51 @@ class ConnectionServiceTest {
         }
     }
 
+    /**
+     * A moved port is named on the Dashboard, since a program set to the
+     * chosen one reaches nothing this session; and a moved HTTP port is
+     * recorded, since a run that dies leaves the system's proxy on it and the
+     * next start looked for such a proxy on the chosen port only.
+     */
+    @Test
+    void aMovedPortIsReportedAndItsHttpPortKeptUntilTheDisconnect() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        // All three ports chosen off the defaults: a machine running a proxy
+        // of its own holds 1080, and SOCKS moved too.
+        int base = freeBlockOf(3);
+        try (ServerSocket taken = new ServerSocket(base + 1, 1, InetAddress.getLoopbackAddress())) {
+            int busy = taken.getLocalPort();
+            store.getSettings().setSocksPort(base);
+            store.getSettings().setHttpPort(busy);
+            store.getSettings().setClashApiPort(base + 2);
+            ConnectionService service = service(engine());
+
+            assertThat(service.connect().started()).isTrue();
+
+            int used = store.getSettings().listenHttpPort();
+            assertThat(movedAsTheUiSeesThem(service))
+                    .containsExactly(new ConnectionService.MovedPort("HTTP", busy, used));
+            assertThat(SessionPorts.recorded(tempDir)).hasValue(used);
+
+            service.disconnect();
+            assertThat(SessionPorts.recorded(tempDir))
+                    .as("a disconnect restores the system's proxy")
+                    .isEmpty();
+        }
+    }
+
+    private static List<ConnectionService.MovedPort> movedAsTheUiSeesThem(
+            ConnectionService service) throws InterruptedException {
+        AtomicReference<List<ConnectionService.MovedPort>> seen = new AtomicReference<>();
+        CountDownLatch read = new CountDownLatch(1);
+        Platform.runLater(() -> {
+            seen.set(service.movedPortsProperty().get());
+            read.countDown();
+        });
+        assertThat(read.await(5, TimeUnit.SECONDS)).isTrue();
+        return seen.get();
+    }
+
     /** The first of {@code count} consecutive loopback ports that are all free. */
     private static int freeBlockOf(int count) throws IOException {
         for (int attempt = 0; attempt < 50; attempt++) {

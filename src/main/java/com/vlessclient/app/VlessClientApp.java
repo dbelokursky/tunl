@@ -7,6 +7,7 @@ import com.vlessclient.platform.CoreRecord;
 import com.vlessclient.platform.PrivilegeHelper;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
+import com.vlessclient.service.SessionPorts;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.SingBoxInstaller;
 import com.vlessclient.service.ThemeManager;
@@ -133,8 +134,17 @@ public class VlessClientApp extends Application {
             if (settings.getProxyMode() != ProxyMode.SYSTEM_PROXY) {
                 return;
             }
-            ServiceLocator.get(SingBoxEngine.class)
-                    .clearStaleSystemProxyOnStartup("127.0.0.1", settings.getHttpPort());
+            SingBoxEngine engine = ServiceLocator.get(SingBoxEngine.class);
+            engine.clearStaleSystemProxyOnStartup("127.0.0.1", settings.getHttpPort());
+            // A run that had moved off the chosen port, because another program
+            // held it, left its proxy on the port it moved to.
+            Path dataDir = ServiceLocator.get(ConfigStore.class).getDataDir();
+            SessionPorts.recorded(dataDir).ifPresent(port -> {
+                if (port != settings.getHttpPort()) {
+                    engine.clearStaleSystemProxyOnStartup("127.0.0.1", port);
+                }
+            });
+            SessionPorts.forget(dataDir);
         } catch (IllegalArgumentException e) {
             log.debug("Skipping stale-proxy cleanup; services unavailable");
         }

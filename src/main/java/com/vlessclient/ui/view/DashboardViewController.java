@@ -24,6 +24,7 @@ import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.service.outbound.OutboundTags;
 import com.vlessclient.ui.view.dashboard.AddHealthTargetDialog;
 import com.vlessclient.ui.view.dashboard.HealthCheckCoordinator;
+import com.vlessclient.ui.view.dashboard.MovedPortsSection;
 import com.vlessclient.ui.view.dashboard.SkippedServersSection;
 import com.vlessclient.ui.view.dashboard.StatusPresenter;
 import com.vlessclient.ui.view.dashboard.TrafficDisplayBinder;
@@ -111,6 +112,8 @@ public class DashboardViewController implements ViewShownAware {
     @FXML private Button updateBannerButton;
     @FXML private HBox skippedServersBanner;
     @FXML private Label skippedServersLabel;
+    @FXML private HBox movedPortsBanner;
+    @FXML private Label movedPortsLabel;
     @FXML private HBox tunnelDroppedBanner;
     @FXML private Label tunnelDroppedLabel;
     @FXML private Button tunnelDroppedButton;
@@ -191,6 +194,10 @@ public class DashboardViewController implements ViewShownAware {
         ServiceLocator.find(ConnectionService.class).ifPresent(service ->
                 new SkippedServersSection(skippedServersBanner, skippedServersLabel)
                         .bind(service.skippedServersProperty()));
+        // Local ports this session moved off because another program held them.
+        ServiceLocator.find(ConnectionService.class).ifPresent(service ->
+                new MovedPortsSection(movedPortsBanner, movedPortsLabel)
+                        .bind(service.movedPortsProperty()));
         // A dropped tunnel whose restart would ask for elevation again waits
         // for the user rather than raising the prompt unasked.
         tunnelDroppedLabel.textProperty().bind(I18n.binding("dashboard.tunnel.dropped"));

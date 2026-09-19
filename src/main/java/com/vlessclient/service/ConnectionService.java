@@ -148,6 +148,10 @@ public class ConnectionService {
     private final ReadOnlyObjectWrapper<List<SkippedServer>> skippedServers =
             new ReadOnlyObjectWrapper<>(List.of());
 
+    /** Ports the running core moved off because another program held them; FX thread. */
+    private final ReadOnlyObjectWrapper<List<MovedPort>> movedPorts =
+            new ReadOnlyObjectWrapper<>(List.of());
+
     /**
      * The ids behind {@link #skippedServers}, readable from any thread: a live
      * switch compares against the configuration the core actually loaded.
@@ -177,6 +181,7 @@ public class ConnectionService {
             // A notice about what the core was started without ends with it.
             if (state == ConnectionState.DISCONNECTED || state == ConnectionState.ERROR) {
                 skippedServers.set(List.of());
+                movedPorts.set(List.of());
             }
             recovery.onConnectionState(state);
         };
@@ -250,6 +255,29 @@ public class ConnectionService {
      */
     public ReadOnlyObjectProperty<List<SkippedServer>> skippedServersProperty() {
         return skippedServers.getReadOnlyProperty();
+    }
+
+    /**
+     * A local port the running core listens on in place of the chosen one,
+     * which another program held.
+     *
+     * @param inbound what listens there: {@code SOCKS}, {@code HTTP} or
+     *                {@code control}
+     * @param chosen  the port the user chose
+     * @param used    the port the run listens on
+     */
+    public record MovedPort(String inbound, int chosen, int used) {
+    }
+
+    /**
+     * The ports the running core moved off, for the Dashboard to say so: a
+     * program set to the chosen port reaches nothing this session. Empty when
+     * none moved or no core runs; changes on the JavaFX thread.
+     *
+     * @return the moved ports of the current session
+     */
+    public ReadOnlyObjectProperty<List<MovedPort>> movedPortsProperty() {
+        return movedPorts.getReadOnlyProperty();
     }
 
     /** Whether a core is running right now. Safe from any thread. */
@@ -339,12 +367,14 @@ public class ConnectionService {
         if (!allowed.getAsBoolean()) {
             return new ConnectAttempt(Outcome.CANCELLED, active);
         }
+        List<MovedPort> moved = List.of();
         if (!current.isRunning()) {
             // Only on a cold start. A restart keeps the ports this session
             // already settled on: the core being replaced may still hold them
             // for a moment, and moving again on every restart would walk the
             // ports upward for no reason.
-            moveTakenListenPortsAside(settings);
+            moved = moveTakenListenPortsAside(settings);
+            recordSessionHttpPort(settings);
         }
         // A control secret for this core alone. One secret lasted the whole
         // run, and while a TUN start waits for the admin prompt the watchdog
@@ -398,6 +428,7 @@ public class ConnectionService {
             return new ConnectAttempt(Outcome.ALREADY_RUNNING, active);
         }
         publishSkipped(skipped);
+        publishMoved(moved);
         return new ConnectAttempt(Outcome.STARTED, active, skipped);
     }
 
@@ -471,6 +502,8 @@ public class ConnectionService {
     private void stopCurrent() {
         liveSelector = null;
         skippedIds = Set.of();
+        // A stopped core put the system's proxy back itself.
+        SessionPorts.forget(configStore.getDataDir());
         SingBoxEngine current = engine;
         if (current != null) {
             log.info("Disconnecting");
@@ -639,7 +672,7 @@ public class ConnectionService {
      * saved, stay as they are, so the next start tries them again, and what
      * listens, connects or shows a port reads the run's.</p>
      */
-    private static void moveTakenListenPortsAside(AppSettings settings) {
+    private static List<MovedPort> moveTakenListenPortsAside(AppSettings settings) {
         int[] chosen = {settings.getSocksPort(), settings.getHttpPort(),
             settings.getClashApiPort()};
         String[] what = {"SOCKS", "HTTP", "control"};
@@ -661,6 +694,35 @@ public class ConnectionService {
             }
         }
         settings.listenOn(listen[0], listen[1], listen[2]);
+        List<MovedPort> moved = new ArrayList<>();
+        for (int i = 0; i < chosen.length; i++) {
+            if (listen[i] != chosen[i]) {
+                moved.add(new MovedPort(what[i], chosen[i], listen[i]));
+            }
+        }
+        return List.copyOf(moved);
+    }
+
+    /**
+     * Keeps this run's HTTP port for the next start when it is not the chosen
+     * one: a run that dies leaves the system's proxy pointing at it, and the
+     * next start looks for such a proxy on the chosen port.
+     */
+    private void recordSessionHttpPort(AppSettings settings) {
+        if (settings.listenHttpPort() != settings.getHttpPort()) {
+            SessionPorts.record(configStore.getDataDir(), settings.listenHttpPort());
+        } else {
+            SessionPorts.forget(configStore.getDataDir());
+        }
+    }
+
+    /** Hands the ports this run moved off to the UI, after the states the start queued. */
+    private void publishMoved(List<MovedPort> moved) {
+        try {
+            Platform.runLater(() -> movedPorts.set(moved));
+        } catch (IllegalStateException toolkitNotRunning) {
+            movedPorts.set(moved);
+        }
     }
 
     /**
