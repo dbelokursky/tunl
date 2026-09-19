@@ -1,9 +1,11 @@
 package com.vlessclient.service;
 
 import com.vlessclient.model.ServerConfig;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,6 +31,7 @@ public class CountryResolver {
 
     private final GeoIpDatabase database;
     private final Map<String, String> cache = new ConcurrentHashMap<>();
+    private final List<Runnable> readyListeners = new CopyOnWriteArrayList<>();
 
     public CountryResolver(GeoIpDatabase database) {
         this.database = database;
@@ -70,12 +73,28 @@ public class CountryResolver {
             return;
         }
         Thread.startVirtualThread(() -> {
-            String code = database.lookup(address).orElse(UNKNOWN);
-            cache.put(address, code);
-            if (!code.equals(UNKNOWN)) {
-                onResolved.accept(code);
+            // Asked before the lookup: a database landing in between must not
+            // turn this miss into a remembered "unknown". On a first launch
+            // every lookup made while the download ran was remembered so, and
+            // no flag appeared until the app was started again.
+            boolean databaseThere = database.isAvailable();
+            Optional<String> code = database.lookup(address);
+            if (code.isPresent()) {
+                cache.put(address, code.get());
+                onResolved.accept(code.get());
+            } else if (databaseThere) {
+                cache.put(address, UNKNOWN);
             }
         });
+    }
+
+    /**
+     * Runs {@code listener} when a download started by {@link #warmUp} lands.
+     *
+     * @param listener what to run, on a background thread
+     */
+    public void onDatabaseReady(Runnable listener) {
+        readyListeners.add(listener);
     }
 
     /**
@@ -89,6 +108,13 @@ public class CountryResolver {
         Thread.startVirtualThread(() -> {
             if (database.ensureDownloaded()) {
                 log.info("Geo-IP database ready; server countries will resolve");
+                for (Runnable listener : readyListeners) {
+                    try {
+                        listener.run();
+                    } catch (RuntimeException e) {
+                        log.warn("A listener for the geo-IP database failed", e);
+                    }
+                }
             }
         });
     }
