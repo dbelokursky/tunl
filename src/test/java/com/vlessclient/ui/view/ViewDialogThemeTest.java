@@ -171,7 +171,7 @@ public class ViewDialogThemeTest extends ApplicationTest {
         DialogPane confirm = open(() -> list.fireEvent(keyPress(KeyCode.DELETE)));
 
         assertThat(confirm.getHeaderText())
-                .isEqualTo(I18n.get("servers.delete.many.header", 2));
+                .isEqualTo(I18n.plural("servers.delete.count", 2));
         assertBelongsToTheWindow(confirm, "dark");
     }
 

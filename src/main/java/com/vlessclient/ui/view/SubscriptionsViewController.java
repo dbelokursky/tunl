@@ -303,8 +303,10 @@ public class SubscriptionsViewController implements ViewShownAware {
         Alert confirm = Dialogs.alert(Alert.AlertType.CONFIRMATION);
         confirm.setTitle(I18n.get("subscriptions.delete.title"));
         confirm.setHeaderText(I18n.get("subscriptions.delete.confirm", sub.getName()));
-        confirm.setContentText(I18n.get("subscriptions.delete.content",
-                String.valueOf(sub.getServerIds().size())));
+        int servers = sub.getServerIds().size();
+        // Nothing to add for a subscription without servers: "all 0 servers".
+        confirm.setContentText(servers == 0 ? null
+                : I18n.plural("subscriptions.delete.content", servers));
         confirm.initOwner(ownerWindow());
 
         Optional<ButtonType> result = confirm.showAndWait();
@@ -368,9 +370,7 @@ public class SubscriptionsViewController implements ViewShownAware {
             urlLabel.getStyleClass().add("server-address");
 
             int serverCount = sub.getServerIds().size();
-            String servers = serverCount == 1
-                    ? I18n.get("subscriptions.servers.one", String.valueOf(serverCount))
-                    : I18n.get("subscriptions.servers.many", String.valueOf(serverCount));
+            String servers = I18n.plural("subscriptions.servers", serverCount);
             String refresh = sub.getLastRefreshedAt() > 0
                     ? I18n.get("subscriptions.refreshed", TIME_FORMAT.format(
                             Instant.ofEpochMilli(sub.getLastRefreshedAt())))

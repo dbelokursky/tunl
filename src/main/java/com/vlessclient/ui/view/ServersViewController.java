@@ -478,7 +478,7 @@ public class ServersViewController {
         }
         Alert confirm = Dialogs.alert(Alert.AlertType.CONFIRMATION);
         confirm.setTitle(I18n.get("dialog.delete.server"));
-        confirm.setHeaderText(I18n.get("servers.delete.many.header", targets.size()));
+        confirm.setHeaderText(I18n.plural("servers.delete.count", targets.size()));
         confirm.setContentText(I18n.get("servers.delete.warning"));
         confirm.initOwner(ownerWindow());
         if (confirm.showAndWait().filter(button -> button == ButtonType.OK).isPresent()) {

@@ -68,15 +68,15 @@ public class RoutingViewTest extends ApplicationTest {
         Label badge = lookup("#bypassCountLabel").query();
 
         interact(() -> area.setText("example.com\n# a comment\n\n   10.0.0.0/8  \n"));
-        assertThat(badge.getText()).isEqualTo(I18n.get("routing.bypass.count.many", "2"));
+        assertThat(badge.getText()).isEqualTo(I18n.plural("routing.bypass.count", 2));
 
         interact(() -> area.setText("example.com"));
-        assertThat(badge.getText()).isEqualTo(I18n.get("routing.bypass.count.one"));
+        assertThat(badge.getText()).isEqualTo(I18n.plural("routing.bypass.count", 1));
 
         interact(() -> area.setText("# only a comment\n\n"));
-        assertThat(badge.getText()).isEqualTo(I18n.get("routing.bypass.count.many", "0"));
+        assertThat(badge.getText()).isEqualTo(I18n.plural("routing.bypass.count", 0));
 
         interact(area::clear);
-        assertThat(badge.getText()).isEqualTo(I18n.get("routing.bypass.count.many", "0"));
+        assertThat(badge.getText()).isEqualTo(I18n.plural("routing.bypass.count", 0));
     }
 }
