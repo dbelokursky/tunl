@@ -346,6 +346,12 @@ public class ConnectionService {
             // ports upward for no reason.
             moveTakenListenPortsAside(settings);
         }
+        // A control secret for this core alone. One secret lasted the whole
+        // run, and while a TUN start waits for the admin prompt the watchdog
+        // sends it to whatever answers on the control port: a program
+        // squatting there kept a token good for every later core. The
+        // monitors read it again when the new core reaches CONNECTED.
+        settings.setClashApiSecret(ConfigStore.newClashApiSecret());
         List<SkippedServer> skipped = new ArrayList<>();
         List<ServerConfig> members = withoutRefused(candidates, active, skipped);
         int refusedByTheCore = 0;

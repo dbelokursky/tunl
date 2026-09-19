@@ -377,10 +377,10 @@ public class SingBoxEngine {
      *
      * <p>Only a 200 for the config's secret that names a sing-box version
      * counts, so a program already on the port that checks another secret, or
-     * is not sing-box, does not. Two can still pass for the core: a sing-box
-     * without a secret, and this app run's previous core while it shuts down,
-     * since the secret lasts the whole run. Both hold the port, so this core
-     * cannot bind it and the session ends in ERROR moments later.</p>
+     * is not sing-box, does not; nor does this app run's previous core while
+     * it shuts down, since every core gets a secret of its own. One can still
+     * pass for the core: a sing-box without a secret. It holds the port, so
+     * this core cannot bind it and the session ends in ERROR moments later.</p>
      *
      * @return true when the core answers
      */

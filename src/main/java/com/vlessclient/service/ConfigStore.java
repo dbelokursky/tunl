@@ -124,10 +124,10 @@ public class ConfigStore {
         ensureDataDir();
         loadServers();
         loadSettings();
-        // Fresh per-run token for the local clash_api control endpoint. Set on
-        // the in-memory settings only (the field is @JsonIgnore), so it never
-        // persists and rotates each run. Shared by the config generator and
-        // TrafficMonitor, which both read this settings instance.
+        // A token for the local clash_api control endpoint, on the in-memory
+        // settings only (the field is @JsonIgnore), so it never persists.
+        // ConnectionService draws another for every core it starts; this one
+        // covers whatever reads the settings before the first connect.
         settings.setClashApiSecret(newClashApiSecret());
     }
 
@@ -173,7 +173,12 @@ public class ConfigStore {
         return UUID.randomUUID().toString();
     }
 
-    private static String newClashApiSecret() {
+    /**
+     * A new token for the clash_api control endpoint: 24 random bytes in hex.
+     *
+     * @return the token
+     */
+    static String newClashApiSecret() {
         byte[] bytes = new byte[24];
         CLASH_API_RANDOM.nextBytes(bytes);
         return java.util.HexFormat.of().formatHex(bytes);

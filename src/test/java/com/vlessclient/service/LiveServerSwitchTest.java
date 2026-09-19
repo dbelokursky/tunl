@@ -29,7 +29,6 @@ class LiveServerSwitchTest {
         store.addServer(first);
         store.addServer(second);
         store.getSettings().setProxyMode(ProxyMode.SYSTEM_PROXY);
-        store.getSettings().setClashApiSecret("private-test-token");
         AtomicReference<String> selected = new AtomicReference<>();
         AtomicInteger puts = new AtomicInteger();
         AtomicInteger status = new AtomicInteger(204);
@@ -42,12 +41,13 @@ class LiveServerSwitchTest {
             // The fake stands in for the core's control endpoint, so it takes
             // the port the connect settled on. In a real run nothing holds
             // that port until the core binds it, and holding it beforehand
-            // now moves the app off it.
+            // now moves the app off it. It checks the secret of the core
+            // running at the time: every core gets its own.
             api = HttpServer.create(new InetSocketAddress(
                     "127.0.0.1", store.getSettings().listenClashApiPort()), 0);
             api.createContext("/proxies/", exchange -> {
                 assertThat(exchange.getRequestHeaders().getFirst("Authorization"))
-                        .isEqualTo("Bearer private-test-token");
+                        .isEqualTo("Bearer " + store.getSettings().getClashApiSecret());
                 if (exchange.getRequestMethod().equals("PUT")) {
                     puts.incrementAndGet();
                     selected.set(JsonMapper.builder().build().readTree(
