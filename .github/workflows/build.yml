@@ -62,16 +62,40 @@ jobs:
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'zulu'
-          cache: 'maven'
+      # Caches are restored here and saved from main only, below. A cache
+      # saved from a pull request is visible to that pull request alone, so
+      # those copies filled the 10 GB quota and pushed main's out; and with
+      # no restore-keys, a pom change started from an empty repository, which
+      # once failed main on a download from Central. restore-keys take the
+      # newest repository of the same OS and arch instead.
+      - id: maven-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: maven-${{ runner.os }}-${{ runner.arch }}-
       # The sing-box tarballs are fetched at generate-resources on every build
       # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
       # pins both the version and the SHA-256s, so a bump misses the cache and
       # re-downloads; bundle-singbox.sh verifies the checksum either way.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      - id: core-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.cache/vless-client-build
           key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
       - run: mvn -B clean verify -Psmoke
+      - name: Save the Maven repository
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.maven-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.m2/repository
+          key: ${{ steps.maven-cache.outputs.cache-primary-key }}
+      - name: Save the core download
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.core-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/vless-client-build
+          key: ${{ steps.core-cache.outputs.cache-primary-key }}
       - name: Probe a runtime linked from scripts/runtime-modules.txt
         # The suite runs on the full JDK, so a module missing from the
         # packaged runtime is invisible to it: this links exactly the listed
@@ -158,7 +182,13 @@ jobs:
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'zulu'
-          cache: 'maven'
+      # Main only, so these may save: the same keys as the test legs, so the
+      # macOS leg's repository serves this job too rather than a second copy.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: maven-${{ runner.os }}-${{ runner.arch }}-
       # The sing-box tarballs are fetched at generate-resources on every build
       # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
       # pins both the version and the SHA-256s, so a bump misses the cache and
@@ -195,7 +225,13 @@ jobs:
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'zulu'
-          cache: 'maven'
+      # Main only, so these may save: the same keys as the test legs, so the
+      # macOS leg's repository serves this job too rather than a second copy.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: maven-${{ runner.os }}-${{ runner.arch }}-
       # The sing-box tarballs are fetched at generate-resources on every build
       # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
       # pins both the version and the SHA-256s, so a bump misses the cache and
