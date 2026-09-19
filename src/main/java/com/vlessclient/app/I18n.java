@@ -64,6 +64,47 @@ public final class I18n {
     }
 
     /**
+     * The form of a message for {@code count}, with the count as {@code {0}}:
+     * the key {@code baseKey.one}, {@code .few} or {@code .many}, by the
+     * plural rule of the UI's language. Messages went around the plural with a
+     * label ("Серверов: 21") or picked between two forms, which gave "remove
+     * all 1 servers" and cannot work in Russian at all.
+     *
+     * @param baseKey the key without its form
+     * @param count   the number the message is about
+     * @return the message in the form for {@code count}
+     */
+    public static String plural(String baseKey, long count) {
+        // As a string: MessageFormat would write a thousand as "1,000".
+        return get(baseKey + "." + pluralForm(getLocale(), count), String.valueOf(count));
+    }
+
+    /**
+     * The plural form a language takes for a number: Russian's one (1, 21,
+     * 101), few (2-4, 22-24) or many (0, 5-20, 25-30, 111-114); every other
+     * language here has one for 1 and many for the rest.
+     *
+     * @param locale the language
+     * @param count  the number
+     * @return {@code one}, {@code few} or {@code many}
+     */
+    static String pluralForm(Locale locale, long count) {
+        long n = Math.abs(count);
+        if ("ru".equals(locale.getLanguage())) {
+            long lastDigit = n % 10;
+            long lastTwo = n % 100;
+            if (lastDigit == 1 && lastTwo != 11) {
+                return "one";
+            }
+            if (lastDigit >= 2 && lastDigit <= 4 && (lastTwo < 12 || lastTwo > 14)) {
+                return "few";
+            }
+            return "many";
+        }
+        return n == 1 ? "one" : "many";
+    }
+
+    /**
      * Returns a JavaFX StringBinding that automatically updates when the locale changes.
      */
     public static StringBinding binding(String key) {
