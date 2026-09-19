@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -153,13 +154,35 @@ public class LatencyTester {
      * @return a future of a map from server id to its result
      */
     public CompletableFuture<Map<String, Result>> testAll(List<ServerConfig> servers) {
+        return testAll(servers, id -> { });
+    }
+
+    /**
+     * Measures every given server concurrently, like {@link #testAll(List)},
+     * and says as each one is done, so a list can show results as they come
+     * in rather than all at once after the slowest.
+     *
+     * @param servers the servers to test; may be null or empty
+     * @param onEach  given the id of each server once its result is in
+     *                {@link #lastResult}, on a tester thread
+     * @return a future of a map from server id to its result
+     */
+    public CompletableFuture<Map<String, Result>> testAll(List<ServerConfig> servers,
+                                                         Consumer<String> onEach) {
         if (servers == null || servers.isEmpty()) {
             return CompletableFuture.completedFuture(Map.of());
         }
 
         List<CompletableFuture<Map.Entry<String, Result>>> futures = servers.stream()
-                .map(server -> CompletableFuture.supplyAsync(
-                        () -> Map.entry(server.getId(), measureBest(server)), executor))
+                .map(server -> CompletableFuture.supplyAsync(() -> {
+                    Result result = measureBest(server);
+                    try {
+                        onEach.accept(server.getId());
+                    } catch (RuntimeException e) {
+                        log.debug("A latency listener failed: {}", e.toString());
+                    }
+                    return Map.entry(server.getId(), result);
+                }, executor))
                 .toList();
 
         return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))

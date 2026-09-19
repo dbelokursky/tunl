@@ -23,6 +23,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -409,15 +411,29 @@ public class ServersViewController {
         }
         ButtonLabels.show(measureButton, "servers.measuring");
         measureButton.setDisable(true);
-        latencyTester.testAll(targets).whenComplete((results, err) -> Platform.runLater(() -> {
-            measureButton.setDisable(false);
-            ButtonLabels.reset(measureButton);
-            if (err != null) {
-                log.warn("Latency measurement failed", err);
-                return;
+        // Rows fill in as results arrive: the list used to be redrawn once,
+        // after the slowest server, and with hundreds of them nothing changed
+        // on screen for minutes. One redraw is queued at a time, however fast
+        // the results come; the latency sort waits for all of them.
+        AtomicBoolean redrawQueued = new AtomicBoolean();
+        Consumer<String> redrawRows = id -> {
+            if (redrawQueued.compareAndSet(false, true)) {
+                Platform.runLater(() -> {
+                    redrawQueued.set(false);
+                    serverListView.refresh();
+                });
             }
-            refreshAfterMeasurement();
-        }));
+        };
+        latencyTester.testAll(targets, redrawRows).whenComplete((results, err) ->
+                Platform.runLater(() -> {
+                    measureButton.setDisable(false);
+                    ButtonLabels.reset(measureButton);
+                    if (err != null) {
+                        log.warn("Latency measurement failed", err);
+                        return;
+                    }
+                    refreshAfterMeasurement();
+                }));
     }
 
     /**
