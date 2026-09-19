@@ -147,103 +147,30 @@ jobs:
           path: dist/*.deb
           retention-days: 14
           if-no-files-found: error
-
-  # Early warning for the JDK 27 move (#216): the same suite, smoke included,
-  # on the next runtime — months before anyone has to care.
-  #
-  # A job of its own rather than a fifth matrix leg, for one reason. Packaging
-  # is gated on `needs: test`, so a canary inside that matrix would have to
-  # carry continue-on-error to avoid blocking the installers — and that flag
-  # can mask the very failure the canary exists to report. Standing apart, it
-  # can fail loudly and still stop nothing: nothing needs it, and main requires
-  # only test-macos, test-windows, test-linux and test-linux-arm.
-  #
-  # ========= Packaging: after that OS's tests ==============================
-  # Each installer is uploaded as an artifact (14 days) so any main commit can
-  # be tried without cutting a release, and each is checked on the runner that
-  # built it: the MSI is installed and uninstalled, the DEB is installed,
-  # launched under Xvfb and removed, the DMG is mounted and its app bundle
-  # inspected. The MSI and the amd64 DEB are built and checked inside
-  # test-windows and test-linux above, on PRs as well, so a broken installer
-  # fails a required check; the DMG and the arm64 DEB are built here, on main
-  # only. Tagged releases build and check their installers in release.yml
-  # through the same scripts.
-
-  package-macos:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: test
-    runs-on: macos-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'zulu'
-      # Main only, so these may save: the same keys as the test legs, so the
-      # macOS leg's repository serves this job too rather than a second copy.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.m2/repository
-          key: maven-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml') }}
-          restore-keys: maven-${{ runner.os }}-${{ runner.arch }}-
-      # The sing-box tarballs are fetched at generate-resources on every build
-      # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
-      # pins both the version and the SHA-256s, so a bump misses the cache and
-      # re-downloads; bundle-singbox.sh verifies the checksum either way.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.cache/vless-client-build
-          key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
-      - run: mvn -B package -DskipTests
+      # The DMG and the arm64 DEB, built and checked here like the MSI and
+      # the amd64 DEB above. Jobs of their own built them on main only, after
+      # the merge, so a broken one merged green.
       - name: Package DMG
+        if: matrix.name == 'macos'
         run: scripts/package-dmg.sh "1.0.0-dev-${GITHUB_SHA:0:7}" "1.0.${{ github.run_number }}"
       - name: Smoke-test the DMG payload
+        if: matrix.name == 'macos'
         # Mounts the DMG and checks Tunl.app inside it: launcher, runtime,
         # app.version, CFBundleVersion, the darwin core in the jar. Not
         # launched — the script says why a CI Mac is the wrong place for it.
         run: scripts/macos-dmg-smoke.sh dist/*.dmg "1.0.0-dev-${GITHUB_SHA:0:7}" "1.0.${{ github.run_number }}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: matrix.name == 'macos'
         with:
           name: vless-client-${{ github.sha }}
           path: dist/*.dmg
           retention-days: 14
           if-no-files-found: error
-
-  package-linux-arm:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: test
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'zulu'
-      # Main only, so these may save: the same keys as the test legs, so the
-      # macOS leg's repository serves this job too rather than a second copy.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.m2/repository
-          key: maven-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml') }}
-          restore-keys: maven-${{ runner.os }}-${{ runner.arch }}-
-      # The sing-box tarballs are fetched at generate-resources on every build
-      # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties
-      # pins both the version and the SHA-256s, so a bump misses the cache and
-      # re-downloads; bundle-singbox.sh verifies the checksum either way.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.cache/vless-client-build
-          key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
-      - run: mvn -B package -DskipTests
       - name: Package DEB (arm64)
+        if: matrix.name == 'linux-arm'
         run: scripts/package-linux.sh "1.0.0-dev-${GITHUB_SHA:0:7}" "1.0.0+dev${{ github.run_number }}"
       - name: Smoke-test DEB install, launch and uninstall (arm64)
+        if: matrix.name == 'linux-arm'
         # The check test-linux runs on the amd64 package: install the .deb,
         # launch it under Xvfb until "Tunl started" is logged, uninstall.
         run: |
@@ -253,23 +180,33 @@ jobs:
             libfreetype6 fontconfig libasound2t64 libgl1 libpango-1.0-0 libcairo2 fonts-dejavu-core
           scripts/linux-deb-smoke.sh dist/*.deb "1.0.0-dev-${GITHUB_SHA:0:7}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: matrix.name == 'linux-arm'
         with:
           name: vless-client-linux-arm-${{ github.sha }}
           path: dist/*.deb
           retention-days: 14
           if-no-files-found: error
 
+  # ========= Installers ====================================================
+  # Every leg above builds its OS's installer and checks it on the runner
+  # that built it, on pull requests as well, so a broken installer fails a
+  # required check: the MSI is installed and uninstalled, each DEB is
+  # installed, launched under Xvfb and removed, the DMG is mounted and its app
+  # bundle inspected. Each is uploaded as an artifact (14 days), so any commit
+  # can be tried without cutting a release. Tagged releases build and check
+  # their installers in release.yml through the same scripts.
+
   # Rolling "dev-latest" prerelease: always holds ALL THREE installers
   # (DMG + MSI + DEB) of the newest merge at a stable URL on the Releases page
-  # (downloadable without a GitHub login, never expires). Runs after every
-  # job that builds an installer, the Windows and Linux test legs included,
-  # so the release is never half-populated. Delete+recreate
+  # (downloadable without a GitHub login, never expires). Runs after the test
+  # legs, which build every installer, so the release is never
+  # half-populated. Delete+recreate
   # replaces the previous merge's assets; the tag is force-moved so the
   # release's source link points at the commit that was actually built. Real
   # releases stay untouched — a prerelease is never marked "Latest".
   dev-release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [test, package-macos, package-linux-arm]
+    needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # One upload at a time: two merges replacing the release at once could
