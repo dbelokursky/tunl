@@ -27,3 +27,12 @@
 -Xmx512m                         # about eight times today's live data, and a ceiling for a leak
 -XX:MinHeapFreeRatio=60          # after each mark keep 60 % free: heap >= 2.5x live, no marking storms
 -XX:G1PeriodicGCInterval=60000   # a minute without any GC runs a concurrent cycle that gives memory back
+
+# Each of the JDK's HTTP clients has a selector thread that wakes every 3 s
+# while it has nothing to do. The app keeps up to nine clients (subscriptions,
+# the updater, the country list, the core's control API, the monitors), so an
+# app sitting in the tray woke up to three times a second for nothing. The
+# selector waits for the nearer of a request's next deadline and this ceiling
+# (JDK 27's HttpClientImpl.SelectorManager), so a request still times out on
+# time.
+-Djdk.internal.httpclient.selectorTimeout=60000   # an idle selector wakes once a minute
