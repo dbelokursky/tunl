@@ -145,6 +145,16 @@ public class AppSettings {
     @JsonProperty("store_secrets_securely")
     private boolean storeSecretsSecurely = true;
 
+    /**
+     * A random id this install sends to subscription providers as
+     * {@code x-hwid}, so a panel that limits devices per plan serves it. Not
+     * taken from the hardware; a new one can be drawn in Settings, which a
+     * provider then counts as a new device. Drawn by ConfigStore#deviceId the
+     * first time it is needed.
+     */
+    @JsonProperty("device_id")
+    private String deviceId;
+
     /** Whether the local MCP control server is enabled. Off by default. */
     @JsonProperty("mcp_enabled")
     private boolean mcpEnabled;
@@ -405,6 +415,14 @@ public class AppSettings {
 
     public void setHealthCheckAutoReconnect(boolean healthCheckAutoReconnect) {
         this.healthCheckAutoReconnect = healthCheckAutoReconnect;
+    }
+
+    public String getDeviceId() {
+        return deviceId;
+    }
+
+    public void setDeviceId(String deviceId) {
+        this.deviceId = deviceId;
     }
 
     public boolean isStoreSecretsSecurely() {

@@ -155,6 +155,16 @@
 
         <CheckBox fx:id="storeSecretsCheck" text="Store credentials in the system keychain"
                   styleClass="form-checkbox"/>
+
+        <HBox spacing="10" alignment="CENTER_LEFT">
+            <Label fx:id="deviceIdLabel" text="Device ID for subscriptions" styleClass="form-label"
+                   prefWidth="210"/>
+            <Label fx:id="deviceIdValue" text="" styleClass="stats-value"/>
+            <Button fx:id="deviceIdResetButton" text="Reset…" styleClass="secondary-button"
+                    onAction="#onResetDeviceId"/>
+        </HBox>
+        <Label fx:id="deviceIdHint" styleClass="hint-label" wrapText="true" maxWidth="520"
+               text="Sent to subscription providers."/>
     </VBox>
 
     <!-- Agent Control (MCP) Section -->

@@ -695,14 +695,20 @@ public class SubscriptionService {
             log.warn("Subscription fetched over plaintext http (MITM/injection "
                     + "risk; prefer https): host={}", host);
         }
-        HttpRequest request = HttpRequest.newBuilder()
+        HttpRequest.Builder request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .GET()
                 .timeout(Duration.ofSeconds(30))
-                .header("User-Agent", "Tunl/" + AppVersion.VERSION)
-                .build();
+                .header("User-Agent", "Tunl/" + AppVersion.VERSION);
+        // A panel that limits devices per plan serves a client only when it
+        // names its device; without these Remnawave answers with an empty
+        // list or a list of messages. The id is random per install, not
+        // taken from the hardware.
+        request.header("x-hwid", configStore.deviceId())
+                .header("x-device-os", deviceOs())
+                .header("x-ver-os", System.getProperty("os.version", ""));
         HttpResponse<InputStream> response =
-                httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+                httpClient.send(request.build(), HttpResponse.BodyHandlers.ofInputStream());
         responseHeaders.set(response.headers());
         try (InputStream body = response.body()) {
             if (response.statusCode() != 200) {
@@ -716,6 +722,15 @@ public class SubscriptionService {
             }
             return readBounded(body, url);
         }
+    }
+
+    /** The operating system as panels list devices: macOS, Windows or Linux. */
+    private static String deviceOs() {
+        String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+        if (os.contains("mac")) {
+            return "macOS";
+        }
+        return os.contains("win") ? "Windows" : "Linux";
     }
 
     /**
