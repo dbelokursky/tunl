@@ -3,6 +3,7 @@ package com.vlessclient.service;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ProxyMode;
+import com.vlessclient.model.RouteMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.RoutingRule;
 import com.vlessclient.model.ServerConfig;
@@ -57,6 +58,12 @@ public class SingBoxConfigGenerator {
     private static final String PROBE_URL = "https://www.gstatic.com/generate_204";
     private static final String PROBE_IDLE_TIMEOUT = "10m";
     private static final int PROBE_TOLERANCE_MS = 50;
+
+    /** The runetfreedom lists of what is blocked in Russia: names first, then addresses. */
+    private static final List<String> BLOCKED_IN_RUSSIA_LISTS =
+            List.of("geosite-ru-blocked", "geoip-ru-blocked");
+    private static final String BLOCKED_LISTS_URL = "https://raw.githubusercontent.com/"
+            + "runetfreedom/russia-v2ray-rules-dat/release/sing-box/";
 
     /** Most servers the "Fastest" mode probes. */
     static final int MAX_AUTOMATIC_MEMBERS = 30;
@@ -287,12 +294,23 @@ public class SingBoxConfigGenerator {
         ArrayNode dnsRules = mapper.createArrayNode();
         dnsRules.add(localRule);
         directDnsRules(routingConfig).forEach(dnsRules::add);
+        boolean blockedOnly = routingConfig != null
+                && routingConfig.getMode() == RouteMode.BLOCKED_IN_RUSSIA;
+        if (blockedOnly) {
+            // A blocked name gets the address of a stub page from the
+            // provider's resolver, so it resolves through the tunnel.
+            ObjectNode blockedNames = mapper.createObjectNode();
+            blockedNames.putArray("rule_set").add(BLOCKED_IN_RUSSIA_LISTS.getFirst());
+            blockedNames.put("server", "proxy-dns");
+            dnsRules.add(blockedNames);
+        }
         dns.set("rules", dnsRules);
 
         // In sing-box 1.13 the dns.rules[].outbound match-all form and
         // the string address shortcut were removed. Use dns.final to route
-        // all queries through the proxy DNS by default.
-        dns.put("final", "proxy-dns");
+        // all queries through the proxy DNS by default, and directly when
+        // only the blocked lists go through the tunnel.
+        dns.put("final", blockedOnly ? "direct-dns" : "proxy-dns");
 
         // A TUN device without an IPv6 address routes IPv4 alone, and the core
         // drops AAAA answers only for ipv4_only: any other strategy handed the
@@ -958,6 +976,21 @@ public class SingBoxConfigGenerator {
             }
         }
 
+        // Only what is blocked in Russia goes through the tunnel, after the
+        // user's own rules; everything else goes direct, by route.final.
+        boolean blockedOnly = routingConfig.getMode() == RouteMode.BLOCKED_IN_RUSSIA;
+        if (blockedOnly) {
+            ArrayNode blocked = mapper.createArrayNode();
+            for (String tag : BLOCKED_IN_RUSSIA_LISTS) {
+                ruleSetTags.add(tag);
+                blocked.add(tag);
+            }
+            ObjectNode blockedRule = mapper.createObjectNode();
+            blockedRule.set("rule_set", blocked);
+            blockedRule.put("outbound", "proxy");
+            rules.add(blockedRule);
+        }
+
         List<String> countries = routingConfig.getBypassCountries();
         if (countries != null && !countries.isEmpty()) {
             // One geosite rule and one geoip rule cover every selected
@@ -1018,7 +1051,7 @@ public class SingBoxConfigGenerator {
 
         ObjectNode route = mapper.createObjectNode();
         route.set("rules", rules);
-        route.put("final", "proxy");
+        route.put("final", blockedOnly ? "direct" : "proxy");
         route.put("auto_detect_interface", true);
 
         if (!ruleSetTags.isEmpty()) {
@@ -1058,6 +1091,9 @@ public class SingBoxConfigGenerator {
      * the proxy group, by the entry's {@code http_client.detour}.
      */
     private ObjectNode buildRemoteRuleSet(String tag) {
+        if (BLOCKED_IN_RUSSIA_LISTS.contains(tag)) {
+            return buildBlockedListRuleSet(tag);
+        }
         // Kind ('geoip' or 'geosite') is the first dash-separated segment
         // of the tag; the entire tag is used verbatim as the .srs filename,
         // so multi-segment tags like 'geosite-category-ru' resolve to
@@ -1079,6 +1115,23 @@ public class SingBoxConfigGenerator {
         // release before its removal stops at rule-set start over it, which
         // `sing-box check` never reaches.
         entry.putObject("http_client").put("detour", "proxy");
+        return entry;
+    }
+
+    /**
+     * A runetfreedom list of what is blocked in Russia. Rebuilt upstream
+     * every six hours, and fetched through the tunnel like the other lists:
+     * GitHub's raw host is what a blocking network is likeliest to cut.
+     */
+    private ObjectNode buildBlockedListRuleSet(String tag) {
+        String kind = tag.substring(0, tag.indexOf('-'));
+        ObjectNode entry = mapper.createObjectNode();
+        entry.put("tag", tag);
+        entry.put("type", "remote");
+        entry.put("format", "binary");
+        entry.put("url", BLOCKED_LISTS_URL + "rule-set-" + kind + "/" + tag + ".srs");
+        entry.putObject("http_client").put("detour", "proxy");
+        entry.put("update_interval", "6h");
         return entry;
     }
 

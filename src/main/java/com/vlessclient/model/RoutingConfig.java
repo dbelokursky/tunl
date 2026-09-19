@@ -43,6 +43,13 @@ public class RoutingConfig {
     private List<RoutingRule> rules = new ArrayList<>();
 
     /**
+     * What goes through the tunnel: everything, or only what is blocked in
+     * Russia. A file from before this field routes everything, as it did.
+     */
+    @JsonProperty("mode")
+    private RouteMode mode = RouteMode.ALL;
+
+    /**
      * User-maintained list of URL/host patterns that should BYPASS the proxy
      * (go direct). One entry per element. Supports:
      * <ul>
@@ -148,6 +155,14 @@ public class RoutingConfig {
         if (country != null && !country.isBlank()) {
             setBypassCountries(List.of(country));
         }
+    }
+
+    public RouteMode getMode() {
+        return mode == null ? RouteMode.ALL : mode;
+    }
+
+    public void setMode(RouteMode mode) {
+        this.mode = mode == null ? RouteMode.ALL : mode;
     }
 
     public List<RoutingRule> getRules() {

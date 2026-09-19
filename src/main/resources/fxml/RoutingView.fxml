@@ -4,6 +4,7 @@
 <?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.ListView?>
+<?import javafx.scene.control.RadioButton?>
 <?import javafx.scene.control.TextArea?>
 <?import javafx.scene.layout.FlowPane?>
 <?import javafx.scene.layout.HBox?>
@@ -18,6 +19,17 @@
 
     <!-- Header -->
     <Label fx:id="titleLabel" text="Routing" styleClass="view-title"/>
+
+    <!-- What goes through the VPN: everything, which the sections below route
+         around, or only what is blocked in Russia, by the runetfreedom lists.
+         The two choices share a toggle group made by the controller. -->
+    <VBox styleClass="card" spacing="8">
+        <Label fx:id="routeModeTitle" text="What goes through the VPN" styleClass="section-title"/>
+        <RadioButton fx:id="routeAllRadio" text="All traffic"/>
+        <RadioButton fx:id="routeBlockedRadio" text="Only what is blocked in Russia"/>
+        <Label fx:id="routeModeHint" styleClass="hint-label" wrapText="true"
+               text="The runetfreedom lists of blocked sites and addresses."/>
+    </VBox>
 
     <!-- Bypass countries: selected codes render as removable chips (added by
          the controller in front of the combo). The combo lists every ISO
