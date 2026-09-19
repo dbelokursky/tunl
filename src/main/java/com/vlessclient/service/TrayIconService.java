@@ -19,9 +19,12 @@ import java.awt.Toolkit;
 import java.awt.TrayIcon;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javafx.application.Platform;
 import javafx.collections.ListChangeListener;
@@ -93,6 +96,12 @@ public class TrayIconService {
     private MenuItem statusItem;
     private Menu serversMenu;
     private ListChangeListener<ServerConfig> serversListener;
+    /** Where work for the AWT thread is queued; replaced in tests. */
+    private Consumer<Runnable> awtInvoker = EventQueue::invokeLater;
+    /** A refresh is queued and has not started, so another request can join it. */
+    private final AtomicBoolean refreshQueued = new AtomicBoolean();
+    /** The servers submenu as last built, so an unchanged list rebuilds nothing. */
+    private ServerMenu shownServerMenu;
     private javafx.beans.value.ChangeListener<ConnectionState> stateListener;
     private javafx.beans.value.ChangeListener<TunnelHealth> healthListener;
 
@@ -292,35 +301,117 @@ public class TrayIconService {
      * call from any thread.
      */
     private void refreshTrayState() {
-        EventQueue.invokeLater(() -> {
-            if (trayIcon == null) {
-                return;
-            }
-            ConnectionState state = currentState();
-            TunnelStatus status = TunnelStatus.of(state, currentHealth());
+        requestRefresh();
+    }
 
-            trayIcon.setImage(createStatusIcon(status));
-            trayIcon.setToolTip("Tunl - " + statusLabel(status));
+    /**
+     * Queues a refresh of the icon, the labels and the servers submenu on the
+     * AWT thread, or joins the one already queued: it reads the state when it
+     * runs, so it shows every change requested before that. Each change of the
+     * server list used to queue a refresh of its own, and a subscription
+     * refresh of 300 servers queued 300 rebuilds of a 300-item native menu,
+     * about 7 seconds on macOS, where the AWT thread is the main thread.
+     */
+    void requestRefresh() {
+        if (refreshQueued.compareAndSet(false, true)) {
+            awtInvoker.accept(() -> {
+                refreshQueued.set(false);
+                applyTrayState();
+            });
+        }
+    }
 
-            if (statusItem != null) {
-                statusItem.setLabel(statusLabel(status));
+    /** Test seam: replaces the AWT event queue. */
+    void setAwtInvoker(Consumer<Runnable> invoker) {
+        this.awtInvoker = invoker;
+    }
+
+    private void applyTrayState() {
+        if (trayIcon == null) {
+            return;
+        }
+        ConnectionState state = currentState();
+        TunnelStatus status = TunnelStatus.of(state, currentHealth());
+
+        trayIcon.setImage(createStatusIcon(status));
+        trayIcon.setToolTip("Tunl - " + statusLabel(status));
+
+        if (statusItem != null) {
+            statusItem.setLabel(statusLabel(status));
+        }
+        if (toggleConnectItem != null) {
+            // Keyed off the process state, not the status: a tunnel that
+            // carries no traffic is still one the user disconnects.
+            boolean connected = state == ConnectionState.CONNECTED
+                    || state == ConnectionState.CONNECTING;
+            toggleConnectItem.setLabel(
+                    connected ? I18n.get("tray.disconnect") : I18n.get("tray.connect"));
+        }
+        rebuildServersMenu();
+    }
+
+    /** Most servers the tray's submenu lists; the others are counted. */
+    static final int MAX_MENU_SERVERS = 25;
+
+    /**
+     * A server as the tray lists it.
+     *
+     * @param id     the server's id
+     * @param label  its name, or its address when it has none
+     * @param active whether it is the picked one
+     */
+    record MenuServer(String id, String label, boolean active) {
+    }
+
+    /**
+     * What the servers submenu shows.
+     *
+     * @param items the servers listed
+     * @param more  how many are left out
+     */
+    record ServerMenu(List<MenuServer> items, int more) {
+    }
+
+    /**
+     * The submenu for a server list: the first {@link #MAX_MENU_SERVERS} and
+     * the picked one wherever it is, the rest counted. A native menu of
+     * hundreds of items from a big subscription could not be read anyway.
+     */
+    static ServerMenu serverMenu(List<ServerConfig> servers) {
+        List<MenuServer> items = new ArrayList<>();
+        ServerConfig picked = servers.stream().filter(ServerConfig::isActive)
+                .findFirst().orElse(null);
+        int room = picked != null && servers.indexOf(picked) >= MAX_MENU_SERVERS
+                ? MAX_MENU_SERVERS - 1 : MAX_MENU_SERVERS;
+        for (ServerConfig server : servers) {
+            if (items.size() < room || server == picked) {
+                items.add(menuServer(server));
             }
-            if (toggleConnectItem != null) {
-                // Keyed off the process state, not the status: a tunnel that
-                // carries no traffic is still one the user disconnects.
-                boolean connected = state == ConnectionState.CONNECTED
-                        || state == ConnectionState.CONNECTING;
-                toggleConnectItem.setLabel(
-                        connected ? I18n.get("tray.disconnect") : I18n.get("tray.connect"));
+            if (items.size() == MAX_MENU_SERVERS) {
+                break;
             }
-            rebuildServersMenu();
-        });
+        }
+        return new ServerMenu(List.copyOf(items), servers.size() - items.size());
+    }
+
+    private static MenuServer menuServer(ServerConfig server) {
+        String label = server.getName() != null && !server.getName().isBlank()
+                ? server.getName()
+                : server.getAddress();
+        return new MenuServer(server.getId(), label, server.isActive());
     }
 
     private void rebuildServersMenu() {
         if (serversMenu == null) {
             return;
         }
+        List<ServerConfig> current = configStore == null ? List.of() : serverSnapshot;
+        if (!current.isEmpty() && serverMenu(current).equals(shownServerMenu)) {
+            // Most refreshes change the icon or a label, not the servers; a
+            // subscription refresh re-applies every server, changed or not.
+            return;
+        }
+        shownServerMenu = null;
         serversMenu.removeAll();
 
         if (configStore == null) {
@@ -338,16 +429,18 @@ public class TrayIconService {
             return;
         }
 
-        for (ServerConfig server : snapshot) {
-            String name = server.getName() != null && !server.getName().isBlank()
-                    ? server.getName()
-                    : server.getAddress();
-            String label = (server.isActive() ? "✓ " : "    ") + name;
-            final String serverId = server.getId();
-            MenuItem item = new MenuItem(label);
-            item.addActionListener(e -> Platform.runLater(() -> selectActiveServer(serverId)));
+        ServerMenu menu = serverMenu(snapshot);
+        for (MenuServer server : menu.items()) {
+            MenuItem item = new MenuItem((server.active() ? "✓ " : "    ") + server.label());
+            item.addActionListener(e -> Platform.runLater(() -> selectActiveServer(server.id())));
             serversMenu.add(item);
         }
+        if (menu.more() > 0) {
+            MenuItem more = new MenuItem(I18n.get("tray.servers.more", menu.more()));
+            more.addActionListener(e -> showMainWindow());
+            serversMenu.add(more);
+        }
+        shownServerMenu = menu;
     }
 
     private void selectActiveServer(String serverId) {
