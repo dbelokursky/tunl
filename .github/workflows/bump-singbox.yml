@@ -12,7 +12,9 @@ on:
     # to seven — sing-box 1.13.19 shipped an hour after a Monday run and
     # would have waited until the next one. The cost of checking more often
     # is one API call: a run with nothing to do stops at the first step.
-    - cron: '0 6 * * *'
+    # Off the hour: GitHub delays scheduled runs at the top of the hour, and
+    # the 06:00 UTC run started between 09:51 and 11:21 in September 2026.
+    - cron: '37 5 * * *'
   workflow_dispatch:
     inputs:
       version:

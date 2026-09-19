@@ -206,6 +206,8 @@ class TrafficMonitorTest {
     private static void awaitFx() throws InterruptedException {
         CountDownLatch latch = new CountDownLatch(1);
         Platform.runLater(latch::countDown);
-        latch.await(2, TimeUnit.SECONDS);
+        // Checked: an FX thread that did not get there in time let the
+        // assertions after it run against a state it had not reached yet.
+        assertThat(latch.await(2, TimeUnit.SECONDS)).as("the FX thread caught up").isTrue();
     }
 }

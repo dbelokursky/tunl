@@ -349,12 +349,12 @@
                                 <rule>
                                     <!-- Floor, not target. Coverage differs by
                                          OS because platform-specific tests are
-                                         skipped. The 2026-09 main baseline is
-                                         64.2% on macOS; the cross-platform CI
-                                         runs 859 tests but skips 55 on Windows
-                                         versus 6 on macOS. Keep enough headroom
-                                         for that spread and raise this floor as
-                                         coverage grows. -->
+                                         skipped. On 2026-09-19 main measured
+                                         80.2% of lines on macOS
+                                         (mvn clean verify -Psmoke, about 1,430
+                                         tests). Keep enough headroom for the
+                                         spread across the CI legs and raise
+                                         this floor as coverage grows. -->
                                     <element>BUNDLE</element>
                                     <limits>
                                         <limit>
@@ -365,12 +365,12 @@
                                         <!-- Branches were ungated, so an error
                                              path could lose all its coverage
                                              without failing the build - the
-                                             lines around it stay covered. The
-                                             2026-09 main baseline is 52.99%
-                                             (2092/3948) on macOS; this floor
-                                             keeps the same ~11pp headroom the
-                                             LINE floor above leaves for the
-                                             Windows/Linux spread. -->
+                                             lines around it stay covered. On
+                                             2026-09-19 main measured 66.9%
+                                             (3718/5556) on macOS; this floor
+                                             leaves about the headroom the LINE
+                                             floor above leaves for the spread
+                                             across the CI legs. -->
                                         <limit>
                                             <counter>BRANCH</counter>
                                             <value>COVEREDRATIO</value>
