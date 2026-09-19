@@ -215,6 +215,15 @@ public class SubscriptionsViewTest extends ApplicationTest {
     @Test
     void shownAgainTheRowsShowWhatARefreshRecordedMeanwhile() {
         service.addSubscription("Provider", "https://provider.example/sub");
+        // The row has to be drawn before the refresh records anything: drawn
+        // after, it shows the error and the check below fails, as it did on
+        // #327's macOS runner. A ListView draws its rows in a pulse, and a
+        // wait for FX events does not wait for one; with the pulse slowed to
+        // 2 Hz (-Djavafx.animation.pulse=2) the row was not there yet after
+        // such a wait in 33 runs of 40, and in 5 it came up with the error.
+        // So the row's button, and then the end of the pulse that drew it:
+        // the list draws its first row twice in that pulse.
+        rowRefreshButton();
         WaitForAsyncUtils.waitForFxEvents();
         String shown = I18n.get("subscriptions.last.error", "401 Unauthorized");
         // What the hourly refresh does: off the FX thread, and unannounced.
