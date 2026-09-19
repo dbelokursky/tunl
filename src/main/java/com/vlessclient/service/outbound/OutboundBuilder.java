@@ -79,8 +79,9 @@ public abstract class OutboundBuilder {
                 reality.put("public_key",
                         CoreSettings.realityPublicKey(tls.getRealityPublicKey()));
             }
-            if (tls.getRealityShortId() != null && !tls.getRealityShortId().isEmpty()) {
-                reality.put("short_id", tls.getRealityShortId());
+            String shortId = CoreSettings.realityShortId(tls.getRealityShortId());
+            if (!shortId.isEmpty()) {
+                reality.put("short_id", shortId);
             }
             tlsNode.set("reality", reality);
         }

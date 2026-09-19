@@ -8,6 +8,7 @@ import java.util.Base64;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.StringJoiner;
 import java.util.regex.Pattern;
 
 /**
@@ -120,6 +121,74 @@ public final class CoreSettings {
             case "plain" -> "none";
             default -> name;
         };
+    }
+
+    /**
+     * A REALITY short ID as the core decodes it: hex, without the spaces a
+     * link or an edit can leave around it. The core refused " 0123abcd"
+     * ("encoding/hex: invalid byte"), while {@link #refusal}, which strips
+     * it, let the server be stored.
+     *
+     * @param shortId the short ID as stored
+     * @return the short ID, or an empty string when there is none
+     */
+    public static String realityShortId(String shortId) {
+        return shortId == null ? "" : shortId.strip();
+    }
+
+    /**
+     * A Shadowsocks password as the core reads it. A 2022 cipher takes one
+     * key, or a server key and a user key separated by a colon, and decodes
+     * each as standard base64 with padding; links also carry the same bytes
+     * without the padding or in the URL alphabet, which the core refused
+     * ("decode key: illegal base64 data"). The older ciphers take any string,
+     * so their password is written as it is.
+     *
+     * @param method   the cipher as stored
+     * @param password the password as stored
+     * @return the password to write
+     */
+    public static String shadowsocksPassword(String method, String password) {
+        String name = shadowsocksMethod(method);
+        if (password == null || name == null || !name.startsWith("2022-")) {
+            return password;
+        }
+        StringJoiner keys = new StringJoiner(":");
+        for (String key : password.split(":", -1)) {
+            keys.add(standardBase64(key));
+        }
+        return keys.toString();
+    }
+
+    /** Base64 in the standard alphabet, padded; a length no base64 has is left as it is. */
+    private static String standardBase64(String value) {
+        String converted = value.strip().replace('-', '+').replace('_', '/');
+        int end = converted.length();
+        while (end > 0 && converted.charAt(end - 1) == '=') {
+            end--;
+        }
+        String bare = converted.substring(0, end);
+        return switch (bare.length() % 4) {
+            case 2 -> bare + "==";
+            case 3 -> bare + "=";
+            default -> bare;
+        };
+    }
+
+    /**
+     * A SIP003 plugin under the name the core knows: simple-obfs is the old
+     * name of obfs-local, and the core knows only the new one ("plugin not
+     * found: simple-obfs").
+     *
+     * @param plugin the plugin as stored
+     * @return the plugin to write
+     */
+    public static String shadowsocksPlugin(String plugin) {
+        if (plugin == null) {
+            return null;
+        }
+        String name = plugin.strip();
+        return "simple-obfs".equalsIgnoreCase(name) ? "obfs-local" : name;
     }
 
     /**

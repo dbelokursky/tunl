@@ -167,7 +167,18 @@ class SingBoxRealBinarySmokeTest {
                 shadowsocksServer("xray-chacha20-poly1305", "chacha20-poly1305"),
                 shadowsocksServer("xray-xchacha20-poly1305", "xchacha20-poly1305"),
                 shadowsocksServer("xray-plain", "plain"),
-                shadowsocksServer("cipher-in-capitals", "AES-256-GCM"));
+                shadowsocksServer("cipher-in-capitals", "AES-256-GCM"),
+                with(realityServer("short-id-with-spaces", "chrome", realityKey),
+                        server -> server.getTls().setRealityShortId(" 0123abcd ")),
+                with(shadowsocksServer("ss2022-key-without-padding", "2022-blake3-aes-128-gcm"),
+                        server -> server.setUuid("AAAAAAAAAAAAAAAAAAAAAA")),
+                with(shadowsocksServer("ss2022-keys-in-base64url", "2022-blake3-aes-256-gcm"),
+                        server -> server.setUuid("-__7__v_-__7__v_-__7__v_-__7__v_-__7__v_-_8"
+                                + ":-__7__v_-__7__v_-__7__v_-__7__v_-__7__v_-_8")),
+                with(shadowsocksServer("simple-obfs", "aes-256-gcm"), server -> {
+                    server.setPlugin("simple-obfs");
+                    server.setPluginOpts("obfs=http;obfs-host=www.bing.com");
+                }));
 
         for (ProxyMode mode : ProxyMode.values()) {
             AppSettings settings = new AppSettings();

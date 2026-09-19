@@ -23,9 +23,10 @@ public final class ShadowsocksOutboundBuilder extends OutboundBuilder {
         outbound.put("server", server.getAddress());
         outbound.put("server_port", server.getPort());
         outbound.put("method", CoreSettings.shadowsocksMethod(server.getEncryption()));
-        outbound.put("password", server.getUuid());
+        outbound.put("password",
+                CoreSettings.shadowsocksPassword(server.getEncryption(), server.getUuid()));
         if (server.getPlugin() != null && !server.getPlugin().isBlank()) {
-            outbound.put("plugin", server.getPlugin());
+            outbound.put("plugin", CoreSettings.shadowsocksPlugin(server.getPlugin()));
             if (server.getPluginOpts() != null && !server.getPluginOpts().isBlank()) {
                 outbound.put("plugin_opts", server.getPluginOpts());
             }
