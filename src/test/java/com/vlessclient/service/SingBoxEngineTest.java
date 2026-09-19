@@ -1,5 +1,6 @@
 package com.vlessclient.service;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.platform.CoreRecord;
@@ -91,17 +92,22 @@ class SingBoxEngineTest {
      * to the running core, not to a refused configuration.
      */
     private Path createCrashingSingBox(Path dir, String name) throws Exception {
+        return createCrashingSingBox(dir, name, "sing-box crashing");
+    }
+
+    /** A core that passes the check, prints {@code lastLine} when run and exits 1. */
+    private Path createCrashingSingBox(Path dir, String name, String lastLine) throws Exception {
         if (WINDOWS) {
             return writeScript(dir, name,
                     "@echo off\r\n"
                     + "if \"%1\"==\"check\" exit /b 0\r\n"
-                    + "echo sing-box crashing\r\n"
+                    + "echo " + lastLine + "\r\n"
                     + "exit /b 1\r\n");
         }
         return writeScript(dir, name,
                 "#!/bin/sh\n"
                 + "[ \"$1\" = check ] && exit 0\n"
-                + "echo 'sing-box crashing'\n"
+                + "echo '" + lastLine + "'\n"
                 + "exit 1\n");
     }
 
@@ -304,6 +310,28 @@ class SingBoxEngineTest {
 
         awaitConnectionState(engine, ConnectionState.ERROR, AWAIT_STATE_TIMEOUT_MS);
         assertThat(engine.errorMessageProperty().get()).contains("exited unexpectedly");
+    }
+
+    /**
+     * The card and the notification showed the exit code and the core's last
+     * line as it came, English inside a Russian window. They now say what the
+     * line means where the core states it in a known way; the line itself is
+     * kept for agents, which read it better than a sentence.
+     */
+    @Test
+    void aCoreThatExitsIsPutIntoWordsAndItsLastLineKept(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        String fatal = "FATAL[0000] start service: start inbound/http[http-in]: listen tcp "
+                + "127.0.0.1:1081: bind: address already in use";
+        SingBoxEngine engine = new SingBoxEngine(createCrashingSingBox(tmp, "sing-box", fatal));
+
+        engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+
+        awaitConnectionState(engine, ConnectionState.ERROR, AWAIT_STATE_TIMEOUT_MS);
+        assertThat(engine.errorMessageProperty().get())
+                .isEqualTo(I18n.get("engine.exit.port", "1081"));
+        assertThat(engine.errorDetailProperty().get())
+                .isEqualTo("sing-box exited with code 1: " + fatal);
     }
 
     @Test

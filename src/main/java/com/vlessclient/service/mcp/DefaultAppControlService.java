@@ -137,7 +137,12 @@ public class DefaultAppControlService implements AppControlService {
             SingBoxEngine current = engine;
             ConnectionState state = current != null
                     ? current.connectionStateProperty().get() : ConnectionState.DISCONNECTED;
-            String error = current != null ? current.errorMessageProperty().get() : "";
+            // The core's own line: it says why exactly, and in the same words
+            // on every machine; the window's sentence is in the UI's language.
+            String error = current != null ? current.errorDetailProperty().get() : "";
+            if ((error == null || error.isBlank()) && current != null) {
+                error = current.errorMessageProperty().get();
+            }
             ServerConfig active = configStore.getServers().stream()
                     .filter(ServerConfig::isActive).findFirst().orElse(null);
             TunnelHealth health = state == ConnectionState.CONNECTED && healthState != null

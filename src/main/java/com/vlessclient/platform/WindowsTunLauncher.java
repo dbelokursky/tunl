@@ -46,6 +46,14 @@ public final class WindowsTunLauncher implements TunLauncher {
 
     private static final Logger log = LoggerFactory.getLogger(WindowsTunLauncher.class);
 
+    /**
+     * How the launcher's line for a UAC prompt that was declined or failed
+     * begins. The app tells the user that administrator rights were not
+     * granted by this line, so the script writes it as it stands here.
+     */
+    public static final String ELEVATION_DECLINED =
+            "FATAL: administrator elevation was declined or failed: ";
+
     @Override
     public Launched launch(Path binary, Path configFile) throws IOException {
         Path tempDir = Path.of(System.getProperty("java.io.tmpdir"));

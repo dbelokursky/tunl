@@ -30,6 +30,8 @@ class LiveStatusTest {
     private final ReadOnlyObjectWrapper<ConnectionState> state =
             new ReadOnlyObjectWrapper<>(ConnectionState.CONNECTED);
     private final ReadOnlyStringWrapper tag = new ReadOnlyStringWrapper();
+    private final ReadOnlyStringWrapper message = new ReadOnlyStringWrapper("");
+    private final ReadOnlyStringWrapper detail = new ReadOnlyStringWrapper("");
     private final TunnelHealthState health = new TunnelHealthState();
     private DefaultAppControlService service;
 
@@ -47,6 +49,16 @@ class LiveStatusTest {
             public ReadOnlyObjectProperty<ConnectionState> connectionStateProperty() {
                 return state.getReadOnlyProperty();
             }
+
+            @Override
+            public ReadOnlyStringProperty errorMessageProperty() {
+                return message.getReadOnlyProperty();
+            }
+
+            @Override
+            public ReadOnlyStringProperty errorDetailProperty() {
+                return detail.getReadOnlyProperty();
+            }
         };
         ProxyGroupMonitor monitor = new ProxyGroupMonitor() {
             @Override
@@ -56,6 +68,24 @@ class LiveStatusTest {
         };
         service = new DefaultAppControlService(store, null, null, null, null,
                 null, null, engine, health, monitor);
+    }
+
+    /**
+     * The window says why the core stopped in a sentence, in the language of
+     * the UI. An agent is given the core's own line, which says it exactly
+     * and in the same words on every machine.
+     */
+    @Test
+    void anExitedCoreIsReportedToAnAgentInTheCoresOwnWords() {
+        String line = "sing-box exited with code 1: FATAL[0000] start service: start "
+                + "inbound/http[http-in]: listen tcp 127.0.0.1:1081: bind: address already in use";
+        FxExecutor.run(() -> {
+            state.set(ConnectionState.ERROR);
+            message.set("Ядро VPN не смогло открыть порт 1081: его занимает другая программа.");
+            detail.set(line);
+        });
+
+        assertThat(service.getStatus().error()).isEqualTo(line);
     }
 
     @Test
