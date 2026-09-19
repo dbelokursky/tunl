@@ -22,6 +22,9 @@ class CoreSettingsTest {
             "WZaG00XCAiVCF2SP5fmSbKiuTbBB+lMDg/81rC8hR80=";
     static final String KEY_16_BYTES = "AAAAAAAAAAAAAAAAAAAAAA==";
     static final String KEY_32_BYTES = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    /** The same 32 bytes in both alphabets: '-' and '_' against '+' and '/'. */
+    static final String URL_KEY_32_BYTES = "-__7__v_-__7__v_-__7__v_-__7__v_-__7__v_-_8";
+    static final String STANDARD_KEY_32_BYTES = "+//7//v/+//7//v/+//7//v/+//7//v/+//7//v/+/8=";
 
     @Test
     void serversTheCoreAcceptsHaveNoRefusal() {
@@ -110,6 +113,53 @@ class CoreSettingsTest {
         assertThat(CoreSettings.refusal(
                 shadowsocks("2022-blake3-aes-256-gcm", KEY_32_BYTES + ":password")))
                 .isPresent();
+    }
+
+    /**
+     * The pinned core's check refused " 0123abcd" with "decode short_id:
+     * encoding/hex: invalid byte: U+0020", while the refusal above, which
+     * strips it, let the server in: stored, and never connecting.
+     */
+    @Test
+    void aRealityShortIdIsWrittenWithoutTheSpacesAroundIt() {
+        assertThat(CoreSettings.realityShortId(" 0123abcd ")).isEqualTo("0123abcd");
+        assertThat(CoreSettings.realityShortId("0123abcd")).isEqualTo("0123abcd");
+        assertThat(CoreSettings.realityShortId(null)).isEmpty();
+    }
+
+    /**
+     * The core decodes a Shadowsocks 2022 key as standard base64 with padding
+     * ("decode key: illegal base64 data" otherwise). Links also carry the same
+     * bytes without the padding or in the URL alphabet, and the refusal above
+     * accepts both, since the key is the right length either way.
+     */
+    @Test
+    void aShadowsocks2022KeyIsWrittenInTheStandardAlphabetWithPadding() {
+        assertThat(CoreSettings.shadowsocksPassword("2022-blake3-aes-128-gcm",
+                "AAAAAAAAAAAAAAAAAAAAAA")).isEqualTo(KEY_16_BYTES);
+        assertThat(CoreSettings.shadowsocksPassword("2022-blake3-aes-128-gcm",
+                "-_-_-_-_-_-_-_-_-_-_-w")).isEqualTo("+/+/+/+/+/+/+/+/+/+/+w==");
+        assertThat(CoreSettings.shadowsocksPassword("2022-blake3-aes-256-gcm",
+                URL_KEY_32_BYTES + ":" + URL_KEY_32_BYTES))
+                .isEqualTo(STANDARD_KEY_32_BYTES + ":" + STANDARD_KEY_32_BYTES);
+        assertThat(CoreSettings.shadowsocksPassword("2022-blake3-aes-128-gcm", KEY_16_BYTES))
+                .isEqualTo(KEY_16_BYTES);
+    }
+
+    /** Any string is a password for the older ciphers: nothing in it is spelling. */
+    @Test
+    void aPasswordForAnOlderCipherIsWrittenAsItIs() {
+        assertThat(CoreSettings.shadowsocksPassword("aes-256-gcm", " pass-word_ "))
+                .isEqualTo(" pass-word_ ");
+        assertThat(CoreSettings.shadowsocksPassword(null, "password")).isEqualTo("password");
+    }
+
+    /** "plugin not found: simple-obfs": the core knows the same plugin as obfs-local. */
+    @Test
+    void simpleObfsIsWrittenUnderTheNameTheCoreKnows() {
+        assertThat(CoreSettings.shadowsocksPlugin("simple-obfs")).isEqualTo("obfs-local");
+        assertThat(CoreSettings.shadowsocksPlugin("obfs-local")).isEqualTo("obfs-local");
+        assertThat(CoreSettings.shadowsocksPlugin("v2ray-plugin")).isEqualTo("v2ray-plugin");
     }
 
     /**
