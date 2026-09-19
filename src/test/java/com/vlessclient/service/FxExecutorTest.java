@@ -56,6 +56,55 @@ class FxExecutorTest {
                 .isFalse();
     }
 
+    /**
+     * An interrupted caller reports a failure too, the recovery scheduler and
+     * the MCP workers among them, whose executors interrupt their threads on
+     * shutdown. Its task stayed queued and ran afterwards: the same "a change
+     * lands after the caller reported failure" the timeout path had fixed.
+     */
+    @Test
+    void aTaskThatHasNotStartedWhenTheCallerIsInterruptedNeverRuns() throws Exception {
+        CountDownLatch fxBusy = new CountDownLatch(1);
+        CountDownLatch releaseFx = new CountDownLatch(1);
+        Platform.runLater(() -> {
+            fxBusy.countDown();
+            try {
+                releaseFx.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        assertThat(fxBusy.await(5, TimeUnit.SECONDS)).as("the FX thread is busy").isTrue();
+
+        AtomicBoolean ran = new AtomicBoolean();
+        java.util.concurrent.atomic.AtomicReference<Throwable> failure =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        Thread caller = Thread.ofVirtual().start(() -> {
+            try {
+                FxExecutor.get(() -> {
+                    ran.set(true);
+                    return null;
+                }, Duration.ofSeconds(10));
+            } catch (RuntimeException e) {
+                failure.set(e);
+            }
+        });
+        try {
+            Thread.sleep(200);
+            caller.interrupt();
+            caller.join(5_000);
+            assertThat(failure.get()).as("the interrupted caller's failure")
+                    .isNotNull().hasMessageContaining("Interrupted");
+        } finally {
+            releaseFx.countDown();
+        }
+        flushFxEvents();
+
+        assertThat(ran)
+                .as("a change whose caller was interrupted must not be applied afterwards")
+                .isFalse();
+    }
+
     @Test
     void aTaskThatAnswersInTimeReturnsItsValueFromTheFxThread() {
         assertThat(FxExecutor.get(Platform::isFxApplicationThread, Duration.ofSeconds(5)))
