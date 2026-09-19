@@ -415,7 +415,7 @@ class ConnectionServiceTest {
 
         assertThatThrownBy(service::connect)
                 .isInstanceOf(ConfigRejectedException.class)
-                .hasMessage("sing-box rejected the settings of server \"Tokyo\": "
+                .hasMessage("The VPN core rejected the settings of server \"Tokyo\": "
                         + "unsupported flow: xtls-rprx-direct");
     }
 
@@ -465,7 +465,7 @@ class ConnectionServiceTest {
 
         assertThatThrownBy(service::connect)
                 .isInstanceOf(ConfigRejectedException.class)
-                .hasMessageStartingWith("sing-box rejected the settings of server \"Tokyo\": ")
+                .hasMessageStartingWith("The VPN core rejected the settings of server \"Tokyo\": ")
                 .hasMessageContaining("short ID");
         assertThat(engine.calls).as("what the engine was asked to do").doesNotContain("start");
     }
@@ -530,7 +530,7 @@ class ConnectionServiceTest {
 
         assertThatThrownBy(service::connect)
                 .isInstanceOf(ConfigRejectedException.class)
-                .hasMessage("sing-box rejected the settings of server \"Tokyo\": "
+                .hasMessage("The VPN core rejected the settings of server \"Tokyo\": "
                         + "transport: unknown transport type: xhttp");
     }
 
@@ -542,7 +542,7 @@ class ConnectionServiceTest {
 
         assertThatThrownBy(service::connect)
                 .isInstanceOf(ConfigRejectedException.class)
-                .hasMessage("sing-box rejected the configuration: "
+                .hasMessage("The VPN core rejected the configuration: "
                         + "missing route.default_domain_resolver");
     }
 

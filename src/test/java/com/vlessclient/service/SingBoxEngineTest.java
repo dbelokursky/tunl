@@ -893,7 +893,7 @@ class SingBoxEngineTest {
 
         assertThatThrownBy(() -> engine.start(config, ProxyMode.SYSTEM_PROXY))
                 .isInstanceOf(ConfigRejectedException.class)
-                .hasMessage("sing-box rejected the configuration: "
+                .hasMessage("The VPN core rejected the configuration: "
                         + "initialize outbound[1]: unsupported flow: xtls-rprx-direct");
         flushFxEvents();
 
