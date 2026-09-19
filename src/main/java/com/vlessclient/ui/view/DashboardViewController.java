@@ -241,7 +241,7 @@ public class DashboardViewController implements ViewShownAware {
         statusPresenter = new StatusPresenter(
                 new StatusPresenter.Controls(statusCircle, statusHalo, statusFlag,
                         statusTitle, statusLabel, serverNameLabel, connectButton),
-                () -> activeServer,
+                this::cardServer,
                 this::routedServer,
                 this::currentHealth,
                 () -> singBoxEngine,
@@ -292,6 +292,7 @@ public class DashboardViewController implements ViewShownAware {
                         (javafx.collections.ListChangeListener<ServerConfig>) change -> {
                             refreshConnectButtonAvailability();
                             reconnectIfActiveServerChanged();
+                            repaintIdleCard();
                         }),
                 () -> log.debug("ConfigStore not available while wiring server-list listener"));
 
@@ -675,6 +676,30 @@ public class DashboardViewController implements ViewShownAware {
     }
 
     /**
+     * The server the status card names. While a core runs, the one it was
+     * started with, which {@link #activeServer} keeps for spotting a switch;
+     * otherwise the one Connect would use, from the store. The field alone is
+     * set only by a connect, so a launch named no server ("Add a server to get
+     * started" beside an enabled Connect) and a new pick went unnoticed.
+     */
+    private ServerConfig cardServer() {
+        ConnectionState state = currentConnectionState();
+        return state == ConnectionState.CONNECTED || state == ConnectionState.CONNECTING
+                ? activeServer
+                : findActiveServer();
+    }
+
+    /**
+     * Renames the idle card after the server list changed: a server added, a
+     * new pick, the pick removed. A live card follows the core, not the list.
+     */
+    private void repaintIdleCard() {
+        if (currentConnectionState() == ConnectionState.DISCONNECTED) {
+            updateUi(ConnectionState.DISCONNECTED);
+        }
+    }
+
+    /**
      * The process state to render and act on: the engine's when there is one,
      * otherwise the local property the no-engine path drives.
      */
@@ -820,7 +845,7 @@ public class DashboardViewController implements ViewShownAware {
                 case ALREADY_RUNNING -> log.warn("sing-box already running");
                 case CANCELLED -> log.debug("Connect superseded by a newer user request");
                 // STARTED: the engine's state listener drives the UI from here.
-                default -> Platform.runLater(() -> setActiveServer(attempt.server()));
+                default -> Platform.runLater(() -> rememberStartedServer(attempt.server()));
             }
         } catch (IOException e) {
             log.error("Failed to start sing-box", e);
@@ -1011,10 +1036,8 @@ public class DashboardViewController implements ViewShownAware {
         statusPresenter.update(state);
     }
 
-    /**
-     * Sets the active server from the server list.
-     */
-    public void setActiveServer(ServerConfig server) {
+    /** Keeps the server the core was started with, for the card and switch detection. */
+    private void rememberStartedServer(ServerConfig server) {
         this.activeServer = server;
         statusPresenter.showActiveServerName(server);
     }
