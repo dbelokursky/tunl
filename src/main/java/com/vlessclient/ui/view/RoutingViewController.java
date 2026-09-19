@@ -337,7 +337,7 @@ public class RoutingViewController {
         Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
         confirm.setTitle(I18n.get("routing.rule.delete.title"));
         confirm.setHeaderText(I18n.get("routing.rule.delete.header",
-                rule.getType() + " " + rule.getValue()));
+                formatRuleType(rule.getType()) + " " + rule.getValue()));
         confirm.setContentText(I18n.get("servers.delete.warning"));
         confirm.initOwner(ownerWindow());
 

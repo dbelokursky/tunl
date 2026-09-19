@@ -34,6 +34,39 @@ public class MessageBundleTest {
                     + "|flash))\\(([^;]*?)\\)");
     private static final Pattern KEY_LITERAL = Pattern.compile("\"([a-z][a-z0-9]*(?:\\.[a-z0-9]+)+)\"");
 
+    /**
+     * A properties file quietly drops the backslash of an escape it does not
+     * know: the Russian prompt for deleting a rule said
+     * "xabDOMAIN_SUFFIX google.comxbb" for a value written as "\\xab{0}\\xbb".
+     * Only the escapes the format means are allowed: \\t \\n \\f \\r, a
+     * four-digit \\u, and an escaped separator, backslash or line end.
+     */
+    @Test
+    void bundlesUseOnlyTheEscapesThePropertiesFormatMeans() throws IOException {
+        for (String bundle : List.of("/i18n/messages_en.properties",
+                "/i18n/messages_ru.properties")) {
+            String text;
+            try (var in = MessageBundleTest.class.getResourceAsStream(bundle)) {
+                text = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            }
+            List<String> bad = new java.util.ArrayList<>();
+            for (int i = 0; i < text.length() - 1; i++) {
+                if (text.charAt(i) != '\\') {
+                    continue;
+                }
+                char next = text.charAt(i + 1);
+                boolean fourHex = next == 'u' && i + 6 <= text.length()
+                        && text.substring(i + 2, i + 6).matches("[0-9a-fA-F]{4}");
+                if (!fourHex && "tnfr\\:=#! \r\n".indexOf(next) < 0) {
+                    int lineStart = text.lastIndexOf('\n', i) + 1;
+                    bad.add(text.substring(lineStart, text.indexOf('=', lineStart)));
+                }
+                i++;
+            }
+            assertThat(bad).as("keys with an escape %s does not mean", bundle).isEmpty();
+        }
+    }
+
     @Test
     void bothLanguagesDefineTheSameKeys() throws IOException {
         Set<String> english = keysOf("/i18n/messages_en.properties");
