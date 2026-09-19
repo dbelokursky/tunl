@@ -95,7 +95,10 @@
 
     <!-- A tunnel that dropped where restarting it would raise the elevation
          prompt again: recovery leaves that reconnect to the user
-         (TunnelRecoveryService). Hidden unless the service offers it. -->
+         (TunnelRecoveryService). Hidden unless the service offers it.
+         The button is pinned to its width: an HBox short of room shrinks
+         every child in proportion, the wrapping label beside it did not
+         shield it, and in Russian it read "Переп…" at the minimum width. -->
     <HBox fx:id="tunnelDroppedBanner" styleClass="tunnel-dropped-banner"
           spacing="12" alignment="CENTER_LEFT" visible="false" managed="false">
         <padding>
@@ -103,8 +106,23 @@
         </padding>
         <Label fx:id="tunnelDroppedLabel" styleClass="tunnel-dropped-label"
                wrapText="true" HBox.hgrow="ALWAYS" maxWidth="Infinity" minWidth="0"/>
-        <Button fx:id="tunnelDroppedButton" styleClass="secondary-button"
+        <Button fx:id="tunnelDroppedButton" styleClass="secondary-button" minWidth="-Infinity"
                 onAction="#onReconnectDroppedTunnelClicked"/>
+    </HBox>
+
+    <!-- The running core was built from settings changed since: DNS, ports,
+         TUN options, routing rules and the mode apply at the next start.
+         Hidden unless ConnectionService.runsCurrentSettings says otherwise.
+         The button is pinned to its width, as the one above. -->
+    <HBox fx:id="pendingChangesBanner" styleClass="skipped-servers-banner"
+          spacing="12" alignment="CENTER_LEFT" visible="false" managed="false">
+        <padding>
+            <Insets top="8" right="12" bottom="8" left="12"/>
+        </padding>
+        <Label fx:id="pendingChangesLabel" styleClass="skipped-servers-label"
+               wrapText="true" HBox.hgrow="ALWAYS" maxWidth="Infinity" minWidth="0"/>
+        <Button fx:id="pendingChangesButton" styleClass="secondary-button" minWidth="-Infinity"
+                onAction="#onReconnectForChangesClicked"/>
     </HBox>
 
     <!-- Status hero: two rows so nothing is clipped at a narrow window.

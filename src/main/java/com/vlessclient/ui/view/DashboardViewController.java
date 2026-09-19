@@ -117,6 +117,9 @@ public class DashboardViewController implements ViewShownAware {
     @FXML private HBox tunnelDroppedBanner;
     @FXML private Label tunnelDroppedLabel;
     @FXML private Button tunnelDroppedButton;
+    @FXML private HBox pendingChangesBanner;
+    @FXML private Label pendingChangesLabel;
+    @FXML private Button pendingChangesButton;
 
     private final ObjectProperty<ConnectionState> connectionState =
             new SimpleObjectProperty<>(ConnectionState.DISCONNECTED);
@@ -202,6 +205,8 @@ public class DashboardViewController implements ViewShownAware {
         // for the user rather than raising the prompt unasked.
         tunnelDroppedLabel.textProperty().bind(I18n.binding("dashboard.tunnel.dropped"));
         ButtonLabels.bindStatic(tunnelDroppedButton, "dashboard.tunnel.reconnect");
+        pendingChangesLabel.textProperty().bind(I18n.binding("dashboard.pending.changes"));
+        ButtonLabels.bindStatic(pendingChangesButton, "dashboard.tunnel.reconnect");
         ServiceLocator.find(ConnectionService.class).ifPresent(service -> {
             tunnelDroppedBanner.visibleProperty().bind(service.reconnectNeededProperty());
             tunnelDroppedBanner.managedProperty().bind(service.reconnectNeededProperty());
@@ -483,6 +488,9 @@ public class DashboardViewController implements ViewShownAware {
             if (!saveSetting(settings -> settings.setProxyMode(newVal))) {
                 log.warn("Could not save proxy mode setting");
             }
+            // Saved, not applied: a running core keeps its mode until the
+            // next start, which the banner offers.
+            refreshPendingChanges(currentState());
         });
     }
 
@@ -656,6 +664,9 @@ public class DashboardViewController implements ViewShownAware {
         // notice. Both halves: the panel, and the month line that opens it.
         trafficHistory.refresh();
         trafficDisplay.refreshIdleSummary();
+        // Settings and Routing are other pages: back here is where their
+        // changes to a running core are first seen.
+        refreshPendingChanges(currentState());
 
         AppSettings settings = ServiceLocator.find(AppSettings.class).orElse(null);
         if (settings == null) {
@@ -827,6 +838,30 @@ public class DashboardViewController implements ViewShownAware {
     @FXML
     private void onReconnectDroppedTunnelClicked() {
         reconnect();
+    }
+
+    @FXML
+    private void onReconnectForChangesClicked() {
+        reconnect();
+    }
+
+    /**
+     * Shows the banner while the running core was built from settings that
+     * changed since. DNS, ports, TUN options, routing rules and the mode apply
+     * only at the next start, and nothing said so; picking another server
+     * switches live and does not count. Checked when the Dashboard is shown,
+     * which is where a change made on another page is seen, when the state
+     * moves, and after the mode is changed here.
+     */
+    private void refreshPendingChanges(ConnectionState state) {
+        // Asked on every state change: a missing service is logged where a
+        // connect needs it, not here.
+        ConnectionService service = ServiceLocator.find(ConnectionService.class).orElse(null);
+        boolean pending = service != null
+                && state == ConnectionState.CONNECTED
+                && !service.runsCurrentSettings();
+        pendingChangesBanner.setVisible(pending);
+        pendingChangesBanner.setManaged(pending);
     }
 
     /** Runs a connect (or reconnect) off the FX thread and reports the result. */
@@ -1041,6 +1076,13 @@ public class DashboardViewController implements ViewShownAware {
     /** Repaints the hero card for a process state. */
     private void updateUi(ConnectionState state) {
         statusPresenter.update(state);
+        refreshPendingChanges(state);
+    }
+
+    /** The core's state, or this view's own when there is no engine. */
+    private ConnectionState currentState() {
+        return singBoxEngine != null
+                ? singBoxEngine.connectionStateProperty().get() : connectionState.get();
     }
 
     /** Keeps the server the core was started with, for the card and switch detection. */
