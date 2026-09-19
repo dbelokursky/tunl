@@ -293,8 +293,8 @@ public class DashboardTrafficDayPopoverTest extends ApplicationTest {
     }
 
     /**
-     * A synthetic MOUSE_CLICKED, not a robot click: Monocle's pointer lands on
-     * this row on macOS and Linux x64 and misses it on Windows and Linux
+     * A synthetic MOUSE_CLICKED, not a robot click: Monocle's pointer landed
+     * on this row on macOS and Linux x64 and missed it on Windows and Linux
      * arm64. Reachability is asserted separately, by size, in
      * {@link #aQuietDayIsStillAFullSizedTarget()}.
      */

@@ -59,7 +59,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * nothing imported here reaches the shared test data dir.</p>
  *
  * <p>Menu items are fired and key events dispatched rather than clicked or
- * typed through the robot: Monocle's pointer reaches popups and rows on macOS
+ * typed through the robot: Monocle's pointer reached popups and rows on macOS
  * and Linux x64 but not on every runner. That the item can be reached is
  * asserted on its own, by opening the menu.</p>
  */

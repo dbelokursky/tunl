@@ -88,7 +88,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * views show their dialogs with {@code showAndWait}, which returns only once
  * the dialog closes, so an {@code interact} around one would not return.
  * Buttons and items are fired rather than clicked, as in
- * {@code ServersImportRedactionTest}: Monocle's pointer does not reach every
+ * {@code ServersImportRedactionTest}: Monocle's pointer did not reach every
  * popup and row on every runner.</p>
  */
 @UiTest
@@ -126,9 +126,9 @@ public class ViewDialogThemeTest extends ApplicationTest {
     /**
      * Hides every dialog still open, which also ends the showAndWait a failed
      * assertion left open, and takes the focus to the root of every dialog the
-     * test opened. Monocle keeps a window focused after it hides, so the field
-     * focused in a dialog would go on blinking its caret: an animation that
-     * keeps JavaFX pulsing for the rest of the fork, which
+     * test opened. The headless platform keeps a window focused after it
+     * hides, so the field focused in a dialog would go on blinking its caret:
+     * an animation that keeps JavaFX pulsing for the rest of the fork, which
      * DashboardHiddenWindowTest counts. A form its own OK button closed blinks
      * on as well, though it has left Window.getWindows() and its field has
      * left its scene, so the dialogs come from {@link #open} too.

@@ -170,12 +170,6 @@
             <version>4.0.18</version>
             <scope>test</scope>
         </dependency>
-        <dependency>
-            <groupId>org.testfx</groupId>
-            <artifactId>openjfx-monocle</artifactId>
-            <version>21.0.2</version>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
 
     <build>
@@ -326,20 +320,21 @@
                         <vless.data.dir>${project.build.directory}/test-data-dir</vless.data.dir>
                         <tunl.smoke.requireCore>${tunl.smoke.requireCore}</tunl.smoke.requireCore>
                         <!--
-                            Headless JavaFX for the whole suite. The UI tests
-                            always set these per-class, but service tests that
-                            call Platform.startup (LogReaderTest,
-                            SingBoxEngineTest) relied on the real glass
-                            toolkit — which works on the mac/windows runners
-                            but hangs on display-less Linux waiting for X.
-                            Monocle behaves identically everywhere.
+                            Headless JavaFX for the whole suite, on the glass
+                            platform JavaFX carries itself
+                            (com.sun.glass.ui.headless): no display and no
+                            window server on any runner. Without it a test
+                            gets the real toolkit, which hangs on display-less
+                            Linux waiting for X. testfx.headless stays false:
+                            set to true, TestFX installs the Monocle platform
+                            over this one, and fails without the Monocle jar,
+                            which the suite no longer needs.
                         -->
-                        <glass.platform>Monocle</glass.platform>
-                        <monocle.platform>Headless</monocle.platform>
+                        <glass.platform>Headless</glass.platform>
                         <prism.order>sw</prism.order>
                         <prism.text>t2k</prism.text>
                         <testfx.robot>glass</testfx.robot>
-                        <testfx.headless>true</testfx.headless>
+                        <testfx.headless>false</testfx.headless>
                         <java.awt.headless>true</java.awt.headless>
                     </systemPropertyVariables>
                 </configuration>

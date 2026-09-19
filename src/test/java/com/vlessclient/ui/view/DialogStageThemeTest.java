@@ -334,8 +334,8 @@ public class DialogStageThemeTest extends ApplicationTest {
 
     /**
      * Over the window the way JavaFX sets a Dialog down: the stage's middle on
-     * the window's. Monocle draws no title bars, so the windows' middles are
-     * their scenes'.
+     * the window's. The headless platform draws no title bars, so the
+     * windows' middles are their scenes'.
      */
     private List<String> placement(Stage stage) {
         double[] offset = onFx(() -> new double[] {

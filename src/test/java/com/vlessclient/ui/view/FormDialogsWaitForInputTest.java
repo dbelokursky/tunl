@@ -75,9 +75,9 @@ public class FormDialogsWaitForInputTest extends ApplicationTest {
 
     /**
      * Closes what a test left open, the warning an incomplete form used to put
-     * up included, and takes focus off the fields: Monocle keeps a hidden
-     * window focused, and a focused field's caret would blink on into
-     * DashboardHiddenWindowTest.
+     * up included, and takes focus off the fields: the headless platform
+     * keeps a hidden window focused, and a focused field's caret would blink
+     * on into DashboardHiddenWindowTest.
      */
     @AfterEach
     void closeTheDialogs() {
@@ -229,8 +229,8 @@ public class FormDialogsWaitForInputTest extends ApplicationTest {
     /**
      * Presses OK as a click does: the click takes the focus to the button
      * first, and a disabled button takes neither. A field left focused would
-     * blink its caret on after OK closed the form, since Monocle keeps a closed
-     * window focused.
+     * blink its caret on after OK closed the form, since the headless platform
+     * keeps a closed window focused.
      */
     private void pressOk(DialogPane form) {
         Button ok = onFx(() -> (Button) form.lookupButton(ButtonType.OK));

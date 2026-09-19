@@ -29,7 +29,7 @@ import org.testfx.framework.junit5.ApplicationTest;
  * The Traffic history card in Settings, driven over plain controls.
  *
  * <p>The dialog is replaced by an answer, and the button is fired rather than
- * clicked: Monocle's pointer does not land on every control on every CI
+ * clicked: Monocle's pointer did not land on every control on every CI
  * platform, and what is under test is what a press does, not where the
  * pointer went.</p>
  */

@@ -15,7 +15,7 @@ import org.testfx.framework.junit5.ApplicationTest;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Smoke tests for DashboardView using TestFX with Monocle headless rendering.
+ * Smoke tests for DashboardView, rendered headlessly through TestFX.
  */
 @UiTest
 public class DashboardViewTest extends ApplicationTest {

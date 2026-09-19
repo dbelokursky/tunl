@@ -111,9 +111,9 @@ class FxPulsesTest {
 
     /**
      * The leak the descriptions were written for: a caret blinks while its
-     * field is focused, and Monocle keeps a window focused after it hides, so
-     * the caret blinks on in a hidden window. Its entry names the field and
-     * says where the field is.
+     * field is focused, and the headless platform keeps a window focused after
+     * it hides, so the caret blinks on in a hidden window. Its entry names the
+     * field and says where the field is.
      */
     @Test
     void tracesACaretToItsFieldAndWhereTheFieldIs() throws Exception {
@@ -141,7 +141,7 @@ class FxPulsesTest {
             flushFxEvents();
 
             assertThat(caret().description())
-                    .as("the caret of a field in a window Monocle hid and still counts focused")
+                    .as("the caret of a field in a window hidden and still counted focused")
                     .endsWith("for TextField \"Provider\" in a hidden window");
         } finally {
             Platform.runLater(() -> {

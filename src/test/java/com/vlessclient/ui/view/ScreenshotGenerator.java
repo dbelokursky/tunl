@@ -476,9 +476,9 @@ public class ScreenshotGenerator extends ApplicationTest {
      * Wraps a snapshot in macOS window chrome: a title bar with the three
      * traffic lights, rounded corners and a hairline edge.
      *
-     * <p>Monocle renders into an offscreen buffer and there is no real window
-     * to capture, so the scene comes out as a bare rectangle -- which reads as
-     * a mockup rather than as an application. The chrome is drawn here instead
+     * <p>The headless platform renders into an offscreen buffer and there is
+     * no real window to capture, so the scene comes out as a bare rectangle --
+     * which reads as a mockup rather than as an application. The chrome is drawn here instead
      * of being faked inside the scene, so nothing in it can be mistaken for a
      * control the app actually has.</p>
      *

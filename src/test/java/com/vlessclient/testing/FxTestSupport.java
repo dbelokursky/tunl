@@ -12,8 +12,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>Nine classes used to carry their own {@code Platform.startup} wrapped in
  * a catch of the "already started" exception, and three defined the same
- * {@code flushFxEvents}. Surefire already runs the whole suite on Monocle, so
- * there is nothing per-class left to configure.</p>
+ * {@code flushFxEvents}. Surefire already runs the whole suite on JavaFX's
+ * headless platform, so there is nothing per-class left to configure.</p>
  */
 public final class FxTestSupport {
 

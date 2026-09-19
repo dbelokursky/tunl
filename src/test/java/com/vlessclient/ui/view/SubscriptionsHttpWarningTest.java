@@ -81,10 +81,11 @@ public class SubscriptionsHttpWarningTest extends ApplicationTest {
 
     /**
      * Hiding a dialog also ends the showAndWait a failed assertion left open.
-     * Monocle keeps a hidden window focused, so the text field focused in the
-     * dialog would go on blinking its caret: an animation that keeps JavaFX
-     * pulsing for the rest of the fork, which DashboardHiddenWindowTest counts.
-     * Focus taken to the window's root stops it.
+     * The headless platform keeps a hidden window focused, so the text field
+     * focused in the dialog would go on blinking its caret: an animation that
+     * keeps JavaFX pulsing for the rest of the fork, which
+     * DashboardHiddenWindowTest counts. Focus taken to the window's root stops
+     * it.
      */
     @AfterEach
     void closeTheDialogsAndGoBackToEnglish() {

@@ -26,13 +26,13 @@ import org.testfx.api.FxToolkit;
  * blinking, it counted over two hundred and failed while the class that leaked
  * passed, and only in a fork that happened to run the two in that order.</p>
  *
- * <p>A caret blinks for as long as its field is focused, and Monocle keeps a
- * window focused after it hides. A dialog closed with a field focused, by its
- * own button or by a teardown hiding it, blinks on unless the test takes the
- * focus to the dialog's root. TestFX hides its stage after every test, and a
- * field focused in the view under test would blink on the same way; that stage
- * is TestFX's rather than the test's, so the focus is taken off it here, before
- * anything is counted.</p>
+ * <p>A caret blinks for as long as its field is focused, and the headless
+ * platform keeps a window focused after it hides. A dialog closed with a
+ * field focused, by its own button or by a teardown hiding it, blinks on
+ * unless the test takes the focus to the dialog's root. TestFX hides its
+ * stage after every test, and a field focused in the view under test would
+ * blink on the same way; that stage is TestFX's rather than the test's, so
+ * the focus is taken off it here, before anything is counted.</p>
  *
  * <p>Such a caret also stops by itself once the dialog it blinks in is
  * collected, so what is found would depend on when a GC ran: at the end of
@@ -126,9 +126,10 @@ public final class AnimationLeakGuardExtension implements BeforeEachCallback, Af
                 + " through every test after it in the fork:\n  "
                 + left.stream().map(FxPulses.Running::description)
                         .collect(Collectors.joining("\n  "))
-                + "\nA caret blinks while its field is focused, and Monocle keeps a window"
-                + " focused after it hides: take the focus to the root of each window the"
-                + " test closed. They are stopped now, so the tests after it start clean.";
+                + "\nA caret blinks while its field is focused, and the headless platform"
+                + " keeps a window focused after it hides: take the focus to the root of"
+                + " each window the test closed. They are stopped now, so the tests after"
+                + " it start clean.";
     }
 
     /** Every window shown while it listens, held until the test has been checked. */

@@ -349,10 +349,10 @@ public class ControlSizingTest extends ApplicationTest {
                 height = view.equals("ServerFormView") ? DIALOG_HEIGHT : 740;
                 // Never shown. A scene only needs a root and its stylesheets
                 // to apply CSS and lay out, and putting one on a stage ties the
-                // test to the screen it runs on: a headless runner whose screen
-                // is smaller than the window clamps the scene, lays everything
-                // out narrower than asked, and can overflow monocle's
-                // framebuffer while painting it.
+                // test to the screen it runs on: the headless platform paints
+                // every window into one framebuffer the size of its 1000-pixel
+                // square screen, and a window that reaches past its bottom
+                // edge throws on the FX thread while it is painted.
                 Scene scene = new Scene(new Group(), width, height);
                 dress(scene, "light");
                 scene.setRoot(root);

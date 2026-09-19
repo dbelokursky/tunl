@@ -71,9 +71,10 @@ import org.testfx.framework.junit5.ApplicationTest;
  * {@code -XX:NativeMemoryTracking=summary} the report ends with HotSpot's
  * native memory account.</p>
  *
- * <p>Rendering is Monocle's software pipeline, so the renderer thread's figures
- * say nothing about ES2 on a Mac; the FX thread's do, because CSS, layout and
- * the app's own listeners run there whatever draws the frame.</p>
+ * <p>Rendering is Prism's software pipeline on the headless platform, so the
+ * renderer thread's figures say nothing about ES2 on a Mac; the FX thread's
+ * do, because CSS, layout and the app's own listeners run there whatever
+ * draws the frame.</p>
  */
 @EnabledIfSystemProperty(named = "tunl.memprobe", matches = "true")
 @UiTest

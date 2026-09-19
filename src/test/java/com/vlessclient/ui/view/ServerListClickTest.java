@@ -27,8 +27,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * context menu must not, because activating a server restarts a live tunnel.
  *
  * <p>The clicks are synthetic MOUSE_CLICKED events fired at the row, as in
- * {@code DashboardTrafficDayPopoverTest}: a robot click lands where Monocle's
- * pointer happens to be, which differs between platforms.</p>
+ * {@code DashboardTrafficDayPopoverTest}: a robot click landed where Monocle's
+ * pointer happened to be, which differed between platforms.</p>
  */
 @UiTest
 public class ServerListClickTest extends ApplicationTest {

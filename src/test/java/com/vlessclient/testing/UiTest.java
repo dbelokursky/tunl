@@ -17,7 +17,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
  * {@code mvn test -Dsurefire.excludedGroups=ui,smoke} runs everything else.
  *
  * <p>Headless rendering itself needs nothing per class — surefire sets the
- * Monocle and TestFX properties for the whole suite.</p>
+ * glass platform and TestFX properties for the whole suite.</p>
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)

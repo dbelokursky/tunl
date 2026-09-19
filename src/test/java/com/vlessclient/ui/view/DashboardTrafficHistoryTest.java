@@ -106,7 +106,7 @@ public class DashboardTrafficHistoryTest extends ApplicationTest {
      * A synthetic MOUSE_CLICKED delivered to the label, not a robot click.
      *
      * <p>The robot version passed on macOS and Linux x64 and failed on Windows
-     * and Linux arm64 -- Monocle's pointer does not land on this label on every
+     * and Linux arm64 -- Monocle's pointer did not land on this label on every
      * platform. Firing the event still goes through the FXML {@code
      * onMouseClicked} wiring, which is the behaviour under test; what it no
      * longer covers is whether the label is reachable by an actual pointer, so

@@ -84,7 +84,7 @@ public class DashboardTrafficHistoryRefreshTest extends ApplicationTest {
     @Test
     void comingBackToTheDashboardShowsAHistoryClearedElsewhere() {
         // A synthetic click, as in DashboardTrafficHistoryTest: Monocle's
-        // pointer does not land on this label on every CI platform.
+        // pointer did not land on this label on every CI platform.
         Label total = lookup("#sessionTotalLabel").query();
         interact(() -> total.fireEvent(new MouseEvent(MouseEvent.MOUSE_CLICKED,
                 0, 0, 0, 0, MouseButton.PRIMARY, 1,

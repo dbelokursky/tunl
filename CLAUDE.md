@@ -27,7 +27,7 @@ truth read by `pom.xml`, `scripts/bundle-singbox.*` and `SingBoxInstaller`.
   only the build host's OS and architecture are bundled.
 - Never start the app to look at a UI change: `mvn javafx:run` launches a real
   VPN client, usually while the user's own instance holds the tunnel. Render
-  headlessly through a TestFX/Monocle test instead (see
+  headlessly through a TestFX test instead (see
   `src/test/java/com/vlessclient/ui/view/*Test.java` and `ScreenshotGenerator`).
 - Workflow edits: run `actionlint` on `.github/workflows/*.yml`; a schema error
   fails the run at startup and `yaml.safe_load` does not catch it.
@@ -54,10 +54,13 @@ truth read by `pom.xml`, `scripts/bundle-singbox.*` and `SingBoxInstaller`.
 
 ## Tests
 
-- UI tests are TestFX headless (Monocle). `UiTestServices.initialize()` builds
-  the real service graph with network doubles; surefire redirects
-  `vless.data.dir`, the log dir and the sing-box install dir into `target/`, so
-  a test never reads the developer's profile or touches the OS keychain.
+- UI tests are TestFX on JavaFX's own `Headless` glass platform, not Monocle.
+  Its screen is 1000×1000 and nothing clips the framebuffer: a shown window
+  that reaches past the bottom edge throws on the FX thread while painting.
+  `UiTestServices.initialize()` builds the real service graph with network
+  doubles; surefire redirects `vless.data.dir`, the log dir and the sing-box
+  install dir into `target/`, so a test never reads the developer's profile or
+  touches the OS keychain.
 - Network is blocked in UI tests (`ExternalNetworkGuardExtension`). Service
   tests inject seams (`HttpClient`, `Path dataDir`, `SecretSealer`) and talk to
   a `com.sun.net.httpserver` on loopback.
