@@ -248,13 +248,23 @@ public class SubscriptionsHttpWarningTest extends ApplicationTest {
     private record Fit(double window, double wanted, double okBottom) {
     }
 
+    /**
+     * Looks up on the FX thread, as every lookup in this class does.
+     *
+     * <p>TestFX's own lookup walks the scene graph from the test thread. While
+     * the list rebuilds its rows, that walk reads a children list mid-change:
+     * on a Windows runner it came back as
+     * {@code NullPointerException ... "javafx.scene.Node.lookupAll(...)"
+     * because "<local7>" is null} from inside {@code Parent.lookupAll}, and
+     * failed a test that has nothing to do with the change under review.</p>
+     */
     private Button addButton() {
-        return lookup("#addSubscriptionButton").queryAs(Button.class);
+        return onFx(() -> lookup("#addSubscriptionButton").queryAs(Button.class));
     }
 
     /** The button reading {@code text} on a subscription row, once the list has drawn one. */
     private Button rowButton(String text) {
-        ListView<?> list = lookup("#subscriptionListView").queryAs(ListView.class);
+        ListView<?> list = onFx(() -> lookup("#subscriptionListView").queryAs(ListView.class));
         return Await.untilValue("a subscription row with a button reading " + text,
                 () -> onFx(() -> list.lookupAll(".button").stream()
                         .filter(node -> node instanceof Button button
