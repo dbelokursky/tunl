@@ -261,7 +261,7 @@ public class ViewDialogThemeTest extends ApplicationTest {
         ServiceLocator.register(RoutingService.class, routing);
         mount("RoutingView", "dark");
 
-        DialogPane confirm = open(rowButton("#rulesListView", I18n.get("button.delete"))::fire);
+        DialogPane confirm = openFromRowButton("#rulesListView", I18n.get("button.delete"));
 
         assertThat(confirm.getHeaderText()).contains("example.com");
         assertBelongsToTheWindow(confirm, "dark");
@@ -295,8 +295,8 @@ public class ViewDialogThemeTest extends ApplicationTest {
         mount("SubscriptionsView", "dark");
         service.addSubscription("Provider", "https://provider.example/sub");
 
-        DialogPane confirm = open(
-                rowButton("#subscriptionListView", I18n.get("button.delete"))::fire);
+        DialogPane confirm = openFromRowButton("#subscriptionListView",
+                I18n.get("button.delete"));
 
         assertThat(confirm.getHeaderText())
                 .isEqualTo(I18n.get("subscriptions.delete.confirm", "Provider"));
@@ -562,16 +562,37 @@ public class ViewDialogThemeTest extends ApplicationTest {
     }
 
     /** The button reading {@code text} on a row of a list, once the list has drawn one. */
-    private Button rowButton(String list, String text) {
-        ListView<?> view = lookup(list).queryAs(ListView.class);
-        return Await.untilValue("a row button reading " + text + " in " + list,
-                () -> onFx(() -> view.lookupAll(".button").stream()
-                        .filter(node -> node instanceof Button button
-                                && text.equals(button.getText()))
-                        .map(Button.class::cast)
-                        .findFirst()
-                        .orElse(null)),
-                Objects::nonNull, PATIENCE);
+    /**
+     * Presses the button reading {@code text} in a row of {@code list}, found
+     * and pressed in the same action on the FX thread, and returns the dialog
+     * it opens.
+     *
+     * <p>A button resolved first and fired afterwards can be one the list has
+     * recycled out of its cells by then: the press does nothing, no dialog
+     * comes, and the test waits for one until it gives up. That is what the
+     * Windows runners kept failing on.</p>
+     */
+    private DialogPane openFromRowButton(String list, String text) {
+        Await.until("a row button reading " + text + " in " + list,
+                () -> onFx(() -> findRowButton(list, text)) != null, PATIENCE);
+        return open(() -> {
+            Button button = findRowButton(list, text);
+            if (button != null) {
+                button.fire();
+            }
+        });
+    }
+
+    /** That button as the scene has it now; call it on the FX thread. */
+    private Button findRowButton(String list, String text) {
+        if (!(lookup(list).tryQueryAs(ListView.class).orElse(null) instanceof ListView<?> view)) {
+            return null;
+        }
+        return view.lookupAll(".button").stream()
+                .filter(node -> node instanceof Button button && text.equals(button.getText()))
+                .map(Button.class::cast)
+                .findFirst()
+                .orElse(null);
     }
 
     /** The item reading {@code text} in the context menu of a drawn server row. */
