@@ -27,6 +27,9 @@ class ReleaseSignatureTest {
 
     private static final String DIGEST =
             "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+    /** The version and asset a manifest ties that digest to, as a release does. */
+    private static final String VERSION = "1.21.0";
+    private static final String ASSET = "Tunl-1.21.0.dmg";
 
     private static KeyPair keyPair;
     private static String publicKeyBase64;
@@ -131,8 +134,10 @@ class ReleaseSignatureTest {
     void theCompiledInKeyRejectsSignaturesItDidNotMake() throws Exception {
         // Signed with a key generated here, not the project's — which is the
         // position an attacker without the release key is in.
-        assertThat(ReleaseSignature.verifyDigest(DIGEST, sign(DIGEST))).isFalse();
-        assertThat(ReleaseSignature.verifyDigest(DIGEST, "AAAA")).isFalse();
+        String manifest = ReleaseSignature.manifestFor(VERSION, ASSET, DIGEST);
+        assertThat(ReleaseSignature.verifyRelease(VERSION, ASSET, DIGEST, sign(manifest)))
+                .isFalse();
+        assertThat(ReleaseSignature.verifyRelease(VERSION, ASSET, DIGEST, "AAAA")).isFalse();
     }
 
     @Test

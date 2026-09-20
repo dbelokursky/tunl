@@ -28,10 +28,6 @@ public enum Platform {
         return this == WINDOWS;
     }
 
-    public boolean isLinux() {
-        return this == LINUX;
-    }
-
     static Platform detect() {
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         if (os.contains("mac") || os.contains("darwin")) {
