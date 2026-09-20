@@ -78,6 +78,13 @@ class WindowsTunLauncherTest {
 
     // --- nothing on disk gets elevated -----------------------------------
 
+    /** The app recognises a declined prompt by this line, so the script has to write it. */
+    @Test
+    void aDeclinedPromptIsReportedInTheLineTheAppRecognises() {
+        assertThat(WindowsTunLauncher.outerScript())
+                .contains("Write-Output ('" + WindowsTunLauncher.ELEVATION_DECLINED + "'");
+    }
+
     @Test
     void neitherScriptElevatesAFileFromDisk() {
         // The escalation this replaced: both scripts were written to

@@ -1,6 +1,5 @@
 package com.vlessclient.service;
 
-import com.vlessclient.app.I18n;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.platform.CoreRecord;
@@ -54,6 +53,7 @@ public class SingBoxEngine {
     private final ObservableList<String> logLines;
     private final ReadOnlyObjectWrapper<ConnectionState> connectionState;
     private final ReadOnlyStringWrapper errorMessage;
+    private final ReadOnlyStringWrapper errorDetail = new ReadOnlyStringWrapper("");
 
     /**
      * Serializes the process lifecycle. start(), stop() and forceStop() run
@@ -219,6 +219,7 @@ public class SingBoxEngine {
         Platform.runLater(() -> {
             connectionState.set(ConnectionState.CONNECTING);
             errorMessage.set("");
+            errorDetail.set("");
             logLines.clear();
         });
 
@@ -624,6 +625,16 @@ public class SingBoxEngine {
     }
 
     /**
+     * The core's own words for the last error: its exit code and the last line
+     * of its log, for an agent and for anyone reading more than the sentence.
+     *
+     * @return the error detail property, empty while there is no error
+     */
+    public ReadOnlyStringProperty errorDetailProperty() {
+        return errorDetail.getReadOnlyProperty();
+    }
+
+    /**
      * Starts a daemon thread that monitors the sing-box process and detects
      * unexpected exits (crashes). On unexpected exit, sets the connection state
      * to ERROR with the last log line as the error message.
@@ -651,14 +662,13 @@ public class SingBoxEngine {
                     if (!stopRequested
                             && proc == process
                             && connectionState.get() != ConnectionState.DISCONNECTED) {
-                        String lastLine = logLines.isEmpty()
-                                ? "sing-box exited with code " + exitCode
-                                : logLines.getLast();
+                        String lastLine = logLines.isEmpty() ? null : logLines.getLast();
                         // Message before state: state listeners fire
                         // synchronously inside set(), and they read the
                         // message the moment they see ERROR.
-                        errorMessage.set(I18n.get("engine.exited.unexpectedly",
-                                String.valueOf(exitCode)) + ": " + lastLine);
+                        errorDetail.set("sing-box exited with code " + exitCode
+                                + (lastLine != null ? ": " + lastLine : ""));
+                        errorMessage.set(CoreExitReason.describe(exitCode, lastLine));
                         connectionState.set(ConnectionState.ERROR);
                     }
                 });

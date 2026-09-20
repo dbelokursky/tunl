@@ -1,6 +1,7 @@
 package com.vlessclient.service;
 
 import com.sun.net.httpserver.HttpServer;
+import com.vlessclient.app.I18n;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.model.Protocol;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.condition.OS;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ProxySelector;
 import java.net.ServerSocket;
@@ -70,6 +72,67 @@ class SingBoxRealBinarySmokeTest {
         assertThat(result.exitCode()).isZero();
         assertThat(result.output().lines().findFirst().orElse(""))
                 .isEqualTo("sing-box version " + SingBoxInstaller.PINNED_VERSION);
+    }
+
+    /**
+     * The sentence a failed start is put into comes from matching the core's
+     * own FATAL line, and those lines are the core's to reword. A core bump
+     * that rewords them fails here, on every system the core ships for,
+     * instead of leaving the card with the generic sentence. On Windows the
+     * port is held with an exclusive bind, which the core's error words
+     * differently from a plain one.
+     */
+    @Test
+    void theCoresStartFailuresAreRecognisedInItsOwnWords() throws Exception {
+        try (ServerSocket held = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            int port = held.getLocalPort();
+            String portTaken = """
+                    {"log": {"level": "info"},
+                     "inbounds": [{"type": "http", "tag": "http-in",
+                                   "listen": "127.0.0.1", "listen_port": %d}],
+                     "outbounds": [{"type": "direct", "tag": "direct"}]}
+                    """.formatted(port);
+
+            assertThat(CoreExitReason.describe(1, lastLineOfAFailedRun(portTaken)))
+                    .isEqualTo(I18n.get("engine.exit.port", String.valueOf(port)));
+        }
+        int closed;
+        int listen;
+        try (ServerSocket first = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+             ServerSocket second = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            closed = first.getLocalPort();
+            listen = second.getLocalPort();
+        }
+        String listNotDownloaded = """
+                {"log": {"level": "info"},
+                 "inbounds": [{"type": "http", "tag": "http-in",
+                               "listen": "127.0.0.1", "listen_port": %d}],
+                 "outbounds": [{"type": "direct", "tag": "direct"}],
+                 "route": {"rule_set": [{"type": "remote", "tag": "geoip-ru", "format": "binary",
+                                         "url": "http://127.0.0.1:%d/geoip-ru.srs"}],
+                           "rules": [{"rule_set": ["geoip-ru"], "outbound": "direct"}]}}
+                """.formatted(listen, closed);
+
+        assertThat(CoreExitReason.describe(1, lastLineOfAFailedRun(listNotDownloaded)))
+                .isEqualTo(I18n.get("engine.exit.rule.set", "geoip-ru"));
+    }
+
+    /** Runs the core on {@code config}, which it must refuse to start, and gives its last line. */
+    private static String lastLineOfAFailedRun(String config) throws Exception {
+        Path file = Files.createTempFile("smoke-exit-", ".json");
+        try {
+            Files.writeString(file, config);
+            ProcessResult result = run(binary, "run", "-c", file.toString());
+            assertThat(result.exitCode()).as("the core refused to start:%n%s", result.output())
+                    .isNotZero();
+            List<String> lines = result.output().lines()
+                    .map(LogReader::stripAnsi)
+                    .filter(line -> !line.isBlank())
+                    .toList();
+            return lines.isEmpty() ? "" : lines.getLast();
+        } finally {
+            Files.deleteIfExists(file);
+        }
     }
 
     @Test
