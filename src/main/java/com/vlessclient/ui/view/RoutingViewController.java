@@ -427,9 +427,7 @@ public class RoutingViewController {
                 }
             }
         }
-        bypassCountLabel.setText(count == 1
-                ? I18n.get("routing.bypass.count.one")
-                : I18n.get("routing.bypass.count.many", String.valueOf(count)));
+        bypassCountLabel.setText(I18n.plural("routing.bypass.count", count));
     }
 
     /**
