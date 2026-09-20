@@ -103,6 +103,20 @@ public class LatencyTester {
                 : java.util.Optional.ofNullable(lastResults.get(serverId));
     }
 
+    /**
+     * The last measurement as the "Fastest" mode ranks it: the latency when
+     * the server answered, {@link Long#MAX_VALUE} when it did not.
+     *
+     * @param serverId the server's id
+     * @return the latency, or empty when the server was not measured
+     */
+    public java.util.OptionalLong lastLatency(String serverId) {
+        return lastResult(serverId)
+                .map(result -> java.util.OptionalLong.of(
+                        result.reachable() ? result.millis() : Long.MAX_VALUE))
+                .orElse(java.util.OptionalLong.empty());
+    }
+
     private Result measureBest(ServerConfig server) {
         if (server == null) {
             return new Result(-1, false);

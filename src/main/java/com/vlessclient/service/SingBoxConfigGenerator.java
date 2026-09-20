@@ -55,8 +55,30 @@ public class SingBoxConfigGenerator {
      * so a failure means the server, not the target.
      */
     private static final String PROBE_URL = "https://www.gstatic.com/generate_204";
-    private static final String PROBE_INTERVAL = "3m";
+    private static final String PROBE_IDLE_TIMEOUT = "10m";
     private static final int PROBE_TOLERANCE_MS = 50;
+
+    /** Most servers the "Fastest" mode probes. */
+    static final int MAX_AUTOMATIC_MEMBERS = 30;
+
+    /**
+     * How fast a server answered when it was last measured.
+     */
+    @FunctionalInterface
+    public interface LatencyRanking {
+
+        /** Nothing measured: the list's own order. */
+        LatencyRanking NONE = serverId -> java.util.OptionalLong.empty();
+
+        /**
+         * The server's last latency.
+         *
+         * @param serverId the server's id
+         * @return its latency in milliseconds; {@link Long#MAX_VALUE} when it
+         *     did not answer; empty when it was not measured
+         */
+        java.util.OptionalLong lastLatency(String serverId);
+    }
 
     private final ObjectMapper mapper;
     private final com.vlessclient.platform.SystemProxySupport systemProxySupport;
@@ -66,13 +88,30 @@ public class SingBoxConfigGenerator {
     private final ShadowsocksOutboundBuilder shadowsocksBuilder;
     private final Hysteria2OutboundBuilder hysteria2Builder;
     private final WireguardEndpointBuilder wireguardBuilder;
+    private final LatencyRanking ranking;
 
     public SingBoxConfigGenerator() {
-        this(com.vlessclient.platform.SystemProxySupport.current());
+        this(LatencyRanking.NONE);
+    }
+
+    /**
+     * Creates a generator whose "Fastest" mode keeps the servers that last
+     * answered fastest.
+     *
+     * @param ranking the servers' last measurements
+     */
+    public SingBoxConfigGenerator(LatencyRanking ranking) {
+        this(com.vlessclient.platform.SystemProxySupport.current(), ranking);
     }
 
     /** Test seam: inject the host's system-proxy capability check. */
     SingBoxConfigGenerator(com.vlessclient.platform.SystemProxySupport systemProxySupport) {
+        this(systemProxySupport, LatencyRanking.NONE);
+    }
+
+    private SingBoxConfigGenerator(com.vlessclient.platform.SystemProxySupport systemProxySupport,
+                                   LatencyRanking ranking) {
+        this.ranking = ranking;
         this.mapper = JsonMapper.builder()
                 .enable(SerializationFeature.INDENT_OUTPUT)
                 .build();
@@ -136,7 +175,8 @@ public class SingBoxConfigGenerator {
         // top-level endpoints entry. It carries its own server tag and the
         // proxy group references it, exactly like an outbound member — a
         // selector may point at an endpoint (verified against the real core).
-        List<ServerConfig> members = groupMembers(candidates, active);
+        List<ServerConfig> members = groupMembers(candidates, active,
+                settings.getServerSelection());
         ArrayNode endpoints = mapper.createArrayNode();
         for (ServerConfig member : members) {
             if (member.getProtocol() == Protocol.WIREGUARD) {
@@ -772,7 +812,8 @@ public class SingBoxConfigGenerator {
      * and refusing to connect over a mode toggle would be worse than ignoring
      * it.</p>
      */
-    private List<ServerConfig> groupMembers(List<ServerConfig> candidates, ServerConfig active) {
+    private List<ServerConfig> groupMembers(List<ServerConfig> candidates, ServerConfig active,
+                                            ServerSelection selection) {
         if (candidates == null) {
             return List.of(active);
         }
@@ -785,7 +826,37 @@ public class SingBoxConfigGenerator {
             }
         }
         byId.putIfAbsent(active.getId(), active);
-        return byId.isEmpty() ? List.of(active) : List.copyOf(byId.values());
+        List<ServerConfig> all = byId.isEmpty() ? List.of(active) : List.copyOf(byId.values());
+        return selection != null && selection.isAutomatic() && all.size() > MAX_AUTOMATIC_MEMBERS
+                ? fastest(all, active)
+                : all;
+    }
+
+    /**
+     * The servers the "Fastest" mode probes: those that last answered
+     * fastest, then those not measured yet in the list's order, then those
+     * that did not answer, and the picked server among them. The core probed
+     * every server every three minutes: with 500, about 100 MB an hour.
+     */
+    private List<ServerConfig> fastest(List<ServerConfig> all, ServerConfig active) {
+        List<ServerConfig> ranked = new ArrayList<>(all);
+        // Stable: servers with equal keys keep the list's order.
+        ranked.sort(java.util.Comparator.comparingLong(
+                server -> ranking.lastLatency(server.getId()).orElse(Long.MAX_VALUE - 1)));
+        List<ServerConfig> members = new ArrayList<>(ranked.subList(0, MAX_AUTOMATIC_MEMBERS));
+        if (!members.contains(active)) {
+            members.set(MAX_AUTOMATIC_MEMBERS - 1, active);
+        }
+        return List.copyOf(members);
+    }
+
+    /**
+     * How often the "Fastest" mode probes its group: one server about every
+     * twenty seconds, and no server more often than every three minutes.
+     */
+    private static String probeInterval(int members) {
+        long seconds = Math.max(180, members * 20L);
+        return seconds % 60 == 0 ? seconds / 60 + "m" : seconds + "s";
     }
 
     /**
@@ -834,7 +905,10 @@ public class SingBoxConfigGenerator {
 
         if (selection.isAutomatic()) {
             group.put("url", PROBE_URL);
-            group.put("interval", PROBE_INTERVAL);
+            group.put("interval", probeInterval(memberTags.size()));
+            // Probing stops after this long without a connection through the
+            // group, and starts again with the next one.
+            group.put("idle_timeout", PROBE_IDLE_TIMEOUT);
             // Only switch away from the current pick when a candidate is
             // meaningfully faster, so traffic does not hop between servers
             // whose latencies are within noise of each other.
