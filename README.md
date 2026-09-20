@@ -214,6 +214,12 @@ carries a `subscription-userinfo` header ("12.3 GB of 100 GB used · expires
 …"). Links of protocols Tunl does not support (TUIC, AnyTLS, …) are left out
 without marking the subscription failed.
 
+A subscription also carries the provider's own name and notices: leave the name
+empty and the provider's title is used, and anything the provider announces is
+shown under the row. Each request carries a device identifier, so a plan that
+limits devices serves Tunl instead of refusing; it is random, made once per
+install, and Settings shows it with a button to make a new one.
+
 <p align="center">
   <img src="docs/screenshots/subscriptions.png" width="900" alt="Subscriptions tab: two providers with the quota each reports and its expiry date"/>
 </p>
@@ -224,7 +230,16 @@ without marking the subscription failed.
   <img src="docs/screenshots/routing.png" width="900" alt="Routing tab: bypass countries, bypass list and custom rules"/>
 </p>
 
-**Routing** tab, top to bottom: **Bypass countries** (their traffic goes
+**What goes through the VPN** is the first choice on the page: **All traffic**,
+as before, or **Only what is blocked in Russia**. The second sends the
+blocked-site and blocked-address lists (runetfreedom, rebuilt every six hours
+and fetched through the tunnel) to the proxy and everything else direct; in TUN
+mode the blocked names resolve through the tunnel as well, since a provider's
+resolver answers them with the address of a stub page. Your own rules and the
+bypass list still come first. The choice applies at the next connect, and the
+Dashboard offers that reconnect.
+
+Below it, **Bypass countries** (their traffic goes
 direct; countries match by IP ranges, and ru, cn and ir by domain as well), a
 **Bypass list** (one host, wildcard, CIDR or IP per line) and **Custom rules**
 that match by domain, domain suffix, domain keyword, domain regex, GeoSite,
@@ -236,6 +251,12 @@ through the **Direct DNS** server from Settings instead of through the tunnel,
 so resolution follows the same split as the traffic.
 
 ### Monitoring
+
+The card says when the running core no longer matches your settings and offers
+to reconnect: a changed port, DNS, mode or routing rule applies at the next
+connect, and used to wait there silently. If a local port was taken, the line
+above names the port the run moved to, while the port you chose stays in
+Settings.
 
 The **Dashboard** shows live stats in the status card: upload and download
 speed, and the session total beside them. Clicking that total opens the last
@@ -350,6 +371,7 @@ else saves on click.
 | | TUN IPv4 Address | `172.19.0.1/30` |
 | | Route IPv6 through the tunnel | On by default; off, IPv6 traffic bypasses the VPN on dual-stack networks |
 | | Store credentials in the system keychain | Seal server credentials and subscription URLs with Keychain / DPAPI / Secret Service instead of writing them into the JSON files |
+| | Device ID | The identifier sent with subscription requests, with a button to make a new one; random, made once per install |
 | Agent Control (MCP) | Enable MCP server, Port, Allow configuration changes, Copy command, Regenerate token | See [Agent control](#agent-control-mcp) |
 | Traffic history | Recorded, Clear history… | How much the local traffic record holds and since which day. **Clear history…** deletes all of it after a confirmation in which Enter cancels; nothing in the record expires on its own, and the Dashboard's history panel only reads it |
 | About | Tunl version, sing-box version, Check for updates | The version rows double as update status; **Restart now** appears once an update is staged. The DB-IP attribution for the country flags lives here too |
