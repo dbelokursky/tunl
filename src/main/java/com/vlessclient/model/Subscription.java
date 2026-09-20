@@ -67,6 +67,13 @@ public class Subscription {
     @JsonProperty("expiresAt")
     private long expiresAt;
 
+    /**
+     * What the provider tells the user, from its {@code announce} header:
+     * one line, read again on every refresh. Empty when it sends none.
+     */
+    @JsonProperty("announce")
+    private String announce = "";
+
     public Subscription() {
         this.id = UUID.randomUUID().toString();
     }
@@ -200,6 +207,14 @@ public class Subscription {
 
     public void setExpiresAt(long expiresAt) {
         this.expiresAt = expiresAt;
+    }
+
+    public String getAnnounce() {
+        return announce == null ? "" : announce;
+    }
+
+    public void setAnnounce(String announce) {
+        this.announce = announce == null ? "" : announce;
     }
 
     @Override
