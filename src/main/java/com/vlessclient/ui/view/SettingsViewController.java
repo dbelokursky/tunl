@@ -16,7 +16,9 @@ import com.vlessclient.ui.view.settings.UpdatesSection;
 import java.io.IOException;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import javafx.beans.value.ObservableValue;
 import javafx.fxml.FXML;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
@@ -42,6 +44,8 @@ import org.slf4j.LoggerFactory;
  */
 public class SettingsViewController implements ViewShownAware {
 
+    /** Where a text field keeps the text it last committed, among its properties. */
+    private static final Object COMMITTED = new Object();
     private static final Logger log = LoggerFactory.getLogger(SettingsViewController.class);
 
     @FXML private Label titleLabel;
@@ -125,6 +129,8 @@ public class SettingsViewController implements ViewShownAware {
     private McpServerService mcpServerService;
     private boolean updatingMcpControls;
     private boolean suppressLaunchAtLoginListener;
+    /** Set while {@link #showStored} fills the controls, so no listener acts on it. */
+    private boolean showingStored;
 
     /**
      * Resolves the settings-related services and builds every section of the
@@ -170,6 +176,7 @@ public class SettingsViewController implements ViewShownAware {
         initSystemProxyAutoConfig(settings);
         initAdvancedSettings(settings);
         initMcpSettings(settings);
+        showStored();
         initTrafficHistorySection();
         initAboutSection();
         bindLabels();
@@ -182,27 +189,23 @@ public class SettingsViewController implements ViewShownAware {
      * connect.
      */
     private void initSystemProxyAutoConfig(AppSettings settings) {
-        systemProxyAutoConfigCheck.setSelected(settings.isSystemProxyAutoConfig());
-        systemProxyAutoConfigCheck.selectedProperty().addListener((obs, oldVal, newVal) -> {
+        onUserChange(systemProxyAutoConfigCheck.selectedProperty(), (oldVal, newVal) -> {
             settings.setSystemProxyAutoConfig(newVal);
             saveSettings(settings);
         });
     }
 
     private void initAdvancedSettings(AppSettings settings) {
-        proxyDnsField.setText(settings.getProxyDns());
         commitOnEditEnd(proxyDnsField, text -> {
             settings.setProxyDns(text);
             saveSettings(settings);
         });
 
-        directDnsField.setText(settings.getDirectDns());
         commitOnEditEnd(directDnsField, text -> {
             settings.setDirectDns(text);
             saveSettings(settings);
         });
 
-        tunInterfaceNameField.setText(settings.getTunInterfaceName());
         commitOnEditEnd(tunInterfaceNameField, text -> {
             settings.setTunInterfaceName(text);
             saveSettings(settings);
@@ -210,20 +213,17 @@ public class SettingsViewController implements ViewShownAware {
 
         deviceIdValue.setText(configStore.deviceId());
 
-        storeSecretsCheck.setSelected(settings.isStoreSecretsSecurely());
-        storeSecretsCheck.selectedProperty().addListener((obs, oldVal, newVal) -> {
+        onUserChange(storeSecretsCheck.selectedProperty(), (oldVal, newVal) -> {
             settings.setStoreSecretsSecurely(newVal);
             saveSettings(settings);
         });
 
-        tunIpv4Field.setText(settings.getTunIpv4Address());
         commitOnEditEnd(tunIpv4Field, text -> {
             settings.setTunIpv4Address(text);
             saveSettings(settings);
         });
 
-        tunIpv6Check.setSelected(settings.isTunIpv6Enabled());
-        tunIpv6Check.selectedProperty().addListener((obs, oldVal, newVal) -> {
+        onUserChange(tunIpv6Check.selectedProperty(), (oldVal, newVal) -> {
             settings.setTunIpv6Enabled(newVal);
             saveSettings(settings);
         });
@@ -250,11 +250,8 @@ public class SettingsViewController implements ViewShownAware {
                 return string;
             }
         });
-        // Normalize any previously stored legacy "system" value to "auto" so it
-        // matches a combo item and displays correctly.
-        themeCombo.setValue(ThemeManager.normalize(settings.getTheme()));
 
-        themeCombo.valueProperty().addListener((obs, oldVal, newVal) -> {
+        onUserChange(themeCombo.valueProperty(), (oldVal, newVal) -> {
             if (newVal != null && !newVal.equals(oldVal)) {
                 settings.setTheme(newVal);
                 if (themeManager != null) {
@@ -288,9 +285,8 @@ public class SettingsViewController implements ViewShownAware {
                 return string;
             }
         });
-        languageCombo.setValue(settings.getLanguage());
 
-        languageCombo.valueProperty().addListener((obs, oldVal, newVal) -> {
+        onUserChange(languageCombo.valueProperty(), (oldVal, newVal) -> {
             if (newVal != null && !newVal.equals(oldVal)) {
                 settings.setLanguage(newVal);
                 Locale newLocale = "ru".equals(newVal) ? Locale.of("ru") : Locale.ENGLISH;
@@ -302,8 +298,7 @@ public class SettingsViewController implements ViewShownAware {
     }
 
     private void initConnectionSettings(AppSettings settings) {
-        autoConnectCheck.setSelected(settings.isAutoConnect());
-        autoConnectCheck.selectedProperty().addListener((obs, oldVal, newVal) -> {
+        onUserChange(autoConnectCheck.selectedProperty(), (oldVal, newVal) -> {
             settings.setAutoConnect(newVal);
             saveSettings(settings);
         });
@@ -311,7 +306,6 @@ public class SettingsViewController implements ViewShownAware {
         initLaunchAtLogin();
 
         restrictToDigits(socksPortField);
-        socksPortField.setText(String.valueOf(settings.getSocksPort()));
         commitOnEditEnd(socksPortField, text -> {
             // An empty or out-of-range entry keeps the stored port rather than
             // resetting a customized one to the default.
@@ -322,7 +316,6 @@ public class SettingsViewController implements ViewShownAware {
         });
 
         restrictToDigits(httpPortField);
-        httpPortField.setText(String.valueOf(settings.getHttpPort()));
         commitOnEditEnd(httpPortField, text -> {
             int port = parsePort(text, settings.getHttpPort());
             settings.setHttpPort(port);
@@ -332,20 +325,17 @@ public class SettingsViewController implements ViewShownAware {
     }
 
     private void initHealthCheckSettings(AppSettings settings) {
-        healthCheckEnabledCheck.setSelected(settings.isHealthCheckEnabled());
-        healthCheckEnabledCheck.selectedProperty().addListener((obs, oldVal, newVal) -> {
+        onUserChange(healthCheckEnabledCheck.selectedProperty(), (oldVal, newVal) -> {
             settings.setHealthCheckEnabled(newVal);
             saveSettings(settings);
         });
 
-        healthCheckAutoReconnectCheck.setSelected(settings.isHealthCheckAutoReconnect());
-        healthCheckAutoReconnectCheck.selectedProperty().addListener((obs, oldVal, newVal) -> {
+        onUserChange(healthCheckAutoReconnectCheck.selectedProperty(), (oldVal, newVal) -> {
             settings.setHealthCheckAutoReconnect(newVal);
             saveSettings(settings);
         });
 
         restrictToDigits(healthCheckIntervalField);
-        healthCheckIntervalField.setText(String.valueOf(settings.getHealthCheckIntervalSeconds()));
         commitOnEditEnd(healthCheckIntervalField, text -> {
             int seconds = parseSeconds(text, settings.getHealthCheckIntervalSeconds());
             settings.setHealthCheckIntervalSeconds(seconds);
@@ -354,8 +344,6 @@ public class SettingsViewController implements ViewShownAware {
         });
 
         restrictToDigits(healthCheckReconnectDelayField);
-        healthCheckReconnectDelayField.setText(
-                String.valueOf(settings.getHealthCheckDelaySeconds()));
         commitOnEditEnd(healthCheckReconnectDelayField, text -> {
             int seconds = parseSeconds(text, settings.getHealthCheckDelaySeconds());
             settings.setHealthCheckDelaySeconds(seconds);
@@ -376,8 +364,7 @@ public class SettingsViewController implements ViewShownAware {
             launchAtLoginCheck.setDisable(true);
             return;
         }
-        launchAtLoginCheck.setSelected(autostart.isEnabled());
-        launchAtLoginCheck.selectedProperty().addListener((obs, oldVal, newVal) -> {
+        onUserChange(launchAtLoginCheck.selectedProperty(), (oldVal, newVal) -> {
             if (suppressLaunchAtLoginListener) {
                 return;
             }
@@ -414,9 +401,8 @@ public class SettingsViewController implements ViewShownAware {
                 setText(empty || item == null ? null : formatCoreLogLevel(item));
             }
         });
-        coreLogLevelCombo.setValue(settings.getCoreLogLevel());
 
-        coreLogLevelCombo.valueProperty().addListener((obs, oldVal, newVal) -> {
+        onUserChange(coreLogLevelCombo.valueProperty(), (oldVal, newVal) -> {
             if (newVal != null && newVal != oldVal) {
                 settings.setCoreLogLevel(newVal);
                 saveSettings(settings);
@@ -440,9 +426,8 @@ public class SettingsViewController implements ViewShownAware {
                 setText(empty || item == null ? null : formatProxyMode(item));
             }
         });
-        proxyModeCombo.setValue(settings.getProxyMode());
 
-        proxyModeCombo.valueProperty().addListener((obs, oldVal, newVal) -> {
+        onUserChange(proxyModeCombo.valueProperty(), (oldVal, newVal) -> {
             if (newVal != null && newVal != oldVal) {
                 settings.setProxyMode(newVal);
                 saveSettings(settings);
@@ -482,6 +467,8 @@ public class SettingsViewController implements ViewShownAware {
     /** The cached view is re-shown, not re-initialized: refresh stale rows. */
     @Override
     public void onViewShown() {
+        showStored();
+        refreshMcpCommand();
         if (updatesSection != null) {
             updatesSection.refreshOnOpen();
         }
@@ -602,8 +589,7 @@ public class SettingsViewController implements ViewShownAware {
      * @param settings the settings instance to read and mutate
      */
     private void initMcpSettings(AppSettings settings) {
-        mcpEnabledCheck.setSelected(settings.isMcpEnabled());
-        mcpEnabledCheck.selectedProperty().addListener((obs, oldVal, newVal) -> {
+        onUserChange(mcpEnabledCheck.selectedProperty(), (oldVal, newVal) -> {
             if (updatingMcpControls) {
                 return;
             }
@@ -613,7 +599,6 @@ public class SettingsViewController implements ViewShownAware {
         });
 
         restrictToDigits(mcpPortField);
-        mcpPortField.setText(String.valueOf(settings.getMcpPort()));
         commitOnEditEnd(mcpPortField, text -> {
             int port = parsePort(text, settings.getMcpPort());
             settings.setMcpPort(port);
@@ -622,8 +607,7 @@ public class SettingsViewController implements ViewShownAware {
             applyMcp();
         });
 
-        mcpAllowMutationsCheck.setSelected(settings.isMcpAllowMutations());
-        mcpAllowMutationsCheck.selectedProperty().addListener((obs, oldVal, newVal) -> {
+        onUserChange(mcpAllowMutationsCheck.selectedProperty(), (oldVal, newVal) -> {
             settings.setMcpAllowMutations(newVal);
             saveSettings(settings);
         });
@@ -757,6 +741,71 @@ public class SettingsViewController implements ViewShownAware {
     }
 
     /**
+     * Fills every control from the stored settings: when the page is built,
+     * and each time it is shown again. The page is cached while settings
+     * change elsewhere, the mode on the Dashboard and anything an agent sets
+     * through MCP, and it kept showing the values it was built with. Filling
+     * the controls is not a change: no listener saves or applies anything
+     * meanwhile, and a text field counts what it shows as committed.
+     */
+    private void showStored() {
+        if (configStore == null) {
+            return;
+        }
+        AppSettings settings = configStore.getSettings();
+        showingStored = true;
+        try {
+            // A legacy stored "system" shows as "auto", the item it became.
+            themeCombo.setValue(ThemeManager.normalize(settings.getTheme()));
+            languageCombo.setValue(settings.getLanguage());
+            autoConnectCheck.setSelected(settings.isAutoConnect());
+            if (autostart != null) {
+                launchAtLoginCheck.setSelected(autostart.isEnabled());
+            }
+            showCommitted(socksPortField, String.valueOf(settings.getSocksPort()));
+            showCommitted(httpPortField, String.valueOf(settings.getHttpPort()));
+            healthCheckEnabledCheck.setSelected(settings.isHealthCheckEnabled());
+            healthCheckAutoReconnectCheck.setSelected(settings.isHealthCheckAutoReconnect());
+            showCommitted(healthCheckIntervalField,
+                    String.valueOf(settings.getHealthCheckIntervalSeconds()));
+            showCommitted(healthCheckReconnectDelayField,
+                    String.valueOf(settings.getHealthCheckDelaySeconds()));
+            coreLogLevelCombo.setValue(settings.getCoreLogLevel());
+            proxyModeCombo.setValue(settings.getProxyMode());
+            systemProxyAutoConfigCheck.setSelected(settings.isSystemProxyAutoConfig());
+            showCommitted(proxyDnsField, settings.getProxyDns());
+            showCommitted(directDnsField, settings.getDirectDns());
+            showCommitted(tunInterfaceNameField, settings.getTunInterfaceName());
+            storeSecretsCheck.setSelected(settings.isStoreSecretsSecurely());
+            showCommitted(tunIpv4Field, settings.getTunIpv4Address());
+            tunIpv6Check.setSelected(settings.isTunIpv6Enabled());
+            mcpEnabledCheck.setSelected(settings.isMcpEnabled());
+            showCommitted(mcpPortField, String.valueOf(settings.getMcpPort()));
+            mcpAllowMutationsCheck.setSelected(settings.isMcpAllowMutations());
+        } finally {
+            showingStored = false;
+        }
+    }
+
+    /**
+     * Runs {@code onChange} for a change the user made to a control, and not
+     * for one {@link #showStored} made to show the stored value.
+     */
+    private <T> void onUserChange(ObservableValue<T> value, BiConsumer<T, T> onChange) {
+        value.addListener((obs, oldVal, newVal) -> {
+            if (!showingStored) {
+                onChange.accept(oldVal, newVal);
+            }
+        });
+    }
+
+    /** Shows {@code text} in a field as already committed, so leaving it saves nothing. */
+    private static void showCommitted(TextField field, String text) {
+        field.setText(text);
+        field.getProperties().put(COMMITTED, trimmed(field.getText()));
+    }
+
+    /**
      * Commits a text field when editing ends — focus leaving the field, or
      * Enter — rather than on every keystroke.
      *
@@ -772,14 +821,14 @@ public class SettingsViewController implements ViewShownAware {
      *               shows (an invalid port is put back to the stored one)
      */
     private static void commitOnEditEnd(TextField field, Consumer<String> commit) {
-        String[] lastCommitted = {trimmed(field.getText())};
+        field.getProperties().put(COMMITTED, trimmed(field.getText()));
         Runnable fire = () -> {
             String text = trimmed(field.getText());
-            if (text.equals(lastCommitted[0])) {
+            if (text.equals(field.getProperties().get(COMMITTED))) {
                 return;
             }
             commit.accept(text);
-            lastCommitted[0] = trimmed(field.getText());
+            field.getProperties().put(COMMITTED, trimmed(field.getText()));
         };
         field.setOnAction(event -> fire.run());
         field.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
