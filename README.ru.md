@@ -502,7 +502,7 @@ sing-box уже внутри.
 ```bash
 git clone https://github.com/dbelokursky/tunl.git
 cd tunl
-mvn clean javafx:run
+./mvnw clean javafx:run
 ```
 
 При первой сборке Maven автоматически скачает `sing-box` (версия пиннится в
@@ -542,15 +542,15 @@ download** в оранжевом баннере на Главной — оно �
 ### Команды
 
 ```bash
-mvn clean verify            # полная проверка: checkstyle, тесты, покрытие, SpotBugs
-mvn clean javafx:run        # запуск в dev-режиме
-mvn clean package           # сборка shade-jar (с бандлом sing-box)
-mvn test                    # только тесты
-mvn test -Dtest=SingBoxInstallerTest   # один тест-класс
-mvn validate                # checkstyle
+./mvnw clean verify          # полная проверка: checkstyle, тесты, покрытие, SpotBugs
+./mvnw clean javafx:run      # запуск в dev-режиме
+./mvnw clean package         # сборка shade-jar (с бандлом sing-box)
+./mvnw test                  # только тесты
+./mvnw test -Dtest=SingBoxInstallerTest   # один тест-класс
+./mvnw validate              # checkstyle
 
 # перегенерировать docs/screenshots/*.png после изменения UI
-mvn test -Dtest=ScreenshotGenerator -Dtunl.screenshots=true -Djacoco.skip=true
+./mvnw test -Dtest=ScreenshotGenerator -Dtunl.screenshots=true -Djacoco.skip=true
 ```
 
 ### Регенерация иконки
@@ -571,7 +571,7 @@ pom.xml (properties-maven-plugin), [scripts/bundle-singbox.sh](scripts/bundle-si
 
 ```bash
 scripts/bump-singbox.sh 1.13.14   # качает tarballs, сверяет SHA-256 с digest из GitHub API, обновляет properties
-mvn clean verify -Psmoke          # полные тесты + smoke на реальном бинарнике
+./mvnw clean verify -Psmoke      # полные тесты + smoke на реальном бинарнике
 ```
 
 Smoke-профиль (`-Psmoke`,

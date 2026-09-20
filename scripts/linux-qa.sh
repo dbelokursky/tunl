@@ -56,8 +56,8 @@ DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
 git clone -q -b "$BRANCH" /src /work && cd /work
 echo "[linux-qa] testing commit: $(git log --oneline -1)"
 
-echo "[linux-qa] === mvn clean verify -Psmoke ==="
-mvn -B clean verify -Psmoke 2>&1 \
+echo "[linux-qa] === ./mvnw clean verify -Psmoke ==="
+./mvnw -B clean verify -Psmoke 2>&1 \
   | grep -E "bundled|Tests run: [0-9]{3}|coverage checks|BUILD" | tail -4
 
 echo "[linux-qa] === GUI probe under Xvfb ==="

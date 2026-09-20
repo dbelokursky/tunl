@@ -15,9 +15,11 @@ truth read by `pom.xml`, `scripts/bundle-singbox.*` and `SingBoxInstaller`.
 
 ## Build and verify
 
-- `mvn clean verify` is the gate: Checkstyle at `validate`, ~1350 tests, JaCoCo
-  floors (73 % line, 60 % branch), SpotBugs at `verify`. Run it from a clean
-  state before calling anything done, and report failures verbatim.
+- `./mvnw clean verify` is the gate: Checkstyle at `validate`, ~1350 tests,
+  JaCoCo floors (73 % line, 60 % branch), SpotBugs at `verify`. Run it from a
+  clean state before calling anything done, and report failures verbatim. The
+  wrapper pins Maven 3.9.16, which is what CI runs; a local `mvn` of that
+  version or newer does the same, and every command below works either way.
 - `mvn clean verify -Psmoke` also runs `SingBoxRealBinarySmokeTest` against the
   bundled core; CI runs it on macOS, Windows, Linux amd64 and Linux arm64.
 - `mvn test -Dtest=SomeTest` for one class, `mvn validate` for Checkstyle only.

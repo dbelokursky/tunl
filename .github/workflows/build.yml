@@ -83,7 +83,12 @@ jobs:
         with:
           path: ~/.cache/vless-client-build
           key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
-      - run: mvn -B clean verify -Psmoke
+      # ./mvnw, so every runner builds with the Maven this repository pins:
+      # the arm64 image carries 3.9.12 and the others 3.9.16, and a plugin
+      # version can come from the Maven rather than from the POM. bash also on
+      # Windows, where the default shell is PowerShell and mvnw is a script.
+      - run: ./mvnw -B clean verify -Psmoke
+        shell: bash
       - name: Save the Maven repository
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.maven-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6

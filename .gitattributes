@@ -1,0 +1,4 @@
+# The Maven wrapper is run by two different shells: cmd.exe wants a batch file
+# with CRLF, and sh wants LF, whatever a checkout's core.autocrlf would do.
+mvnw text eol=lf
+mvnw.cmd text eol=crlf

@@ -80,7 +80,7 @@ git log --oneline -1
 # The guest runs without -e so a failed phase cannot skip the ones after it,
 # which is why the build is checked by hand: without a jar every phase below
 # would launch nothing and report INCONCLUSIVE instead of failing.
-if ! mvn -B -q clean package -DskipTests < /dev/null > "$OUT/build.log" 2>&1; then
+if ! ./mvnw -B -q clean package -DskipTests < /dev/null > "$OUT/build.log" 2>&1; then
   tail -20 "$OUT/build.log"
   echo "BUILD FAILED on $QA_BRANCH -- see $OUT/build.log; nothing to test" >&2
   exit 1
