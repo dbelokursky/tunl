@@ -2,6 +2,7 @@ package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.model.RouteMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.RoutingRule;
 import com.vlessclient.service.RoutingRuleCheck;
@@ -25,8 +26,10 @@ import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
+import javafx.scene.control.RadioButton;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
+import javafx.scene.control.ToggleGroup;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -47,6 +50,10 @@ public class RoutingViewController {
     private static final Logger log = LoggerFactory.getLogger(RoutingViewController.class);
 
     @FXML private Label titleLabel;
+    @FXML private Label routeModeTitle;
+    @FXML private RadioButton routeAllRadio;
+    @FXML private RadioButton routeBlockedRadio;
+    @FXML private Label routeModeHint;
     @FXML private Label bypassCountriesTitle;
     @FXML private Label bypassListTitle;
     @FXML private Label bypassListHint;
@@ -77,6 +84,7 @@ public class RoutingViewController {
         bindLabels();
 
         RoutingConfig config = routingService.getConfig();
+        initRouteMode(config);
         initBypassCountryChips(config);
 
         rulesListView.setItems(rulesList);
@@ -93,6 +101,33 @@ public class RoutingViewController {
         }
         updateBypassCount();
         updateEmptyState();
+    }
+
+    /**
+     * Wires the choice of what goes through the VPN. It is read when the core
+     * starts, so a change applies at the next connect, which the Dashboard
+     * offers.
+     */
+    private void initRouteMode(RoutingConfig config) {
+        if (routeAllRadio == null || routeBlockedRadio == null) {
+            return;
+        }
+        ToggleGroup choice = new ToggleGroup();
+        routeAllRadio.setToggleGroup(choice);
+        routeBlockedRadio.setToggleGroup(choice);
+        (config.getMode() == RouteMode.BLOCKED_IN_RUSSIA ? routeBlockedRadio : routeAllRadio)
+                .setSelected(true);
+        choice.selectedToggleProperty().addListener((obs, was, is) -> {
+            if (is == null) {
+                return;
+            }
+            RouteMode mode = is == routeBlockedRadio ? RouteMode.BLOCKED_IN_RUSSIA : RouteMode.ALL;
+            RoutingConfig current = routingService.getConfig();
+            if (current.getMode() != mode) {
+                current.setMode(mode);
+                routingService.saveConfig(current);
+            }
+        });
     }
 
     /** Every ISO country as "code — name", in the language the app is in. */
@@ -437,6 +472,10 @@ public class RoutingViewController {
      */
     private void bindLabels() {
         titleLabel.textProperty().bind(I18n.binding("routing.title"));
+        routeModeTitle.textProperty().bind(I18n.binding("routing.mode.title"));
+        routeAllRadio.textProperty().bind(I18n.binding("routing.mode.all"));
+        routeBlockedRadio.textProperty().bind(I18n.binding("routing.mode.blocked"));
+        routeModeHint.textProperty().bind(I18n.binding("routing.mode.hint"));
         bypassCountriesTitle.textProperty().bind(I18n.binding("routing.bypass.countries.title"));
         bypassCountryHint.textProperty().bind(I18n.binding("routing.bypass.countries.hint"));
         bypassListTitle.textProperty().bind(I18n.binding("routing.bypass.list.title"));

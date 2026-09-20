@@ -1339,4 +1339,23 @@ class SingBoxRealBinarySmokeTest {
     static void noop() {
         // binary is shared, nothing to clean
     }
+
+    /**
+     * The "only what is blocked in Russia" mode as the generator writes it,
+     * in both proxy modes: the runetfreedom lists fetched through the tunnel,
+     * and in TUN mode a DNS rule naming one of them. The core refuses a whole
+     * configuration over a field or a reference it does not know.
+     */
+    @Test
+    void checkAcceptsTheBlockedOnlyMode() throws Exception {
+        RoutingConfig routing = new RoutingConfig();
+        routing.setMode(com.vlessclient.model.RouteMode.BLOCKED_IN_RUSSIA);
+        for (ProxyMode mode : ProxyMode.values()) {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(mode);
+
+            assertCheckPasses(generator.generate(serverFor(Protocol.VLESS), settings, routing),
+                    "blocked only/" + mode);
+        }
+    }
 }

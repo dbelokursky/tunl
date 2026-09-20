@@ -417,13 +417,22 @@ public class ViewDialogThemeTest extends ApplicationTest {
 
     // ===== Opening and reading dialogs =====
 
-    /** Puts a view in the window, dressed in {@code theme}, and returns its controller. */
+    /**
+     * Puts a view in the window, dressed in {@code theme}, and returns its
+     * controller.
+     *
+     * <p>In the shared scroll wrapper, as MainViewController mounts it. Set as
+     * the root on its own, a page taller than the window has to give the space
+     * back from somewhere: on the Linux runners the Routing page did, and its
+     * rules list came out with no room, drew no rows, and the test waited for
+     * a button that was never built.</p>
+     */
     private <T> T mount(String view, String theme) {
         List<T> controller = new ArrayList<>(1);
         interact(() -> {
             FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/" + view + ".fxml"));
             try {
-                stage.getScene().setRoot(loader.load());
+                stage.getScene().setRoot(new ContentScrollPane(loader.load()));
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
