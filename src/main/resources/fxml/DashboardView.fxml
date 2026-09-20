@@ -31,8 +31,13 @@
             <Label fx:id="singBoxMissingHint" styleClass="banner-subtitle"/>
             <Label fx:id="brewCommandLabel" text="brew install sing-box" styleClass="banner-command"/>
         </VBox>
-        <!-- Label comes from ButtonLabels.bind: it swaps to "Copied!" on
-             click, and both spellings have to survive a language switch. -->
+        <!-- Labels come from ButtonLabels.bind: the first swaps to "Copied!"
+             on click, and both spellings have to survive a language switch.
+             bind also pins each button to its widest label, which is what
+             keeps them whole when this row runs short of room: an HBox short
+             of room shrinks every child, whatever its hgrow, so the text
+             beside them does not yield first
+             (DashboardBannerButtonWidthTest). -->
         <Button fx:id="copyBrewButton" styleClass="secondary-button"
                 onAction="#onCopyBrewCommandClicked"/>
         <Button fx:id="retryInstallButton" styleClass="secondary-button"
@@ -41,8 +46,12 @@
 
     <!-- Update banner (hidden unless a newer release exists). Same shape as
          the one above, in an informational rather than a warning palette: a
-         waiting update is news, not a problem. minWidth=0 + wrapText so the
-         text yields at a narrow window instead of pushing the button out. -->
+         waiting update is news, not a problem. minWidth=0 + wrapText let the
+         text wrap and give up its width at a narrow window. That is not what
+         saves the button: an HBox short of room shrinks every child, whatever
+         its hgrow. The button is whole because ButtonLabels.bind pins it to
+         its label (DashboardBannerButtonWidthTest); a button labelled through
+         bindStatic, as recheckButton is, needs minWidth="-Infinity" here. -->
     <HBox fx:id="updateBanner" styleClass="update-banner"
           spacing="12" alignment="CENTER_LEFT"
           visible="false" managed="false">
