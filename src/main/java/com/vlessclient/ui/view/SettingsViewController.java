@@ -18,6 +18,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import javafx.application.Platform;
 import javafx.beans.value.ObservableValue;
 import javafx.fxml.FXML;
 import javafx.scene.Scene;
@@ -368,15 +369,53 @@ public class SettingsViewController implements ViewShownAware {
             if (suppressLaunchAtLoginListener) {
                 return;
             }
-            try {
-                autostart.setEnabled(newVal);
-            } catch (IOException e) {
-                log.error("Failed to {} launch at login", newVal ? "enable" : "disable", e);
-                suppressLaunchAtLoginListener = true;
-                launchAtLoginCheck.setSelected(oldVal);
-                suppressLaunchAtLoginListener = false;
-            }
+            // Off the FX thread, like the read: on Windows this writes the
+            // Run value with `reg`, and the click held the window until the
+            // process came back.
+            Thread.startVirtualThread(() -> {
+                try {
+                    autostart.setEnabled(newVal);
+                } catch (IOException e) {
+                    log.error("Failed to {} launch at login",
+                            newVal ? "enable" : "disable", e);
+                    Platform.runLater(() -> showAutostart(oldVal));
+                }
+            });
         });
+    }
+
+    /**
+     * Shows whether the app starts with the system, asked off the FX thread.
+     *
+     * <p>The checkbox reflects the system rather than a stored setting, and on
+     * Windows the system answers through {@code reg query} — a process, behind
+     * a two-second timeout. Asked here, it held the FX thread for as long as
+     * the query took, on every visit to this page; a loaded machine reached
+     * the timeout and the window stood still for the whole two seconds.</p>
+     */
+    private void showStoredAutostart() {
+        if (autostart == null) {
+            return;
+        }
+        Thread.startVirtualThread(() -> {
+            boolean enabled = autostart.isEnabled();
+            Platform.runLater(() -> showAutostart(enabled));
+        });
+    }
+
+    /**
+     * Puts {@code enabled} in the checkbox without the listener reading it as
+     * the user's doing and writing it back to the system.
+     *
+     * @param enabled what the system says, or the value a failed write reverts to
+     */
+    private void showAutostart(boolean enabled) {
+        suppressLaunchAtLoginListener = true;
+        try {
+            launchAtLoginCheck.setSelected(enabled);
+        } finally {
+            suppressLaunchAtLoginListener = false;
+        }
     }
 
     /**
@@ -759,9 +798,7 @@ public class SettingsViewController implements ViewShownAware {
             themeCombo.setValue(ThemeManager.normalize(settings.getTheme()));
             languageCombo.setValue(settings.getLanguage());
             autoConnectCheck.setSelected(settings.isAutoConnect());
-            if (autostart != null) {
-                launchAtLoginCheck.setSelected(autostart.isEnabled());
-            }
+            showStoredAutostart();
             showCommitted(socksPortField, String.valueOf(settings.getSocksPort()));
             showCommitted(httpPortField, String.valueOf(settings.getHttpPort()));
             healthCheckEnabledCheck.setSelected(settings.isHealthCheckEnabled());
