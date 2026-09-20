@@ -128,23 +128,38 @@ public class UpdateBannerSection {
 
     /** Re-renders the banner from the updater's current state. */
     public void refresh() {
+        if (updateManager == null) {
+            render(State.HIDDEN, "");
+            return;
+        }
+        render(stateFor(updateManager.updateAvailableProperty().get(),
+                        updateManager.hasStagedUpdate(),
+                        updateManager.downloadingProperty().get(),
+                        UpdateApplier.current().selfUpdates()),
+                updateManager.latestVersionProperty().get());
+    }
+
+    /**
+     * Renders {@code state} for the release numbered {@code version}.
+     *
+     * <p>Apart from {@link #refresh()} so a layout test can lay the banner out
+     * in a state the platform it runs on never reaches: whether an update is
+     * staged at all is {@code UpdateApplier}'s answer, and on Linux it is no,
+     * so the restart button never shows there.</p>
+     *
+     * @param state   what the banner should say about an update, if anything
+     * @param version the newer release's number, as the title quotes it
+     */
+    public void render(State state, String version) {
         if (banner == null) {
             return;
         }
-        State state = updateManager == null
-                ? State.HIDDEN
-                : stateFor(updateManager.updateAvailableProperty().get(),
-                        updateManager.hasStagedUpdate(),
-                        updateManager.downloadingProperty().get(),
-                        UpdateApplier.current().selfUpdates());
-
         banner.setVisible(state != State.HIDDEN);
         banner.setManaged(state != State.HIDDEN);
         if (state == State.HIDDEN) {
             return;
         }
 
-        String version = updateManager.latestVersionProperty().get();
         title.setText(state == State.READY
                 ? I18n.get("dashboard.update.ready", version)
                 : I18n.get("dashboard.update.available", version));
