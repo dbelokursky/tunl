@@ -9,12 +9,15 @@ import com.vlessclient.testing.Await;
 import com.vlessclient.testing.UiTest;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
@@ -144,9 +147,7 @@ public class SubscriptionsViewTest extends ApplicationTest {
     void deletingASubscriptionAsksThenRemovesItOffTheFxThread() throws Exception {
         service.addSubscription("Provider", "https://provider.example/sub");
         WaitForAsyncUtils.waitForFxEvents();
-        Button delete = rowButton("button.delete");
-
-        Platform.runLater(delete::fire);
+        pressRowButtonWithoutWaiting("button.delete");
         DialogPane confirm = awaitDialog("the delete confirmation", pane ->
                 I18n.get("subscriptions.delete.confirm", "Provider").equals(pane.getHeaderText()));
         interact(() -> ((Button) confirm.lookupButton(ButtonType.OK)).fire());
@@ -176,12 +177,13 @@ public class SubscriptionsViewTest extends ApplicationTest {
             throw new IllegalStateException("could not apply the refreshed servers");
         });
         try {
-            interact(rowRefreshButton()::fire);
+            pressRowButton("button.refresh");
             Await.until("the refresh to start", () -> refreshes.get() == 1, PATIENCE);
-            interact(rowRefreshButton()::fire);
+            pressRowButton("button.refresh");
             WaitForAsyncUtils.waitForFxEvents();
 
-            assertThat(rowRefreshButton().isDisabled()).as("the row's Refresh while it runs").isTrue();
+            assertThat(onFx(() -> findRowButton("button.refresh").isDisabled()))
+                    .as("the row's Refresh while it runs").isTrue();
         } finally {
             release.countDown();
         }
@@ -190,8 +192,10 @@ public class SubscriptionsViewTest extends ApplicationTest {
         assertThat(failure.getContentText()).isEqualTo("could not apply the refreshed servers");
         interact(() -> ((Button) failure.lookupButton(ButtonType.OK)).fire());
 
-        Await.until("the row's Refresh to be offered again",
-                () -> !rowRefreshButton().isDisabled(), PATIENCE);
+        Await.until("the row's Refresh to be offered again", () -> onFx(() -> {
+            Button refresh = findRowButton("button.refresh");
+            return refresh != null && !refresh.isDisabled();
+        }), PATIENCE);
         assertThat(refreshes.get()).as("refreshes started").isEqualTo(1);
     }
 
@@ -236,7 +240,7 @@ public class SubscriptionsViewTest extends ApplicationTest {
         // such a wait in 33 runs of 40, and in 5 it came up with the error.
         // So the row's button, and then the end of the pulse that drew it:
         // the list draws its first row twice in that pulse.
-        rowRefreshButton();
+        awaitRowButton("button.refresh");
         WaitForAsyncUtils.waitForFxEvents();
         String shown = I18n.get("subscriptions.last.error", "401 Unauthorized");
         // What the hourly refresh does: off the FX thread, and unannounced.
@@ -267,22 +271,62 @@ public class SubscriptionsViewTest extends ApplicationTest {
                 I18n.get("subscriptions.error.no.links")));
     }
 
-    private Button rowRefreshButton() {
-        return rowButton("button.refresh");
+    /**
+     * Presses the row's button labelled {@code key}, found and pressed in one
+     * action on the FX thread.
+     *
+     * <p>Resolved on the test thread and fired afterwards, the press could
+     * land on a button the list had recycled out of its cells meanwhile: the
+     * handler did nothing, the work it was to start never started, and the
+     * test waited for that work until it gave up. On the Windows runners it
+     * cost one run in two, in five tests at once, and the wait's length was
+     * the only thing the failure measured.</p>
+     */
+    private void pressRowButton(String key) {
+        awaitRowButton(key);
+        interact(() -> {
+            Button button = findRowButton(key);
+            assertThat(button).as("the row's \"%s\" button when it is pressed", I18n.get(key))
+                    .isNotNull();
+            button.fire();
+        });
     }
 
     /**
-     * The row's button labelled with {@code key}, waited for: a ListView builds
-     * its cells during layout, a pulse after the subscription lands, so a query
-     * that runs straight after the change can find nothing.
+     * The same press, without waiting for it to return: the dialog it opens
+     * waits for the user, so an {@code interact} around it would not come
+     * back.
      */
-    private Button rowButton(String key) {
-        String text = I18n.get(key);
-        return Await.untilValue("the row's \"" + text + "\" button",
-                () -> lookup((Node node) -> node instanceof Button button
-                        && text.equals(button.getText())).tryQueryAs(Button.class).orElse(null),
-                Objects::nonNull, PATIENCE);
+    private void pressRowButtonWithoutWaiting(String key) {
+        awaitRowButton(key);
+        Platform.runLater(() -> {
+            Button button = findRowButton(key);
+            if (button != null) {
+                button.fire();
+            }
+        });
     }
+
+    /** Waits for the row's button to be drawn, looking on the FX thread. */
+    private void awaitRowButton(String key) {
+        Await.until("the row's \"" + I18n.get(key) + "\" button",
+                () -> onFx(() -> findRowButton(key)) != null, PATIENCE);
+    }
+
+    /** That button as the scene has it now; call it on the FX thread. */
+    private Button findRowButton(String key) {
+        String text = I18n.get(key);
+        return lookup((Node node) -> node instanceof Button button
+                && text.equals(button.getText())).tryQueryAs(Button.class).orElse(null);
+    }
+
+    /** Runs {@code work} on the FX thread and hands back what it returned. */
+    private <T> T onFx(Supplier<T> work) {
+        List<T> result = new ArrayList<>(1);
+        interact(() -> result.add(work.get()));
+        return result.get(0);
+    }
+
 
     /**
      * Waits for a label with this text. Shown again, the view asks its list to
