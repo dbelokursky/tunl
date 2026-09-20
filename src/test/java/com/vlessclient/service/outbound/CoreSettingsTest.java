@@ -179,7 +179,11 @@ class CoreSettingsTest {
                     reality(server -> server.getTls().setRealityPublicKey("pubkey123")),
                     reality(server -> server.getTls().setRealityShortId("0123456789abcdef01")),
                     shadowsocks("chacha20", "password"),
-                    shadowsocks("2022-blake3-aes-128-gcm", KEY_32_BYTES));
+                    shadowsocks("2022-blake3-aes-128-gcm", KEY_32_BYTES),
+                    quic(Protocol.VLESS, false),
+                    withPlugin("kcptun", "mode=fast"),
+                    withPlugin("obfs-local", "obfs=xyz"),
+                    withPlugin("v2ray-plugin", "mode=quic"));
             for (ServerConfig server : refused) {
                 assertThat(CoreSettings.refusal(server)).hasValueSatisfying(refusal -> {
                     assertThat(refusal.reason()).as(refusal.feature())
@@ -190,6 +194,68 @@ class CoreSettingsTest {
             }
         } finally {
             I18n.setLocale(before);
+        }
+    }
+
+    /**
+     * "create client transport: quic: TLS required", from the core's check
+     * for VLESS, VMess and Trojan alike. The link parser took such a server,
+     * and every connect that included it failed.
+     */
+    @Test
+    void quicWithoutTlsIsRefused() {
+        for (Protocol protocol : List.of(Protocol.VLESS, Protocol.VMESS, Protocol.TROJAN)) {
+            assertThat(CoreSettings.refusal(quic(protocol, false))).as(protocol.name())
+                    .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                            .isEqualTo("QUIC without TLS"));
+            assertThat(CoreSettings.refusal(quic(protocol, true))).as(protocol + " with TLS")
+                    .isEmpty();
+        }
+    }
+
+    /**
+     * "plugin not found: kcptun". The core has obfs-local and v2ray-plugin,
+     * and simple-obfs is obfs-local under its old name.
+     */
+    @Test
+    void aPluginTheCoreDoesNotHaveIsRefused() {
+        assertThat(CoreSettings.refusal(withPlugin("kcptun", "mode=fast")))
+                .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                        .isEqualTo("plugin kcptun"));
+        for (String plugin : new String[] {"obfs-local", "simple-obfs", "v2ray-plugin"}) {
+            assertThat(CoreSettings.refusal(withPlugin(plugin, null))).as(plugin).isEmpty();
+        }
+    }
+
+    /**
+     * The modes the core runs, as its check answered: obfs-local's http and
+     * tls ("unknown obfs mode xyz" otherwise), v2ray-plugin's websocket and
+     * quic, spelled exactly so ("v2ray-plugin: unknown mode: ws"), and quic
+     * only with tls ("TLS required").
+     */
+    @Test
+    void aPluginModeTheCoreDoesNotRunIsRefused() {
+        java.util.Map<ServerConfig, String> refused = new java.util.LinkedHashMap<>();
+        refused.put(withPlugin("obfs-local", "obfs=xyz;obfs-host=cdn.example"),
+                "obfs-local mode xyz");
+        refused.put(withPlugin("v2ray-plugin", "mode=ws;host=cdn.example"),
+                "v2ray-plugin mode ws");
+        refused.put(withPlugin("v2ray-plugin", "mode=grpc;tls;host=cdn.example"),
+                "v2ray-plugin mode grpc");
+        refused.put(withPlugin("v2ray-plugin", "mode=quic;host=cdn.example"),
+                "v2ray-plugin QUIC without TLS");
+        refused.forEach((server, feature) -> assertThat(CoreSettings.refusal(server))
+                .as(server.getPluginOpts())
+                .hasValueSatisfying(refusal -> assertThat(refusal.feature()).isEqualTo(feature)));
+
+        List<ServerConfig> accepted = List.of(
+                withPlugin("obfs-local", "obfs=http;obfs-host=cdn.example"),
+                withPlugin("simple-obfs", "obfs=tls;obfs-host=cdn.example"),
+                withPlugin("v2ray-plugin", "mode=websocket;tls;host=cdn.example;path=/ws"),
+                withPlugin("v2ray-plugin", "mode=quic;tls;host=cdn.example"),
+                withPlugin("v2ray-plugin", "tls;host=cdn.example"));
+        for (ServerConfig server : accepted) {
+            assertThat(CoreSettings.refusal(server)).as(server.getPluginOpts()).isEmpty();
         }
     }
 
@@ -221,6 +287,27 @@ class CoreSettingsTest {
         server.setPort(8388);
         server.setUuid(password);
         server.setEncryption(method);
+        return server;
+    }
+
+    static ServerConfig quic(Protocol protocol, boolean tls) {
+        ServerConfig server = new ServerConfig();
+        server.setId("quic-" + protocol);
+        server.setName("quic-" + protocol);
+        server.setProtocol(protocol);
+        server.setAddress("203.0.113.4");
+        server.setPort(443);
+        server.setUuid("b1c2d3e4-f5a6-7890-abcd-ef1234567890");
+        server.getTransport().setType(com.vlessclient.model.TransportType.QUIC);
+        server.getTls().setEnabled(tls);
+        server.getTls().setServerName(tls ? "quic.example" : null);
+        return server;
+    }
+
+    static ServerConfig withPlugin(String plugin, String options) {
+        ServerConfig server = shadowsocks("aes-256-gcm", "password");
+        server.setPlugin(plugin);
+        server.setPluginOpts(options);
         return server;
     }
 }

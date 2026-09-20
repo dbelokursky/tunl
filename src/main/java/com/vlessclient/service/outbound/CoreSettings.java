@@ -4,8 +4,11 @@ import com.vlessclient.app.I18n;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TlsConfig;
+import com.vlessclient.model.TransportType;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.StringJoiner;
@@ -53,6 +56,16 @@ public final class CoreSettings {
     private static final Pattern SHORT_ID = Pattern.compile("(?:[0-9a-fA-F]{2}){0,8}");
 
     private static final int REALITY_KEY_BYTES = 32;
+
+    /** The protocols whose servers carry a V2Ray transport block. */
+    private static final Set<Protocol> TRANSPORT_PROTOCOLS =
+            Set.of(Protocol.VLESS, Protocol.VMESS, Protocol.TROJAN);
+
+    /** The modes of obfs-local the core runs. */
+    private static final Set<String> OBFS_MODES = Set.of("http", "tls");
+
+    /** The modes of v2ray-plugin the core runs; quic only with tls. */
+    private static final Set<String> V2RAY_PLUGIN_MODES = Set.of("websocket", "quic");
 
     private CoreSettings() {
     }
@@ -211,9 +224,10 @@ public final class CoreSettings {
      * Why the core would refuse this server however its settings are spelled:
      * a port outside 1 to 65535 (the check lets 0 through, but nothing dials
      * it), a VLESS flow other than Vision, an unknown uTLS fingerprint, a
-     * REALITY key or short ID the core cannot decode, an unknown Shadowsocks
-     * cipher, or a Shadowsocks 2022 key of the wrong length. A setting the
-     * spelling methods correct is not a refusal.
+     * REALITY key or short ID the core cannot decode, the QUIC transport
+     * without TLS, an unknown Shadowsocks cipher, a Shadowsocks 2022 key of
+     * the wrong length, or a SIP003 plugin or plugin mode the core does not
+     * have. A setting the spelling methods correct is not a refusal.
      *
      * @param server the server to check
      * @return the refusal, or empty when the core accepts the server
@@ -229,11 +243,18 @@ public final class CoreSettings {
             return refused("flow " + flow, "refusal.flow", flow);
         }
         TlsConfig tls = server.getTls();
-        if (tls != null && tls.isEnabled()) {
+        boolean tlsEnabled = tls != null && tls.isEnabled();
+        if (tlsEnabled) {
             Optional<Refusal> refusal = tlsRefusal(tls);
             if (refusal.isPresent()) {
                 return refusal;
             }
+        }
+        if (!tlsEnabled && TRANSPORT_PROTOCOLS.contains(server.getProtocol())
+                && server.getTransport() != null
+                && server.getTransport().getType() == TransportType.QUIC) {
+            // "create client transport: quic: TLS required"
+            return refused("QUIC without TLS", "refusal.quic.tls");
         }
         if (server.getProtocol() == Protocol.SHADOWSOCKS) {
             return shadowsocksRefusal(server);
@@ -266,19 +287,75 @@ public final class CoreSettings {
         if (method == null || !SHADOWSOCKS_METHODS.contains(method)) {
             return refused("cipher " + method, "refusal.cipher", method);
         }
-        if (!method.startsWith("2022-")) {
-            return Optional.empty();
-        }
-        int bytes = "2022-blake3-aes-128-gcm".equals(method) ? 16 : 32;
-        String password = server.getUuid() == null ? "" : server.getUuid();
-        // A multi-user server is given the server key and the user key, colon-separated.
-        for (String key : password.split(":", -1)) {
-            if (decodedLength(key) != bytes) {
-                return refused("Shadowsocks 2022 key", "refusal.ss2022.key",
-                        method, String.valueOf(bytes));
+        if (method.startsWith("2022-")) {
+            int bytes = "2022-blake3-aes-128-gcm".equals(method) ? 16 : 32;
+            String password = server.getUuid() == null ? "" : server.getUuid();
+            // A multi-user server is given the server key and the user key, colon-separated.
+            for (String key : password.split(":", -1)) {
+                if (decodedLength(key) != bytes) {
+                    return refused("Shadowsocks 2022 key", "refusal.ss2022.key",
+                            method, String.valueOf(bytes));
+                }
             }
         }
-        return Optional.empty();
+        return pluginRefusal(server.getPlugin(), server.getPluginOpts());
+    }
+
+    /**
+     * Why the core would refuse a SIP003 plugin: one it does not have ("plugin
+     * not found"), or a mode it does not run. It has obfs-local, in http and
+     * tls mode ("unknown obfs mode"), and v2ray-plugin, in websocket mode and
+     * in quic mode with tls ("unknown mode", "TLS required"). Names and modes
+     * match exactly, as in the core.
+     */
+    private static Optional<Refusal> pluginRefusal(String plugin, String options) {
+        String name = shadowsocksPlugin(plugin);
+        if (name == null || name.isEmpty()) {
+            return Optional.empty();
+        }
+        Map<String, String> settings = pluginOptions(options);
+        switch (name) {
+            case "obfs-local" -> {
+                String mode = settings.getOrDefault("obfs", "http");
+                if (!OBFS_MODES.contains(mode)) {
+                    return refused("obfs-local mode " + mode, "refusal.plugin.mode", name, mode);
+                }
+                return Optional.empty();
+            }
+            case "v2ray-plugin" -> {
+                String mode = settings.getOrDefault("mode", "websocket");
+                if ("quic".equals(mode) && !settings.containsKey("tls")) {
+                    return refused("v2ray-plugin QUIC without TLS", "refusal.plugin.quic.tls");
+                }
+                if (!V2RAY_PLUGIN_MODES.contains(mode)) {
+                    return refused("v2ray-plugin mode " + mode, "refusal.plugin.mode", name, mode);
+                }
+                return Optional.empty();
+            }
+            default -> {
+                return refused("plugin " + name, "refusal.plugin", name);
+            }
+        }
+    }
+
+    /**
+     * SIP003 plugin options, {@code key=value;flag}, as the core splits them;
+     * a flag such as {@code tls} maps to an empty value. Nothing is trimmed,
+     * since the core trims nothing either.
+     */
+    private static Map<String, String> pluginOptions(String options) {
+        Map<String, String> settings = new HashMap<>();
+        if (options == null || options.isEmpty()) {
+            return settings;
+        }
+        for (String option : options.split(";")) {
+            int equals = option.indexOf('=');
+            String key = equals < 0 ? option : option.substring(0, equals);
+            if (!key.isEmpty()) {
+                settings.put(key, equals < 0 ? "" : option.substring(equals + 1));
+            }
+        }
+        return settings;
     }
 
     /** How many bytes a base64 value in either alphabet decodes to, or -1 when it does not. */

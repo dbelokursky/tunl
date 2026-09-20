@@ -14,6 +14,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -82,6 +83,12 @@ public class ShareLinkParser {
 
     /** Longest display name kept from a link; anything past it is noise. */
     static final int MAX_NAME_LENGTH = 200;
+
+    /** VLESS encryption values that ask for none, VMess words some panels put there included. */
+    private static final Set<String> NO_VLESS_ENCRYPTION = Set.of("none", "auto", "zero");
+
+    /** Longest part of a link's own value a refusal repeats. */
+    private static final int MAX_FEATURE_LENGTH = 40;
 
     /**
      * A display name safe to store, render and log.
@@ -288,6 +295,7 @@ public class ShareLinkParser {
         // Encryption
         String encryption = params.get("encryption");
         if (encryption != null && !encryption.isBlank()) {
+            refuseVlessEncryption(encryption);
             config.setEncryption(encryption);
         }
 
@@ -352,6 +360,10 @@ public class ShareLinkParser {
         // Transport
         String net = getJsonString(node, "net", "tcp");
         TransportType transportType = parseTransportType(mapVmessNet(net));
+        if (transportType == TransportType.TCP
+                && "http".equalsIgnoreCase(getJsonString(node, "type", ""))) {
+            throw unsupportedTcpHeader();
+        }
         config.getTransport().setType(transportType);
 
         String path = getJsonString(node, "path", "");
@@ -558,6 +570,7 @@ public class ShareLinkParser {
         config.setPort(port);
         config.setName(displayName(fragment, host, port));
         applyPlugin(config, query);
+        refuseShadowsocksTransport(query);
 
         return config;
     }
@@ -697,6 +710,10 @@ public class ShareLinkParser {
     private void applyTransportParams(ServerConfig config, Map<String, String> params) {
         String type = params.getOrDefault("type", "tcp");
         TransportType transportType = parseTransportType(type);
+        if (transportType == TransportType.TCP
+                && "http".equalsIgnoreCase(params.get("headerType"))) {
+            throw unsupportedTcpHeader();
+        }
         config.getTransport().setType(transportType);
 
         // Decoded once already, with the rest of the query. A second pass
@@ -840,6 +857,60 @@ public class ShareLinkParser {
         String name = type.toLowerCase(Locale.ROOT);
         return new UnsupportedFeatureException("transport " + name,
                 I18n.get("refusal.transport", name));
+    }
+
+    /**
+     * TCP disguised as HTTP ({@code headerType=http}). It used to be read as
+     * plain TCP, which a server expecting the disguise does not answer.
+     */
+    private static UnsupportedFeatureException unsupportedTcpHeader() {
+        return new UnsupportedFeatureException("TCP with an HTTP header",
+                I18n.get("refusal.tcp.http.header"));
+    }
+
+    /**
+     * Refuses Xray's VLESS encryption: a server set up for it takes no plain
+     * VLESS, and sing-box has no other. The values that ask for none pass,
+     * VMess words some panels write there included. The refusal names the
+     * method only: the client's keys follow its first dot.
+     */
+    private static void refuseVlessEncryption(String encryption) {
+        String value = encryption.strip();
+        if (NO_VLESS_ENCRYPTION.contains(value.toLowerCase(Locale.ROOT))) {
+            return;
+        }
+        String method = value.split("\\.", 2)[0];
+        if (method.length() > MAX_FEATURE_LENGTH) {
+            method = method.substring(0, MAX_FEATURE_LENGTH);
+        }
+        throw new UnsupportedFeatureException("VLESS encryption " + method,
+                I18n.get("refusal.vless.encryption", method));
+    }
+
+    /**
+     * Refuses Shadowsocks over another transport or over TLS, as 3x-ui hands
+     * it out ({@code type=ws&security=tls}). sing-box runs Shadowsocks over
+     * TCP only, and read as plain Shadowsocks such a link reached a server
+     * that does not answer it.
+     */
+    private void refuseShadowsocksTransport(String query) {
+        Map<String, String> params = parseQueryParams(query);
+        String type = params.getOrDefault("type", "tcp").strip();
+        if (!type.isEmpty() && !"tcp".equalsIgnoreCase(type) && !"raw".equalsIgnoreCase(type)) {
+            throw unsupportedShadowsocksCarrier(type.toLowerCase(Locale.ROOT));
+        }
+        String security = params.getOrDefault("security", "none").strip();
+        if (!security.isEmpty() && !"none".equalsIgnoreCase(security)) {
+            throw unsupportedShadowsocksCarrier(security.toUpperCase(Locale.ROOT));
+        }
+        if ("http".equalsIgnoreCase(params.get("headerType"))) {
+            throw unsupportedTcpHeader();
+        }
+    }
+
+    private static UnsupportedFeatureException unsupportedShadowsocksCarrier(String name) {
+        return new UnsupportedFeatureException("Shadowsocks over " + name,
+                I18n.get("refusal.shadowsocks.transport", name));
     }
 
     private Map<String, String> parseQueryParams(String query) {
