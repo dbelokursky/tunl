@@ -19,6 +19,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -38,6 +39,7 @@ import javafx.fxml.FXMLLoader;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.ContextMenu;
@@ -106,8 +108,8 @@ public class ServersViewController {
     private LatencyTester latencyTester;
 
     /**
-     * Where the clipboard import reads its text: the system clipboard, except
-     * in a test, since headless JavaFX has none to fill.
+     * Where the clipboard import reads its text: the system clipboard, or a
+     * test's own text.
      */
     private Supplier<String> clipboardText = () -> Clipboard.getSystemClipboard().getString();
 
@@ -116,6 +118,13 @@ public class ServersViewController {
      * since headless JavaFX cannot show one.
      */
     private Function<Window, File> importFileChooser = ServersViewController::chooseImportFile;
+
+    /**
+     * Takes a subscription URL pasted here to the Subscriptions page's form;
+     * the main window sets it. Unset, an import report only says where
+     * subscriptions are added.
+     */
+    private Consumer<String> onAddSubscription;
 
     /**
      * How the list is ordered. {@link #CONFIGURED} is the stored order, kept as
@@ -252,6 +261,16 @@ public class ServersViewController {
     /** Replaces the clipboard the import reads; for tests, which have none. */
     void setClipboardText(Supplier<String> source) {
         this.clipboardText = source;
+    }
+
+    /**
+     * Sets where a subscription URL pasted here goes: the main window opens
+     * the Subscriptions page's form with it.
+     *
+     * @param onAddSubscription takes the URL as it was pasted
+     */
+    public void setOnAddSubscription(Consumer<String> onAddSubscription) {
+        this.onAddSubscription = onAddSubscription;
     }
 
     /** Replaces the chooser the file import asks; for tests, which cannot show one. */
@@ -594,7 +613,7 @@ public class ServersViewController {
         if (result.added() + result.updated() == 1 && result.skipped().isEmpty()) {
             return;
         }
-        showImportReport(result, "dialog.import.link", "servers.import.link.no.links");
+        showImportReport(result, "dialog.import.link", "servers.import.link.no.links", text);
     }
 
     private void showImportError(RuntimeException e) {
@@ -673,7 +692,8 @@ public class ServersViewController {
             showImportError(e);
             return;
         }
-        showImportReport(result, "servers.import.clipboard", "servers.import.clipboard.no.links");
+        showImportReport(result, "servers.import.clipboard", "servers.import.clipboard.no.links",
+                text);
     }
 
     /**
@@ -690,7 +710,7 @@ public class ServersViewController {
      * @param noLinksKey what to say when the text held no link at all
      */
     private void showImportReport(ServerBackupService.ImportResult result,
-                                  String titleKey, String noLinksKey) {
+                                  String titleKey, String noLinksKey, String text) {
         int imported = result.added() + result.updated();
         int skipped = result.skipped().size();
         Alert report = Dialogs.alert(Alert.AlertType.INFORMATION);
@@ -699,6 +719,7 @@ public class ServersViewController {
             report.setTitle(I18n.get(titleKey));
             report.setHeaderText(I18n.get("servers.import.clipboard.nothing"));
             report.setContentText(nothingImportedReason(result, noLinksKey));
+            offerAsSubscription(report, result, text);
         } else if (skipped == 0) {
             report.setTitle(I18n.get("servers.backup.import.done.title"));
             report.setHeaderText(I18n.get("servers.import.clipboard.done", imported));
@@ -720,6 +741,38 @@ public class ServersViewController {
             return I18n.get("servers.import.clipboard.subscription");
         }
         return skippedList(result);
+    }
+
+    /**
+     * Offers to add the subscription URL that was all the text held, on the
+     * Subscriptions page's form, where its checks apply. The URL is taken
+     * from the text, since the report's entries are redacted; two URLs are
+     * not guessed between.
+     */
+    private void offerAsSubscription(Alert report, ServerBackupService.ImportResult result,
+                                     String text) {
+        if (onAddSubscription == null || text == null || result.skipped().size() != 1
+                || !isWebAddress(result.skipped().getFirst())) {
+            return;
+        }
+        // The tokens ServerBackupService.importShareLinks reads as links.
+        List<String> links = Arrays.stream(text.strip().split("\\s+"))
+                .filter(token -> token.contains("://"))
+                .toList();
+        if (links.size() != 1) {
+            return;
+        }
+        String url = links.getFirst();
+        ButtonType add = new ButtonType(I18n.get("button.add.subscription"),
+                ButtonBar.ButtonData.OK_DONE);
+        report.getButtonTypes().setAll(add, ButtonType.CANCEL);
+        Dialogs.localizeButtons(report.getDialogPane());
+        // After the report has gone: the form waits for the user.
+        report.setOnHidden(event -> {
+            if (report.getResult() == add) {
+                Platform.runLater(() -> onAddSubscription.accept(url));
+            }
+        });
     }
 
     /**

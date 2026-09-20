@@ -120,8 +120,18 @@ public class SubscriptionsViewController implements ViewShownAware {
 
     @FXML
     private void onAddSubscriptionClicked() {
+        openAddSubscriptionDialog("");
+    }
+
+    /**
+     * Opens the form that adds a subscription, holding {@code url}: empty from
+     * this page's button, or a URL pasted on the Servers page.
+     *
+     * @param url what the URL field starts with
+     */
+    public void openAddSubscriptionDialog(String url) {
         showSubscriptionDialog(I18n.get("button.add.subscription"),
-                I18n.get("subscriptions.add.header"), "", "")
+                I18n.get("subscriptions.add.header"), "", url)
                 .ifPresent(entry -> runOffFxThread(
                         () -> subscriptionService.addSubscription(entry.name(), entry.url()),
                         "subscriptions.add.failed"));
