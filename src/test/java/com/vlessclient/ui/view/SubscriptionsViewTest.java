@@ -43,6 +43,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 @UiTest
 public class SubscriptionsViewTest extends ApplicationTest {
 
+    /**
+     * How long a wait for background work may take before it counts as work
+     * that never ran.
+     *
+     * <p>Ten seconds was not enough on a loaded Windows runner: four runs in
+     * one evening failed here and in {@code ViewDialogThemeTest}, each on a
+     * ten-second wait, with the log showing ten seconds in which nothing at
+     * all happened — the work started after them and every rerun passed. What
+     * the waits guard is work that never runs, and that still fails; it now
+     * takes longer to say so.</p>
+     */
+    private static final Duration PATIENCE = Duration.ofSeconds(30);
+
     @TempDir
     static Path tempDir;
 
@@ -138,12 +151,12 @@ public class SubscriptionsViewTest extends ApplicationTest {
                 I18n.get("subscriptions.delete.confirm", "Provider").equals(pane.getHeaderText()));
         interact(() -> ((Button) confirm.lookupButton(ButtonType.OK)).fire());
 
-        assertThat(removed.await(10, TimeUnit.SECONDS)).as("the subscription is removed").isTrue();
+        assertThat(removed.await(PATIENCE.toSeconds(), TimeUnit.SECONDS)).as("the subscription is removed").isTrue();
         assertThat(removedOnFxThread.get())
                 .as("removing waits for the refresh lock, which froze the window on the FX thread")
                 .isFalse();
         Await.until("the list to empty", () -> service.getSubscriptions().isEmpty(),
-                Duration.ofSeconds(10));
+                PATIENCE);
     }
 
     /**
@@ -164,7 +177,7 @@ public class SubscriptionsViewTest extends ApplicationTest {
         });
         try {
             interact(rowRefreshButton()::fire);
-            Await.until("the refresh to start", () -> refreshes.get() == 1, Duration.ofSeconds(10));
+            Await.until("the refresh to start", () -> refreshes.get() == 1, PATIENCE);
             interact(rowRefreshButton()::fire);
             WaitForAsyncUtils.waitForFxEvents();
 
@@ -178,7 +191,7 @@ public class SubscriptionsViewTest extends ApplicationTest {
         interact(() -> ((Button) failure.lookupButton(ButtonType.OK)).fire());
 
         Await.until("the row's Refresh to be offered again",
-                () -> !rowRefreshButton().isDisabled(), Duration.ofSeconds(10));
+                () -> !rowRefreshButton().isDisabled(), PATIENCE);
         assertThat(refreshes.get()).as("refreshes started").isEqualTo(1);
     }
 
@@ -194,7 +207,7 @@ public class SubscriptionsViewTest extends ApplicationTest {
         Button refreshAll = lookup("#refreshAllButton").query();
         try {
             interact(refreshAll::fire);
-            Await.until("Refresh All to start", () -> runs.get() == 1, Duration.ofSeconds(10));
+            Await.until("Refresh All to start", () -> runs.get() == 1, PATIENCE);
             interact(refreshAll::fire);
             WaitForAsyncUtils.waitForFxEvents();
 
@@ -203,7 +216,7 @@ public class SubscriptionsViewTest extends ApplicationTest {
             release.countDown();
         }
         Await.until("Refresh All to be offered again", () -> !refreshAll.isDisabled(),
-                Duration.ofSeconds(10));
+                PATIENCE);
         assertThat(runs.get()).as("runs started").isEqualTo(1);
     }
 
@@ -268,7 +281,7 @@ public class SubscriptionsViewTest extends ApplicationTest {
         return Await.untilValue("the row's \"" + text + "\" button",
                 () -> lookup((Node node) -> node instanceof Button button
                         && text.equals(button.getText())).tryQueryAs(Button.class).orElse(null),
-                Objects::nonNull, Duration.ofSeconds(10));
+                Objects::nonNull, PATIENCE);
     }
 
     /**
@@ -280,7 +293,7 @@ public class SubscriptionsViewTest extends ApplicationTest {
      */
     private void awaitLabel(String text) {
         Await.until("a label reading \"" + text + "\"", () -> showsLabel(text),
-                Duration.ofSeconds(10));
+                PATIENCE);
     }
 
     private boolean showsLabel(String text) {
@@ -290,7 +303,7 @@ public class SubscriptionsViewTest extends ApplicationTest {
 
     private static void awaitQuietly(CountDownLatch latch) {
         try {
-            latch.await(10, TimeUnit.SECONDS);
+            latch.await(PATIENCE.toSeconds(), TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
@@ -298,7 +311,7 @@ public class SubscriptionsViewTest extends ApplicationTest {
 
     private DialogPane awaitDialog(String what, Predicate<DialogPane> matches) {
         return Await.untilValue(what, () -> showingDialog(matches), Objects::nonNull,
-                Duration.ofSeconds(10));
+                PATIENCE);
     }
 
     private DialogPane showingDialog(Predicate<DialogPane> matches) {
