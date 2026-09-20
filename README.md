@@ -506,7 +506,7 @@ ship sing-box inside.
 ```bash
 git clone https://github.com/dbelokursky/tunl.git
 cd tunl
-mvn clean javafx:run
+./mvnw clean javafx:run
 ```
 
 On the first build Maven automatically downloads `sing-box` (the version is
@@ -545,15 +545,15 @@ Homebrew paths (`/opt/homebrew/bin`, `/usr/local/bin`) or `$PATH`.
 ### Commands
 
 ```bash
-mvn clean verify            # the gate: checkstyle, tests, coverage, SpotBugs
-mvn clean javafx:run        # run in dev mode
-mvn clean package           # build the shaded jar (with the sing-box bundle)
-mvn test                    # tests only
-mvn test -Dtest=SingBoxInstallerTest   # a single test class
-mvn validate                # checkstyle
+./mvnw clean verify          # the gate: checkstyle, tests, coverage, SpotBugs
+./mvnw clean javafx:run      # run in dev mode
+./mvnw clean package         # build the shaded jar (with the sing-box bundle)
+./mvnw test                  # tests only
+./mvnw test -Dtest=SingBoxInstallerTest   # a single test class
+./mvnw validate              # checkstyle
 
 # regenerate docs/screenshots/*.png after a UI change
-mvn test -Dtest=ScreenshotGenerator -Dtunl.screenshots=true -Djacoco.skip=true
+./mvnw test -Dtest=ScreenshotGenerator -Dtunl.screenshots=true -Djacoco.skip=true
 ```
 
 ### Regenerating the icon
@@ -574,7 +574,7 @@ and SingBoxInstaller, so they can never drift. Bumping is one command:
 
 ```bash
 scripts/bump-singbox.sh 1.13.14   # downloads tarballs, checks SHA-256 against the GitHub API digest, updates the properties
-mvn clean verify -Psmoke          # full tests + smoke on the real binary
+./mvnw clean verify -Psmoke          # full tests + smoke on the real binary
 ```
 
 The smoke profile (`-Psmoke`,

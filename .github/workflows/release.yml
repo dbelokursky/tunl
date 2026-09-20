@@ -290,12 +290,14 @@ jobs:
           path: ~/.cache/vless-client-build
           key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
       - name: Build fat JAR
-        run: mvn clean package -DskipTests
+        run: ./mvnw -B clean package -DskipTests
+        shell: bash
       - name: Smoke-test the bundled sing-box
         # The DMG must never ship a core the generator can't drive: run the
         # real-binary smoke suite (version match, `sing-box check` on every
         # config shape, live run with clash_api + http-inbound probes).
-        run: mvn test -Psmoke -Dtest=SingBoxRealBinarySmokeTest
+        run: ./mvnw -B test -Psmoke -Dtest=SingBoxRealBinarySmokeTest
+        shell: bash
       - name: Validate macOS signing configuration
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
@@ -431,11 +433,13 @@ jobs:
           path: ~/.cache/vless-client-build
           key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
       - name: Build fat JAR
-        run: mvn -B clean package -DskipTests
+        run: ./mvnw -B clean package -DskipTests
+        shell: bash
       - name: Smoke-test the bundled sing-box
         # The MSI must never ship a core the generator can't drive: the same
         # real-binary smoke suite as macOS, running the bundled sing-box.exe.
-        run: mvn -B test -Psmoke "-Dtest=SingBoxRealBinarySmokeTest"
+        run: ./mvnw -B test -Psmoke -Dtest=SingBoxRealBinarySmokeTest
+        shell: bash
       - name: Validate Windows signing configuration
         shell: pwsh
         env:
@@ -539,11 +543,13 @@ jobs:
           path: ~/.cache/vless-client-build
           key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
       - name: Build fat JAR
-        run: mvn -B clean package -DskipTests
+        run: ./mvnw -B clean package -DskipTests
+        shell: bash
       - name: Smoke-test the bundled sing-box
         # The DEB must never ship a core the generator can't drive: the same
         # real-binary smoke suite as the other platforms.
-        run: mvn -B test -Psmoke -Dtest=SingBoxRealBinarySmokeTest
+        run: ./mvnw -B test -Psmoke -Dtest=SingBoxRealBinarySmokeTest
+        shell: bash
       - name: Create DEB with jpackage
         run: scripts/package-linux.sh "${GITHUB_REF_NAME#v}"
       - name: Smoke-test DEB install, launch and uninstall
@@ -607,9 +613,11 @@ jobs:
           path: ~/.cache/vless-client-build
           key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
       - name: Build fat JAR
-        run: mvn -B clean package -DskipTests
+        run: ./mvnw -B clean package -DskipTests
+        shell: bash
       - name: Smoke-test the bundled sing-box
-        run: mvn -B test -Psmoke -Dtest=SingBoxRealBinarySmokeTest
+        run: ./mvnw -B test -Psmoke -Dtest=SingBoxRealBinarySmokeTest
+        shell: bash
       - name: Create DEB with jpackage
         run: scripts/package-linux.sh "${GITHUB_REF_NAME#v}"
       - name: Smoke-test DEB install, launch and uninstall

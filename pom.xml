@@ -179,6 +179,43 @@
     </dependencies>
 
     <build>
+        <!--
+            The five plugins the default lifecycle binds without this project
+            asking for them. Their versions otherwise come from the Maven that
+            runs the build - the super-POM's - so the arm64 runner's 3.9.12
+            built with different plugins than 3.9.16 everywhere else. Pinned at
+            the versions 3.9.16 chose, so nothing changes but the guarantee;
+            requirePluginVersions in the enforcer keeps the list complete.
+        -->
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-clean-plugin</artifactId>
+                    <version>3.2.0</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-resources-plugin</artifactId>
+                    <version>3.4.0</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-install-plugin</artifactId>
+                    <version>3.1.4</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-deploy-plugin</artifactId>
+                    <version>3.1.4</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-site-plugin</artifactId>
+                    <version>3.12.1</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
         <plugins>
             <!--
                 Loads singbox.version + checksums from singbox.properties so
@@ -459,6 +496,17 @@
                                 </requireJavaVersion>
                                 <dependencyConvergence/>
                                 <banDuplicatePomDependencyVersions/>
+                                <!--
+                                    Every plugin pinned here rather than
+                                    inherited from whatever Maven the runner
+                                    happens to carry: the arm64 image shipped
+                                    3.9.12 against 3.9.16 elsewhere, and a
+                                    super-POM's plugin versions come with the
+                                    Maven, not with this build.
+                                -->
+                                <requirePluginVersions>
+                                    <banSnapshots>true</banSnapshots>
+                                </requirePluginVersions>
                             </rules>
                         </configuration>
                     </execution>
