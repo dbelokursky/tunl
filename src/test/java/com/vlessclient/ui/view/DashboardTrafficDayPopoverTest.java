@@ -7,7 +7,6 @@ import com.vlessclient.app.ThemeCss;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.TrafficHistoryStore;
-import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.testing.UiTest;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -147,7 +146,7 @@ public class DashboardTrafficDayPopoverTest extends ApplicationTest {
         assertThat(cardText())
                 .as("the split the tooltip has no room for is the whole reason "
                         + "the card exists")
-                .contains(TrafficMonitor.formatBytes(BUSY_DAY_BYTES))
+                .contains(TrafficText.bytes(BUSY_DAY_BYTES))
                 .contains("Amsterdam 01")
                 .contains("Frankfurt 02");
         assertThat(column(BUSY_DAY).getPseudoClassStates())
@@ -163,8 +162,8 @@ public class DashboardTrafficDayPopoverTest extends ApplicationTest {
         assertThat(cardText())
                 .as("today carried 5 KB of the window's 16 KB; a card summing "
                         + "the window would be a second copy of the panel")
-                .contains(TrafficMonitor.formatBytes(5_000))
-                .doesNotContain(TrafficMonitor.formatBytes(BUSY_DAY_BYTES));
+                .contains(TrafficText.bytes(5_000))
+                .doesNotContain(TrafficText.bytes(BUSY_DAY_BYTES));
     }
 
     /**
@@ -179,7 +178,7 @@ public class DashboardTrafficDayPopoverTest extends ApplicationTest {
                         + "the lines still total the figure above them")
                 .contains("Exit 1", "Exit 2", "Exit 3")
                 .doesNotContain("Exit 4", "Exit 5")
-                .contains(TrafficMonitor.formatBytes(700 + 600));
+                .contains(TrafficText.bytes(700 + 600));
     }
 
     @Test
@@ -250,7 +249,7 @@ public class DashboardTrafficDayPopoverTest extends ApplicationTest {
         assertThat(cardText())
                 .as("most days in the window are this day; three zeroes read "
                         + "as a broken card rather than as an idle Tuesday")
-                .doesNotContain("0 B");
+                .doesNotContain(TrafficText.bytes(0));
         assertThat(card().isVisible()).isTrue();
     }
 

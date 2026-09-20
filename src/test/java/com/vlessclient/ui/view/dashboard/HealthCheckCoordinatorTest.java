@@ -617,7 +617,7 @@ class HealthCheckCoordinatorTest {
 
         assertThat(resultTexts())
                 .as("precondition: the second probe is drawn")
-                .containsExactly("12 ms", I18n.get("dashboard.health.unreachable"));
+                .containsExactly(I18n.get("unit.ms", 12), I18n.get("dashboard.health.unreachable"));
         assertThat(statusList.getChildren())
                 .as("the rows the first probe built, updated")
                 .containsExactlyElementsOf(rows);
@@ -698,7 +698,7 @@ class HealthCheckCoordinatorTest {
         assertThat(summaryLabel.getText())
                 .as("but not drawn")
                 .isEqualTo(I18n.get("dashboard.health.all.reachable"));
-        assertThat(resultTexts()).containsExactly("12 ms");
+        assertThat(resultTexts()).containsExactly(I18n.get("unit.ms", 12));
 
         onFxAndWait(() -> window.getScene().setRoot(healthCard));
 

@@ -5,8 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.vlessclient.app.I18n;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.TrafficHistoryStore;
-import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.testing.UiTest;
+import com.vlessclient.ui.view.TrafficText;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -54,7 +54,7 @@ public class TrafficHistorySettingsSectionTest extends ApplicationTest {
         section(storeWithTraffic(dir), owner -> false);
 
         assertThat(summary.getText())
-                .contains(TrafficMonitor.formatBytes(5_000))
+                .contains(TrafficText.bytes(5_000))
                 .contains(LocalDate.now().format(DateTimeFormatter
                         .ofLocalizedDate(FormatStyle.MEDIUM).withLocale(I18n.getLocale())));
         assertThat(clear.isDisabled()).isFalse();
@@ -109,7 +109,7 @@ public class TrafficHistorySettingsSectionTest extends ApplicationTest {
         store.record(server(), 2_000, 2_000);
         interact(section::refresh);
 
-        assertThat(summary.getText()).contains(TrafficMonitor.formatBytes(4_000));
+        assertThat(summary.getText()).contains(TrafficText.bytes(4_000));
         assertThat(clear.isDisabled()).isFalse();
     }
 
