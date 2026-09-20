@@ -24,7 +24,10 @@ final class LiveSelector {
     // objects, so "detour" also covers a remote rule set's http_client.detour.
     private static final Set<String> REFERENCES = Set.of(
             "tag", "outbound", "detour", "final");
-    private final JsonNode comparable;
+    /** Whether the configuration has a manual selector to switch. */
+    private final boolean manual;
+    /** The configuration as generated, but for the manual selector's pick. */
+    private final JsonNode loaded;
     private final String groupTag;
     private final String config;
     private final URI endpoint;
@@ -32,12 +35,13 @@ final class LiveSelector {
 
     LiveSelector(String generated) {
         ObjectNode root = (ObjectNode) MAPPER.readTree(generated);
-        comparable = comparable(root);
+        manual = manualSelector(root) != null;
+        loaded = withoutPick(root);
         // sing-box restores a cached selection before considering "default".
         // Give each process its own selector key so an older choice cannot
         // override the user's current selection. Rule-set caches remain shared.
-        groupTag = comparable != null ? "proxy-" + UUID.randomUUID() : OutboundTags.PROXY;
-        if (comparable != null) {
+        groupTag = manual ? "proxy-" + UUID.randomUUID() : OutboundTags.PROXY;
+        if (manual) {
             replaceReferences(root);
         }
         config = MAPPER.writeValueAsString(root);
@@ -55,8 +59,23 @@ final class LiveSelector {
         return groupTag;
     }
 
+    /** Whether a server of a configuration generated now can be picked on this core. */
     boolean accepts(String generated) {
-        return comparable != null && comparable.equals(comparable(MAPPER.readTree(generated)));
+        return manual && matches(generated);
+    }
+
+    /**
+     * Whether a configuration generated now is the one this core loaded, but
+     * for the manual selector's pick, which changes without a restart. Unlike
+     * {@link #accepts}, it answers for every group: with the automatic
+     * selection there is no selector to switch, yet the core may still run
+     * the settings as they are.
+     *
+     * @param generated a configuration generated from the current settings
+     * @return true when a restart would load the same configuration
+     */
+    boolean matches(String generated) {
+        return loaded.equals(withoutPick(MAPPER.readTree(generated)));
     }
 
     boolean select(String serverTag) {
@@ -93,13 +112,21 @@ final class LiveSelector {
         return request;
     }
 
-    private static JsonNode comparable(JsonNode root) {
+    private static JsonNode withoutPick(JsonNode root) {
         JsonNode copy = root.deepCopy();
-        for (JsonNode outbound : copy.path("outbounds")) {
+        ObjectNode selector = manualSelector(copy);
+        if (selector != null) {
+            selector.remove("default");
+        }
+        return copy;
+    }
+
+    /** The manual selector among the outbounds, or null with the automatic selection. */
+    private static ObjectNode manualSelector(JsonNode root) {
+        for (JsonNode outbound : root.path("outbounds")) {
             if (OutboundTags.PROXY.equals(outbound.path("tag").asString())
                     && "selector".equals(outbound.path("type").asString())) {
-                ((ObjectNode) outbound).remove("default");
-                return copy;
+                return (ObjectNode) outbound;
             }
         }
         return null;

@@ -141,8 +141,8 @@ public class ConnectionService {
     private final TunnelRecoveryService recovery;
     private final ChangeListener<ConnectionState> stateListener;
     private volatile ProxyMode requestedMode;
-    private volatile LiveSelector liveSelector;
-    private ProxyMode runningMode;
+    /** What the running core was started from, or null when none was. */
+    private volatile Run run;
 
     /** What the running core was started without, for the UI; changed on the FX thread. */
     private final ReadOnlyObjectWrapper<List<SkippedServer>> skippedServers =
@@ -153,10 +153,15 @@ public class ConnectionService {
             new ReadOnlyObjectWrapper<>(List.of());
 
     /**
-     * The ids behind {@link #skippedServers}, readable from any thread: a live
-     * switch compares against the configuration the core actually loaded.
+     * What a core was started from: the configuration it loaded, the mode, the
+     * ports the user chose, which its own may have moved off, and the ids of
+     * the servers it was started without. Set as one, before the core starts:
+     * it reports CONNECTED from its own thread, and a reader asking then got
+     * the mode and the left-out servers of the start before.
      */
-    private volatile Set<String> skippedIds = Set.of();
+    private record Run(LiveSelector selector, ProxyMode mode, List<Integer> chosenPorts,
+                       Set<String> leftOut) {
+    }
 
 
     /**
@@ -390,14 +395,13 @@ public class ConnectionService {
             while (true) {
                 LiveSelector prepared = new LiveSelector(
                         configGenerator.generate(members, active, settings, routing));
-                LiveSelector previous = liveSelector;
-                liveSelector = prepared;
+                Run previous = run;
+                run = new Run(prepared, mode, chosenPorts(settings), idsOf(skipped));
                 try {
                     current.start(prepared.config(), mode);
-                    runningMode = mode;
                     break;
                 } catch (ConfigRejectedException e) {
-                    liveSelector = previous;
+                    run = previous;
                     Refusal refusal = refusalOf(e, prepared.config(), members).orElse(null);
                     if (refusal == null) {
                         throw e;
@@ -419,7 +423,7 @@ public class ConnectionService {
                         return new ConnectAttempt(Outcome.CANCELLED, active);
                     }
                 } catch (IOException | IllegalStateException e) {
-                    liveSelector = previous;
+                    run = previous;
                     throw e;
                 }
             }
@@ -469,16 +473,12 @@ public class ConnectionService {
     }
 
     /**
-     * Records what the core was just started without. The ids are set at once
-     * for the live switch; the list reaches the UI through the FX queue, after
-     * the not-started state each refused attempt queued, so that state cannot
-     * clear it again.
+     * Hands what the core was just started without to the UI, through the FX
+     * queue, after the not-started state each refused attempt queued, so that
+     * state cannot clear it again. The live switch reads the ids from the run.
      */
     private void publishSkipped(List<SkippedServer> skipped) {
         List<SkippedServer> snapshot = List.copyOf(skipped);
-        skippedIds = snapshot.stream()
-                .map(SkippedServer::id)
-                .collect(Collectors.toUnmodifiableSet());
         try {
             Platform.runLater(() -> skippedServers.set(snapshot));
         } catch (IllegalStateException toolkitNotRunning) {
@@ -500,8 +500,7 @@ public class ConnectionService {
     }
 
     private void stopCurrent() {
-        liveSelector = null;
-        skippedIds = Set.of();
+        run = null;
         // A stopped core put the system's proxy back itself.
         SessionPorts.forget(configStore.getDataDir());
         SingBoxEngine current = engine;
@@ -533,8 +532,8 @@ public class ConnectionService {
 
     /** The group tag used by the current process, for live status queries. */
     public String getProxyGroupTag() {
-        LiveSelector current = liveSelector;
-        return current != null ? current.groupTag() : OutboundTags.PROXY;
+        Run current = run;
+        return current != null ? current.selector().groupTag() : OutboundTags.PROXY;
     }
 
     /**
@@ -560,21 +559,11 @@ public class ConnectionService {
             }
             AppSettings settings = configStore.getSettings();
             ProxyMode mode = requestedMode != null ? requestedMode : settings.getProxyMode();
-            // The loaded configuration left out the servers the core refused, so
-            // compare against the same set. Picking one of those does not match
-            // and restarts, where its refusal is reported by name.
-            Set<String> skippedNow = skippedIds;
-            List<ServerConfig> members = skippedNow.contains(active.getId())
-                    ? candidates
-                    : candidates.stream()
-                            .filter(server -> !skippedNow.contains(server.getId()))
-                            .toList();
-            String generated = configGenerator.generate(members, active,
-                    settings, safeRoutingConfig());
-            LiveSelector selector = liveSelector;
-            if (isRunning() && runningMode == mode && selector != null
-                    && selector.accepts(generated)
-                    && selector.select(OutboundTags.server(active))) {
+            Run current = run;
+            if (isRunning() && current != null && current.mode() == mode
+                    && current.selector().accepts(
+                            generatedNow(candidates, active, settings, current.leftOut()))
+                    && current.selector().select(OutboundTags.server(active))) {
                 if (!recovery.isWanted(request)) {
                     return new ConnectAttempt(Outcome.CANCELLED, active);
                 }
@@ -588,6 +577,66 @@ public class ConnectionService {
             stopCurrent();
             return connectInternal(requestedMode, () -> recovery.isWanted(request));
         }
+    }
+
+    /**
+     * Whether the running core was built from the settings, rules and servers
+     * as they are now, but for which server is picked, which switches live.
+     * A change of DNS, ports, TUN options, a routing rule or the mode applies
+     * only at the next start, and nothing said so.
+     *
+     * <p>Compared with what a reconnect from the Dashboard would start: the
+     * saved mode, and the chosen ports as well as the configuration, since a
+     * port the run moved stands in for the chosen one until the run ends.</p>
+     *
+     * @return true when no core runs, or when a restart would load the same
+     *     configuration
+     */
+    public boolean runsCurrentSettings() {
+        Run current = run;
+        if (!isRunning() || current == null) {
+            return true;
+        }
+        List<ServerConfig> candidates = FxExecutor.get(
+                () -> List.copyOf(configStore.getServers()));
+        ServerConfig active = candidates.stream().filter(ServerConfig::isActive)
+                .findFirst().orElse(null);
+        if (active == null) {
+            return true;
+        }
+        AppSettings settings = configStore.getSettings();
+        return current.mode() == settings.getProxyMode()
+                && current.chosenPorts().equals(chosenPorts(settings))
+                && current.selector().matches(
+                        generatedNow(candidates, active, settings, current.leftOut()));
+    }
+
+    /**
+     * The configuration the current settings make. The loaded one left out
+     * the servers the core refused, so it leaves them out too; picking one of
+     * those does not match and restarts, where its refusal is reported by
+     * name.
+     */
+    private String generatedNow(List<ServerConfig> candidates, ServerConfig active,
+                                AppSettings settings, Set<String> leftOut) {
+        List<ServerConfig> members = leftOut.contains(active.getId())
+                ? candidates
+                : candidates.stream()
+                        .filter(server -> !leftOut.contains(server.getId()))
+                        .toList();
+        return configGenerator.generate(members, active, settings, safeRoutingConfig());
+    }
+
+    /** The ports the user chose, which a run's own may have moved off. */
+    private static List<Integer> chosenPorts(AppSettings settings) {
+        return List.of(settings.getSocksPort(), settings.getHttpPort(),
+                settings.getClashApiPort());
+    }
+
+    private static Set<String> idsOf(List<SkippedServer> skipped) {
+        return skipped.stream()
+                .map(SkippedServer::id)
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     private boolean recover(BooleanSupplier allowed) throws IOException {

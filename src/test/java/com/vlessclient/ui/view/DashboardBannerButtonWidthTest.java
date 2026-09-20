@@ -3,10 +3,20 @@ package com.vlessclient.ui.view;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vlessclient.app.I18n;
+import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.app.ThemeCss;
+import com.vlessclient.model.AppSettings;
+import com.vlessclient.model.ConnectionState;
+import com.vlessclient.service.ConnectionService;
+import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.testing.UiTest;
 import com.vlessclient.ui.view.dashboard.UpdateBannerSection;
+import java.nio.file.Path;
 import java.util.Locale;
+import javafx.beans.property.ReadOnlyBooleanProperty;
+import javafx.beans.property.ReadOnlyBooleanWrapper;
+import javafx.beans.property.ReadOnlyObjectProperty;
+import javafx.beans.property.SimpleObjectProperty;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Bounds;
 import javafx.scene.Parent;
@@ -29,12 +39,14 @@ import org.testfx.framework.junit5.ApplicationTest;
  * used to say its {@code minWidth=0} text did. Both banners are short of room
  * here: they ask for 598 and 768 px of the 500 they get.</p>
  *
- * <p>What keeps the buttons whole is {@code ButtonLabels.bind}, which pins a
- * button to its widest label. That is what this guards: relabelled through
- * {@code bindStatic}, which binds the text and pins nothing, the three
- * measured 93 px of the 141.5 «Перезапустить» needs, 57 of 120.9 and 82 of
- * 175.3 — an ellipsis on each. A button bound that way needs the FXML pin
- * instead, as {@code recheckButton} has.</p>
+ * <p>What keeps the update and install buttons whole is
+ * {@code ButtonLabels.bind}, which pins a button to its widest label. That is
+ * what this guards: relabelled through {@code bindStatic}, which binds the
+ * text and pins nothing, the three measured 93 px of the 141.5
+ * «Перезапустить» needs, 57 of 120.9 and 82 of 175.3 — an ellipsis on each.
+ * The two reconnect buttons are bound that way, so the FXML pins them with
+ * {@code minWidth="-Infinity"}, as {@code recheckButton} has; without it
+ * «Переподключить» came out as «Переподк…».</p>
  *
  * <p>Russian at 500 px with Verdana: the window's narrowest content width, and
  * the font the Linux runners have, where Cyrillic measures about a third wider
@@ -46,11 +58,49 @@ public class DashboardBannerButtonWidthTest extends ApplicationTest {
     /** Window min 760 - sidebar 200 - content padding 48 = 512; a hair tighter. */
     private static final double CONTENT_WIDTH = 500;
 
+    /** Engine whose connection state the test drives directly. */
+    private static final class FakeEngine extends SingBoxEngine {
+        private final SimpleObjectProperty<ConnectionState> state =
+                new SimpleObjectProperty<>(ConnectionState.DISCONNECTED);
+
+        FakeEngine() {
+            super(Path.of("sing-box-not-used-in-tests"));
+        }
+
+        @Override
+        public ReadOnlyObjectProperty<ConnectionState> connectionStateProperty() {
+            return state;
+        }
+    }
+
+    private static final FakeEngine ENGINE = new FakeEngine();
+    private static final ReadOnlyBooleanWrapper DROPPED = new ReadOnlyBooleanWrapper(true);
+
     private Scene scene;
 
+    /**
+     * Russian, and a connection whose settings have moved on and whose tunnel
+     * has dropped, so both reconnect notices are up with something to press.
+     */
     @BeforeAll
-    static void inRussian() {
+    static void inRussianWithBothNotices() {
         I18n.setLocale(Locale.of("ru"));
+        AppSettings settings = new AppSettings();
+        settings.setHealthCheckEnabled(false);
+        ServiceLocator.register(AppSettings.class, settings);
+        ServiceLocator.register(SingBoxEngine.class, ENGINE);
+        ServiceLocator.register(ConnectionService.class,
+                new ConnectionService(null, null, null, null) {
+                    @Override
+                    public boolean runsCurrentSettings() {
+                        return false;
+                    }
+
+                    @Override
+                    public ReadOnlyBooleanProperty reconnectNeededProperty() {
+                        return DROPPED.getReadOnlyProperty();
+                    }
+                });
     }
 
     @AfterAll
@@ -109,6 +159,27 @@ public class DashboardBannerButtonWidthTest extends ApplicationTest {
 
         assertKeepsItsLabel(copy, "#copyBrewButton");
         assertKeepsItsLabel(retry, "#retryInstallButton");
+    }
+
+    /**
+     * The two reconnect notices: one for settings the running core no longer
+     * matches, one for a tunnel that dropped. Each is a wrapping label beside
+     * its button, and neither button is pinned by ButtonLabels — bindStatic
+     * only binds the text — so the FXML pins them.
+     */
+    @Test
+    void theReconnectButtonsKeepTheirLabels() {
+        Button pending = lookup("#pendingChangesButton").queryButton();
+        Button dropped = lookup("#tunnelDroppedButton").queryButton();
+        interact(() -> {
+            ENGINE.state.set(ConnectionState.CONNECTED);
+            layOut();
+        });
+
+        assertKeepsItsLabel(pending, "#pendingChangesButton");
+        assertKeepsItsLabel(dropped, "#tunnelDroppedButton");
+
+        interact(() -> ENGINE.state.set(ConnectionState.DISCONNECTED));
     }
 
     /** Lays the scene out as a shown window does, CSS first. */

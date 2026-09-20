@@ -82,6 +82,11 @@ class ConnectionServiceTest {
         volatile boolean stopFinishesWhileAwaited;
         /** The last launch asked for elevation, so starting again would ask again. */
         volatile boolean prompts;
+        /**
+         * Runs once the core is up, before {@code start} returns: the real one
+         * reports CONNECTED from its own thread, which the UI can see first.
+         */
+        volatile Runnable onStarted;
 
         RecordingEngine(Path binary) {
             super(binary);
@@ -103,6 +108,10 @@ class ConnectionServiceTest {
             configs.add(configJson);
             modes.add(proxyMode);
             running = true;
+            Runnable started = onStarted;
+            if (started != null) {
+                started.run();
+            }
         }
 
         @Override
@@ -808,6 +817,102 @@ class ConnectionServiceTest {
     private static String controlSecret(String configJson) {
         return tools.jackson.databind.json.JsonMapper.builder().build().readTree(configJson)
                 .path("experimental").path("clash_api").path("secret").asString("");
+    }
+
+    /**
+     * A change of the settings applies at the next start, and said nothing:
+     * the Dashboard now asks whether the running core still matches. Picking
+     * another server switches live and does not count.
+     */
+    @Test
+    void theRunningCoreMatchesTheSettingsUntilTheyChange() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(server("srv-2", "Osaka"));
+        ConnectionService service = service(engine());
+        assertThat(service.runsCurrentSettings()).as("nothing runs").isTrue();
+
+        assertThat(service.connect().started()).isTrue();
+        assertThat(service.runsCurrentSettings()).as("just started").isTrue();
+
+        store.setActiveServer("srv-2");
+        assertThat(service.runsCurrentSettings()).as("another server picked").isTrue();
+
+        store.getSettings().setCoreLogLevel(com.vlessclient.model.CoreLogLevel.DEBUG);
+        assertThat(service.runsCurrentSettings()).as("the core's log level changed").isFalse();
+
+        service.disconnect();
+        assertThat(service.connect().started()).isTrue();
+        assertThat(service.runsCurrentSettings()).as("started again").isTrue();
+    }
+
+    /** With the fastest server picked there is no selector to switch, but a match still is one. */
+    @Test
+    void theAutomaticSelectionMatchesTheSettingsItStartedWith() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(server("srv-2", "Osaka"));
+        store.getSettings().setServerSelection(ServerSelection.AUTO_BEST);
+        ConnectionService service = service(engine());
+
+        assertThat(service.connect().started()).isTrue();
+
+        assertThat(service.runsCurrentSettings()).isTrue();
+        store.getSettings().setCoreLogLevel(com.vlessclient.model.CoreLogLevel.DEBUG);
+        assertThat(service.runsCurrentSettings()).isFalse();
+    }
+
+    /**
+     * The core reports CONNECTED from its own thread, and the Dashboard asks
+     * then, before {@code start} has returned here. The mode of a first start
+     * was recorded only after it returned, and the servers it was started
+     * without later still, so that first look compared the new core with no
+     * mode, or with the servers it had left out, and offered a reconnect that
+     * stayed on screen.
+     */
+    @Test
+    void aCoreJustReportedRunningIsComparedWithWhatItWasStartedFrom() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(server("srv-2", "Frankfurt"));
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        List<Boolean> seenAsItStarted = new CopyOnWriteArrayList<>();
+        engine.onStarted = () -> seenAsItStarted.add(service.runsCurrentSettings());
+
+        assertThat(service.connect().started()).isTrue();
+        service.disconnect();
+        engine.refuseWith = config -> config.contains(tag("srv-2"))
+                ? "initialize outbound[" + outboundIndex(config, "srv-2")
+                        + "]: unsupported flow: xtls-rprx-direct"
+                : null;
+        assertThat(service.connect().skipped()).hasSize(1);
+
+        assertThat(seenAsItStarted).as("a first start, then one without a refused server")
+                .containsExactly(true, true);
+    }
+
+    /**
+     * A port chosen while this run listens on a moved one. The moved port
+     * stands in for the chosen one until the run ends, so the configuration
+     * alone showed no change, though the reconnect is what applies it: this is
+     * the change the moved-port notice invites.
+     */
+    @Test
+    void aPortChosenWhileTheRunListensOnAMovedOneWaitsForTheReconnect() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        int base = freeBlockOf(5);
+        try (ServerSocket taken = new ServerSocket(base + 1, 1, InetAddress.getLoopbackAddress())) {
+            store.getSettings().setSocksPort(base);
+            store.getSettings().setHttpPort(taken.getLocalPort());
+            store.getSettings().setClashApiPort(base + 2);
+            ConnectionService service = service(engine());
+            assertThat(service.connect().started()).isTrue();
+            assertThat(service.runsCurrentSettings()).as("the moved port is the run's own")
+                    .isTrue();
+
+            store.getSettings().setHttpPort(base + 4);
+
+            assertThat(service.runsCurrentSettings()).as("another HTTP port chosen")
+                    .isFalse();
+        }
     }
 
     @Test
