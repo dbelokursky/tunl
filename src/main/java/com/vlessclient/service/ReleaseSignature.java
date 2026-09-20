@@ -79,18 +79,6 @@ public final class ReleaseSignature {
     }
 
     /**
-     * Verifies a signature over a downloaded installer's digest.
-     *
-     * @param digest          the {@code sha256:<hex>} computed from the bytes
-     *                        that were actually downloaded
-     * @param signatureBase64 the contents of the release's signature asset
-     * @return true when the signature is valid for this build's key
-     */
-    public static boolean verifyDigest(String digest, String signatureBase64) {
-        return verify(PUBLIC_KEY, digest, signatureBase64);
-    }
-
-    /**
      * The message a release signature covers: a format marker, the version,
      * the asset's file name and its digest, one per line.
      *

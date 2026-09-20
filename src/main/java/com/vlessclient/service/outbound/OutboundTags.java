@@ -9,7 +9,10 @@ import com.vlessclient.model.ServerConfig;
  * routing and DNS resolve them ({@code route.final}, the DNS {@code detour},
  * every rule-set {@code download_detour}), and the clash_api client addresses
  * proxies by them. Deriving them in more than one place is how those three
- * drift apart, so every tag this app emits comes from here.</p>
+ * drift apart, so every outbound tag comes from here. Two DNS server tags do
+ * not, yet: {@code proxy-dns} and {@code direct-dns} are literals in
+ * {@code SingBoxConfigGenerator.buildDns}, which writes one of their detours
+ * by hand as well.</p>
  *
  * <p>{@link #PROXY} is the fixed entry point. Everything downstream references
  * it and nothing downstream cares what kind of node carries it — today a

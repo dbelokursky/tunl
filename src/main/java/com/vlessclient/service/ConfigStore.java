@@ -100,15 +100,12 @@ public class ConfigStore {
     private record SealedSecret(String plaintext, String tag) {
     }
 
-    public ConfigStore() {
-        this(PlatformPaths.current().dataDir(), SecretSealers.forCurrentPlatform());
-    }
-
     /**
      * Creates a store backed by an explicit directory (used for DI and tests).
      *
      * <p>Test seam: sealing disabled so test suites never write into the real
-     * OS keychain. Production always goes through the no-arg constructor.</p>
+     * OS keychain. Production takes the constructor below, from
+     * {@code ServiceLocator}: the platform's data directory and its sealer.</p>
      *
      * @param dataDir the directory backing this store
      */

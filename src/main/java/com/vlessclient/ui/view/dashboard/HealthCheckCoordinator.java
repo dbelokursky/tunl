@@ -324,7 +324,7 @@ public final class HealthCheckCoordinator {
                 .count();
         if (reachable == results.size()) {
             publishHealth(TunnelHealth.HEALTHY);
-        } else if (reachable == 0) {
+        } else if (ServiceReachabilityChecker.allUnreachable(results)) {
             publishHealth(TunnelHealth.BROKEN);
         } else {
             publishHealth(TunnelHealth.DEGRADED);
