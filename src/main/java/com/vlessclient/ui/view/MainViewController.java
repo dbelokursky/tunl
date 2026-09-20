@@ -325,10 +325,25 @@ public class MainViewController {
             if (controller != null) {
                 controllerCache.put(viewName, controller);
             }
+            if (controller instanceof ServersViewController servers) {
+                servers.setOnAddSubscription(this::addSubscription);
+            }
             return view;
         } catch (IOException e) {
             log.error("Failed to load FXML: {}", fxmlPath, e);
             return null;
+        }
+    }
+
+    /**
+     * Opens the Subscriptions page's form holding {@code url}: a subscription
+     * URL pasted on the Servers page, which fetches none.
+     */
+    private void addSubscription(String url) {
+        showSubscriptions();
+        if (controllerCache.get("SubscriptionsView")
+                instanceof SubscriptionsViewController subscriptions) {
+            subscriptions.openAddSubscriptionDialog(url);
         }
     }
 
