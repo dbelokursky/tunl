@@ -20,8 +20,11 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import org.slf4j.Logger;
@@ -31,6 +34,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
@@ -63,7 +67,7 @@ public class ConfigStore {
      * The last value sealed under each secret key, and the tag it produced.
      *
      * <p>Credentials are plaintext in memory, so {@code SecretSealer.isSealed}
-     * never short-circuits and {@link #serializableServers()} used to re-seal
+     * never short-circuits and {@link #sealCredentials} used to re-seal
      * every server on every save. Each seal forks the platform secret tool
      * ({@code security} on macOS), so one 60-server save meant 60 processes,
      * and a subscription refresh — which saved once per server — meant 3600.</p>
@@ -77,10 +81,20 @@ public class ConfigStore {
      * <p>Loading fills it too, with the tags the file already holds: without
      * them the first save after a restart sealed every credential again.</p>
      *
-     * <p>Guarded by this object's monitor: only reached from the synchronized
-     * save path, the synchronized mutators and loading.</p>
+     * <p>Guarded by this object's monitor, which the save holds only to read
+     * and fill it: the keychain runs outside.</p>
      */
     private final Map<String, SealedSecret> sealCache = new HashMap<>();
+
+    /**
+     * Serializes the writes of servers.json. The FX thread never waits for
+     * it: a save asked for there while another runs is left to that one,
+     * which writes again before it lets go.
+     */
+    private final ReentrantLock serversFile = new ReentrantLock();
+
+    /** A change to the server list that no write has taken in yet. */
+    private final AtomicBoolean serversUnsaved = new AtomicBoolean();
 
     /** A sealed value and the plaintext that produced it. */
     private record SealedSecret(String plaintext, String tag) {
@@ -388,7 +402,7 @@ public class ConfigStore {
      *
      * <p>The cost of the split is that a mutation and its save are two critical
      * sections rather than one, so a concurrent change can land in between.
-     * {@code saveServers()} still serializes a consistent snapshot under the
+     * {@code saveServers()} still takes a consistent snapshot under the
      * monitor; it may simply be a newer one than the caller produced.</p>
      */
     private <T> T mutateList(Supplier<T> mutation) {
@@ -497,13 +511,59 @@ public class ConfigStore {
         saveSettings(settings);
     }
 
-    /** Package-private so tests can count how often a change hits the disk. */
-    synchronized void saveServers() {
+    /**
+     * Writes the server list. Package-private so tests can count how often a
+     * change hits the disk.
+     *
+     * <p>Sealing takes a keychain process per new credential, and the whole
+     * save used to run inside this object's monitor, which the FX thread
+     * takes to read the list, change it and save the settings: a
+     * subscription of 300 servers froze the window for seconds. Now only the
+     * snapshot is taken under the monitor, and the write under a lock of its
+     * own that the FX thread only tries.</p>
+     */
+    void saveServers() {
+        serversUnsaved.set(true);
+        boolean onFxThread = Platform.isFxApplicationThread();
+        do {
+            if (onFxThread) {
+                if (!serversFile.tryLock()) {
+                    // The write under way takes this change in before it lets go.
+                    return;
+                }
+            } else {
+                serversFile.lock();
+            }
+            try {
+                while (serversUnsaved.getAndSet(false)) {
+                    writeServers();
+                }
+            } finally {
+                serversFile.unlock();
+            }
+            // A change that came in while the lock was being let go.
+        } while (serversUnsaved.get());
+    }
+
+    /**
+     * Writes servers.json as the list is now, with its credentials sealed
+     * when secure storage is on.
+     */
+    private void writeServers() {
+        ArrayNode snapshot;
+        boolean secureStorage;
+        synchronized (this) {
+            snapshot = objectMapper.valueToTree(servers);
+            secureStorage = settings.isStoreSecretsSecurely();
+        }
+        if (secureStorage && sealer.isAvailable()) {
+            sealCredentials(snapshot);
+        }
         Path file = dataDir.resolve(SERVERS_FILE);
         try {
             ObjectNode envelope = objectMapper.createObjectNode();
             envelope.put("config_version", SERVERS_CONFIG_VERSION);
-            envelope.set("servers", objectMapper.valueToTree(serializableServers()));
+            envelope.set("servers", snapshot);
             SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(envelope));
             persistence.saved(SERVERS_FILE);
             dropLegacyBackupOnceMigrated(file, objectMapper, "servers");
@@ -514,65 +574,64 @@ public class ConfigStore {
     }
 
     /**
-     * The on-disk view of the server list. In memory credentials stay
-     * plaintext; when secure storage is enabled and a backend is available,
-     * the persisted copies carry sealed values instead. A failed seal keeps
-     * the plaintext — a readable config always wins over a lost credential.
+     * Replaces the credentials in a snapshot of the list with their sealed
+     * tags; in memory they stay plaintext. uuid carries the credential for
+     * every protocol; flow is a secret only for Hysteria2 (its obfs
+     * password), and for VLESS holds the public flow-control mode, which must
+     * stay readable. A failed seal keeps the plaintext: a readable config
+     * always wins over a lost credential.
      */
-    private List<ServerConfig> serializableServers() {
-        boolean sealing = settings.isStoreSecretsSecurely() && sealer.isAvailable();
-        if (!sealing) {
-            return new ArrayList<>(servers);
-        }
-        List<ServerConfig> out = new ArrayList<>(servers.size());
-        for (ServerConfig live : servers) {
-            // uuid carries the credential for every protocol; flow is only a
-            // secret for Hysteria2 (obfs password) — for VLESS it holds the
-            // public flow-control mode and must stay readable.
-            String sealedUuid = sealValue(live, live.getUuid(), "uuid");
-            String sealedFlow = live.getProtocol() == Protocol.HYSTERIA2
-                    ? sealValue(live, live.getFlow(), "flow")
-                    : null;
-            if (sealedUuid == null && sealedFlow == null) {
-                out.add(live);
-                continue;
-            }
-            try {
-                ServerConfig copy = objectMapper.readValue(
-                        objectMapper.writeValueAsString(live), ServerConfig.class);
-                if (sealedUuid != null) {
-                    copy.setUuid(sealedUuid);
+    private void sealCredentials(ArrayNode snapshot) {
+        for (JsonNode node : snapshot) {
+            if (node instanceof ObjectNode server) {
+                String id = server.path("id").asString("");
+                String name = server.path("name").asString("");
+                sealField(server, id, name, "uuid");
+                if (Protocol.HYSTERIA2.getValue().equals(server.path("protocol").asString(""))) {
+                    sealField(server, id, name, "flow");
                 }
-                if (sealedFlow != null) {
-                    copy.setFlow(sealedFlow);
-                }
-                out.add(copy);
-            } catch (JacksonException e) {
-                log.warn("Could not copy server '{}' for sealing; keeping plaintext",
-                        live.getName(), e);
-                out.add(live);
             }
         }
-        return out;
     }
 
-    /** Seals one field's value; null when there is nothing to seal or it failed. */
-    private String sealValue(ServerConfig live, String value, String field) {
+    private void sealField(ObjectNode server, String id, String name, String field) {
+        JsonNode value = server.get(field);
+        if (value != null && value.isString()) {
+            String sealed = sealValue(id, name, value.asString(), field);
+            if (sealed != null) {
+                server.put(field, sealed);
+            }
+        }
+    }
+
+    /**
+     * Seals one field's value; null when there is nothing to seal or it
+     * failed. The keychain runs outside this object's monitor.
+     */
+    private String sealValue(String serverId, String serverName, String value, String field) {
         if (value == null || value.isBlank() || SecretSealer.isSealed(value)) {
             return null;
         }
-        String key = secretKey(live.getId(), field);
-        SealedSecret cached = sealCache.get(key);
-        if (cached != null && cached.plaintext().equals(value)) {
-            return cached.tag();
+        String key = secretKey(serverId, field);
+        synchronized (this) {
+            SealedSecret cached = sealCache.get(key);
+            if (cached != null && cached.plaintext().equals(value)) {
+                return cached.tag();
+            }
         }
         String sealed = sealer.seal(key, value);
         if (sealed == null) {
-            log.warn("Could not seal {} for server '{}'; keeping plaintext",
-                    field, live.getName());
+            log.warn("Could not seal {} for server '{}'; keeping plaintext", field, serverName);
             return null;
         }
-        sealCache.put(key, new SealedSecret(value, sealed));
+        synchronized (this) {
+            // Not for a server removed meanwhile, whose keychain entry is
+            // being deleted: a later server of the same id would reuse a tag
+            // that names nothing.
+            if (indexOfServer(serverId) >= 0) {
+                sealCache.put(key, new SealedSecret(value, sealed));
+            }
+        }
         return sealed;
     }
 
