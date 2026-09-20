@@ -96,7 +96,18 @@ public class ViewDialogThemeTest extends ApplicationTest {
 
     private static final String LINK = "vless://11111111-2222-3333-4444-555555555555"
             + "@198.51.100.7:443?type=tcp#Netherlands%2001";
-    private static final Duration PATIENCE = Duration.ofSeconds(10);
+    /**
+     * How long a wait for background work may take before it counts as work
+     * that never ran.
+     *
+     * <p>Ten seconds was not enough on a loaded Windows runner: four runs in
+     * one evening failed here and in {@code ViewDialogThemeTest}, each on a
+     * ten-second wait, with the log showing ten seconds in which nothing at
+     * all happened — the work started after them and every rerun passed. What
+     * the waits guard is work that never runs, and that still fails; it now
+     * takes longer to say so.</p>
+     */
+    private static final Duration PATIENCE = Duration.ofSeconds(30);
 
     @TempDir
     static Path tempDir;
