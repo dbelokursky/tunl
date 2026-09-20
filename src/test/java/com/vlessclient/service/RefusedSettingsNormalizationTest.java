@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.model.TransportConfig;
+import com.vlessclient.model.TransportType;
 import com.vlessclient.service.outbound.OutboundTags;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
@@ -39,13 +41,40 @@ class RefusedSettingsNormalizationTest {
         assertThat(utls.get("fingerprint").asString()).isEqualTo("chrome");
     }
 
+    /**
+     * Plain TLS whose link names no fingerprint went out with Go's own
+     * ClientHello, which no browser sends and DPI tells apart. It goes as
+     * Chrome now, like REALITY and like other clients by default. The real
+     * core's greeting is asserted in {@code SingBoxRealBinarySmokeTest}.
+     */
     @Test
-    void plainTlsWithoutAFingerprintStillGoesWithoutUtls() throws Exception {
+    void plainTlsWithoutAFingerprintGoesAsChromeToo() throws Exception {
         ServerConfig server = reality();
         server.getTls().setReality(false);
         server.getTls().setFingerprint("");
 
-        assertThat(memberOf(server, "outbounds").get("tls").has("utls")).isFalse();
+        JsonNode utls = memberOf(server, "outbounds").get("tls").get("utls");
+
+        assertThat(utls).isNotNull();
+        assertThat(utls.get("enabled").asBoolean()).isTrue();
+        assertThat(utls.get("fingerprint").asString()).isEqualTo("chrome");
+    }
+
+    /**
+     * Over QUIC, Hysteria2's or the QUIC transport's, no fingerprint is sent,
+     * not even one the link sets: the core fails every such connection with
+     * "unsupported usage for uTLS".
+     */
+    @Test
+    void noFingerprintGoesOverQuic() throws Exception {
+        ServerConfig overQuic = reality();
+        overQuic.getTls().setReality(false);
+        overQuic.getTls().setFingerprint("chrome");
+        TransportConfig quic = new TransportConfig();
+        quic.setType(TransportType.QUIC);
+        overQuic.setTransport(quic);
+
+        assertThat(memberOf(overQuic, "outbounds").get("tls").has("utls")).isFalse();
     }
 
     @Test

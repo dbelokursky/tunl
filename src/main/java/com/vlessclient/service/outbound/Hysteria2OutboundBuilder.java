@@ -32,7 +32,7 @@ public final class Hysteria2OutboundBuilder extends OutboundBuilder {
             outbound.set("obfs", obfs);
         }
 
-        addTlsIfEnabled(outbound, server.getTls());
+        addTlsIfEnabled(outbound, server);
 
         return outbound;
     }

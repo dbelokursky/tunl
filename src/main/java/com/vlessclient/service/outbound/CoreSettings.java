@@ -4,6 +4,7 @@ import com.vlessclient.app.I18n;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TlsConfig;
+import com.vlessclient.model.TransportConfig;
 import com.vlessclient.model.TransportType;
 import java.util.Base64;
 import java.util.HashMap;
@@ -30,8 +31,8 @@ import java.util.regex.Pattern;
  */
 public final class CoreSettings {
 
-    /** The uTLS fingerprint a REALITY server gets when its link names none. */
-    private static final String REALITY_FINGERPRINT = "chrome";
+    /** The uTLS fingerprint a server gets when its link names none. */
+    private static final String DEFAULT_FINGERPRINT = "chrome";
 
     /** The uTLS fingerprints the core knows. */
     private static final Set<String> FINGERPRINTS = Set.of(
@@ -83,19 +84,39 @@ public final class CoreSettings {
 
     /**
      * The uTLS fingerprint to send: the link's own, in the lower case the core
-     * matches on, or Chrome for a REALITY server whose link names none. The
-     * core refuses a REALITY client without uTLS, and a link that leaves the
-     * fingerprint out means "any", not "none".
+     * matches on, or Chrome's when the link names none. A link that leaves the
+     * fingerprint out means "any", not "none". The core refuses a REALITY
+     * client without uTLS, and plain TLS without it went out with Go's own
+     * ClientHello, which no browser sends and DPI tells apart; Chrome is also
+     * the default of other clients. Over WebSocket the core still offers
+     * HTTP/1.1 alone, which a front needs to upgrade the connection.
      *
      * @param tls the server's TLS settings
-     * @return the fingerprint, or null when uTLS is not used
+     * @return the fingerprint
      */
     public static String fingerprint(TlsConfig tls) {
         String fingerprint = tls.getFingerprint();
         if (fingerprint != null && !fingerprint.isBlank()) {
             return fingerprint.strip().toLowerCase(Locale.ROOT);
         }
-        return tls.isReality() ? REALITY_FINGERPRINT : null;
+        return DEFAULT_FINGERPRINT;
+    }
+
+    /**
+     * The uTLS fingerprint to send for this server: {@link #fingerprint}, or
+     * none when its TLS runs inside QUIC, Hysteria2's or the QUIC transport's.
+     * The core passes {@code check} with uTLS there, then fails every
+     * connection with "unsupported usage for uTLS", for a fingerprint the
+     * link set as for the default.
+     *
+     * @param server the server to connect to
+     * @return the fingerprint, or null when uTLS cannot be used
+     */
+    public static String fingerprintToSend(ServerConfig server) {
+        TransportConfig transport = server.getTransport();
+        boolean overQuic = server.getProtocol() == Protocol.HYSTERIA2
+                || transport != null && transport.getType() == TransportType.QUIC;
+        return overQuic ? null : fingerprint(server.getTls());
     }
 
     /**

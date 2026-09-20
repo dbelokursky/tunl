@@ -25,7 +25,7 @@ public final class VmessOutboundBuilder extends OutboundBuilder {
         outbound.put("alter_id", 0);
         outbound.put("security", "auto");
 
-        addTlsIfEnabled(outbound, server.getTls());
+        addTlsIfEnabled(outbound, server);
         addTransportIfNeeded(outbound, server.getTransport());
 
         return outbound;
