@@ -35,7 +35,7 @@
              product handed to users: EA artifacts are unsupported, can be
              withdrawn from Central, and change under a fixed coordinate. 26.0.2
              is the newest GA - the 27 line exists only as -ea. -->
-        <javafx.version>26.0.2</javafx.version>
+        <javafx.version>27</javafx.version>
         <junit.version>6.1.3</junit.version>
         <jackson.version>3.2.2</jackson.version>
         <logback.version>1.6.3</logback.version>
