@@ -362,6 +362,18 @@ public class ServiceLocator {
             log.error("Error stopping SubscriptionService during shutdown", e);
         }
 
+        // A save of the server list asked for on the FX thread is written on
+        // a thread of its own; a quit right after an import must not lose it.
+        try {
+            Object store = services.get(ConfigStore.class);
+            if (store instanceof ConfigStore configStore
+                    && !configStore.awaitPendingWrites(2000)) {
+                log.warn("The server list was still being written at shutdown");
+            }
+        } catch (Exception e) {
+            log.error("Error waiting for the server list to be written during shutdown", e);
+        }
+
         // After the monitor, so the last samples it published are in the
         // buckets before they are written. Up to a minute of counting lives
         // only in memory between flushes; this is what saves it on a clean

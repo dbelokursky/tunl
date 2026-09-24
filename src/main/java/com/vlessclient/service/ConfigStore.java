@@ -20,6 +20,12 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
@@ -95,6 +101,15 @@ public class ConfigStore {
 
     /** A change to the server list that no write has taken in yet. */
     private final AtomicBoolean serversUnsaved = new AtomicBoolean();
+
+    /**
+     * Where a save asked for on the FX thread is written. The FX thread wrote
+     * itself whenever no other write was under way, and sealing a credential
+     * starts a keychain process: pasting, restoring or importing a list of
+     * servers froze the window for a process per new credential, then fsync.
+     */
+    private final ExecutorService serversWriter = Executors.newSingleThreadExecutor(
+            DaemonThreads.factory("servers-writer"));
 
     /** A sealed value and the plaintext that produced it. */
     private record SealedSecret(String plaintext, String tag) {
@@ -523,16 +538,19 @@ public class ConfigStore {
      */
     void saveServers() {
         serversUnsaved.set(true);
-        boolean onFxThread = Platform.isFxApplicationThread();
+        if (Platform.isFxApplicationThread()) {
+            // Never on the FX thread: the writer takes it, and a change made
+            // while it writes is taken in before it lets go.
+            serversWriter.execute(this::writePendingServers);
+            return;
+        }
+        writePendingServers();
+    }
+
+    /** Writes the list until no change is left that a write has not taken in. */
+    private void writePendingServers() {
         do {
-            if (onFxThread) {
-                if (!serversFile.tryLock()) {
-                    // The write under way takes this change in before it lets go.
-                    return;
-                }
-            } else {
-                serversFile.lock();
-            }
+            serversFile.lock();
             try {
                 while (serversUnsaved.getAndSet(false)) {
                     writeServers();
@@ -542,6 +560,25 @@ public class ConfigStore {
             }
             // A change that came in while the lock was being let go.
         } while (serversUnsaved.get());
+    }
+
+    /**
+     * Waits for the servers.json writes asked for so far, for a quit: a save
+     * handed to the writer a moment before would otherwise be lost with it.
+     *
+     * @param millis how long to wait at most
+     * @return false when the writes did not finish in time
+     */
+    public boolean awaitPendingWrites(long millis) {
+        try {
+            serversWriter.submit(() -> { }).get(millis, TimeUnit.MILLISECONDS);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (ExecutionException | TimeoutException | RejectedExecutionException e) {
+            return false;
+        }
     }
 
     /**
