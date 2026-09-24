@@ -10,7 +10,7 @@ import java.util.Map;
  * and its path, host, service name, and headers.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class TransportConfig {
+public class TransportConfig extends KeepsUnknownFields {
 
     @JsonProperty("type")
     private TransportType type = TransportType.TCP;

@@ -139,4 +139,55 @@ class ConfigStoreFxThreadTest {
                         + "FX thread — that is the jank this split exists to avoid")
                 .isFalse();
     }
+
+    /**
+     * The FX thread wrote the list itself whenever no other write was under
+     * way, and sealing a credential starts a keychain process: pasting,
+     * restoring or importing servers froze the window, a process per new
+     * credential. A save asked for there is written off it, and a quit waits
+     * for it.
+     */
+    @Test
+    @Timeout(20)
+    @DisplayName("a save asked for on the FX thread is written off it")
+    void aSaveAskedForOnTheFxThreadIsWrittenOffIt() throws Exception {
+        AtomicReference<Boolean> sealedOnFx = new AtomicReference<>();
+        com.vlessclient.platform.InMemorySecretSealer keychain =
+                new com.vlessclient.platform.InMemorySecretSealer();
+        com.vlessclient.platform.SecretSealer recording =
+                new com.vlessclient.platform.SecretSealer() {
+                    @Override
+                    public boolean isAvailable() {
+                        return keychain.isAvailable();
+                    }
+
+                    @Override
+                    public String seal(String key, String plaintext) {
+                        sealedOnFx.compareAndSet(null, Platform.isFxApplicationThread());
+                        return keychain.seal(key, plaintext);
+                    }
+
+                    @Override
+                    public java.util.Optional<String> unseal(String key, String stored) {
+                        return keychain.unseal(key, stored);
+                    }
+
+                    @Override
+                    public void delete(String key) {
+                        keychain.delete(key);
+                    }
+                };
+        ConfigStore store = new ConfigStore(tempDir, recording);
+        store.getSettings().setStoreSecretsSecurely(true);
+        CountDownLatch added = new CountDownLatch(1);
+
+        Platform.runLater(() -> {
+            store.addServer(server("s1"));
+            added.countDown();
+        });
+
+        assertThat(added.await(5, TimeUnit.SECONDS)).isTrue();
+        assertThat(store.awaitPendingWrites(5000)).as("the write finished").isTrue();
+        assertThat(sealedOnFx.get()).as("sealed, and not on the FX thread").isFalse();
+    }
 }

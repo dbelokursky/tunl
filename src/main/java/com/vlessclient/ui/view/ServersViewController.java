@@ -970,7 +970,9 @@ public class ServersViewController {
     private boolean updateLatencyChip(Label chip, Tooltip tooltip, ServerConfig server) {
         Optional<LatencyTester.Result> measured = latencyTester == null
                 ? Optional.empty() : latencyTester.lastResult(server.getId());
-        if (measured.isEmpty()) {
+        // Nothing measurable (a UDP server, a connect that would go through
+        // the tunnel) shows as nothing, not as a red "timeout".
+        if (measured.isEmpty() || !measured.get().measured()) {
             return false;
         }
         LatencyTester.Result result = measured.get();

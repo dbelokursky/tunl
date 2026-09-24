@@ -284,8 +284,13 @@ public class DefaultAppControlService implements AppControlService {
         }
 
         if (mode != null && !mode.isBlank() && effectiveMode != settings.getProxyMode()) {
-            settings.setProxyMode(effectiveMode);
-            configStore.saveSettings(settings);
+            // On the FX thread, as set_proxy_mode does: this runs on an HTTP
+            // worker, and the dashboard reads the same instance from FX.
+            FxExecutor.run(() -> {
+                AppSettings live = configStore.getSettings();
+                live.setProxyMode(effectiveMode);
+                configStore.saveSettings(live);
+            });
         }
 
         // The connect flow itself belongs to ConnectionService — including
