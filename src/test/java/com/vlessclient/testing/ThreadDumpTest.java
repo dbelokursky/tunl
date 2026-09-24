@@ -2,6 +2,7 @@ package com.vlessclient.testing;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import org.junit.jupiter.api.Test;
 
@@ -45,6 +46,10 @@ class ThreadDumpTest {
             }
         });
         try {
+            // Started is not yet parked: on a Windows runner the dump came
+            // before the probe had run at all.
+            Await.until("the probe to wait on its latch",
+                    () -> parked.getState() == Thread.State.WAITING, Duration.ofSeconds(10));
             String summary = ThreadDump.forBackgroundWork();
 
             assertThat(summary).startsWith("threads: ").contains("; carriers {")
