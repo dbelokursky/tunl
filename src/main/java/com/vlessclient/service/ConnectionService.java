@@ -170,7 +170,7 @@ public class ConnectionService {
      * the mode and the left-out servers of the start before.
      */
     private record Run(LiveSelector selector, ProxyMode mode, List<Integer> chosenPorts,
-                       Set<String> leftOut) {
+                       Set<String> leftOut, HostFacts host) {
     }
 
 
@@ -405,12 +405,15 @@ public class ConnectionService {
         List<ServerConfig> members = withoutRefused(candidates, active, skipped);
         int refusedByTheCore = 0;
         RoutingConfig routing = safeRoutingConfig();
+        // The run's own: comparing with the settings later reads the host as
+        // it was now, and asks it nothing on the FX thread.
+        HostFacts host = configGenerator.hostFacts();
         try {
             while (true) {
                 LiveSelector prepared = new LiveSelector(
-                        configGenerator.generate(members, active, settings, routing));
+                        configGenerator.generate(members, active, settings, routing, host));
                 Run previous = run;
-                run = new Run(prepared, mode, chosenPorts(settings), idsOf(skipped));
+                run = new Run(prepared, mode, chosenPorts(settings), idsOf(skipped), host);
                 try {
                     current.start(prepared.config(), mode);
                     break;
@@ -444,6 +447,13 @@ public class ConnectionService {
         } catch (IllegalStateException e) {
             log.warn("sing-box already running: {}", e.getMessage());
             return new ConnectAttempt(Outcome.ALREADY_RUNNING, active);
+        }
+        if (mode == ProxyMode.TUN && settings.isTunIpv6Enabled()
+                && !SingBoxConfigGenerator.tunTakesIpv6(settings, host)) {
+            // Said once per start: the generator runs again on every dashboard
+            // update to compare, and said it each time.
+            log.info("TUN IPv6 is on, but no interface holds a global IPv6 address: "
+                    + "the device stays IPv4-only so direct routes are not dialled over IPv6");
         }
         appliedServerId = active.getId();
         publishSkipped(skipped);
@@ -612,8 +622,8 @@ public class ConnectionService {
             ProxyMode mode = requestedMode != null ? requestedMode : settings.getProxyMode();
             Run current = run;
             if (isRunning() && current != null && current.mode() == mode
-                    && current.selector().accepts(
-                            generatedNow(candidates, active, settings, current.leftOut()))
+                    && current.selector().accepts(generatedNow(
+                            candidates, active, settings, current.leftOut(), current.host()))
                     && current.selector().select(OutboundTags.server(active))) {
                 if (!recovery.isWanted(request)) {
                     return new ConnectAttempt(Outcome.CANCELLED, active);
@@ -659,24 +669,24 @@ public class ConnectionService {
         AppSettings settings = configStore.getSettings();
         return current.mode() == settings.getProxyMode()
                 && current.chosenPorts().equals(chosenPorts(settings))
-                && current.selector().matches(
-                        generatedNow(candidates, active, settings, current.leftOut()));
+                && current.selector().matches(generatedNow(
+                        candidates, active, settings, current.leftOut(), current.host()));
     }
 
     /**
      * The configuration the current settings make. The loaded one left out
      * the servers the core refused, so it leaves them out too; picking one of
      * those does not match and restarts, where its refusal is reported by
-     * name.
+     * name. The host is taken as the run found it.
      */
     private String generatedNow(List<ServerConfig> candidates, ServerConfig active,
-                                AppSettings settings, Set<String> leftOut) {
+                                AppSettings settings, Set<String> leftOut, HostFacts host) {
         List<ServerConfig> members = leftOut.contains(active.getId())
                 ? candidates
                 : candidates.stream()
                         .filter(server -> !leftOut.contains(server.getId()))
                         .toList();
-        return configGenerator.generate(members, active, settings, safeRoutingConfig());
+        return configGenerator.generate(members, active, settings, safeRoutingConfig(), host);
     }
 
     /** The ports the user chose, which a run's own may have moved off. */
