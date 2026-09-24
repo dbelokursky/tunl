@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.service.ConnectionService;
+import com.vlessclient.testing.ThreadDump;
 import com.vlessclient.testing.UiTest;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -81,7 +82,10 @@ public class DashboardTunnelDroppedBannerTest extends ApplicationTest {
 
         interact(button::fire);
         assertThat(RECONNECTED.await(10, TimeUnit.SECONDS))
-                .as("the button restarts the tunnel")
+                .withFailMessage(() -> "the button did not restart the tunnel; registered: "
+                        + ServiceLocator.find(ConnectionService.class)
+                                .map(found -> found.getClass().getName()).orElse("none")
+                        + "\n" + ThreadDump.forBackgroundWork())
                 .isTrue();
         assertThat(RECONNECTS).hasValue(1);
         assertThat(ON_FX_THREAD)

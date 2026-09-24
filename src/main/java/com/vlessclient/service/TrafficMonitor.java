@@ -110,20 +110,31 @@ public class TrafficMonitor {
 
     /** Puts the live readouts back to zero on the FX thread. */
     private void zeroSpeeds() {
-        Platform.runLater(() -> {
+        Runnable zero = () -> {
             uploadSpeed.set(0);
             downloadSpeed.set(0);
-        });
+        };
+        try {
+            Platform.runLater(zero);
+        } catch (IllegalStateException toolkitNotRunning) {
+            // No FX thread to hand it to, as for a graph shut down before
+            // the toolkit started: nothing else can be reading them.
+            zero.run();
+        }
     }
 
     /**
      * Stops the stream for good and releases the HTTP client. {@link #stop}
      * is the per-disconnect call and keeps the client for the next connect;
-     * this one is for the service graph going away.
+     * this one is for the service graph going away. The client is released
+     * whatever stopping does: an open one keeps a selector thread.
      */
     public void shutdown() {
-        stop();
-        httpClient.shutdownNow();
+        try {
+            stop();
+        } finally {
+            httpClient.shutdownNow();
+        }
     }
 
     /**
