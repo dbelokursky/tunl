@@ -120,9 +120,10 @@ class SingBoxConfigGeneratorTunTest {
 
         assertThat(tun).isNotNull();
         assertThat(tun.get("auto_route").asBoolean()).isTrue();
-        // strict_route is deliberately absent — see comment in the
-        // generator and the v0.1.7 investigation in the commit log.
-        assertThat(tun.has("strict_route")).isFalse();
+        // strict_route is deliberately absent outside Windows — see the
+        // comment in the generator and the v0.1.7 investigation in the log.
+        assertThat(tun.has("strict_route")).isEqualTo(
+                SingBoxConfigGenerator.strictRouteOn(com.vlessclient.platform.Platform.current()));
         // stack=gvisor (not system) — without strict_route's PF rules the
         // system stack silently drops TCP traffic from the TUN on macOS;
         // gvisor's userspace TCP/IP has no such dependency. v0.1.8 fix.
@@ -640,5 +641,21 @@ class SingBoxConfigGeneratorTunTest {
 
         assertThat(tunCache.get("path").asString())
                 .isNotEqualTo(proxyCache.get("path").asString());
+    }
+
+    /**
+     * Windows asks every adapter's resolver at once, and without the WFP
+     * filters strict_route adds, names leaked in plaintext to the physical
+     * network's resolver while the card said Connected. Elsewhere strict_route
+     * blocked the direct outbound, so it stays off there.
+     */
+    @Test
+    void strictRouteIsTheDnsLeakProtectionOnWindowsOnly() {
+        assertThat(SingBoxConfigGenerator.strictRouteOn(com.vlessclient.platform.Platform.WINDOWS))
+                .isTrue();
+        assertThat(SingBoxConfigGenerator.strictRouteOn(com.vlessclient.platform.Platform.MAC))
+                .isFalse();
+        assertThat(SingBoxConfigGenerator.strictRouteOn(com.vlessclient.platform.Platform.LINUX))
+                .isFalse();
     }
 }
