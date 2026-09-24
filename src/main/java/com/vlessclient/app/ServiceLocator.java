@@ -254,16 +254,7 @@ public class ServiceLocator {
         if (engine == null) {
             return;
         }
-        // A tunnel coming up is worth a check of its own. For a user whose
-        // network throttles or blocks GitHub — the reason this app exists —
-        // that is the moment a check can succeed at all, and no timer can know
-        // it. UpdateManager throttles the trigger, so a flapping tunnel does
-        // not turn into a flapping check.
-        engine.connectionStateProperty().addListener((o, was, is) -> {
-            if (is == com.vlessclient.model.ConnectionState.CONNECTED) {
-                updateManager.checkAfterEvent();
-            }
-        });
+        updateManager.checkWhenConnected(engine);
     }
 
     /**
@@ -501,6 +492,13 @@ public class ServiceLocator {
         Object tray = services.get(TrayIconService.class);
         if (tray instanceof TrayIconService trayIconService) {
             trayIconService.rebindEngineListener();
+        }
+        // The check on connect followed the engine that existed at startup,
+        // which on a first run was none: once the core was installed from the
+        // dashboard, no connect checked for updates for the rest of the run.
+        Object updates = services.get(UpdateManager.class);
+        if (updates instanceof UpdateManager updateManager) {
+            updateManager.checkWhenConnected(engine);
         }
         log.info("SingBoxEngine registered with binary: {}", singBoxPath);
     }

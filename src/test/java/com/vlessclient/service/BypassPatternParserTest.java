@@ -107,4 +107,41 @@ class BypassPatternParserTest {
     void pureWildcardReturnsNull() {
         assertThat(BypassPatternParser.parse("*")).isNull();
     }
+
+    /** {@code *vk.com*} became the keyword {@code vkcom}, which no name contains. */
+    @Test
+    void aKeywordKeepsTheDotsInsideIt() {
+        assertThat(BypassPatternParser.parse("*vk.com*")).isEqualTo(
+                new BypassPatternParser.Parsed(BypassPatternParser.Kind.DOMAIN_KEYWORD, "vk.com"));
+        assertThat(BypassPatternParser.parse("*.google.*")).as("dots beside a star go")
+                .isEqualTo(new BypassPatternParser.Parsed(
+                        BypassPatternParser.Kind.DOMAIN_KEYWORD, "google"));
+    }
+
+    /** The core compares lower-case names; {@code Example.RU} matched nothing. */
+    @Test
+    void aPatternIsLowerCased() {
+        assertThat(BypassPatternParser.parse("Example.RU")).isEqualTo(
+                new BypassPatternParser.Parsed(BypassPatternParser.Kind.DOMAIN, "example.ru"));
+    }
+
+    /** SNI and DNS carry punycode, so {@code *.рф} as typed matched nothing. */
+    @Test
+    void anInternationalizedNameBecomesPunycode() {
+        assertThat(BypassPatternParser.parse("*.рф")).isEqualTo(new BypassPatternParser.Parsed(
+                BypassPatternParser.Kind.DOMAIN_SUFFIX, "xn--p1ai"));
+        assertThat(BypassPatternParser.parse("кремль.рф")).isEqualTo(
+                new BypassPatternParser.Parsed(
+                        BypassPatternParser.Kind.DOMAIN, "xn--e1ajeds9e.xn--p1ai"));
+    }
+
+    /** A star between names stands for anything, dots included, which only a regex says. */
+    @Test
+    void aStarInTheMiddleBecomesARegex() {
+        assertThat(BypassPatternParser.parse("mail.*.com")).isEqualTo(
+                new BypassPatternParser.Parsed(
+                        BypassPatternParser.Kind.DOMAIN_REGEX, "^mail\\..*\\.com$"));
+        assertThat(BypassPatternParser.parse("*.кремль.*.рф").value())
+                .isEqualTo("^.*\\.xn--e1ajeds9e\\..*\\.xn--p1ai$");
+    }
 }

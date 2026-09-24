@@ -869,6 +869,12 @@ public class ConfigStore {
                         + "understands {}); reading best-effort",
                         settings.getConfigVersion(), AppSettings.CURRENT_CONFIG_VERSION);
             }
+            // The exact retired default only: an address the user typed stays.
+            if (AppSettings.RETIRED_DIRECT_DNS_DEFAULT.equals(settings.getDirectDns())) {
+                settings.setDirectDns(AppSettings.SYSTEM_DNS);
+                log.info("Direct DNS moved from the retired default {} to the system resolver",
+                        AppSettings.RETIRED_DIRECT_DNS_DEFAULT);
+            }
             // Future incompatible versions dispatch their migrations here;
             // saving always stamps the version this build writes.
             settings.setConfigVersion(AppSettings.CURRENT_CONFIG_VERSION);
