@@ -1,6 +1,7 @@
 package com.vlessclient.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.UUID;
 
@@ -55,6 +56,19 @@ public class ServerConfig {
 
     @JsonProperty("active")
     private boolean active;
+
+    /**
+     * The subscription this server came from; null for one the user added.
+     *
+     * <p>Membership used to live only in the subscription's list of server
+     * ids, which is saved after the servers: a quit between the two saves
+     * left a refresh's new servers in no list, and the next refresh added
+     * them again, as duplicates no refresh or delete would reach. Stamped on
+     * the server, membership is saved with the server.</p>
+     */
+    @JsonProperty("subscription_id")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String subscriptionId;
 
     /**
      * Creates a server with a fresh random id and default transport and TLS config.
@@ -167,6 +181,14 @@ public class ServerConfig {
 
     public void setActive(boolean active) {
         this.active = active;
+    }
+
+    public String getSubscriptionId() {
+        return subscriptionId;
+    }
+
+    public void setSubscriptionId(String subscriptionId) {
+        this.subscriptionId = subscriptionId;
     }
 
     @Override
