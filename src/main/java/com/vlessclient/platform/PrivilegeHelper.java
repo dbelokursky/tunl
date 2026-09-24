@@ -2,10 +2,13 @@ package com.vlessclient.platform;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,13 +52,26 @@ import org.slf4j.LoggerFactory;
  * connection without a prompt, but its <em>path</em> is not caller-controlled
  * and contains no spaces to escape in the sudoers line.</p>
  *
- * <p><b>Residual.</b> The user still controls the <em>contents</em> of that one
- * config, so code already running as the user can influence what the root
- * sing-box does while a TUN connection is being started. Closing that needs a
- * code-signed privileged helper that owns the config outright, which requires
- * notarization and is tracked separately. If installation is declined or fails,
- * the caller falls back to the osascript-per-connect path (password each time,
- * no standing rule).</p>
+ * <p><b>Why a launcher, where there is one.</b> Pinning the path leaves the
+ * <em>contents</em> of that config to the user, and a config alone makes root
+ * write a file anywhere ({@code log.output}, the cache file, a rule set's
+ * path), run a program (a tor outbound) or read a key: code running as the
+ * user still had root without a prompt. Where macOS ships {@link #JQ} (15 and
+ * later) the rule authorizes the root-owned {@link #LAUNCHER} instead, with no
+ * arguments. It takes the config on stdin, so root never opens a path the user
+ * controls, keeps what a Tunl TUN config is made of (see
+ * {@code scripts/tun-launch.sh}), and runs the core on the result from a
+ * directory only root can open. The launcher's content is part of what
+ * {@link #isConfigured} checks, so a build that changes it sets it up again.
+ * macOS 13 and 14 keep the pinned rule.</p>
+ *
+ * <p><b>Residual.</b> The user still picks what the connection is: a config
+ * that passes the launcher still routes every user's traffic on this Mac
+ * through a server of the caller's choosing, the way the app itself does.
+ * Closing that needs a code-signed privileged helper that owns the config
+ * outright, which requires notarization and is tracked separately. If
+ * installation is declined or fails, the caller falls back to the
+ * osascript-per-connect path (password each time, no standing rule).</p>
  */
 public final class PrivilegeHelper {
 
@@ -65,6 +81,22 @@ public final class PrivilegeHelper {
 
     /** Root-owned directory containing the privileged core and run directory. */
     private static final Path ELEVATED_DIR = Path.of("/usr/local/libexec/vless-client");
+
+    /**
+     * Root-owned launcher the rule authorizes, with no arguments, where
+     * {@link #JQ} is there: it filters the config it reads on stdin and runs
+     * the core on the result.
+     */
+    static final Path LAUNCHER = ELEVATED_DIR.resolve("tun-launch");
+
+    /** Root-only 0700 directory for the filtered config and the core's cache. */
+    static final Path STATE_DIR = ELEVATED_DIR.resolve("state");
+
+    /** What the launcher filters with; part of macOS since 15. */
+    static final Path JQ = Path.of("/usr/bin/jq");
+
+    /** The launcher's source; {@code @BASE@} stands for {@link #ELEVATED_DIR}. */
+    private static final String LAUNCHER_SCRIPT = "/scripts/tun-launch.sh";
 
     /** Root-owned copy of sing-box the sudoers rule authorizes for {@code sudo -n}. */
     static final Path ELEVATED_BINARY = ELEVATED_DIR.resolve("sing-box");
@@ -99,6 +131,46 @@ public final class PrivilegeHelper {
     }
 
     /**
+     * Whether TUN starts through the launcher: whether this Mac has the
+     * {@code jq} it filters with. Without it (macOS 13 and 14) the rule stays
+     * the pinned command line.
+     */
+    public static boolean usesLauncher() {
+        return Files.isExecutable(JQ);
+    }
+
+    /**
+     * The root-owned launcher to run with {@code sudo -n} and the config on
+     * stdin, once configured where {@link #usesLauncher()}.
+     */
+    public static Path launcher() {
+        return LAUNCHER;
+    }
+
+    /**
+     * The launcher as installed under {@code base}: the script with its base
+     * directory filled in. Tests install it elsewhere; the app installs it
+     * under {@link #ELEVATED_DIR}.
+     *
+     * @param base directory holding the launcher, the core and the state dir;
+     *             must not contain a single quote, which the script quotes it in
+     */
+    static String launcherScript(Path base) {
+        String dir = base.toString();
+        if (dir.indexOf('\'') >= 0) {
+            throw new IllegalArgumentException("unquotable launcher base: " + dir);
+        }
+        try (InputStream in = PrivilegeHelper.class.getResourceAsStream(LAUNCHER_SCRIPT)) {
+            if (in == null) {
+                throw new IllegalStateException("missing resource " + LAUNCHER_SCRIPT);
+            }
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8).replace("@BASE@", dir);
+        } catch (IOException e) {
+            throw new UncheckedIOException("could not read " + LAUNCHER_SCRIPT, e);
+        }
+    }
+
+    /**
      * Whether the <em>pinned</em> NOPASSWD rule is active and the root-owned
      * copy still matches {@code userBinary}. A content mismatch (first run, or
      * a core update that rewrote the user binary) reports not-configured so the
@@ -113,14 +185,61 @@ public final class PrivilegeHelper {
      * So an install counts as configured only when the wide form is also
      * <em>refused</em>.</p>
      *
+     * <p>Where {@link #usesLauncher()}, the rule has to be the launcher's
+     * instead, and the installed launcher has to be this build's: the pinned
+     * rule is what the launcher replaces, so an install carrying it is set up
+     * again, and so is one whose launcher an older build wrote.</p>
+     *
      * @param userBinary the current (user-writable) sing-box binary
-     * @return true if the pinned rule is live and the root copy is current
+     * @return true if the expected rule is live and the root copies are current
      */
     public static boolean isConfigured(Path userBinary) {
-        if (userBinary == null || !hasPinnedRule(sudoListing())) {
+        if (userBinary == null) {
             return false;
         }
-        return sameContent(userBinary, ELEVATED_BINARY);
+        String listing = sudoListing();
+        boolean ruleInPlace = usesLauncher()
+                ? hasLauncherRule(listing) && launcherIsCurrent()
+                : hasPinnedRule(listing);
+        return ruleInPlace && sameContent(userBinary, ELEVATED_BINARY);
+    }
+
+    /**
+     * Whether {@code listing} grants NOPASSWD to the launcher. The rule gives
+     * it no arguments ({@code ""}); the listing may spell that quoted,
+     * escaped or not at all, and all three are the launcher's rule: the
+     * script reads nothing from its arguments.
+     *
+     * @param listing raw {@code sudo -n -l} output
+     */
+    static boolean hasLauncherRule(String listing) {
+        if (listing == null) {
+            return false;
+        }
+        String launcher = LAUNCHER.toString();
+        for (String line : listing.lines().toList()) {
+            String trimmed = line.trim();
+            int marker = trimmed.indexOf("NOPASSWD:");
+            if (marker < 0) {
+                continue;
+            }
+            String authorized = trimmed.substring(marker + "NOPASSWD:".length()).trim();
+            if (authorized.equals(launcher)
+                    || authorized.equals(launcher + " \"\"")
+                    || authorized.equals(launcher + " \\\"\\\"")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether the installed launcher is the one this build installs. */
+    private static boolean launcherIsCurrent() {
+        try {
+            return Files.readString(LAUNCHER).equals(launcherScript(ELEVATED_DIR));
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     /**
@@ -162,19 +281,29 @@ public final class PrivilegeHelper {
     }
 
     /**
-     * Whether the pre-hardening rule — the one authorizing the binary with any
-     * arguments — is still installed.
+     * Whether an older build's rule is installed that lets anything running as
+     * the user run the core as root on a config of its choosing: the
+     * pre-hardening rule (the binary with any arguments) anywhere, and the
+     * pinned rule where the launcher can replace it.
      *
      * <p>Distinct from {@code !isConfigured()}, which is also true when no rule
-     * exists at all. Only this case is worth interrupting the user about at
+     * exists at all. Only these cases are worth interrupting the user about at
      * startup: a standing rule that grants write-a-file-as-root to anything
      * running as them, which would otherwise sit there until they next use TUN.</p>
      */
-    public static boolean hasLegacyWideRule() {
-        return hasLegacyWideRule(sudoListing());
+    public static boolean hasRuleToReplace() {
+        return hasRuleToReplace(sudoListing(), usesLauncher());
     }
 
-    /** Test seam for {@link #hasLegacyWideRule()}. */
+    /** Test seam for {@link #hasRuleToReplace()}. */
+    static boolean hasRuleToReplace(String listing, boolean launcherAvailable) {
+        return hasLegacyWideRule(listing) || (launcherAvailable && hasPinnedRule(listing));
+    }
+
+    /**
+     * Whether the pre-hardening rule — the one authorizing the binary with any
+     * arguments — is still installed.
+     */
     static boolean hasLegacyWideRule(String listing) {
         if (listing == null) {
             return false;
@@ -211,8 +340,9 @@ public final class PrivilegeHelper {
     }
 
     /**
-     * Installs the root-owned sing-box copy and the NOPASSWD rule pointing at
-     * it, in one {@code osascript ... with administrator privileges} prompt.
+     * Installs the root-owned sing-box copy, the launcher where
+     * {@link #usesLauncher()}, and the NOPASSWD rule, in one
+     * {@code osascript ... with administrator privileges} prompt.
      *
      * @param userBinary absolute path to the current sing-box executable
      * @throws IOException if the privileged step failed or sudoers validation
@@ -231,7 +361,8 @@ public final class PrivilegeHelper {
         // shell (see configureShellCommand): a user-owned staged file could be
         // rewritten to `user ALL=(ALL) NOPASSWD: ALL` in the window between our
         // write and root's install, and visudo -c checks syntax, not content.
-        String shellCommand = configureShellCommand(userBinary, user);
+        boolean launcher = usesLauncher();
+        String shellCommand = configureShellCommand(userBinary, user, launcher);
 
         ProcessBuilder pb = new ProcessBuilder(
                 "osascript",
@@ -259,7 +390,8 @@ public final class PrivilegeHelper {
             String output = new String(proc.getInputStream().readAllBytes());
             throw new IOException("osascript exited with code " + code + ": " + output);
         }
-        log.info("Installed root-owned sing-box and NOPASSWD rule at {}", ELEVATED_BINARY);
+        log.info("Installed root-owned sing-box and the NOPASSWD rule for {}",
+                launcher ? LAUNCHER : ELEVATED_BINARY);
     }
 
     /**
@@ -271,6 +403,15 @@ public final class PrivilegeHelper {
     static String sudoersRule(String user) {
         return user + " ALL=(root) NOPASSWD: "
                 + ELEVATED_BINARY + " run -c " + ELEVATED_CONFIG + "\n";
+    }
+
+    /**
+     * The sudoers line where {@link #usesLauncher()}: the launcher, with no
+     * arguments ({@code ""} is how sudoers says so). The config travels on
+     * stdin, which sudo leaves to the caller and the launcher filters.
+     */
+    static String launcherRule(String user) {
+        return user + " ALL=(root) NOPASSWD: " + LAUNCHER + " \"\"\n";
     }
 
     /**
@@ -293,28 +434,48 @@ public final class PrivilegeHelper {
      * <p>The run directory is 0700 and owned by {@code user} so the app can
      * rewrite the config per connection without another prompt, while its
      * root-owned parent keeps anyone else from swapping the directory itself.</p>
+     *
+     * <p>With {@code launcher}, root also writes the launcher from the text
+     * carried in the command itself (base64, so no quoting can bend it) into
+     * its own {@code mktemp} file, installs it root:wheel 0755, creates the
+     * root-only state directory, and the rule authorizes the launcher.</p>
      */
-    static String configureShellCommand(Path userBinary, String user) {
+    static String configureShellCommand(Path userBinary, String user, boolean launcher) {
         String src = singleQuote(userBinary.toAbsolutePath().toString());
         String dst = singleQuote(ELEVATED_BINARY.toString());
         String dstDir = singleQuote(ELEVATED_DIR.toString());
         String runDir = singleQuote(ELEVATED_RUN_DIR.toString());
         String owner = singleQuote(user);
         String target = singleQuote(SUDOERS_FILE.toString());
-        // echo re-adds the trailing newline sudoersRule() carries; the line has
-        // no backslashes (fixed POSIX paths + username), so /bin/sh's echo emits
+        // echo re-adds the trailing newline the rule carries; the line has no
+        // backslashes (fixed POSIX paths + username), so /bin/sh's echo emits
         // it verbatim. Single-quoting the whole line neutralizes any character
         // in the username.
-        String ruleLiteral = singleQuote(sudoersRule(user).stripTrailing());
+        String rule = launcher ? launcherRule(user) : sudoersRule(user);
+        String ruleLiteral = singleQuote(rule.stripTrailing());
+        String installLauncher = "";
+        String temps = "\"$STAGE\"";
+        if (launcher) {
+            String script = Base64.getEncoder().encodeToString(
+                    launcherScript(ELEVATED_DIR).getBytes(StandardCharsets.UTF_8));
+            installLauncher = " && LAUNCH=\"$(mktemp)\""
+                    + " && echo " + singleQuote(script) + " | /usr/bin/base64 -D > \"$LAUNCH\""
+                    + " && install -m 0755 -o root -g wheel \"$LAUNCH\" "
+                    + singleQuote(LAUNCHER.toString())
+                    + " && install -d -m 0700 -o root -g wheel "
+                    + singleQuote(STATE_DIR.toString());
+            temps += " \"$LAUNCH\"";
+        }
         return "mkdir -p " + dstDir
                 + " && install -m 0755 -o root -g wheel " + src + " " + dst
                 + " && install -d -m 0700 -o " + owner + " -g staff " + runDir
                 + " && umask 077 && STAGE=\"$(mktemp)\""
+                + installLauncher
                 + " && echo " + ruleLiteral + " > \"$STAGE\""
                 + " && visudo -c -f \"$STAGE\""
                 + " && install -m 0440 -o root -g wheel \"$STAGE\" " + target
-                + " || { rm -f " + target + " \"$STAGE\" 2>/dev/null; exit 1; }; "
-                + "rm -f \"$STAGE\" 2>/dev/null";
+                + " || { rm -f " + target + " " + temps + " 2>/dev/null; exit 1; }; "
+                + "rm -f " + temps + " 2>/dev/null";
     }
 
     /** SHA-256 equality of two files; false if either can't be read. */
