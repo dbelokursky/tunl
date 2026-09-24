@@ -355,30 +355,9 @@ public class ServiceLocator {
             log.error("Error stopping SubscriptionService during shutdown", e);
         }
 
-        // A save of the server list asked for on the FX thread is written on
-        // a thread of its own; a quit right after an import must not lose it.
-        try {
-            Object store = services.get(ConfigStore.class);
-            if (store instanceof ConfigStore configStore
-                    && !configStore.awaitPendingWrites(2000)) {
-                log.warn("The server list was still being written at shutdown");
-            }
-        } catch (Exception e) {
-            log.error("Error waiting for the server list to be written during shutdown", e);
-        }
-
         // After the monitor, so the last samples it published are in the
-        // buckets before they are written. Up to a minute of counting lives
-        // only in memory between flushes; this is what saves it on a clean
-        // exit.
-        try {
-            Object history = services.get(TrafficHistoryStore.class);
-            if (history instanceof TrafficHistoryStore historyStore) {
-                historyStore.flush();
-            }
-        } catch (Exception e) {
-            log.error("Error flushing TrafficHistoryStore during shutdown", e);
-        }
+        // buckets before they are written.
+        saveStateForExit();
 
         try {
             Object monitor = services.get(TrafficMonitor.class);
@@ -447,6 +426,36 @@ public class ServiceLocator {
         }
 
         services.clear();
+    }
+
+    /**
+     * Writes what only memory holds: a server-list save still on its way to
+     * disk (one asked for on the FX thread is written on a thread of its own)
+     * and up to a minute of traffic counted since the history's last flush.
+     *
+     * <p>{@link #shutdown()} calls it on a normal quit. A SIGTERM — a
+     * {@code kill}, a Linux session ending — never reaches JavaFX's
+     * {@code stop()}, and it used to lose both; the app's shutdown hook calls
+     * this for it. Running it twice writes the same thing twice.</p>
+     */
+    public static void saveStateForExit() {
+        try {
+            Object store = services.get(ConfigStore.class);
+            if (store instanceof ConfigStore configStore
+                    && !configStore.awaitPendingWrites(2000)) {
+                log.warn("The server list was still being written at shutdown");
+            }
+        } catch (Exception e) {
+            log.error("Error waiting for the server list to be written during shutdown", e);
+        }
+        try {
+            Object history = services.get(TrafficHistoryStore.class);
+            if (history instanceof TrafficHistoryStore historyStore) {
+                historyStore.flush();
+            }
+        } catch (Exception e) {
+            log.error("Error flushing TrafficHistoryStore during shutdown", e);
+        }
     }
 
     /**

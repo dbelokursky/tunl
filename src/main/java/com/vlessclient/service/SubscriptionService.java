@@ -24,6 +24,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
@@ -211,6 +212,7 @@ public class SubscriptionService {
                 .build();
         this.subscriptions = FXCollections.observableArrayList();
         loadSubscriptions();
+        adoptStampedServers();
     }
 
     public ObservableList<Subscription> getSubscriptions() {
@@ -262,7 +264,8 @@ public class SubscriptionService {
             return;
         }
         // One batch rather than one save per server, matching diffAndApply.
-        configStore.applyServerBatch(List.of(), List.copyOf(sub.getServerIds()));
+        List<String> members = membersOf(sub).stream().map(ServerConfig::getId).toList();
+        configStore.applyServerBatch(List.of(), members);
         FxExecutor.run(() -> {
             synchronized (this) {
                 subscriptions.remove(sub);
@@ -273,8 +276,7 @@ public class SubscriptionService {
         }
         saveSubscriptions();
         Thread.startVirtualThread(() -> sealer.delete(urlSecretKey(sub.getId())));
-        log.info("Removed subscription '{}' and {} servers",
-                sub.getName(), sub.getServerIds().size());
+        log.info("Removed subscription '{}' and {} servers", sub.getName(), members.size());
     }
 
     /**
@@ -1002,14 +1004,49 @@ public class SubscriptionService {
      */
     private void diffAndApply(Subscription sub, List<ServerConfig> fetchedServers,
             boolean allowRemovals) {
-        List<ServerConfig> existing = sub.getServerIds().stream()
-                .map(configStore::getServerById)
-                .flatMap(java.util.Optional::stream)
-                .toList();
         SubscriptionReconciler.Batch batch =
-                SubscriptionReconciler.reconcile(existing, fetchedServers, allowRemovals);
+                SubscriptionReconciler.reconcile(membersOf(sub), fetchedServers, allowRemovals);
+        // Stamped before the servers are saved: their membership is then on
+        // disk with them even if the list saved after them never is.
+        batch.upserts().forEach(server -> server.setSubscriptionId(sub.getId()));
         configStore.applyServerBatch(batch.upserts(), batch.removals());
         sub.setServerIds(batch.serverIds());
+    }
+
+    /**
+     * The stored servers of {@code sub}: the ones its list names and the ones
+     * stamped with its id, which the list misses when a quit came between a
+     * refresh saving the servers and saving the list.
+     */
+    private List<ServerConfig> membersOf(Subscription sub) {
+        Map<String, ServerConfig> members = new LinkedHashMap<>();
+        for (String id : sub.getServerIds()) {
+            configStore.getServerById(id).ifPresent(server -> members.put(server.getId(), server));
+        }
+        for (ServerConfig server : configStore.getServersOfSubscription(sub.getId())) {
+            members.putIfAbsent(server.getId(), server);
+        }
+        return List.copyOf(members.values());
+    }
+
+    /**
+     * Puts back into each subscription's list the servers stamped with its id
+     * that the list misses, so its count and its members agree from the start.
+     */
+    private void adoptStampedServers() {
+        for (Subscription sub : subscriptions) {
+            List<String> ids = new ArrayList<>(sub.getServerIds());
+            for (ServerConfig server : configStore.getServersOfSubscription(sub.getId())) {
+                if (!ids.contains(server.getId())) {
+                    ids.add(server.getId());
+                }
+            }
+            if (ids.size() != sub.getServerIds().size()) {
+                log.info("Subscription '{}': {} saved server(s) were missing from its list",
+                        sub.getName(), ids.size() - sub.getServerIds().size());
+                sub.setServerIds(ids);
+            }
+        }
     }
 
     private Subscription findById(String id) {

@@ -457,8 +457,24 @@ public class ConfigStore {
         copy.setId(UUID.randomUUID().toString());
         copy.setName(copy.getName() + I18n.get("servers.copy.suffix"));
         copy.setActive(false);
+        // The user's own server from now on: a subscription's refresh must
+        // neither match it nor remove it as one the provider withdrew.
+        copy.setSubscriptionId(null);
         mutateList(() -> servers.add(copy));
         saveServers();
+    }
+
+    /**
+     * The servers stamped as coming from a subscription, whether or not its
+     * own list of server ids names them.
+     *
+     * @param subscriptionId the subscription's id
+     * @return a snapshot of the stamped servers, in list order
+     */
+    public synchronized List<ServerConfig> getServersOfSubscription(String subscriptionId) {
+        return servers.stream()
+                .filter(s -> subscriptionId.equals(s.getSubscriptionId()))
+                .toList();
     }
 
     /**

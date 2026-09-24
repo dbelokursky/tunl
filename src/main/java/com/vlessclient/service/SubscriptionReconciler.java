@@ -97,7 +97,9 @@ final class SubscriptionReconciler {
 
     private static ObjectNode identity(ServerConfig server) {
         ObjectNode node = MAPPER.valueToTree(server);
-        node.remove(List.of("id", "name", "active"));
+        // The subscription stamp is local state too: a stored server carries
+        // it and a fetched one does not yet.
+        node.remove(List.of("id", "name", "active", "subscription_id"));
         return node;
     }
 
