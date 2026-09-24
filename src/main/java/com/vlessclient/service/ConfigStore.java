@@ -498,7 +498,9 @@ public class ConfigStore {
         try {
             SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(settings));
             persistence.saved(SETTINGS_FILE);
-        } catch (IOException e) {
+        } catch (IOException | JacksonException e) {
+            // JacksonException is unchecked in Jackson 3: a serialization that
+            // failed (a list changed under it) skipped the unsaved banner.
             log.error("Failed to save settings to {}", file, e);
             persistence.failed(SETTINGS_FILE, this::retrySettings);
         }
@@ -564,7 +566,7 @@ public class ConfigStore {
             SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(envelope));
             persistence.saved(SERVERS_FILE);
             dropLegacyBackupOnceMigrated(file, objectMapper, "servers");
-        } catch (IOException e) {
+        } catch (IOException | JacksonException e) {
             log.error("Failed to save servers to {}", file, e);
             persistence.failed(SERVERS_FILE, this::saveServers);
         }

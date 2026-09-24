@@ -154,7 +154,12 @@ public class RoutingService {
         RoutingRuleCheck.problem(rule.getType(), rule.getValue()).ifPresent(reason -> {
             throw new IllegalArgumentException(reason);
         });
-        config.getRules().add(rule);
+        // A new list, not the live one changed: a config being generated
+        // iterates it without this lock, and a rule added from the UI or MCP
+        // during a connect threw ConcurrentModificationException there.
+        List<RoutingRule> rules = new ArrayList<>(config.getRules());
+        rules.add(rule);
+        config.setRules(rules);
         saveConfig(config);
     }
 
@@ -165,7 +170,9 @@ public class RoutingService {
      * @param ruleId the id of the rule to remove
      */
     public synchronized void removeRule(String ruleId) {
-        boolean removed = config.getRules().removeIf(r -> r.getId().equals(ruleId));
+        List<RoutingRule> rules = new ArrayList<>(config.getRules());
+        boolean removed = rules.removeIf(r -> r.getId().equals(ruleId));
+        config.setRules(rules);
         if (removed) {
             saveConfig(config);
         } else {

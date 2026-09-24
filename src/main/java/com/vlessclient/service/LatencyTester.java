@@ -1,5 +1,6 @@
 package com.vlessclient.service;
 
+import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import java.net.InetSocketAddress;
 import java.net.Socket;
@@ -47,21 +48,60 @@ public class LatencyTester {
     /** Supplies the running core's Clash API details, or null when it is down. */
     private volatile java.util.function.Supplier<ApiEndpoint> endpointSupplier = () -> null;
 
-    /** Where to reach the Clash API of the core that is currently running. */
-    public record ApiEndpoint(int port, String secret) { }
+    /**
+     * Where to reach the Clash API of the core that is currently running.
+     *
+     * @param port   the Clash API port
+     * @param secret the Clash API secret
+     * @param tun    whether that core runs a TUN device, which the app's own
+     *               connections go through
+     */
+    public record ApiEndpoint(int port, String secret, boolean tun) {
+
+        /** A core without a TUN device. */
+        public ApiEndpoint(int port, String secret) {
+            this(port, secret, false);
+        }
+    }
 
     /**
      * One server's measurement.
      *
-     * @param millis      round-trip in milliseconds, or -1 when unreachable
+     * @param millis       round-trip in milliseconds, or -1 when unreachable
      * @param throughProxy true when measured through the proxy itself rather
      *                     than by connecting to its address
+     * @param measured     false when nothing could be measured: a server over
+     *                     UDP, which a TCP connect says nothing about, or a TCP
+     *                     connect that would itself go through the tunnel
      */
-    public record Result(long millis, boolean throughProxy) {
+    public record Result(long millis, boolean throughProxy, boolean measured) {
+
+        /** A measurement that was taken. */
+        public Result(long millis, boolean throughProxy) {
+            this(millis, throughProxy, true);
+        }
+
+        /**
+         * Nothing could be measured.
+         *
+         * @return a result that is neither reachable nor unreachable
+         */
+        public static Result notMeasured() {
+            return new Result(-1, false, false);
+        }
+
         public boolean reachable() {
-            return millis >= 0;
+            return measured && millis >= 0;
         }
     }
+
+    /**
+     * Where a plain TCP connect ranks in "Fastest": after every server
+     * measured through the proxy. It says the address answers, not that the
+     * proxy works, and a quick connect outranked a server a real request went
+     * through.
+     */
+    static final long TCP_ONLY_RANK_OFFSET = 1_000_000L;
 
     /**
      * Creates a tester backed by a fixed pool of daemon threads.
@@ -111,10 +151,15 @@ public class LatencyTester {
      * @return the latency, or empty when the server was not measured
      */
     public java.util.OptionalLong lastLatency(String serverId) {
-        return lastResult(serverId)
-                .map(result -> java.util.OptionalLong.of(
-                        result.reachable() ? result.millis() : Long.MAX_VALUE))
-                .orElse(java.util.OptionalLong.empty());
+        Result result = serverId == null ? null : lastResults.get(serverId);
+        if (result == null || !result.measured()) {
+            return java.util.OptionalLong.empty();
+        }
+        if (!result.reachable()) {
+            return java.util.OptionalLong.of(Long.MAX_VALUE);
+        }
+        return java.util.OptionalLong.of(result.throughProxy()
+                ? result.millis() : TCP_ONLY_RANK_OFFSET + result.millis());
     }
 
     private Result measureBest(ServerConfig server) {
@@ -145,6 +190,17 @@ public class LatencyTester {
                     // The core cannot test this one; the address is all there is.
                 }
             }
+            if (endpoint.tun()) {
+                // The app's own connect would go through the tunnel, and time
+                // the proxy's route to the server rather than the server.
+                return Result.notMeasured();
+            }
+        }
+        if (server.getProtocol() == Protocol.HYSTERIA2
+                || server.getProtocol() == Protocol.WIREGUARD) {
+            // UDP: a TCP connect to its port fails whatever the server is
+            // doing, and every such server read "timeout" and sorted last.
+            return Result.notMeasured();
         }
         return new Result(measureLatency(server), false);
     }
