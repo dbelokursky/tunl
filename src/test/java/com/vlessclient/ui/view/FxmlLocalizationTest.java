@@ -50,11 +50,13 @@ public class FxmlLocalizationTest extends ApplicationTest {
 
     /**
      * Literals that are the same in every language: an acronym, a shell
-     * command, a uTLS fingerprint name shown as a sample. Anything whose
+     * command, a uTLS fingerprint name shown as a sample, the direct DNS
+     * field's {@code system}, a keyword it takes as typed. Anything whose
      * Russian translation is spelled exactly like the English (TLS, Reality)
      * is accepted through the bundle itself.
      */
-    private static final Set<String> NEUTRAL = Set.of("ALPN", "brew install sing-box", "chrome");
+    private static final Set<String> NEUTRAL =
+            Set.of("ALPN", "brew install sing-box", "chrome", "system");
 
     private static final List<String> VIEWS = List.of(
             "/fxml/MainView.fxml", "/fxml/DashboardView.fxml", "/fxml/ServersView.fxml",

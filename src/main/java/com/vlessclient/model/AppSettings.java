@@ -92,8 +92,24 @@ public class AppSettings {
     @JsonProperty("proxy_dns")
     private String proxyDns = "https://1.1.1.1/dns-query";
 
+    /**
+     * The direct DNS value that means the operating system's resolver: the
+     * one the network the machine is on offers, which is what the sites the
+     * rules send direct are resolved by anyway, from the same address.
+     */
+    public static final String SYSTEM_DNS = "system";
+
+    /**
+     * Direct DNS until 1.22: AliDNS over DoH. Every name the rules send
+     * direct (a .ru bank, Gosuslugi, Yandex) went from the user's real
+     * address to Alibaba's resolver, answers came from its view of the CDNs,
+     * and where DoH to it was blocked those sites stopped resolving. Settings
+     * still carrying it move to {@link #SYSTEM_DNS}.
+     */
+    public static final String RETIRED_DIRECT_DNS_DEFAULT = "https://223.5.5.5/dns-query";
+
     @JsonProperty("direct_dns")
-    private String directDns = "https://223.5.5.5/dns-query";
+    private String directDns = SYSTEM_DNS;
 
     @JsonProperty("dns_strategy")
     private String dnsStrategy = "prefer_ipv4";
