@@ -340,6 +340,53 @@ class DefaultAppControlServiceTest {
         assertThat(store.getSettings().getCoreLogLevel()).isEqualTo(CoreLogLevel.INFO);
     }
 
+    /**
+     * The settings MCP could set but never report back, or neither: an agent
+     * that changed one had no way to see it had, or what it was before.
+     */
+    @Test
+    void setSetting_theKeysThatHadDriftedAreSetAndReportedBack() throws Exception {
+        JsonMapper json = JsonMapper.builder().build();
+
+        service.setSetting("server_selection", stringNode("auto_best"));
+        service.setSetting("system_proxy_auto_config", json.getNodeFactory().booleanNode(false));
+        service.setSetting("tun_ipv4_address", stringNode("172.20.0.1/30"));
+        SettingsInfo info = service.setSetting("tunIpv6Enabled",
+                json.getNodeFactory().booleanNode(true));
+
+        assertThat(info.serverSelection()).isEqualTo("auto_best");
+        assertThat(info.systemProxyAutoConfig()).isFalse();
+        assertThat(info.tunIpv4Address()).isEqualTo("172.20.0.1/30");
+        assertThat(info.tunIpv6Enabled()).isTrue();
+        assertThat(store.getSettings().getServerSelection())
+                .isEqualTo(com.vlessclient.model.ServerSelection.AUTO_BEST);
+    }
+
+    @Test
+    void setSetting_refusesAValueTheSettingWouldMisread() {
+        // "yes" read as false: the setting went off and the call reported success.
+        assertThatThrownBy(() -> service.setSetting("auto_connect", stringNode("yes")))
+                .isInstanceOf(McpToolException.class).hasMessageContaining("true or false");
+        assertThatThrownBy(() -> service.setSetting("server_selection", stringNode("fastest")))
+                .isInstanceOf(McpToolException.class).hasMessageContaining("single, auto_best");
+        for (String network : new String[] {"172.20.0.1", "172.20.0.1/31", "fd00::1/126",
+                "tun0/30", "172.20.0.1/x"}) {
+            assertThatThrownBy(() -> service.setSetting("tun_ipv4_address", stringNode(network)))
+                    .as(network)
+                    .isInstanceOf(McpToolException.class).hasMessageContaining("IPv4 network");
+        }
+        assertThat(store.getSettings().isAutoConnect()).isFalse();
+        assertThat(store.getSettings().getServerSelection())
+                .isEqualTo(com.vlessclient.model.ServerSelection.SINGLE);
+    }
+
+    @Test
+    void setSetting_anUnknownKeyIsToldEveryKeyThereIs() {
+        assertThatThrownBy(() -> service.setSetting("colour", stringNode("red")))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining(String.join(", ", McpSettings.writableKeys()));
+    }
+
     @Test
     void getSettings_reportsTheCoreLogLevel() {
         store.getSettings().setCoreLogLevel(CoreLogLevel.ERROR);

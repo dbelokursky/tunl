@@ -21,6 +21,13 @@ package com.vlessclient.service.mcp;
  * @param mcpEnabled       whether the MCP server is enabled
  * @param mcpPort          MCP server port
  * @param mcpAllowMutations whether mutating MCP tools are permitted
+ * @param serverSelection  {@code single} (the active server) or {@code auto_best}
+ *                         (the fastest, picked by the core)
+ * @param systemProxyAutoConfig whether connecting in system-proxy mode sets the
+ *                         OS proxy
+ * @param tunIpv4Address   the TUN device's IPv4 network
+ * @param tunIpv6Enabled   whether the TUN device takes IPv6 (only where the
+ *                         machine has an IPv6 uplink)
  */
 public record SettingsInfo(
         String theme,
@@ -38,5 +45,9 @@ public record SettingsInfo(
         boolean healthCheck,
         boolean mcpEnabled,
         int mcpPort,
-        boolean mcpAllowMutations) {
+        boolean mcpAllowMutations,
+        String serverSelection,
+        boolean systemProxyAutoConfig,
+        String tunIpv4Address,
+        boolean tunIpv6Enabled) {
 }

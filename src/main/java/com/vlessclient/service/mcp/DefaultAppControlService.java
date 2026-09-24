@@ -3,7 +3,6 @@ package com.vlessclient.service.mcp;
 import com.vlessclient.app.I18n;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
-import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.RoutingRule;
@@ -256,7 +255,9 @@ public class DefaultAppControlService implements AppControlService {
                 s.getProxyDns(), s.getDirectDns(), s.getDnsStrategy(),
                 s.getTunInterfaceName(), s.getCoreLogLevel().getValue(),
                 s.isHealthCheckEnabled(),
-                s.isMcpEnabled(), s.getMcpPort(), s.isMcpAllowMutations());
+                s.isMcpEnabled(), s.getMcpPort(), s.isMcpAllowMutations(),
+                s.getServerSelection().getValue(), s.isSystemProxyAutoConfig(),
+                s.getTunIpv4Address(), s.isTunIpv6Enabled());
     }
 
     @Override
@@ -444,7 +445,7 @@ public class DefaultAppControlService implements AppControlService {
         FxExecutor.run(() -> {
             AppSettings s = configStore.getSettings();
             try {
-                applySetting(s, key, value);
+                McpSettings.apply(s, key, value);
             } catch (McpToolException e) {
                 rejected[0] = e;
                 return;
@@ -456,37 +457,6 @@ public class DefaultAppControlService implements AppControlService {
         }
         ensureSaved();
         return getSettings();
-    }
-
-    private void applySetting(AppSettings s, String key, JsonNode value)
-            throws McpToolException {
-        switch (key.toLowerCase()) {
-            case "theme" -> s.setTheme(asText(value, key));
-            case "language" -> s.setLanguage(asText(value, key));
-            case "auto_connect", "autoconnect" -> s.setAutoConnect(value.asBoolean());
-            case "socks_port", "socksport" -> s.setSocksPort(asPort(value, key));
-            case "http_port", "httpport" -> s.setHttpPort(asPort(value, key));
-            case "clash_api_port", "clashapiport" -> s.setClashApiPort(asPort(value, key));
-            case "proxy_dns", "proxydns" -> s.setProxyDns(asText(value, key));
-            case "direct_dns", "directdns" -> s.setDirectDns(asText(value, key));
-            case "dns_strategy", "dnsstrategy" -> s.setDnsStrategy(asText(value, key));
-            case "tun_interface_name", "tuninterfacename" ->
-                    s.setTunInterfaceName(asText(value, key));
-            case "tun_ipv6_enabled", "tunipv6enabled" -> s.setTunIpv6Enabled(value.asBoolean());
-            case "core_log_level", "coreloglevel" ->
-                    s.setCoreLogLevel(asCoreLogLevel(value, key));
-            case "health_check_enabled", "healthcheckenabled" ->
-                    s.setHealthCheckEnabled(value.asBoolean());
-            case "mcp_allow_mutations", "mcpallowmutations" ->
-                    s.setMcpAllowMutations(value.asBoolean());
-            default -> throw new McpToolException("Setting '" + key + "' is not settable via MCP. "
-                    + "Allowed: theme, language, auto_connect, socks_port, http_port, "
-                    + "clash_api_port, proxy_dns, direct_dns, dns_strategy, tun_interface_name, "
-                    + "tun_ipv6_enabled, core_log_level, health_check_enabled, "
-                    + "mcp_allow_mutations. "
-                    + "(mcp_enabled/mcp_port require the Settings screen — they restart "
-                    + "the server.)");
-        }
     }
 
     @Override
@@ -541,36 +511,8 @@ public class DefaultAppControlService implements AppControlService {
                 s.getAddress(), s.getPort(), s.isActive());
     }
 
-    private String asText(JsonNode value, String key) throws McpToolException {
-        if (!value.isString()) {
-            throw new McpToolException("Setting '" + key + "' expects a string.");
-        }
-        return value.asString();
-    }
 
-    private int asPort(JsonNode value, String key) throws McpToolException {
-        if (!value.isInt() || value.asInt() < 1 || value.asInt() > 65535) {
-            throw new McpToolException("Setting '" + key + "' expects a port (1-65535).");
-        }
-        return value.asInt();
-    }
 
-    /**
-     * Unlike {@link CoreLogLevel#fromValue(String)}, which forgives an unknown
-     * value so a settings file can never block start-up, this rejects one: an
-     * agent that asked for {@code verbose} and was silently given {@code info}
-     * would go on to read a log that does not hold what it went looking for.
-     */
-    private CoreLogLevel asCoreLogLevel(JsonNode value, String key) throws McpToolException {
-        String raw = asText(value, key);
-        for (CoreLogLevel level : CoreLogLevel.values()) {
-            if (level.getValue().equalsIgnoreCase(raw.trim())) {
-                return level;
-            }
-        }
-        throw new McpToolException("Setting '" + key
-                + "' expects one of: debug, info, warn, error.");
-    }
 
     private RoutingRule.RuleType parseRuleType(String type) throws McpToolException {
         if (type == null) {
