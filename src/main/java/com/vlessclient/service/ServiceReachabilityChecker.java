@@ -76,8 +76,28 @@ public class ServiceReachabilityChecker {
         ProbeResult probe(HealthCheckTarget target, int httpProxyPort);
     }
 
+    /**
+     * Where probes go when the route rules would send them past the tunnel: a
+     * proxy group of the core, asked through its Clash API.
+     *
+     * @param httpPort    the local HTTP inbound, for a host:port target, which
+     *                    is no URL the group can fetch
+     * @param controlPort the core's Clash API port
+     * @param secret      the Clash API secret
+     * @param group       the group to measure through
+     */
+    public record GroupRoute(int httpPort, int controlPort, String secret, String group) {
+    }
+
+    /** Seam over probing one target through a proxy group; tests inject a stub. */
+    @FunctionalInterface
+    public interface GroupProbeExecutor {
+        ProbeResult probe(HealthCheckTarget target, GroupRoute route);
+    }
+
     private final ExecutorService executor;
     private final ProbeExecutor probeExecutor;
+    private final GroupProbeExecutor groupProbeExecutor;
 
     private volatile HttpClient cachedClient;
     private volatile int cachedPort = -1;
@@ -93,9 +113,24 @@ public class ServiceReachabilityChecker {
      *                      the real HTTP-through-proxy probe
      */
     public ServiceReachabilityChecker(ProbeExecutor probeExecutor) {
+        this(probeExecutor, null);
+    }
+
+    /**
+     * Creates a checker using the given probe implementations.
+     *
+     * @param probeExecutor      custom probe through the HTTP inbound, or
+     *                           {@code null} for the real one
+     * @param groupProbeExecutor custom probe through a proxy group, or
+     *                           {@code null} for the real Clash API one
+     */
+    public ServiceReachabilityChecker(ProbeExecutor probeExecutor,
+                                      GroupProbeExecutor groupProbeExecutor) {
         this.executor = Executors.newFixedThreadPool(POOL_SIZE,
                 DaemonThreads.factory("reachability-checker"));
         this.probeExecutor = probeExecutor != null ? probeExecutor : this::realProbe;
+        this.groupProbeExecutor = groupProbeExecutor != null
+                ? groupProbeExecutor : new ClashGroupProbe();
     }
 
     /**
@@ -121,6 +156,60 @@ public class ServiceReachabilityChecker {
                     }
                     return results;
                 });
+    }
+
+    /**
+     * Probes every target through a proxy group of the core instead of the
+     * local HTTP inbound, which the route rules apply to.
+     *
+     * <p>In the mode that sends only the blocked lists through the tunnel,
+     * those rules sent the probes direct: Google answered past a dead server,
+     * the verdict never read broken, and recovery never restarted a tunnel
+     * that carried nothing. A host:port target, which is no URL for the group
+     * to fetch, still goes through the inbound.</p>
+     *
+     * @param targets the targets
+     * @param route   the group and the core's Clash API
+     * @return one result per target, in order
+     */
+    public CompletableFuture<List<ProbeResult>> checkAllThroughGroup(
+            List<HealthCheckTarget> targets, GroupRoute route) {
+        if (targets == null || targets.isEmpty()) {
+            return CompletableFuture.completedFuture(List.of());
+        }
+        List<CompletableFuture<ProbeResult>> futures = targets.stream()
+                .map(target -> CompletableFuture.supplyAsync(
+                        () -> target.getUrl() != null && parseHostPort(target.getUrl()) != null
+                                ? probeExecutor.probe(target, route.httpPort())
+                                : groupProbeExecutor.probe(target, route), executor))
+                .toList();
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .thenApply(v -> futures.stream().map(CompletableFuture::join).toList());
+    }
+
+    /** The real group probe: the core requests the target through the group. */
+    private static final class ClashGroupProbe implements GroupProbeExecutor {
+
+        private final ClashApiDelayProbe delays = new ClashApiDelayProbe();
+
+        @Override
+        public ProbeResult probe(HealthCheckTarget target, GroupRoute route) {
+            String name = target.getName() != null ? target.getName() : target.getUrl();
+            String url = target.getUrl();
+            if (url == null || url.isBlank()) {
+                return new ProbeResult(name, url, false, -1, "no url");
+            }
+            ClashApiDelayProbe.Answer answer =
+                    delays.measure(route.controlPort(), route.secret(), route.group(), url);
+            return switch (answer) {
+                case ClashApiDelayProbe.Answer.Delay delay ->
+                        new ProbeResult(name, url, true, delay.millis(), "via " + route.group());
+                case ClashApiDelayProbe.Answer.Failed failed ->
+                        new ProbeResult(name, url, false, -1, "the proxy did not carry it");
+                case ClashApiDelayProbe.Answer.NoAnswer none ->
+                        new ProbeResult(name, url, false, -1, "no answer from the core");
+            };
+        }
     }
 
     /**

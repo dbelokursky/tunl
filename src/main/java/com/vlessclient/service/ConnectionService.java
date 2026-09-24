@@ -6,6 +6,7 @@ import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.model.ServerSelection;
 import com.vlessclient.service.outbound.CoreSettings;
 import com.vlessclient.service.outbound.OutboundTags;
 import java.io.IOException;
@@ -150,6 +151,8 @@ public class ConnectionService {
     private volatile Run run;
     /** The ports the last core listened on, which a restart may find in its TIME_WAIT. */
     private volatile Set<Integer> lastCorePorts = Set.of();
+    /** The server the running core was last pointed at, by a start or a live switch. */
+    private volatile String appliedServerId;
 
     /** What the running core was started without, for the UI; changed on the FX thread. */
     private final ReadOnlyObjectWrapper<List<SkippedServer>> skippedServers =
@@ -196,6 +199,9 @@ public class ConnectionService {
                 movedPorts.set(List.of());
             }
             recovery.onConnectionState(state);
+            if (state == ConnectionState.CONNECTED) {
+                followActiveServer();
+            }
         };
         bindEngine(engine);
     }
@@ -439,6 +445,7 @@ public class ConnectionService {
             log.warn("sing-box already running: {}", e.getMessage());
             return new ConnectAttempt(Outcome.ALREADY_RUNNING, active);
         }
+        appliedServerId = active.getId();
         publishSkipped(skipped);
         publishMoved(moved);
         return new ConnectAttempt(Outcome.STARTED, active, skipped);
@@ -538,6 +545,42 @@ public class ConnectionService {
         }
     }
 
+    /**
+     * Applies a server picked while the core was still starting.
+     *
+     * <p>A pick switches the running core, but only once it runs: one made
+     * while the tunnel was connecting, by the user or during a recovery
+     * restart, changed the list and the tray while the traffic stayed on the
+     * server the start had begun with, and no banner said so. Called as the
+     * core reaches CONNECTED; the automatic selection has nothing pinned to
+     * follow.</p>
+     */
+    void followActiveServer() {
+        String applied = appliedServerId;
+        if (applied == null || configStore == null
+                || configStore.getSettings().getServerSelection() != ServerSelection.SINGLE) {
+            return;
+        }
+        ServerConfig active = FxExecutor.get(() -> configStore.getServers().stream()
+                .filter(ServerConfig::isActive).findFirst().orElse(null));
+        if (active == null || active.getId().equals(applied)) {
+            return;
+        }
+        log.info("The active server changed while connecting; applying {}", active.getName());
+        Thread.startVirtualThread(() -> {
+            try {
+                switchToActiveServer();
+            } catch (IOException | RuntimeException e) {
+                log.warn("Could not apply the server picked while connecting", e);
+            }
+        });
+    }
+
+    /** The server the running core was last pointed at, or null before any start. */
+    String appliedServerId() {
+        return appliedServerId;
+    }
+
     /** The group tag used by the current process, for live status queries. */
     public String getProxyGroupTag() {
         Run current = run;
@@ -577,6 +620,7 @@ public class ConnectionService {
                 }
                 // The core kept running, so no state change will tell recovery.
                 recovery.keptUp(request);
+                appliedServerId = active.getId();
                 return new ConnectAttempt(Outcome.SWITCHED, active);
             }
             if (!recovery.isWanted(request)) {
