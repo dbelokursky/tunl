@@ -17,11 +17,14 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -165,6 +168,32 @@ class ConnectionServiceTest {
 
     private RecordingEngine engine() {
         return new RecordingEngine(tempDir.resolve("sing-box"));
+    }
+
+    /**
+     * A stopped root core leaves its closed connections in TIME_WAIT, and
+     * macOS refused the app's own bind while they lasted, though the next core
+     * bound the port fine: every quick TUN restart moved the control port up
+     * by one. A port the last core had that nothing listens on is free, bind
+     * or no bind. A socket that holds a port without listening stands in for
+     * TIME_WAIT here: it refuses the bind and accepts no connection.
+     */
+    @Test
+    void aPortTheLastCoreHadIsFreeUnlessAProgramListensOnIt() throws Exception {
+        try (Socket holder = new Socket()) {
+            holder.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
+            int port = holder.getLocalPort();
+
+            assertThat(ConnectionService.isFree(port, Set.of()))
+                    .as("somebody else's port that will not bind").isFalse();
+            assertThat(ConnectionService.isFree(port, Set.of(port)))
+                    .as("the last core's, nothing listening").isTrue();
+        }
+        try (ServerSocket listener = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            int port = listener.getLocalPort();
+            assertThat(ConnectionService.isFree(port, Set.of(port)))
+                    .as("the last core's, but a program took it since").isFalse();
+        }
     }
 
     @Test

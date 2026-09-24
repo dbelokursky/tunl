@@ -2,7 +2,10 @@ package com.vlessclient.app;
 
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TrayIconService;
+import com.vlessclient.service.UpdateManager;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -20,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class EngineReRegistrationTest {
 
     private TrayIconService previousTray;
+    private UpdateManager previousUpdates;
 
     @AfterEach
     void restoreLocator() {
@@ -27,6 +31,37 @@ class EngineReRegistrationTest {
         // later test in this JVM.
         if (previousTray != null) {
             ServiceLocator.register(TrayIconService.class, previousTray);
+        }
+        if (previousUpdates != null) {
+            ServiceLocator.register(UpdateManager.class, previousUpdates);
+        }
+    }
+
+    /**
+     * The check on connect followed the engine that existed at startup, which
+     * on a first run was none: after the core was installed from the
+     * dashboard, no connect checked for updates for the rest of the run.
+     */
+    @Test
+    @DisplayName("registering an engine makes its connects check for updates")
+    void registeringAnEngineFollowsItForUpdateChecks() {
+        previousUpdates = ServiceLocator.find(UpdateManager.class).orElse(null);
+        RecordingUpdates updates = new RecordingUpdates();
+        ServiceLocator.register(UpdateManager.class, updates);
+
+        ServiceLocator.registerSingBoxEngine(Path.of("target", "no-such-sing-box"));
+
+        assertThat(updates.followed).containsExactly(ServiceLocator.get(SingBoxEngine.class));
+    }
+
+    /** Records which engines it was asked to follow. */
+    private static final class RecordingUpdates extends UpdateManager {
+
+        private final List<SingBoxEngine> followed = new ArrayList<>();
+
+        @Override
+        public void checkWhenConnected(SingBoxEngine engine) {
+            followed.add(engine);
         }
     }
 

@@ -1,6 +1,7 @@
 package com.vlessclient.service;
 
 import com.vlessclient.app.AppVersion;
+import com.vlessclient.model.ConnectionState;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -58,6 +59,15 @@ public class UpdateManager {
      * A tunnel that flaps would otherwise check on every reconnect.
      */
     static final long EVENT_CHECK_THROTTLE_MS = 15L * 60 * 1000;
+
+    /**
+     * How soon the next event may check again after one that could not reach
+     * GitHub. The claim is taken before the check runs, and a check fired
+     * while the tunnel was still coming up failed and held it for the whole
+     * quarter hour: for a user whose network blocks GitHub, the next chance
+     * the tunnel gave went unused.
+     */
+    static final long FAILED_EVENT_CHECK_RETRY_MS = 60L * 1000;
 
     /** When an event last claimed a check; 0 = never. */
     private volatile long lastEventCheckMs;
@@ -158,6 +168,24 @@ public class UpdateManager {
     }
 
     /**
+     * Checks each time {@code engine} brings a tunnel up.
+     *
+     * <p>For a user whose network throttles or blocks GitHub — the reason
+     * this app exists — that is the moment a check can succeed at all, and no
+     * timer can know it. {@link #checkAfterEvent()} throttles the trigger, so
+     * a flapping tunnel does not turn into a flapping check.</p>
+     *
+     * @param engine the engine whose tunnel to follow
+     */
+    public void checkWhenConnected(SingBoxEngine engine) {
+        engine.connectionStateProperty().addListener((o, was, is) -> {
+            if (is == ConnectionState.CONNECTED) {
+                checkAfterEvent();
+            }
+        });
+    }
+
+    /**
      * Checks because something happened, not because the timer said so.
      *
      * <p>Wired to the tunnel coming up, which is the moment worth reacting
@@ -167,14 +195,17 @@ public class UpdateManager {
      * check is worth making.</p>
      */
     public void checkAfterEvent() {
-        if (!claimEventCheck(System.currentTimeMillis())) {
+        long claimedAt = System.currentTimeMillis();
+        if (!claimEventCheck(claimedAt)) {
             return;
         }
         // Onto the checker thread: callers are the FX thread or whatever
         // thread the engine changed state on, and neither should wait on HTTP.
         scheduler.execute(() -> {
             try {
-                checkForUpdates();
+                if (checkForUpdates() == CheckResult.UNREACHABLE) {
+                    eventCheckFailed(claimedAt);
+                }
                 autoDownloadIfAllowed();
             } catch (Exception e) {
                 log.warn("Event-triggered update check failed", e);
@@ -194,6 +225,19 @@ public class UpdateManager {
         }
         lastEventCheckMs = nowMs;
         return true;
+    }
+
+    /**
+     * Shortens the claim of an event check that could not reach GitHub to
+     * {@link #FAILED_EVENT_CHECK_RETRY_MS}, unless a later event has claimed
+     * a check since.
+     *
+     * @param claimedAtMs when the failed check was claimed
+     */
+    synchronized void eventCheckFailed(long claimedAtMs) {
+        if (lastEventCheckMs == claimedAtMs) {
+            lastEventCheckMs = claimedAtMs - EVENT_CHECK_THROTTLE_MS + FAILED_EVENT_CHECK_RETRY_MS;
+        }
     }
 
     /**

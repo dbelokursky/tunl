@@ -26,6 +26,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 @ExtendWith(FxToolkitExtension.class)
 class LogReaderTest {
 
+    /**
+     * The core logs "started" for each inbound it brings up, before the rest
+     * are; only its own line says the whole core is up. Taking the first read
+     * the session as Connected before the core answered, and recovery tore the
+     * fresh tunnel down seconds later.
+     */
+    @Test
+    void onlyTheCoresOwnStartedLineCounts() {
+        assertThat(LogReader.isStartedMessage(
+                "+0200 2026-09-24 19:02:06 INFO inbound/tun[tun-in]: started at utun99"))
+                .isFalse();
+        assertThat(LogReader.isStartedMessage(
+                "INFO inbound/socks[socks-in]: tcp server started at 127.0.0.1:1080"))
+                .isFalse();
+        assertThat(LogReader.isStartedMessage(
+                "+0200 2026-09-24 19:02:07 INFO sing-box started (1.37s)")).isTrue();
+    }
+
     @Test
     void appendsLinesFromInputStreamToObservableList() throws Exception {
         String input = "line one\nline two\nline three\n";
