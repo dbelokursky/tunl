@@ -15,6 +15,7 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import javafx.application.Platform;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -250,6 +251,60 @@ class TunnelRecoveryServiceTest {
 
         recovery.connectionRequested();
         assertThat(recovery.stopReason()).as("the reason once the user connects again").isNull();
+    }
+
+    /**
+     * With the Wi-Fi gone nothing answers, and a restart only cut what still
+     * worked and grew the backoff toward five minutes. It waits for a network,
+     * at the same delay, and the banner says so.
+     */
+    @Test
+    void withoutANetworkTheRestartWaitsForOne() throws Exception {
+        AtomicBoolean networkUp = new AtomicBoolean();
+        recovery.close();
+        recovery = new TunnelRecoveryService(() -> settings, guard -> {
+            if (guard.getAsBoolean()) {
+                starts.incrementAndGet();
+            }
+            return false;
+        }, restartPrompts::get, networkUp::get, scheduler);
+        recovery.connectionRequested();
+
+        recovery.onHealth(TunnelHealth.BROKEN);
+        scheduler.jobs.get(0).run();
+        scheduler.jobs.get(1).run();
+
+        assertThat(starts).as("no restart without a network").hasValue(0);
+        assertThat(published().reason()).isEqualTo(TunnelRecoveryService.Reason.NO_NETWORK);
+        assertThat(scheduler.jobs).extracting(job -> job.seconds)
+                .as("the wait does not grow").containsExactly(10L, 10L, 10L);
+
+        networkUp.set(true);
+        scheduler.jobs.get(2).run();
+        assertThat(starts).hasValue(1);
+    }
+
+    /** Every retry read "all services unreachable", a crash of the core included. */
+    @Test
+    void aRetrySaysWhyItWasScheduled() throws Exception {
+        recovery.onConnectionState(ConnectionState.ERROR);
+        assertThat(published().reason()).isEqualTo(TunnelRecoveryService.Reason.CORE_STOPPED);
+
+        scheduler.jobs.getFirst().run();
+
+        assertThat(published().reason()).isEqualTo(TunnelRecoveryService.Reason.RESTART_FAILED);
+    }
+
+    /** The retry as published, once an update queued to the FX thread has run. */
+    private TunnelRecoveryService.Retry published() throws InterruptedException {
+        try {
+            CountDownLatch flushed = new CountDownLatch(1);
+            Platform.runLater(flushed::countDown);
+            assertThat(flushed.await(5, TimeUnit.SECONDS)).isTrue();
+        } catch (IllegalStateException toolkitNotRunning) {
+            // Published in place.
+        }
+        return recovery.retryProperty().get();
     }
 
     private static final class ManualScheduler extends ScheduledThreadPoolExecutor {

@@ -11,6 +11,7 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
@@ -597,10 +598,19 @@ public class SingBoxInstaller {
         return fileName != null && fileName.toString().equals(expected);
     }
 
+    /**
+     * Makes the core executable by its owner alone. World-executable, the
+     * Linux core, which the TUN setup grants CAP_NET_ADMIN, handed that
+     * capability to any user of the machine who ran it.
+     */
     void makeExecutable(Path binary) throws IOException {
-        File f = binary.toFile();
-        if (!f.setExecutable(true, false)) {
-            throw new IOException("Failed to set executable bit on " + binary);
+        try {
+            Files.setPosixFilePermissions(binary, PosixFilePermissions.fromString("rwx------"));
+        } catch (UnsupportedOperationException notPosix) {
+            File f = binary.toFile();
+            if (!f.setExecutable(true, true)) {
+                throw new IOException("Failed to set executable bit on " + binary);
+            }
         }
     }
 
