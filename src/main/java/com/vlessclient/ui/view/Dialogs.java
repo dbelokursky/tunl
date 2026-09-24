@@ -1,9 +1,12 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
+import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.service.ThemeManager;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.Dialog;
 import javafx.scene.control.DialogPane;
 
 /**
@@ -29,7 +32,23 @@ public final class Dialogs {
     public static Alert alert(Alert.AlertType type) {
         Alert alert = new Alert(type);
         localizeButtons(alert.getDialogPane());
+        dressFrame(alert);
         return alert;
+    }
+
+    /**
+     * Paints the dialog's title bar in the theme the app wears now.
+     *
+     * <p>The owner lends a dialog its stylesheets, inside JavaFX, but not its
+     * color scheme, which is what JavaFX paints the native frame from. Left
+     * alone that is the platform's value, which misses the macOS appearance,
+     * and in the dark theme every alert came up under a white title bar.</p>
+     *
+     * @param dialog a dialog of the app's own making
+     */
+    static void dressFrame(Dialog<?> dialog) {
+        ServiceLocator.find(ThemeManager.class).ifPresent(themes -> dialog.getDialogPane()
+                .getScene().getPreferences().setColorScheme(themes.currentColorScheme()));
     }
 
     /**

@@ -42,12 +42,14 @@ final class DialogStage extends Stage {
 
     /**
      * Puts {@code scene} in the stage, dressed in the stylesheets the app wears
-     * now: a snapshot, as ThemeManager hands every scene it does not own.
+     * now and a title bar to match: a snapshot, as ThemeManager hands every
+     * scene it does not own.
      */
     void setThemedScene(Scene scene) {
         Optional<ThemeManager> themes = ServiceLocator.find(ThemeManager.class);
         if (themes.isPresent()) {
             scene.getStylesheets().addAll(themes.get().currentStylesheets());
+            scene.getPreferences().setColorScheme(themes.get().currentColorScheme());
         } else {
             log.debug("ThemeManager unavailable; '{}' keeps the default styling", getTitle());
         }
