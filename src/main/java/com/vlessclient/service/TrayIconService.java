@@ -356,10 +356,15 @@ public class TrayIconService {
         TunnelStatus status = TunnelStatus.of(state, currentHealth());
 
         trayIcon.setImage(createStatusIcon(status));
-        trayIcon.setToolTip("Tunl - " + statusLabel(status));
+        // While the user wants a tunnel that carries nothing, traffic goes
+        // out direct; the status alone ("Connecting", "Error") did not say it.
+        String label = AppHttpClients.isTunnelWantedButNotCarrying()
+                ? statusLabel(status) + " " + I18n.get("tray.status.unprotected")
+                : statusLabel(status);
+        trayIcon.setToolTip("Tunl - " + label);
 
         if (statusItem != null) {
-            statusItem.setLabel(statusLabel(status));
+            statusItem.setLabel(label);
         }
         if (toggleConnectItem != null) {
             // Keyed off the process state, not the status: a tunnel that
