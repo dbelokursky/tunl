@@ -12,9 +12,11 @@ import org.slf4j.LoggerFactory;
  * <ol>
  *   <li>Preferred: sudoers NOPASSWD is already installed (one-time setup by
  *       {@link PrivilegeHelper}). The wrapper is spawned directly as the
- *       current user and invokes {@code sudo -n sing-box run -c ...}, so no
- *       password prompt appears. Stop is signalled via the user-writable
- *       stop file.</li>
+ *       current user and runs the root side with {@code sudo -n}, so no
+ *       password prompt appears: the launcher with the config on stdin where
+ *       {@link PrivilegeHelper#usesLauncher()}, {@code sing-box run -c} on
+ *       the published config otherwise. Stop is signalled via the
+ *       user-writable stop file.</li>
  *   <li>Fallback: if NOPASSWD is not available (e.g. user declined the
  *       one-time configure step), spawn the wrapper inside
  *       {@code osascript ... with administrator privileges}. A password
@@ -43,9 +45,14 @@ public final class MacTunLauncher implements TunLauncher {
         }
 
         boolean withoutPrompt = PrivilegeHelper.isConfigured(binary);
-        Process process = withoutPrompt
-                ? startViaSudoNoPassword(binary, configFile, stopSignalFile)
-                : startViaOsascriptPrompt(binary, configFile, stopSignalFile);
+        Process process;
+        if (!withoutPrompt) {
+            process = startViaOsascriptPrompt(binary, configFile, stopSignalFile);
+        } else if (PrivilegeHelper.usesLauncher()) {
+            process = startViaLauncher(binary, configFile, stopSignalFile);
+        } else {
+            process = startViaSudoNoPassword(binary, configFile, stopSignalFile);
+        }
         return new Launched(process, stopSignalFile, !withoutPrompt);
     }
 
@@ -56,7 +63,9 @@ public final class MacTunLauncher implements TunLauncher {
      * server's credentials until the next connect overwrote it — surviving
      * disconnect, app exit and reboot.
      *
-     * <p>The run dir is user-owned, so no privileges are needed to remove it.</p>
+     * <p>The run dir is user-owned, so no privileges are needed to remove it.
+     * The launcher path publishes nothing; this still removes a copy an
+     * earlier connection on the pinned rule left.</p>
      */
     @Override
     public void cleanupSession() {
@@ -69,6 +78,38 @@ public final class MacTunLauncher implements TunLauncher {
             log.warn("Could not remove the published TUN config at {}: {}",
                     published, e.getMessage());
         }
+    }
+
+    /**
+     * Starts sing-box through the root-owned launcher via {@code sudo -n} — no
+     * password prompt. The wrapper's shell, running as the user, opens the
+     * generated config and hands it to the launcher on stdin; the launcher
+     * filters it and runs the core on what is left. No copy is published: the
+     * rule does not name a config path, so the engine's own file serves.
+     */
+    private Process startViaLauncher(Path binary, Path configFile,
+                                     Path stopSignalFile) throws IOException {
+        String shellCommand = launcherWrapperCommand(
+                PrivilegeHelper.launcher(), configFile, stopSignalFile);
+
+        ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", shellCommand);
+        pb.directory(SecureFiles.parentDirectory(binary).toFile());
+        pb.redirectErrorStream(true);
+        Process process = pb.start();
+        log.info("Started sing-box via the TUN launcher (no password prompt)");
+        return process;
+    }
+
+    /**
+     * The wrapper for the launcher path: the same watch as
+     * {@link #sudoWrapperCommand}, around {@code sudo -n <launcher> < config}.
+     * The launcher replaces itself with the core, so the process sudo forwards
+     * TERM/INT to is the core itself.
+     */
+    static String launcherWrapperCommand(Path launcher, Path configFile, Path stopSignalFile) {
+        return watched("sudo -n " + shellQuote(launcher.toString())
+                        + " < " + shellQuote(configFile.toAbsolutePath().toString()),
+                stopSignalFile);
     }
 
     /**
@@ -115,21 +156,9 @@ public final class MacTunLauncher implements TunLauncher {
      */
     static String sudoWrapperCommand(Path elevatedBinary, Path publishedConfig,
                                      Path stopSignalFile) {
-        long parentPid = ProcessHandle.current().pid();
-        String singBoxCmd = shellQuote(elevatedBinary.toAbsolutePath().toString());
-        String configPath = shellQuote(publishedConfig.toString());
-        String stopPath = shellQuote(stopSignalFile.toAbsolutePath().toString());
-
-        return String.format(
-                "trap 'kill ${SBPID:-$!} 2>/dev/null; exit 0' EXIT INT TERM; "
-                        + "sudo -n %s run -c %s & SBPID=$!; "
-                        + "while kill -0 $SBPID 2>/dev/null "
-                        + "&& kill -0 %d 2>/dev/null "
-                        + "&& [ ! -f %s ]; do sleep 0.3; done; "
-                        + "kill $SBPID 2>/dev/null; "
-                        + "wait $SBPID 2>/dev/null; "
-                        + "rm -f %s",
-                singBoxCmd, configPath, parentPid, stopPath, stopPath);
+        return watched("sudo -n " + shellQuote(elevatedBinary.toAbsolutePath().toString())
+                        + " run -c " + shellQuote(publishedConfig.toString()),
+                stopSignalFile);
     }
 
     /**
@@ -162,21 +191,31 @@ public final class MacTunLauncher implements TunLauncher {
      */
     static String osascriptWrapperCommand(Path binary, Path configFile,
                                           Path stopSignalFile) {
+        return watched(shellQuote(binary.toAbsolutePath().toString())
+                        + " run -c " + shellQuote(configFile.toAbsolutePath().toString()),
+                stopSignalFile);
+    }
+
+    /**
+     * Runs {@code start} in the background and tears it down when the core
+     * exits, the stop file appears, or the app's pid is gone. The trap is set
+     * before the core starts, so no signal can land between the two and leave
+     * the core orphaned.
+     */
+    private static String watched(String start, Path stopSignalFile) {
         long parentPid = ProcessHandle.current().pid();
-        String singBoxCmd = shellQuote(binary.toAbsolutePath().toString());
-        String configPath = shellQuote(configFile.toAbsolutePath().toString());
         String stopPath = shellQuote(stopSignalFile.toAbsolutePath().toString());
 
         return String.format(
                 "trap 'kill ${SBPID:-$!} 2>/dev/null; exit 0' EXIT INT TERM; "
-                        + "%s run -c %s & SBPID=$!; "
+                        + "%s & SBPID=$!; "
                         + "while kill -0 $SBPID 2>/dev/null "
                         + "&& kill -0 %d 2>/dev/null "
                         + "&& [ ! -f %s ]; do sleep 0.3; done; "
                         + "kill $SBPID 2>/dev/null; "
                         + "wait $SBPID 2>/dev/null; "
                         + "rm -f %s",
-                singBoxCmd, configPath, parentPid, stopPath, stopPath);
+                start, parentPid, stopPath, stopPath);
     }
 
     /**
