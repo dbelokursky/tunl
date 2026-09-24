@@ -74,7 +74,7 @@ class McpServerBuildTest {
     void buildServer_hidesMutationToolsWhenDisabled() {
         control.settings = new SettingsInfo("system", "en", false, "system_proxy",
                 1080, 1081, 9090, "d", "d", "prefer_ipv4", "utun99", "info",
-                true, true, 55555, false);
+                true, true, 55555, false, "single", true, "172.19.0.1/30", false);
         // The allowMutations supplier reads ConfigStore settings, so flip that store's flag.
         ConfigStore store = new ConfigStore(tempDir);
         store.getSettings().setMcpAllowMutations(false);
