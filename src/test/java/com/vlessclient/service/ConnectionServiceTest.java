@@ -25,6 +25,8 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -773,7 +775,8 @@ class ConnectionServiceTest {
         SingBoxConfigGenerator capturing = new SingBoxConfigGenerator() {
             @Override
             public String generate(List<ServerConfig> candidates, ServerConfig active,
-                                   AppSettings settings, RoutingConfig routing) {
+                                   AppSettings settings, RoutingConfig routing,
+                                   HostFacts host) {
                 captured.add(List.copyOf(candidates));
                 return "{}";
             }
@@ -858,6 +861,33 @@ class ConnectionServiceTest {
         assertThat(service.runsCurrentSettings()).isTrue();
         store.getSettings().setCoreLogLevel(com.vlessclient.model.CoreLogLevel.DEBUG);
         assertThat(service.runsCurrentSettings()).isFalse();
+    }
+
+    /**
+     * The configuration is generated again on every dashboard update to tell
+     * whether the core still matches, and that asked the host afresh on the FX
+     * thread: a host that changed under a run read as a change of the settings
+     * ("restart to apply"), though the user had changed nothing. A run keeps
+     * the facts it started from.
+     */
+    @Test
+    void aRunKeepsTheHostFactsItStartedFrom() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        AtomicInteger asked = new AtomicInteger();
+        AtomicBoolean proxyStore = new AtomicBoolean(true);
+        SingBoxConfigGenerator generator = new SingBoxConfigGenerator(() -> {
+            asked.incrementAndGet();
+            return proxyStore.get();
+        }, () -> true);
+        ConnectionService service =
+                new ConnectionService(store, generator, new RoutingService(), engine());
+
+        assertThat(service.connect().started()).isTrue();
+        proxyStore.set(false);
+
+        assertThat(service.runsCurrentSettings())
+                .as("the host changed under the run, the settings did not").isTrue();
+        assertThat(asked).as("asked once, as the core started").hasValue(1);
     }
 
     /**
@@ -951,7 +981,8 @@ class ConnectionServiceTest {
         SingBoxConfigGenerator capturing = new SingBoxConfigGenerator() {
             @Override
             public String generate(List<ServerConfig> candidates, ServerConfig active,
-                                   AppSettings settings, RoutingConfig routing) {
+                                   AppSettings settings, RoutingConfig routing,
+                                   HostFacts host) {
                 captured.add(routing);
                 return "{}";
             }
@@ -970,7 +1001,8 @@ class ConnectionServiceTest {
         SingBoxConfigGenerator capturing = new SingBoxConfigGenerator() {
             @Override
             public String generate(List<ServerConfig> candidates, ServerConfig active,
-                                   AppSettings settings, RoutingConfig routing) {
+                                   AppSettings settings, RoutingConfig routing,
+                                   HostFacts host) {
                 captured.add(routing);
                 return "{}";
             }

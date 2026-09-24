@@ -568,6 +568,18 @@ class SingBoxConfigGeneratorTunTest {
                 .isEqualTo("ipv4_only");
     }
 
+    /** With the switch off there is nothing to decide, so the network is not asked. */
+    @Test
+    void tunMode_withTheSwitchOffTheNetworkIsNotAsked() {
+        AppSettings settings = tunSettings();
+        settings.setTunIpv6Enabled(false);
+        Ipv6Uplink unasked = () -> {
+            throw new AssertionError("the network was asked");
+        };
+
+        onNetwork(unasked).generate(createVlessServer(), settings);
+    }
+
     @Test
     void tunMode_bootstrapResolverIsTheOsResolver() throws Exception {
         // The proxy server's hostname and remote rule-set hosts must resolve

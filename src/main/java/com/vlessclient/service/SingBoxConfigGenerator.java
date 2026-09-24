@@ -177,9 +177,27 @@ public class SingBoxConfigGenerator {
      */
     public String generate(List<ServerConfig> candidates, ServerConfig active,
                            AppSettings settings, RoutingConfig routingConfig) {
+        return generate(candidates, active, settings, routingConfig, hostFacts());
+    }
+
+    /**
+     * Generates the configuration from facts about the host that the caller
+     * keeps: a running core's, so that generating again to compare asks the
+     * host nothing and reads the host as it was at the start.
+     *
+     * @param candidates    every server the group may use
+     * @param active        the pinned server
+     * @param settings      app settings
+     * @param routingConfig routing rules, or {@code null} for defaults
+     * @param host          what the host was like; see {@link #hostFacts()}
+     * @return the sing-box configuration serialized as a JSON string
+     */
+    public String generate(List<ServerConfig> candidates, ServerConfig active,
+                           AppSettings settings, RoutingConfig routingConfig,
+                           HostFacts host) {
         ObjectNode root = mapper.createObjectNode();
         // Decided once: the device's address and the DNS strategy must agree.
-        boolean tunIpv6 = tunTakesIpv6(settings);
+        boolean tunIpv6 = tunTakesIpv6(settings, host);
 
         root.set("log", buildLog(settings));
 
@@ -187,7 +205,7 @@ public class SingBoxConfigGenerator {
             root.set("dns", buildDns(settings, routingConfig, tunIpv6));
         }
 
-        root.set("inbounds", buildInbounds(settings, tunIpv6));
+        root.set("inbounds", buildInbounds(settings, tunIpv6, host));
 
         // WireGuard is not an outbound anymore: sing-box 1.13 removed the
         // legacy wireguard outbound (deprecated since 1.11) in favor of a
@@ -744,19 +762,22 @@ public class SingBoxConfigGenerator {
      * what the device gives up there is reaching IPv6-only hosts through the
      * proxy, which is rarer than every bypassed site failing.</p>
      */
-    private boolean tunTakesIpv6(AppSettings settings) {
-        if (settings.getProxyMode() != ProxyMode.TUN || !settings.isTunIpv6Enabled()) {
-            return false;
-        }
-        if (ipv6Uplink.isPresent()) {
-            return true;
-        }
-        log.info("TUN IPv6 is on, but no interface holds a global IPv6 address: "
-                + "the device stays IPv4-only so direct routes are not dialled over IPv6");
-        return false;
+    static boolean tunTakesIpv6(AppSettings settings, HostFacts host) {
+        return settings.getProxyMode() == ProxyMode.TUN && settings.isTunIpv6Enabled()
+                && host.ipv6Uplink();
     }
 
-    private ArrayNode buildInbounds(AppSettings settings, boolean tunIpv6) {
+    /**
+     * Fresh facts about this host, each asked the first time a configuration
+     * needs it. A caller that generates again to compare keeps the instance.
+     *
+     * @return facts not yet asked
+     */
+    public HostFacts hostFacts() {
+        return new HostFacts(ipv6Uplink, systemProxySupport);
+    }
+
+    private ArrayNode buildInbounds(AppSettings settings, boolean tunIpv6, HostFacts host) {
         ArrayNode inbounds = mapper.createArrayNode();
 
         if (settings.getProxyMode() == ProxyMode.TUN) {
@@ -837,7 +858,7 @@ public class SingBoxConfigGenerator {
         // serve manually-configured clients.
         if (settings.getProxyMode() == ProxyMode.SYSTEM_PROXY
                 && settings.isSystemProxyAutoConfig()) {
-            if (systemProxySupport.canAutoConfigure()) {
+            if (host.systemProxyAutoConfigurable()) {
                 http.put("set_system_proxy", true);
             } else {
                 // The user asked for the OS proxy and is not getting it. Saying
