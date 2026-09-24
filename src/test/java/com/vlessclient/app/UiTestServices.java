@@ -52,25 +52,27 @@ public final class UiTestServices {
         ShareLinkParser shareLinkParser = ServiceLocator.get(ShareLinkParser.class);
 
         NoNetworkGeoIpDatabase geoIp = new NoNetworkGeoIpDatabase();
-        ServiceLocator.register(GeoIpDatabase.class, geoIp);
+        replace(GeoIpDatabase.class, geoIp, GeoIpDatabase::shutdown);
         ServiceLocator.register(CountryResolver.class, new NoNetworkCountryResolver(geoIp));
 
         NoNetworkTrafficMonitor trafficMonitor = new NoNetworkTrafficMonitor();
-        ServiceLocator.register(TrafficMonitor.class, trafficMonitor);
-        ServiceLocator.register(ProxyGroupMonitor.class, new NoNetworkProxyGroupMonitor());
+        replace(TrafficMonitor.class, trafficMonitor, TrafficMonitor::shutdown);
+        replace(ProxyGroupMonitor.class, new NoNetworkProxyGroupMonitor(),
+                ProxyGroupMonitor::shutdown);
 
         NoNetworkLatencyTester latencyTester = new NoNetworkLatencyTester();
-        ServiceLocator.register(LatencyTester.class, latencyTester);
+        replace(LatencyTester.class, latencyTester, LatencyTester::shutdown);
 
-        ServiceLocator.register(ServiceReachabilityChecker.class,
-                new NoNetworkReachabilityChecker());
+        replace(ServiceReachabilityChecker.class, new NoNetworkReachabilityChecker(),
+                ServiceReachabilityChecker::shutdown);
 
         NoNetworkSubscriptionService subscriptionService =
                 new NoNetworkSubscriptionService(configStore, shareLinkParser);
-        ServiceLocator.register(SubscriptionService.class, subscriptionService);
+        replace(SubscriptionService.class, subscriptionService, SubscriptionService::shutdown);
 
-        ServiceLocator.register(UpdateManager.class, new NoNetworkUpdateManager());
-        ServiceLocator.register(SingBoxInstaller.class, new NoNetworkSingBoxInstaller());
+        replace(UpdateManager.class, new NoNetworkUpdateManager(), UpdateManager::shutdown);
+        replace(SingBoxInstaller.class, new NoNetworkSingBoxInstaller(),
+                SingBoxInstaller::shutdown);
 
         NoNetworkConnectionService connectionService = new NoNetworkConnectionService();
         ServiceLocator.register(ConnectionService.class, connectionService);
@@ -83,6 +85,32 @@ public final class UiTestServices {
         ServiceLocator.register(McpServerService.class,
                 new NoNetworkMcpServerService(configStore, control));
     }
+
+    /**
+     * Registers {@code replacement} in place of what the graph built, shutting
+     * that down first. Replaced without it, every graph left its services'
+     * HTTP clients open, each with a selector thread, a virtual one on this
+     * JDK, that lives until the client is collected; on a Windows runner such
+     * a thread holds a carrier while it waits, and after a hundred graphs none
+     * was left for the work the UI hands off (six UI tests timed out at once).
+     */
+    private static <T> void replace(Class<T> type, T replacement, Consumer<T> shutdown) {
+        ServiceLocator.find(type).ifPresent(original -> {
+            shutdown.accept(original);
+            Consumer<Object> keep = keepReplaced;
+            if (keep != null) {
+                keep.accept(original);
+            }
+        });
+        ServiceLocator.register(type, replacement);
+    }
+
+    /**
+     * Test seam: handed every service a double replaces, so a test can keep it
+     * reachable the way the UI's controllers and listeners kept theirs, and see
+     * that shutting it down, not collecting it, is what closes its clients.
+     */
+    static volatile Consumer<Object> keepReplaced;
 
     private static SingBoxEngine optionalEngine() {
         try {

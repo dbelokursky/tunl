@@ -30,7 +30,7 @@ import tools.jackson.databind.json.JsonMapper;
  * group and only while connected. Callers fall back to the TCP measurement
  * otherwise rather than showing nothing.</p>
  */
-public class ClashApiDelayProbe {
+public class ClashApiDelayProbe implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(ClashApiDelayProbe.class);
 
@@ -54,6 +54,16 @@ public class ClashApiDelayProbe {
     /** Test seam. */
     ClashApiDelayProbe(HttpClient httpClient) {
         this.httpClient = httpClient;
+    }
+
+    /**
+     * Releases the HTTP client. Each one keeps a selector thread, a virtual
+     * one on this JDK, until it is closed or collected, and on Windows that
+     * thread holds a carrier the whole time it waits for I/O.
+     */
+    @Override
+    public void close() {
+        httpClient.shutdownNow();
     }
 
     /** What the core answered about one proxy. */
