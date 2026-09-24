@@ -348,4 +348,21 @@ class RoutingServiceTest {
         assertThat(rules.get(2).getValue()).isEqualTo("second.com");
     }
 
+
+    /**
+     * A config being generated iterates the rules without the service's lock,
+     * and a rule added from the UI or MCP meanwhile changed that very list:
+     * ConcurrentModificationException mid-connect. Changes make a new list.
+     */
+    @Test
+    void aChangeLeavesTheListAReaderHoldsAlone() {
+        java.util.List<RoutingRule> held = routingService.getConfig().getRules();
+        int before = held.size();
+
+        routingService.addRule(new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX,
+                "example.org", RoutingRule.RuleAction.DIRECT));
+
+        assertThat(held).as("the list a reader iterates").hasSize(before);
+        assertThat(routingService.getConfig().getRules()).hasSize(before + 1);
+    }
 }

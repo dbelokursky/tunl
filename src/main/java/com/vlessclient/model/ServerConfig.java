@@ -9,7 +9,7 @@ import java.util.UUID;
  * and transport and TLS settings.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ServerConfig {
+public class ServerConfig extends KeepsUnknownFields {
 
     @JsonProperty("id")
     private String id;

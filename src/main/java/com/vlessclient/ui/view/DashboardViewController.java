@@ -246,7 +246,8 @@ public class DashboardViewController implements ViewShownAware {
                 }
                 return ServiceLocator.find(AppSettings.class)
                         .map(settings -> new LatencyTester.ApiEndpoint(
-                                settings.listenClashApiPort(), settings.getClashApiSecret()))
+                                settings.listenClashApiPort(), settings.getClashApiSecret(),
+                                settings.getProxyMode() == ProxyMode.TUN))
                         .orElse(null);
             });
         }

@@ -16,7 +16,7 @@ import java.util.List;
  * conservatively.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class RoutingConfig {
+public class RoutingConfig extends KeepsUnknownFields {
 
     /**
      * The retired preset from pre-composition routing.json files, captured
