@@ -7,6 +7,8 @@ import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.RoutingRule;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
+import com.vlessclient.platform.Ipv6Uplink;
+import com.vlessclient.platform.SystemProxySupport;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,13 +20,25 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class SingBoxConfigGeneratorTunTest {
 
+    /** A network with IPv6, where the device's IPv6 address keeps it inside the tunnel. */
+    private static final Ipv6Uplink DUAL_STACK = () -> true;
+
+    /** A network without IPv6, like the Wi-Fi Russian sites stopped opening on. */
+    private static final Ipv6Uplink IPV4_ONLY_NETWORK = () -> false;
+
     private SingBoxConfigGenerator generator;
     private ObjectMapper mapper;
 
     @BeforeEach
     void setUp() {
-        generator = new SingBoxConfigGenerator();
+        // Not the host's own network: whether the machine running the tests
+        // has IPv6 must not decide what the IPv6 assertions see.
+        generator = onNetwork(DUAL_STACK);
         mapper = JsonMapper.builder().build();
+    }
+
+    private static SingBoxConfigGenerator onNetwork(Ipv6Uplink uplink) {
+        return new SingBoxConfigGenerator(SystemProxySupport.current(), uplink);
     }
 
     private ServerConfig createVlessServer() {
@@ -529,6 +543,29 @@ class SingBoxConfigGeneratorTunTest {
         assertThat(dualStack.get("strategy").asString())
                 .as("with IPv6 on the device, the chosen strategy stands")
                 .isEqualTo("prefer_ipv6");
+    }
+
+    /**
+     * On a network without IPv6 the device's IPv6 address drew apps into IPv6
+     * connections the direct outbound could not dial: Chrome opened ya.ru over
+     * IPv6 through the tunnel, and the bypass route failed with "no route to
+     * host" while the terminal, asking for A records alone, still got through.
+     * With the switch on, such a network gets what the switch off gives.
+     */
+    @Test
+    void tunMode_onANetworkWithoutIpv6TheDeviceStaysIpv4Only() throws Exception {
+        AppSettings settings = tunSettings();
+        settings.setTunIpv6Enabled(true);
+
+        JsonNode config = parse(onNetwork(IPV4_ONLY_NETWORK)
+                .generate(createVlessServer(), settings));
+
+        assertThat(config.get("inbounds").get(0).get("address").toString())
+                .contains("172.19.0.1/30")
+                .doesNotContain(SingBoxConfigGenerator.TUN_IPV6_ADDRESS);
+        assertThat(config.get("dns").get("strategy").asString())
+                .as("no AAAA answers for apps to dial over IPv6")
+                .isEqualTo("ipv4_only");
     }
 
     @Test

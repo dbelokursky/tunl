@@ -8,6 +8,7 @@ import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.RoutingRule;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.ServerSelection;
+import com.vlessclient.platform.Ipv6Uplink;
 import com.vlessclient.service.outbound.Hysteria2OutboundBuilder;
 import com.vlessclient.service.outbound.OutboundTags;
 import com.vlessclient.service.outbound.ShadowsocksOutboundBuilder;
@@ -89,6 +90,7 @@ public class SingBoxConfigGenerator {
 
     private final ObjectMapper mapper;
     private final com.vlessclient.platform.SystemProxySupport systemProxySupport;
+    private final Ipv6Uplink ipv6Uplink;
     private final VlessOutboundBuilder vlessBuilder;
     private final VmessOutboundBuilder vmessBuilder;
     private final TrojanOutboundBuilder trojanBuilder;
@@ -108,21 +110,29 @@ public class SingBoxConfigGenerator {
      * @param ranking the servers' last measurements
      */
     public SingBoxConfigGenerator(LatencyRanking ranking) {
-        this(com.vlessclient.platform.SystemProxySupport.current(), ranking);
+        this(com.vlessclient.platform.SystemProxySupport.current(), Ipv6Uplink.current(),
+                ranking);
     }
 
     /** Test seam: inject the host's system-proxy capability check. */
     SingBoxConfigGenerator(com.vlessclient.platform.SystemProxySupport systemProxySupport) {
-        this(systemProxySupport, LatencyRanking.NONE);
+        this(systemProxySupport, Ipv6Uplink.current(), LatencyRanking.NONE);
+    }
+
+    /** Test seam: inject the host's network as well, which the TUN device's IPv6 depends on. */
+    SingBoxConfigGenerator(com.vlessclient.platform.SystemProxySupport systemProxySupport,
+                           Ipv6Uplink ipv6Uplink) {
+        this(systemProxySupport, ipv6Uplink, LatencyRanking.NONE);
     }
 
     private SingBoxConfigGenerator(com.vlessclient.platform.SystemProxySupport systemProxySupport,
-                                   LatencyRanking ranking) {
+                                   Ipv6Uplink ipv6Uplink, LatencyRanking ranking) {
         this.ranking = ranking;
         this.mapper = JsonMapper.builder()
                 .enable(SerializationFeature.INDENT_OUTPUT)
                 .build();
         this.systemProxySupport = systemProxySupport;
+        this.ipv6Uplink = ipv6Uplink;
         this.vlessBuilder = new VlessOutboundBuilder(mapper);
         this.vmessBuilder = new VmessOutboundBuilder(mapper);
         this.trojanBuilder = new TrojanOutboundBuilder(mapper);
@@ -168,14 +178,16 @@ public class SingBoxConfigGenerator {
     public String generate(List<ServerConfig> candidates, ServerConfig active,
                            AppSettings settings, RoutingConfig routingConfig) {
         ObjectNode root = mapper.createObjectNode();
+        // Decided once: the device's address and the DNS strategy must agree.
+        boolean tunIpv6 = tunTakesIpv6(settings);
 
         root.set("log", buildLog(settings));
 
         if (settings.getProxyMode() == ProxyMode.TUN) {
-            root.set("dns", buildDns(settings, routingConfig));
+            root.set("dns", buildDns(settings, routingConfig, tunIpv6));
         }
 
-        root.set("inbounds", buildInbounds(settings));
+        root.set("inbounds", buildInbounds(settings, tunIpv6));
 
         // WireGuard is not an outbound anymore: sing-box 1.13 removed the
         // legacy wireguard outbound (deprecated since 1.11) in favor of a
@@ -242,7 +254,8 @@ public class SingBoxConfigGenerator {
         return log;
     }
 
-    private ObjectNode buildDns(AppSettings settings, RoutingConfig routingConfig) {
+    private ObjectNode buildDns(AppSettings settings, RoutingConfig routingConfig,
+                                boolean tunIpv6) {
         ObjectNode proxyDns = mapper.createObjectNode();
         proxyDns.put("tag", "proxy-dns");
         populateDnsServerAddress(proxyDns, settings.getProxyDns());
@@ -315,8 +328,7 @@ public class SingBoxConfigGenerator {
         // A TUN device without an IPv6 address routes IPv4 alone, and the core
         // drops AAAA answers only for ipv4_only: any other strategy handed the
         // system IPv6 addresses, which it reached around the tunnel.
-        boolean tunWithoutIpv6 = settings.getProxyMode() == ProxyMode.TUN
-                && !settings.isTunIpv6Enabled();
+        boolean tunWithoutIpv6 = settings.getProxyMode() == ProxyMode.TUN && !tunIpv6;
         dns.put("strategy", tunWithoutIpv6 ? "ipv4_only" : settings.getDnsStrategy());
 
         return dns;
@@ -563,7 +575,8 @@ public class SingBoxConfigGenerator {
         ObjectNode lanNames = mapper.createObjectNode();
         lanNames.set("domain_suffix", lanSuffixes);
         lanNames.put("server", "local-dns");
-        ObjectNode dns = buildDns(settings, routingConfig);
+        // No TUN device in this mode, so none with an IPv6 address either.
+        ObjectNode dns = buildDns(settings, routingConfig, false);
         ((ArrayNode) dns.get("rules")).insert(1, lanNames);
         root.set("dns", dns);
         // The core demands one once a dns block exists, and the OS resolver
@@ -720,7 +733,30 @@ public class SingBoxConfigGenerator {
         }
     }
 
-    private ArrayNode buildInbounds(AppSettings settings) {
+    /**
+     * Whether the TUN device takes an IPv6 address: the user's switch, on a
+     * network that carries IPv6 at all.
+     *
+     * <p>Without an IPv6 uplink the address drew apps into IPv6 connections the
+     * direct outbound could not dial, so every site the rules bypass broke in
+     * browsers (see {@link Ipv6Uplink}). The switch is there to keep IPv6 from
+     * going around the tunnel, and such a network has no IPv6 to go around it;
+     * what the device gives up there is reaching IPv6-only hosts through the
+     * proxy, which is rarer than every bypassed site failing.</p>
+     */
+    private boolean tunTakesIpv6(AppSettings settings) {
+        if (settings.getProxyMode() != ProxyMode.TUN || !settings.isTunIpv6Enabled()) {
+            return false;
+        }
+        if (ipv6Uplink.isPresent()) {
+            return true;
+        }
+        log.info("TUN IPv6 is on, but no interface holds a global IPv6 address: "
+                + "the device stays IPv4-only so direct routes are not dialled over IPv6");
+        return false;
+    }
+
+    private ArrayNode buildInbounds(AppSettings settings, boolean tunIpv6) {
         ArrayNode inbounds = mapper.createArrayNode();
 
         if (settings.getProxyMode() == ProxyMode.TUN) {
@@ -735,8 +771,9 @@ public class SingBoxConfigGenerator {
             // Without an IPv6 address auto_route only covers IPv4, so on a
             // dual-stack network every IPv6 destination bypassed the tunnel
             // while the card said "Connected". The private and link-local v6
-            // ranges stay excluded below, like their IPv4 counterparts.
-            if (settings.isTunIpv6Enabled()) {
+            // ranges stay excluded below, like their IPv4 counterparts. A
+            // network without IPv6 keeps the device IPv4-only: tunTakesIpv6.
+            if (tunIpv6) {
                 address.add(TUN_IPV6_ADDRESS);
             }
             tun.set("address", address);
