@@ -970,36 +970,3 @@ jobs:
             exit 1
           fi
           echo "Published verified release $GITHUB_REF_NAME"
-
-  # Keep the Releases page tidy: once all four installers are attached, delete
-  # every real release older than the 5 newest. The rolling dev-latest
-  # prerelease and any draft are never counted or touched. Git tags are kept
-  # (no --cleanup-tag), so version history stays intact and any pruned build
-  # can be rebuilt from its tag — only the Releases-page entry and its uploaded
-  # installers go. Runs only after the verified draft is made public.
-  prune-old-releases:
-    needs: publish-release
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - name: Delete real releases older than the newest 5
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          stale=$(gh release list --json tagName,isPrerelease,isDraft,createdAt \
-            --jq 'map(select((.isPrerelease or .isDraft) | not))
-                  | sort_by(.createdAt) | reverse | .[5:][].tagName')
-          if [ -z "$stale" ]; then
-            echo "5 or fewer real releases — nothing to prune."
-            exit 0
-          fi
-          echo "Pruning releases older than the newest 5 (tags kept):"
-          echo "$stale"
-          while IFS= read -r tag; do
-            [ -n "$tag" ] || continue
-            gh release delete "$tag" --yes && echo "deleted release $tag" \
-              || echo "::warning::could not delete release $tag (will retry next release)"
-          done <<< "$stale"
