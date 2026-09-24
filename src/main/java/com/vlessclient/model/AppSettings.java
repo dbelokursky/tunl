@@ -11,7 +11,7 @@ import java.util.List;
  * ports, proxy mode, DNS, TUN interface, and health-check settings.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class AppSettings {
+public class AppSettings extends KeepsUnknownFields {
 
     /**
      * Schema version of settings.json. Files written before versioning carry
