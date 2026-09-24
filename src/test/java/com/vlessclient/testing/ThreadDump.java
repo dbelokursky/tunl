@@ -72,15 +72,23 @@ public final class ThreadDump {
      * @return the summary, or a line saying why there is none
      */
     public static String forBackgroundWork() {
-        String dump = ofAllThreads();
+        return summarize(ofAllThreads());
+    }
+
+    /** {@link #forBackgroundWork()} over a given dump; a test seam. */
+    static String summarize(String text) {
+        // Without its carriage returns: on Windows the dump ended its lines
+        // in two of them, so a split on a blank line cut at every line, and
+        // every thread came out as its header alone.
+        String dump = text.replace("\r", "");
         List<String> kept = new ArrayList<>();
         Map<String, Integer> carriers = new TreeMap<>();
         int virtual = 0;
         int running = 0;
         int selectors = 0;
         int selectorsRunning = 0;
-        for (String entry : dump.split("\\R\\R")) {
-            String[] lines = entry.strip().split("\\R");
+        for (String entry : dump.split("\n\n")) {
+            String[] lines = entry.strip().split("\n");
             String header = lines[0];
             if (!header.startsWith("#")) {
                 continue;
