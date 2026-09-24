@@ -53,9 +53,31 @@ class AppHttpClientsTest {
     @Test
     void followTunnelStaysDirectUntilAnEngineIsRegistered() {
         AppHttpClients.followTunnel(() -> null, com.vlessclient.model.AppSettings::new,
-                new TunnelHealthState());
+                new TunnelHealthState(), () -> false);
 
         assertThat(AppHttpClients.selector().select(PUBLIC)).containsExactly(Proxy.NO_PROXY);
+    }
+
+    /**
+     * Only a core that was up and declared broken counted as not carrying
+     * traffic; while it was down or restarting, which recovery stretches to
+     * minutes, a subscription fetch sent its token out direct.
+     */
+    @Test
+    void aTunnelWantedWithNoCoreUpCarriesNothing() {
+        java.util.concurrent.atomic.AtomicBoolean wanted =
+                new java.util.concurrent.atomic.AtomicBoolean(true);
+        AppHttpClients.followTunnel(() -> null, com.vlessclient.model.AppSettings::new,
+                new TunnelHealthState(), wanted::get);
+        try {
+            assertThat(AppHttpClients.isTunnelWantedButNotCarrying())
+                    .as("wanted, no core running").isTrue();
+            wanted.set(false);
+            assertThat(AppHttpClients.isTunnelWantedButNotCarrying())
+                    .as("disconnected by the user").isFalse();
+        } finally {
+            AppHttpClients.routeDirect();
+        }
     }
 
     @Test

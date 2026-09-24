@@ -176,6 +176,16 @@ public final class TunnelRecoveryService implements AutoCloseable {
         cancelPending();
     }
 
+    /**
+     * Whether the user wants a tunnel: asked for one and has not disconnected
+     * since, whatever the core is doing now.
+     *
+     * @return whether a tunnel is wanted
+     */
+    public synchronized boolean isTunnelWanted() {
+        return wanted && !closed;
+    }
+
     /** Whether recovery currently owns a stop/start operation. */
     public synchronized boolean isRecovering() {
         return wanted && running;
