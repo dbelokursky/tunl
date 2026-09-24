@@ -732,11 +732,12 @@
 }
 
 /* The field's own background and border are the box; .content only insets
-   the text, by the 12 (inside the 1px border) a TextField's text sits in. */
+   the text as far as a TextField's sits: 12 inside the 1px border, and one
+   more at the start, which JavaFX 27's TextField puts before its text. */
 .text-area.form-field .content,
 .text-area.form-field:focused .content {
     -fx-background-color: transparent;
-    -fx-padding: 8 12;
+    -fx-padding: 8 12 8 13;
 }
 
 /* Cleared by name, because the content no longer covers it: inside a
