@@ -45,11 +45,12 @@ public final class AppHttpClients {
             new TunnelProxySelector(() -> PORT.get().get());
 
     /**
-     * Whether the core is up but the reachability checks have declared the
-     * tunnel broken — the one state in which the selector sends the app's own
-     * requests direct while the user believes they are tunneled.
+     * Whether the user wants a tunnel and it carries no traffic: the core is
+     * down, restarting or still connecting, or up and declared broken. The
+     * selector sends the app's own requests direct then, while the user
+     * believes they are tunneled.
      */
-    private static final AtomicReference<BooleanSupplier> BROKEN_WHILE_CONNECTED =
+    private static final AtomicReference<BooleanSupplier> UNPROTECTED =
             new AtomicReference<>(() -> false);
 
     private AppHttpClients() {
@@ -88,10 +89,12 @@ public final class AppHttpClients {
      * @param engine   the current engine, or null before one exists
      * @param settings the current settings, for the local HTTP inbound port
      * @param health   the reachability verdict for the running tunnel
+     * @param wanted   whether the user wants a tunnel now
      */
     public static void followTunnel(Supplier<SingBoxEngine> engine,
                                     Supplier<AppSettings> settings,
-                                    TunnelHealthState health) {
+                                    TunnelHealthState health,
+                                    BooleanSupplier wanted) {
         routeThroughTunnel(() -> {
             SingBoxEngine current = engine.get();
             if (current == null || !TunnelProxySelector.carriesTraffic(
@@ -100,11 +103,13 @@ public final class AppHttpClients {
             }
             return OptionalInt.of(settings.get().listenHttpPort());
         });
-        BROKEN_WHILE_CONNECTED.set(() -> {
+        UNPROTECTED.set(() -> {
+            if (!wanted.getAsBoolean()) {
+                return false;
+            }
             SingBoxEngine current = engine.get();
-            return current != null
-                    && current.connectionStateProperty().get() == ConnectionState.CONNECTED
-                    && health.get() == TunnelHealth.BROKEN;
+            return current == null || !TunnelProxySelector.carriesTraffic(
+                    current.connectionStateProperty().get(), health.get());
         });
     }
 
@@ -116,24 +121,26 @@ public final class AppHttpClients {
      */
     public static void routeDirect() {
         PORT.set(OptionalInt::empty);
-        BROKEN_WHILE_CONNECTED.set(() -> false);
+        UNPROTECTED.set(() -> false);
     }
 
     /**
-     * True while the core is connected but the tunnel has been declared
-     * broken. Requests made now bypass the tunnel; a caller carrying a
-     * credential in its URL (a subscription fetch) should decline to send
-     * rather than expose it, and the user's real address, directly.
+     * True while the user wants a tunnel and it carries no traffic. Requests
+     * made now bypass the tunnel; a caller carrying a credential in its URL (a
+     * subscription fetch) should decline to send rather than expose it, and
+     * the user's real address, directly. Only a core that was up and declared
+     * broken counted before: while it was down or restarting, which recovery
+     * can stretch to minutes, the token went out direct.
      *
-     * @return whether the tunnel is being bypassed while it looks connected
+     * @return whether the tunnel is being bypassed while the user wants it
      */
-    public static boolean isTunnelBrokenWhileConnected() {
-        return BROKEN_WHILE_CONNECTED.get().getAsBoolean();
+    public static boolean isTunnelWantedButNotCarrying() {
+        return UNPROTECTED.get().getAsBoolean();
     }
 
-    /** Test seam: replaces the probe behind {@link #isTunnelBrokenWhileConnected()}. */
+    /** Test seam: replaces the probe behind {@link #isTunnelWantedButNotCarrying()}. */
     static void setTunnelBrokenProbe(BooleanSupplier probe) {
-        BROKEN_WHILE_CONNECTED.set(probe == null ? () -> false : probe);
+        UNPROTECTED.set(probe == null ? () -> false : probe);
     }
 
     /** The selector every client built here shares. Package-private for tests. */

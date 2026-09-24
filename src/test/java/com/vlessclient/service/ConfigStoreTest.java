@@ -248,6 +248,27 @@ class ConfigStoreTest {
     }
 
     /**
+     * Direct DNS defaulted to AliDNS over DoH, and every install that never
+     * touched the field carries it in settings.json: each name the rules send
+     * direct went from the user's real address to Alibaba. The retired
+     * default moves to the system resolver; an address the user typed stays.
+     */
+    @Test
+    void theRetiredDirectDnsDefaultMovesToTheSystemResolver(@TempDir Path dirs) throws Exception {
+        java.nio.file.Files.createDirectories(dirs.resolve("old"));
+        java.nio.file.Files.writeString(dirs.resolve("old").resolve("settings.json"),
+                "{\"config_version\": 1, \"direct_dns\": \"https://223.5.5.5/dns-query\"}");
+        java.nio.file.Files.createDirectories(dirs.resolve("chosen"));
+        java.nio.file.Files.writeString(dirs.resolve("chosen").resolve("settings.json"),
+                "{\"config_version\": 1, \"direct_dns\": \"https://77.88.8.8/dns-query\"}");
+
+        assertThat(new ConfigStore(dirs.resolve("old")).getSettings().getDirectDns())
+                .isEqualTo(AppSettings.SYSTEM_DNS);
+        assertThat(new ConfigStore(dirs.resolve("chosen")).getSettings().getDirectDns())
+                .isEqualTo("https://77.88.8.8/dns-query");
+    }
+
+    /**
      * A new install spoke English whatever the system's language, while its
      * theme already followed the system; most people who install Tunl read
      * Russian. It now takes the system's language when that is one the app

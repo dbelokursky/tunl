@@ -1,7 +1,9 @@
 package com.vlessclient.platform;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.List;
 import org.slf4j.Logger;
@@ -59,6 +61,7 @@ public final class LinuxTunLauncher implements TunLauncher {
         // shared /tmp; the root-side wrapper can read it there.
         Path stopSignalFile = StopSignals.newStopSignalFile();
 
+        restrictToOwner(binary);
         if (!hasNetAdminCapability(binary)) {
             grantNetAdminCapability(binary);
         }
@@ -75,6 +78,21 @@ public final class LinuxTunLauncher implements TunLauncher {
                 ? "cap_net_admin fast path (no elevation prompt)"
                 : elevator + " wrapper (PolicyKit prompt expected)");
         return new Launched(process, stopSignalFile, !direct);
+    }
+
+    /**
+     * Keeps the core executable by its owner alone. The capability the
+     * one-time setcap grants goes to whoever runs the binary, and it was
+     * world-executable: on a shared machine another user could run it with a
+     * config of their own and hold CAP_NET_ADMIN, with no prompt. A chmod
+     * leaves the capability in place, so an install from before is closed too.
+     */
+    static void restrictToOwner(Path binary) {
+        try {
+            Files.setPosixFilePermissions(binary, PosixFilePermissions.fromString("rwx------"));
+        } catch (UnsupportedOperationException | IOException e) {
+            log.warn("Could not restrict {} to its owner: {}", binary, e.getMessage());
+        }
     }
 
     /**
