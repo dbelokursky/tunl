@@ -777,6 +777,15 @@ public class SingBoxConfigGenerator {
         return new HostFacts(ipv6Uplink, systemProxySupport);
     }
 
+    /**
+     * Whether the TUN device takes strict_route on {@code platform}: on
+     * Windows, where it is the DNS-leak protection; nowhere else, where it
+     * blocked the direct outbound (see buildInbounds).
+     */
+    static boolean strictRouteOn(com.vlessclient.platform.Platform platform) {
+        return platform == com.vlessclient.platform.Platform.WINDOWS;
+    }
+
     private ArrayNode buildInbounds(AppSettings settings, boolean tunIpv6, HostFacts host) {
         ArrayNode inbounds = mapper.createArrayNode();
 
@@ -804,7 +813,18 @@ public class SingBoxConfigGenerator {
             // address and redirects it into the configured DNS module.
             tun.put("dns_mode", "hijack");
             tun.put("auto_route", true);
-            // Deliberately NOT setting strict_route: true. Combined with
+            if (strictRouteOn(com.vlessclient.platform.Platform.current())) {
+                // Windows only. Its resolver asks every adapter's DNS server
+                // at once, so without WFP filters names leaked in plaintext
+                // to the physical network's resolver while the card said
+                // Connected. What strict_route adds there is that and no more:
+                // port 53 blocked outside the tunnel, IPv6 blocked while the
+                // device has none, the core's own traffic always let through
+                // (sing-tun's "protect" filters), the LAN untouched, and all
+                // of it dynamic, gone with the core.
+                tun.put("strict_route", true);
+            }
+            // Elsewhere deliberately NOT setting strict_route: true. Combined with
             // route_exclude_address it caused widespread direct-outbound
             // timeouts in v0.1.6 — every connection that should escape the
             // TUN (sing-box's own direct outbound for RU/geosite routes,
