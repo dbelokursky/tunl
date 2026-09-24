@@ -198,6 +198,39 @@ class UpdateManagerTest {
                 .isTrue();
     }
 
+    /**
+     * A check a connect triggered while the tunnel was still coming up could
+     * not reach GitHub, and held the claim for the whole quarter hour. The
+     * next event may try again a minute later; a flapping tunnel still may not.
+     */
+    @Test
+    void anEventCheckThatCouldNotReachGitHubMayBeRetriedSoon() {
+        UpdateManager manager = new UpdateManager();
+        long start = 1_000_000L;
+        assertThat(manager.claimEventCheck(start)).isTrue();
+
+        manager.eventCheckFailed(start);
+
+        assertThat(manager.claimEventCheck(start + 1_000)).as("reconnecting").isFalse();
+        assertThat(manager.claimEventCheck(start + UpdateManager.FAILED_EVENT_CHECK_RETRY_MS))
+                .isTrue();
+    }
+
+    /** A failure reported late does not cut short the claim of a check made since. */
+    @Test
+    void aLateFailureLeavesALaterClaimAlone() {
+        UpdateManager manager = new UpdateManager();
+        long start = 1_000_000L;
+        assertThat(manager.claimEventCheck(start)).isTrue();
+        long later = start + UpdateManager.EVENT_CHECK_THROTTLE_MS;
+        assertThat(manager.claimEventCheck(later)).isTrue();
+
+        manager.eventCheckFailed(start);
+
+        assertThat(manager.claimEventCheck(later + UpdateManager.FAILED_EVENT_CHECK_RETRY_MS))
+                .isFalse();
+    }
+
     @Test
     void downloadPolicy_downloadsUnlessSomethingIsAlreadyStaged() {
         // Re-downloading on top of a verified installer that is already
