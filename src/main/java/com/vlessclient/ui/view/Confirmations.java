@@ -40,6 +40,7 @@ public final class Confirmations {
         ButtonType cancel = new ButtonType(I18n.get("button.cancel"),
                 ButtonBar.ButtonData.CANCEL_CLOSE);
         Alert dialog = new Alert(Alert.AlertType.CONFIRMATION, content, cancel, act);
+        Dialogs.dressFrame(dialog);
         dialog.setTitle(title);
         dialog.setHeaderText(header);
         if (dialog.getDialogPane().lookupButton(act) instanceof Button acting) {
