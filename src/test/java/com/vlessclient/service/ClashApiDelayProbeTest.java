@@ -150,4 +150,15 @@ class ClashApiDelayProbeTest {
 
         assertThat(result).isInstanceOf(ClashApiDelayProbe.Answer.NoAnswer.class);
     }
+
+    /** A health target is measured as itself, through the group, not as the stock probe URL. */
+    @Test
+    @DisplayName("a given target is what the core is asked to fetch")
+    void aGivenTargetIsWhatTheCoreFetches() {
+        probe().measure(port, "", "proxy", "https://www.google.com/generate_204");
+
+        assertThat(paths).singleElement().asString()
+                .startsWith("/proxies/proxy/delay")
+                .contains("url=https%3A%2F%2Fwww.google.com%2Fgenerate_204");
+    }
 }

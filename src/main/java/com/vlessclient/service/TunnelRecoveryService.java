@@ -3,6 +3,7 @@ package com.vlessclient.service;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.TunnelHealth;
+import com.vlessclient.platform.NetworkPresence;
 import java.io.IOException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -27,6 +28,7 @@ public final class TunnelRecoveryService implements AutoCloseable {
     private final Supplier<AppSettings> settings;
     private final Attempt attempt;
     private final BooleanSupplier restartNeedsTheUser;
+    private final BooleanSupplier networkUp;
     private final ScheduledExecutorService scheduler;
     private final ReadOnlyObjectWrapper<Retry> retry = new ReadOnlyObjectWrapper<>();
     private final ReadOnlyBooleanWrapper reconnectNeeded = new ReadOnlyBooleanWrapper();
@@ -48,8 +50,45 @@ public final class TunnelRecoveryService implements AutoCloseable {
     /** The last reachability verdict, to re-arm a retry a request cancelled. */
     private TunnelHealth lastHealth = TunnelHealth.UNMONITORED;
 
-    /** The retry displayed by the UI; a null property value means no retry is pending. */
-    public record Retry(int attempt, int delaySeconds) {
+    /**
+     * The retry displayed by the UI; a null property value means no retry is
+     * pending.
+     *
+     * @param attempt      the restart's number since the tunnel was last healthy
+     * @param delaySeconds how long until it runs
+     * @param reason       why it was scheduled, which the banner says: every
+     *                     retry used to read "all services unreachable", a
+     *                     crash of the core included
+     */
+    public record Retry(int attempt, int delaySeconds, Reason reason) {
+
+        /** A retry because no health-check target answered. */
+        public Retry(int attempt, int delaySeconds) {
+            this(attempt, delaySeconds, Reason.UNREACHABLE);
+        }
+    }
+
+    /** Why a restart was scheduled. */
+    public enum Reason {
+        /** No health-check target answered through the tunnel. */
+        UNREACHABLE("no health-check target answered through the tunnel"),
+        /** The core stopped on its own. */
+        CORE_STOPPED("the core stopped"),
+        /** The previous restart did not bring the tunnel up. */
+        RESTART_FAILED("the restart did not bring the tunnel up"),
+        /** The host has no network; the restart waits for one. */
+        NO_NETWORK("there is no network to restart it over");
+
+        private final String described;
+
+        Reason(String described) {
+            this.described = described;
+        }
+
+        /** The reason as the log says it. */
+        public String described() {
+            return described;
+        }
     }
 
     /** A restart must recheck the supplied guard immediately before starting a new core. */
@@ -69,16 +108,24 @@ public final class TunnelRecoveryService implements AutoCloseable {
      */
     public TunnelRecoveryService(Supplier<AppSettings> settings, Attempt attempt,
                                  BooleanSupplier restartNeedsTheUser) {
-        this(settings, attempt, restartNeedsTheUser, Executors.newSingleThreadScheduledExecutor(
-                DaemonThreads.factory("tunnel-recovery")));
+        this(settings, attempt, restartNeedsTheUser, NetworkPresence.current()::isUp,
+                Executors.newSingleThreadScheduledExecutor(
+                        DaemonThreads.factory("tunnel-recovery")));
     }
 
     TunnelRecoveryService(Supplier<AppSettings> settings, Attempt attempt,
                           BooleanSupplier restartNeedsTheUser,
                           ScheduledExecutorService scheduler) {
+        this(settings, attempt, restartNeedsTheUser, () -> true, scheduler);
+    }
+
+    TunnelRecoveryService(Supplier<AppSettings> settings, Attempt attempt,
+                          BooleanSupplier restartNeedsTheUser, BooleanSupplier networkUp,
+                          ScheduledExecutorService scheduler) {
         this.settings = settings;
         this.attempt = attempt;
         this.restartNeedsTheUser = restartNeedsTheUser;
+        this.networkUp = networkUp;
         this.scheduler = scheduler;
     }
 
@@ -148,7 +195,7 @@ public final class TunnelRecoveryService implements AutoCloseable {
         }
         connectedSinceRequest = true;
         if (lastHealth == TunnelHealth.BROKEN) {
-            schedule("the tunnel was already failing its health check");
+            schedule(Reason.UNREACHABLE);
         }
     }
 
@@ -198,7 +245,7 @@ public final class TunnelRecoveryService implements AutoCloseable {
             connectedSinceRequest = true;
         }
         if (state == ConnectionState.ERROR) {
-            schedule("the core stopped");
+            schedule(Reason.CORE_STOPPED);
         } else if (state == ConnectionState.CONNECTED && !settings.get().isHealthCheckEnabled()) {
             attempts = 0;
             cancelPending();
@@ -209,7 +256,7 @@ public final class TunnelRecoveryService implements AutoCloseable {
     public synchronized void onHealth(TunnelHealth health) {
         lastHealth = health;
         if (health == TunnelHealth.BROKEN) {
-            schedule("no health-check target answered through the tunnel");
+            schedule(Reason.UNREACHABLE);
         } else if (health == TunnelHealth.HEALTHY || health == TunnelHealth.DEGRADED) {
             attempts = 0;
             cancelPending();
@@ -221,7 +268,7 @@ public final class TunnelRecoveryService implements AutoCloseable {
      * after it came up left only "Disconnecting" there, from a thread name,
      * with nothing to tell a crash from a failed probe.
      */
-    private void schedule(String why) {
+    private void schedule(Reason why) {
         AppSettings config = settings.get();
         if (!wanted || closed || running || pending != null
                 || !config.isHealthCheckAutoReconnect()) {
@@ -241,8 +288,9 @@ public final class TunnelRecoveryService implements AutoCloseable {
         int seconds = (int) Math.min(Math.max(base, 300L),
                 (long) base * (1L << Math.min(attempts, 20)));
         long request = generation;
-        publish(new Retry(++attempts, seconds));
-        log.info("Restarting the tunnel in {} s (attempt {}): {}", seconds, attempts, why);
+        publish(new Retry(++attempts, seconds, why));
+        log.info("Restarting the tunnel in {} s (attempt {}): {}",
+                seconds, attempts, why.described());
         pending = scheduler.schedule(() -> retry(request), seconds, TimeUnit.SECONDS);
     }
 
@@ -253,6 +301,17 @@ public final class TunnelRecoveryService implements AutoCloseable {
             }
             if (!settings.get().isHealthCheckAutoReconnect()) {
                 cancelPending();
+                return;
+            }
+            if (!networkUp.getAsBoolean()) {
+                // A roam, the lid closed: with no network nothing answers, and
+                // a restart only cut what still worked and grew the backoff.
+                // Asked again after the same delay, which does not grow.
+                int seconds = Math.max(1, settings.get().getHealthCheckDelaySeconds());
+                publish(new Retry(attempts, seconds, Reason.NO_NETWORK));
+                log.info("Not restarting the tunnel: {}; asking again in {} s",
+                        Reason.NO_NETWORK.described(), seconds);
+                pending = scheduler.schedule(() -> retry(request), seconds, TimeUnit.SECONDS);
                 return;
             }
             pending = null;
@@ -279,7 +338,7 @@ public final class TunnelRecoveryService implements AutoCloseable {
                         stop(refused);
                     }
                 } else if ((!started && isWanted(request)) || lastState == ConnectionState.ERROR) {
-                    schedule("the restart did not bring the tunnel up");
+                    schedule(Reason.RESTART_FAILED);
                 }
             }
         }
