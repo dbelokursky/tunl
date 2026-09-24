@@ -4,6 +4,7 @@ import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.service.DiagnosticsBundle;
 import com.vlessclient.service.LogLineFormatter;
+import com.vlessclient.service.Redact;
 import com.vlessclient.service.SingBoxEngine;
 import java.io.File;
 import java.io.IOException;
@@ -529,6 +530,23 @@ public class LogsViewController {
         return scene == null ? null : scene.getWindow();
     }
 
+    /**
+     * The log as saved: every line, with the paths and queries of URLs cut the
+     * way the diagnostics bundle cuts them. A subscription URL carries the
+     * account token, and "Save log" wrote it out whole, to a file meant for a
+     * bug report.
+     *
+     * @param lines the buffered log lines
+     * @return the file's content
+     */
+    static String savedLog(List<String> lines) {
+        return lines.stream()
+                .filter(line -> line != null)
+                .map(Redact::urlsIn)
+                .collect(Collectors.joining(
+                        System.lineSeparator(), "", System.lineSeparator()));
+    }
+
     @FXML
     private void onDownloadClicked() {
         if (sourceLogLines == null || sourceLogLines.isEmpty()) {
@@ -553,10 +571,7 @@ public class LogsViewController {
         // Snapshot here is safe: appends run on the FX thread too, so the list
         // cannot mutate mid-iteration. Saves the full buffer, not the filtered
         // view — the level/search filters are a transient reading aid.
-        String content = sourceLogLines.stream()
-                .filter(line -> line != null)
-                .collect(Collectors.joining(
-                        System.lineSeparator(), "", System.lineSeparator()));
+        String content = savedLog(sourceLogLines);
         try {
             Files.writeString(file.toPath(), content, StandardCharsets.UTF_8);
             log.info("Saved {} log lines to {}", sourceLogLines.size(), file);

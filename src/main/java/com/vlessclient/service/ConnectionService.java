@@ -540,6 +540,16 @@ public class ConnectionService {
         }
     }
 
+    /**
+     * Whether the user wants a tunnel now: asked for one and has not
+     * disconnected since, whether or not the core is up at the moment.
+     *
+     * @return whether a tunnel is wanted
+     */
+    public boolean isTunnelWanted() {
+        return recovery.isTunnelWanted();
+    }
+
     /** The group tag used by the current process, for live status queries. */
     public String getProxyGroupTag() {
         Run current = run;

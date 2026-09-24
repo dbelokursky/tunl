@@ -206,6 +206,21 @@ public class LogsViewTest extends ApplicationTest {
         assertThat(list.getSelectionModel().getSelectedItems()).containsExactly(selected);
     }
 
+    /**
+     * A subscription URL carries the account token, and "Save log" wrote it
+     * out whole; the diagnostics bundle already cut it. What a connection
+     * went to stays, since that is what a log is read for.
+     */
+    @Test
+    void aSavedLogCutsTheTokensOutOfUrls() {
+        String saved = LogsViewController.savedLog(List.of(
+                "INFO Refreshing https://sub.example.com/api/v1/client/subscribe?token=s3cr3t",
+                "INFO inbound/tun[tun-in]: inbound connection to [2a02:6b8::2:242]:443"));
+
+        assertThat(saved).doesNotContain("s3cr3t").contains("https://sub.example.com/")
+                .contains("[2a02:6b8::2:242]:443");
+    }
+
     /** Closing the window to the tray hides the stage and leaves the scene on it. */
     @Test
     void rowsAreNotRebuiltWhileTheWindowIsHidden() {

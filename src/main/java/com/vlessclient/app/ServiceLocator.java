@@ -246,7 +246,9 @@ public class ServiceLocator {
                         ? engine
                         : null,
                 configStore::getSettings,
-                get(TunnelHealthState.class));
+                get(TunnelHealthState.class),
+                () -> services.get(ConnectionService.class) instanceof ConnectionService connection
+                        && connection.isTunnelWanted());
     }
 
     private static void attachUpdateCheckListener(
