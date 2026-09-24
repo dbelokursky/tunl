@@ -253,13 +253,19 @@ public class SingBoxConfigGenerator {
 
         ObjectNode directDns = mapper.createObjectNode();
         directDns.put("tag", "direct-dns");
-        populateDnsServerAddress(directDns, settings.getDirectDns());
+        if (isSystemDns(settings.getDirectDns())) {
+            // The OS resolver: the network's own, from the address the direct
+            // connection leaves anyway.
+            directDns.put("type", "local");
+        } else {
+            populateDnsServerAddress(directDns, settings.getDirectDns());
+        }
         // Deliberately NOT setting detour:"direct" here — sing-box 1.13
         // rejects DNS servers that detour to an "empty" direct outbound with
         // FATAL "detour to an empty direct outbound makes no sense".
         // Omitting detour lets the server dial through the default outbound
         // route, which for a bare system resolver address does the right thing.
-        if (!isIpLiteral(directDns.get("server").asString())) {
+        if (directDns.has("server") && !isIpLiteral(directDns.get("server").asString())) {
             // The core refuses a server named by host that it has no way to
             // resolve ("missing domain resolver for domain server address"),
             // and route.default_domain_resolver does not reach DNS servers, so
@@ -702,6 +708,11 @@ public class SingBoxConfigGenerator {
             server.put("type", "udp");
             server.put("server", address);
         }
+    }
+
+    /** Whether a DNS setting names the OS resolver, {@link AppSettings#SYSTEM_DNS}. */
+    static boolean isSystemDns(String address) {
+        return address != null && AppSettings.SYSTEM_DNS.equalsIgnoreCase(address.trim());
     }
 
     /**
@@ -1153,6 +1164,7 @@ public class SingBoxConfigGenerator {
         ArrayNode domains = mapper.createArrayNode();
         ArrayNode domainSuffixes = mapper.createArrayNode();
         ArrayNode domainKeywords = mapper.createArrayNode();
+        ArrayNode domainRegexes = mapper.createArrayNode();
         ArrayNode ipCidrs = mapper.createArrayNode();
 
         for (String raw : bypassList) {
@@ -1164,13 +1176,14 @@ public class SingBoxConfigGenerator {
                 case DOMAIN -> domains.add(parsed.value());
                 case DOMAIN_SUFFIX -> domainSuffixes.add(parsed.value());
                 case DOMAIN_KEYWORD -> domainKeywords.add(parsed.value());
+                case DOMAIN_REGEX -> domainRegexes.add(parsed.value());
                 case IP_CIDR -> ipCidrs.add(parsed.value());
                 default -> throw new IllegalStateException("Unexpected: " + parsed.kind());
             }
         }
 
-        if (domains.isEmpty() && domainSuffixes.isEmpty()
-                && domainKeywords.isEmpty() && ipCidrs.isEmpty()) {
+        if (domains.isEmpty() && domainSuffixes.isEmpty() && domainKeywords.isEmpty()
+                && domainRegexes.isEmpty() && ipCidrs.isEmpty()) {
             return null;
         }
 
@@ -1183,6 +1196,9 @@ public class SingBoxConfigGenerator {
         }
         if (!domainKeywords.isEmpty()) {
             rule.set("domain_keyword", domainKeywords);
+        }
+        if (!domainRegexes.isEmpty()) {
+            rule.set("domain_regex", domainRegexes);
         }
         if (!ipCidrs.isEmpty()) {
             rule.set("ip_cidr", ipCidrs);
