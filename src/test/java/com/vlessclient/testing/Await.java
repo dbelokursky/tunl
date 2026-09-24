@@ -36,8 +36,8 @@ public final class Await {
         long deadline = System.nanoTime() + timeout.toNanos();
         while (!condition.getAsBoolean()) {
             if (System.nanoTime() >= deadline) {
-                throw new AssertionError(
-                        "timed out after " + timeout.toMillis() + " ms waiting for " + what);
+                throw new AssertionError("timed out after " + timeout.toMillis()
+                        + " ms waiting for " + what + "\n" + ThreadDump.forBackgroundWork());
             }
             pause();
         }
@@ -64,7 +64,8 @@ public final class Await {
             }
             if (System.nanoTime() >= deadline) {
                 throw new AssertionError("timed out after " + timeout.toMillis()
-                        + " ms waiting for " + what + "; last seen: " + value);
+                        + " ms waiting for " + what + "; last seen: " + value
+                        + "\n" + ThreadDump.forBackgroundWork());
             }
             pause();
         }
