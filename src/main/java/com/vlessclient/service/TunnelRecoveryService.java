@@ -148,7 +148,7 @@ public final class TunnelRecoveryService implements AutoCloseable {
         }
         connectedSinceRequest = true;
         if (lastHealth == TunnelHealth.BROKEN) {
-            schedule();
+            schedule("the tunnel was already failing its health check");
         }
     }
 
@@ -188,7 +188,7 @@ public final class TunnelRecoveryService implements AutoCloseable {
             connectedSinceRequest = true;
         }
         if (state == ConnectionState.ERROR) {
-            schedule();
+            schedule("the core stopped");
         } else if (state == ConnectionState.CONNECTED && !settings.get().isHealthCheckEnabled()) {
             attempts = 0;
             cancelPending();
@@ -199,14 +199,19 @@ public final class TunnelRecoveryService implements AutoCloseable {
     public synchronized void onHealth(TunnelHealth health) {
         lastHealth = health;
         if (health == TunnelHealth.BROKEN) {
-            schedule();
+            schedule("no health-check target answered through the tunnel");
         } else if (health == TunnelHealth.HEALTHY || health == TunnelHealth.DEGRADED) {
             attempts = 0;
             cancelPending();
         }
     }
 
-    private void schedule() {
+    /**
+     * Schedules a restart, saying why in the log: a tunnel torn down seconds
+     * after it came up left only "Disconnecting" there, from a thread name,
+     * with nothing to tell a crash from a failed probe.
+     */
+    private void schedule(String why) {
         AppSettings config = settings.get();
         if (!wanted || closed || running || pending != null
                 || !config.isHealthCheckAutoReconnect()) {
@@ -227,6 +232,7 @@ public final class TunnelRecoveryService implements AutoCloseable {
                 (long) base * (1L << Math.min(attempts, 20)));
         long request = generation;
         publish(new Retry(++attempts, seconds));
+        log.info("Restarting the tunnel in {} s (attempt {}): {}", seconds, attempts, why);
         pending = scheduler.schedule(() -> retry(request), seconds, TimeUnit.SECONDS);
     }
 
@@ -263,7 +269,7 @@ public final class TunnelRecoveryService implements AutoCloseable {
                         stop(refused);
                     }
                 } else if ((!started && isWanted(request)) || lastState == ConnectionState.ERROR) {
-                    schedule();
+                    schedule("the restart did not bring the tunnel up");
                 }
             }
         }

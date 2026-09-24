@@ -10,7 +10,9 @@ import com.vlessclient.service.outbound.CoreSettings;
 import com.vlessclient.service.outbound.OutboundTags;
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
+import java.net.Socket;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -62,6 +64,9 @@ public class ConnectionService {
      * engine's own SIGTERM grace plus force-kill.
      */
     private static final Duration STOP_WAIT = Duration.ofSeconds(15);
+
+    /** A loopback connect answers at once either way; this only bounds a firewall's silence. */
+    private static final int PORT_PROBE_TIMEOUT_MS = 250;
 
     /**
      * How many servers the core refuses before one connect gives up. Each one
@@ -143,6 +148,8 @@ public class ConnectionService {
     private volatile ProxyMode requestedMode;
     /** What the running core was started from, or null when none was. */
     private volatile Run run;
+    /** The ports the last core listened on, which a restart may find in its TIME_WAIT. */
+    private volatile Set<Integer> lastCorePorts = Set.of();
 
     /** What the running core was started without, for the UI; changed on the FX thread. */
     private final ReadOnlyObjectWrapper<List<SkippedServer>> skippedServers =
@@ -374,11 +381,12 @@ public class ConnectionService {
         }
         List<MovedPort> moved = List.of();
         if (!current.isRunning()) {
-            // Only on a cold start. A restart keeps the ports this session
-            // already settled on: the core being replaced may still hold them
-            // for a moment, and moving again on every restart would walk the
-            // ports upward for no reason.
-            moved = moveTakenListenPortsAside(settings);
+            // Only once the previous core is gone: while it still ran, its own
+            // ports would read as taken. What it leaves behind in TIME_WAIT
+            // does not (see isFree), so a restart keeps the ports it had.
+            moved = moveTakenListenPortsAside(settings, lastCorePorts);
+            lastCorePorts = Set.copyOf(List.of(settings.listenSocksPort(),
+                    settings.listenHttpPort(), settings.listenClashApiPort()));
             recordSessionHttpPort(settings);
         }
         // A control secret for this core alone. One secret lasted the whole
@@ -721,7 +729,8 @@ public class ConnectionService {
      * saved, stay as they are, so the next start tries them again, and what
      * listens, connects or shows a port reads the run's.</p>
      */
-    private static List<MovedPort> moveTakenListenPortsAside(AppSettings settings) {
+    private static List<MovedPort> moveTakenListenPortsAside(AppSettings settings,
+                                                             Set<Integer> lastCores) {
         int[] chosen = {settings.getSocksPort(), settings.getHttpPort(),
             settings.getClashApiPort()};
         String[] what = {"SOCKS", "HTTP", "control"};
@@ -731,7 +740,7 @@ public class ConnectionService {
         Set<Integer> reserved = new LinkedHashSet<>();
         boolean[] kept = new boolean[chosen.length];
         for (int i = 0; i < chosen.length; i++) {
-            kept[i] = !reserved.contains(chosen[i]) && canBind(chosen[i]);
+            kept[i] = !reserved.contains(chosen[i]) && isFree(chosen[i], lastCores);
             if (kept[i]) {
                 reserved.add(chosen[i]);
             }
@@ -739,7 +748,7 @@ public class ConnectionService {
         int[] listen = chosen.clone();
         for (int i = 0; i < chosen.length; i++) {
             if (!kept[i]) {
-                listen[i] = freePortFrom(chosen[i], what[i], reserved);
+                listen[i] = freePortFrom(chosen[i], what[i], reserved, lastCores);
             }
         }
         settings.listenOn(listen[0], listen[1], listen[2]);
@@ -779,9 +788,10 @@ public class ConnectionService {
      * Ports already handed out in this pass count as taken, so two inbounds
      * cannot be moved onto the same one.
      */
-    private static int freePortFrom(int configured, String what, Set<Integer> alreadyTaken) {
+    private static int freePortFrom(int configured, String what, Set<Integer> alreadyTaken,
+                                    Set<Integer> lastCores) {
         for (int port = configured; port <= 65535 && port < configured + 64; port++) {
-            if (alreadyTaken.contains(port) || !canBind(port)) {
+            if (alreadyTaken.contains(port) || !isFree(port, lastCores)) {
                 continue;
             }
             if (port != configured) {
@@ -798,10 +808,37 @@ public class ConnectionService {
         return configured;
     }
 
-    private static boolean canBind(int port) {
+    /**
+     * Whether the next core can have {@code port}.
+     *
+     * <p>A core stopped a moment ago leaves its closed connections in
+     * TIME_WAIT for half a minute, and when that core ran as root (TUN), macOS
+     * refuses the app's own bind while they last, though the next root core
+     * binds the port fine: a quick restart reported the control port "held by
+     * another program" and walked it from 9099 to 9100 to 9101. So a port the
+     * last core listened on is free when nothing listens on it now, whatever
+     * the bind says; any other port is free when it binds.</p>
+     *
+     * @param port       the port to ask about
+     * @param lastCores  the ports the last core listened on
+     */
+    static boolean isFree(int port, Set<Integer> lastCores) {
         try (ServerSocket probe = new ServerSocket(port, 1, InetAddress.getLoopbackAddress())) {
             return probe.getLocalPort() == port;
-        } catch (IOException taken) {
+        } catch (IOException refused) {
+            return lastCores.contains(port) && !someoneListens(port);
+        }
+    }
+
+    private static boolean someoneListens(int port) {
+        try (Socket probe = new Socket()) {
+            probe.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), port),
+                    PORT_PROBE_TIMEOUT_MS);
+            // Dialled from the very port it dials, a socket reaches itself (TCP
+            // simultaneous open); macOS hands out ephemeral ports in sequence,
+            // which makes that likely for a port in its range.
+            return probe.getLocalPort() != port;
+        } catch (IOException nothingListens) {
             return false;
         }
     }

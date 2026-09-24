@@ -6,6 +6,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -139,13 +140,19 @@ public class LogReader {
     }
 
     /**
-     * Detects whether a log line indicates that sing-box has successfully started.
+     * Whether a log line says the core as a whole is up.
+     *
+     * <p>Any line containing "started" used to count, and the core logs one
+     * for each inbound it brings up, before the rest are: the session read as
+     * Connected, its health probe went out into a core that was not answering
+     * yet, failed, and recovery tore the fresh tunnel down seconds later, on
+     * connect after connect. sing-box logs "sing-box started (…s)" once, when
+     * its start has returned.</p>
      *
      * @param line the log line to check
-     * @return true if the line contains a "started" indicator
+     * @return true for the core's own "started" line
      */
-    private boolean isStartedMessage(String line) {
-        String lower = line.toLowerCase();
-        return lower.contains("sing-box started") || lower.contains("started");
+    static boolean isStartedMessage(String line) {
+        return line.toLowerCase(Locale.ROOT).contains("sing-box started");
     }
 }
