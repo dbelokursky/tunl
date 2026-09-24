@@ -252,4 +252,37 @@ class ServiceReachabilityCheckerTest {
             return socket.getLocalPort();
         }
     }
+
+    /**
+     * Through a group, a URL target is fetched by the core through it; a
+     * host:port one, which is no URL the group can fetch, still goes through
+     * the inbound.
+     */
+    @Test
+    void throughAGroupOnlyUrlTargetsGoToTheGroup() throws Exception {
+        List<String> viaInbound = new java.util.concurrent.CopyOnWriteArrayList<>();
+        List<String> viaGroup = new java.util.concurrent.CopyOnWriteArrayList<>();
+        ServiceReachabilityChecker checker = new ServiceReachabilityChecker(
+                (target, port) -> {
+                    viaInbound.add(target.getUrl() + "@" + port);
+                    return new ProbeResult(target.getName(), target.getUrl(), true, 1, "tcp");
+                },
+                (target, route) -> {
+                    viaGroup.add(target.getUrl() + "@" + route.group());
+                    return new ProbeResult(target.getName(), target.getUrl(), true, 1, "group");
+                });
+        try {
+            List<ProbeResult> results = checker.checkAllThroughGroup(List.of(
+                            new HealthCheckTarget("Google", "https://www.google.com/generate_204"),
+                            new HealthCheckTarget("Box", "203.0.113.7:22")),
+                    new ServiceReachabilityChecker.GroupRoute(1082, 9099, "s", "proxy"))
+                    .get(5, TimeUnit.SECONDS);
+
+            assertThat(results).extracting(ProbeResult::detail).containsExactly("group", "tcp");
+            assertThat(viaGroup).containsExactly("https://www.google.com/generate_204@proxy");
+            assertThat(viaInbound).containsExactly("203.0.113.7:22@1082");
+        } finally {
+            checker.shutdown();
+        }
+    }
 }

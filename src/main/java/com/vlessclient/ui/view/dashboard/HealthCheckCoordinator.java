@@ -5,12 +5,16 @@ import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.HealthCheckTarget;
+import com.vlessclient.model.RouteMode;
 import com.vlessclient.model.TunnelHealth;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.service.ConnectionService;
+import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.service.TunnelRecoveryService;
+import com.vlessclient.service.outbound.OutboundTags;
 import com.vlessclient.ui.view.FxTimer;
 import com.vlessclient.ui.view.OnScreen;
 import java.time.Duration;
@@ -278,9 +282,12 @@ public final class HealthCheckCoordinator {
         }
 
         final int gen = healthGeneration.incrementAndGet();
-        final int httpPort = settings.listenHttpPort();
+        ServiceReachabilityChecker.GroupRoute group = throughGroup(settings);
 
-        reachabilityChecker.checkAll(targets, httpPort).whenComplete((results, err) ->
+        (group != null
+                ? reachabilityChecker.checkAllThroughGroup(targets, group)
+                : reachabilityChecker.checkAll(targets, settings.listenHttpPort()))
+                .whenComplete((results, err) ->
                 Platform.runLater(() -> {
                     if (gen != healthGeneration.get()) {
                         return;   // superseded by a newer check or cancelled
@@ -304,6 +311,31 @@ public final class HealthCheckCoordinator {
                     publishVerdict(results);
                     evaluateReconnect(results, settings);
                 }));
+    }
+
+    /**
+     * The proxy group to probe through, in the mode that sends only the
+     * blocked lists through the tunnel, else null. There the route rules sent
+     * the probes direct: Google answered past a dead server, and recovery
+     * never restarted a tunnel that carried nothing.
+     */
+    private static ServiceReachabilityChecker.GroupRoute throughGroup(AppSettings settings) {
+        RouteMode mode;
+        try {
+            mode = ServiceLocator.find(RoutingService.class)
+                    .map(routing -> routing.getConfig().getMode())
+                    .orElse(RouteMode.ALL);
+        } catch (RuntimeException unreadable) {
+            return null;
+        }
+        if (mode != RouteMode.BLOCKED_IN_RUSSIA) {
+            return null;
+        }
+        String group = ServiceLocator.find(ConnectionService.class)
+                .map(ConnectionService::getProxyGroupTag)
+                .orElse(OutboundTags.PROXY);
+        return new ServiceReachabilityChecker.GroupRoute(settings.listenHttpPort(),
+                settings.listenClashApiPort(), settings.getClashApiSecret(), group);
     }
 
     /**
@@ -380,6 +412,20 @@ public final class HealthCheckCoordinator {
     }
 
     /**
+     * The banner for a retry, by why it was scheduled: every retry said "all
+     * services unreachable", a crash of the core and a Wi-Fi that was gone
+     * included.
+     */
+    private static String bannerKey(TunnelRecoveryService.Reason reason) {
+        return switch (reason) {
+            case UNREACHABLE -> "dashboard.reconnect.banner";
+            case CORE_STOPPED -> "dashboard.reconnect.banner.core";
+            case RESTART_FAILED -> "dashboard.reconnect.banner.failed";
+            case NO_NETWORK -> "dashboard.reconnect.banner.network";
+        };
+    }
+
+    /**
      * Draws what recovery is doing in the banner: the countdown to a pending
      * retry, or why recovery stopped. A refused configuration used to leave
      * only the countdown, while the same restart failed at every step.
@@ -389,7 +435,7 @@ public final class HealthCheckCoordinator {
         String stopped = recovery.stopReasonProperty().get();
         if (next != null) {
             setHealthCardVisible(true);
-            showReconnectBanner(I18n.get("dashboard.reconnect.banner",
+            showReconnectBanner(I18n.get(bannerKey(next.reason()),
                     String.valueOf(next.delaySeconds()), String.valueOf(next.attempt())));
         } else if (stopped != null) {
             setHealthCardVisible(true);

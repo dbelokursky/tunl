@@ -86,6 +86,8 @@ sed_i "$PKGBUILD_FILE" \
 # without duplicating the field values here. Runs on any platform (no makepkg).
 generate_srcinfo() {
     local tmp; tmp="$(mktemp "${TMPDIR:-/tmp}/vless-srcinfo.XXXXXX")"
+    # Every field below is the PKGBUILD's own, set by sourcing it.
+    # shellcheck disable=SC2154
     (
         set +u
         # shellcheck source=/dev/null

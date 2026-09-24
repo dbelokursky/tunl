@@ -210,6 +210,21 @@ public class LogsViewTest extends ApplicationTest {
     }
 
     /**
+     * A subscription URL carries the account token, and "Save log" wrote it
+     * out whole; the diagnostics bundle already cut it. What a connection
+     * went to stays, since that is what a log is read for.
+     */
+    @Test
+    void aSavedLogCutsTheTokensOutOfUrls() {
+        String saved = LogsViewController.savedLog(List.of(
+                "INFO Refreshing https://sub.example.com/api/v1/client/subscribe?token=s3cr3t",
+                "INFO inbound/tun[tun-in]: inbound connection to [2a02:6b8::2:242]:443"));
+
+        assertThat(saved).doesNotContain("s3cr3t").contains("https://sub.example.com/")
+                .contains("[2a02:6b8::2:242]:443");
+    }
+
+    /**
      * Installing the core from the dashboard registers a new engine after this
      * view was built, and the view went on showing the log of the engine that
      * had no binary: empty, for the rest of the run.

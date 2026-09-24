@@ -196,6 +196,27 @@ class ConnectionServiceTest {
         }
     }
 
+    /**
+     * A server picked while the tunnel was still connecting changed the list
+     * and the tray, and the traffic stayed on the server the start began with.
+     * Reaching Connected applies it.
+     */
+    @Test
+    void aServerPickedWhileConnectingIsAppliedOnceConnected() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(server("srv-2", "Osaka"));
+        store.setActiveServer("srv-1");
+        ConnectionService service = service(engine());
+        assertThat(service.connect().started()).isTrue();
+        assertThat(service.appliedServerId()).isEqualTo("srv-1");
+
+        store.setActiveServer("srv-2");
+        service.followActiveServer();
+
+        Await.until("the pick applied", () -> "srv-2".equals(service.appliedServerId()),
+                Duration.ofSeconds(5));
+    }
+
     @Test
     void recoveryLeavesTheReconnectToTheUserOnlyWhereARestartWouldPrompt() {
         RecordingEngine engine = engine();
