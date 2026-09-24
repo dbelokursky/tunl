@@ -8,7 +8,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * REALITY parameters.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class TlsConfig {
+public class TlsConfig extends KeepsUnknownFields {
 
     @JsonProperty("enabled")
     private boolean enabled;

@@ -9,7 +9,7 @@ import java.util.UUID;
  * assigning it an action (proxy, direct, or block).
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class RoutingRule {
+public class RoutingRule extends KeepsUnknownFields {
 
     @JsonProperty("id")
     private String id;

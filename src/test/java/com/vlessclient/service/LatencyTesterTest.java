@@ -126,4 +126,41 @@ class LatencyTesterTest {
             return socket.getLocalPort();
         }
     }
+
+    /** A TCP connect to a UDP server fails whatever the server does: nothing is measured. */
+    @Test
+    void aUdpServerIsNotMeasuredByATcpConnect() throws Exception {
+        ServerConfig server = new ServerConfig();
+        server.setId("hy2");
+        server.setProtocol(com.vlessclient.model.Protocol.HYSTERIA2);
+        server.setAddress(LOOPBACK);
+        server.setPort(closedLoopbackPort());
+
+        LatencyTester.Result result = tester.measure(server).get(10, TimeUnit.SECONDS);
+
+        assertThat(result.measured()).isFalse();
+        assertThat(tester.lastLatency("hy2")).as("not ranked as dead").isEmpty();
+    }
+
+    /**
+     * A plain TCP connect says the address answers, not that the proxy works;
+     * a quick one outranked a server a real request went through.
+     */
+    @Test
+    void aTcpConnectRanksAfterAMeasurementThroughTheProxy() throws Exception {
+        try (java.net.ServerSocket listener = new java.net.ServerSocket(0, 1,
+                InetAddress.getLoopbackAddress())) {
+            ServerConfig server = new ServerConfig();
+            server.setId("tcp");
+            server.setProtocol(com.vlessclient.model.Protocol.VLESS);
+            server.setAddress(LOOPBACK);
+            server.setPort(listener.getLocalPort());
+
+            LatencyTester.Result result = tester.measure(server).get(10, TimeUnit.SECONDS);
+
+            assertThat(result.reachable()).isTrue();
+            assertThat(tester.lastLatency("tcp").getAsLong())
+                    .isGreaterThanOrEqualTo(LatencyTester.TCP_ONLY_RANK_OFFSET);
+        }
+    }
 }

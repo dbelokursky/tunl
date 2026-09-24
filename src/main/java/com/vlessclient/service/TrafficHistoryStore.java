@@ -80,6 +80,9 @@ public class TrafficHistoryStore {
 
     private int version = 1;
     private boolean dirty;
+
+    /** Keeps writes of the file in order; taken before this object's monitor. */
+    private final Object writeOrder = new Object();
     private boolean attached;
     private long lastFlushAt;
 
@@ -226,22 +229,35 @@ public class TrafficHistoryStore {
      * Writes pending changes to disk; a no-op when nothing changed, or while
      * the file holds a history this session could not load.
      */
-    public synchronized void flush() {
-        if (!dirty || keepExistingFile) {
-            return;
-        }
-        TrafficHistory history = new TrafficHistory();
-        history.setVersion(version);
-        history.setDays(new ArrayList<>(byDate.values()));
-        Path file = dataDir.resolve(HISTORY_FILE);
-        try {
-            Files.createDirectories(dataDir);
-            // Owner-only and atomic, like every other file in the data dir:
-            // this one says when the user ran a tunnel and through which exit.
-            SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(history));
-            dirty = false;
-        } catch (IOException e) {
-            log.error("Failed to save traffic history to {}", file, e);
+    public void flush() {
+        // The write happens outside this object's monitor, which record()
+        // takes on the FX thread for every sample: an fsync under it stalled
+        // the UI once a minute. A lock of its own keeps two writes in order,
+        // so an older snapshot cannot land after a newer one.
+        synchronized (writeOrder) {
+            byte[] bytes;
+            synchronized (this) {
+                if (!dirty || keepExistingFile) {
+                    return;
+                }
+                TrafficHistory history = new TrafficHistory();
+                history.setVersion(version);
+                history.setDays(new ArrayList<>(byDate.values()));
+                bytes = objectMapper.writeValueAsBytes(history);
+                dirty = false;
+            }
+            Path file = dataDir.resolve(HISTORY_FILE);
+            try {
+                Files.createDirectories(dataDir);
+                // Owner-only and atomic, like every other file in the data dir:
+                // this one says when the user ran a tunnel and through which exit.
+                SecureFiles.writePrivately(file, bytes);
+            } catch (IOException e) {
+                log.error("Failed to save traffic history to {}", file, e);
+                synchronized (this) {
+                    dirty = true;
+                }
+            }
         }
     }
 
@@ -249,17 +265,23 @@ public class TrafficHistoryStore {
      * Forgets everything and removes the file. The only way the record is
      * cleared, since nothing expires on its own.
      */
-    public synchronized void reset() {
-        byDate.clear();
-        dirty = false;
-        Path file = dataDir.resolve(HISTORY_FILE);
-        try {
-            Files.deleteIfExists(file);
-            // The file this session could not load is gone, so the record can
-            // start again.
-            keepExistingFile = false;
-        } catch (IOException e) {
-            log.error("Failed to delete traffic history at {}", file, e);
+    public void reset() {
+        // Under the write lock too: a flush under way would write the file
+        // back after it was deleted.
+        synchronized (writeOrder) {
+            synchronized (this) {
+                byDate.clear();
+                dirty = false;
+                Path file = dataDir.resolve(HISTORY_FILE);
+                try {
+                    Files.deleteIfExists(file);
+                    // The file this session could not load is gone, so the
+                    // record can start again.
+                    keepExistingFile = false;
+                } catch (IOException e) {
+                    log.error("Failed to delete traffic history at {}", file, e);
+                }
+            }
         }
     }
 

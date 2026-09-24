@@ -11,7 +11,7 @@ import java.util.UUID;
  * refresh interval and the ids of the servers it has imported.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class Subscription {
+public class Subscription extends KeepsUnknownFields {
 
     @JsonProperty("id")
     private String id;
