@@ -177,6 +177,12 @@ x64 box, ideally a clean user profile.
 - [ ] **TUN connect** — switch to **TUN** mode and connect; a **UAC prompt**
       appears (per connect); confirm the **`VlessClientTun` wintun adapter**
       comes up (Network Connections / `ipconfig`).
+- [ ] **TUN DNS** — while connected in TUN, a DNS leak test (e.g.
+      browserleaks.com/dns) lists the proxy DNS's resolvers only, not the
+      ISP's; a site the rules send direct (a `.ru` one) and the router's page
+      on the LAN still open. *strict_route's WFP filters are what keep
+      Windows from asking the physical adapter's resolver; CI cannot
+      exercise them.*
 - [ ] **TUN disconnect** — disconnect; confirm the adapter is **removed**.
 - [ ] **Quit while connected (TUN)** — connect in TUN, then **Quit the app**
       (tray → Quit) *while still connected*. Confirm **no `sing-box.exe`
