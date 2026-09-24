@@ -89,6 +89,22 @@ jobs:
       # Windows, where the default shell is PowerShell and mvnw is a script.
       - run: ./mvnw -B clean verify -Psmoke
         shell: bash
+      - name: Name the failed tests
+        # The job log is readable only signed in, or as a download from blob
+        # storage that some networks cannot reach; an annotation comes from
+        # the checks API. One per failing test class, with the head of its
+        # surefire report.
+        if: failure()
+        shell: bash
+        run: |
+          shopt -s nullglob
+          for report in target/surefire-reports/*.txt; do
+            if grep -q -E '<<< (FAILURE|ERROR)!' "$report"; then
+              body=$(grep -E -A10 '<<< (FAILURE|ERROR)!' "$report" | head -40 \
+                | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN { ORS = "%0A" } { print }')
+              echo "::error title=$(basename "$report" .txt)::${body}"
+            fi
+          done
       - name: Save the Maven repository
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.maven-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
