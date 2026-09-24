@@ -163,16 +163,18 @@ they work on a network that blocks the sites they talk to. (While the tunnel
 is up but failing its reachability checks, a subscription refresh is postponed
 rather than sent around it.)
 
-In TUN mode the tunnel captures IPv6 as well (**Settings → Advanced → Route
-IPv6 through the tunnel**, on by default); turn it off for a server without
-IPv6 egress.
+In TUN mode the tunnel captures IPv6 as well where the machine has IPv6
+(**Settings → Advanced → Route IPv6 through the tunnel**, on by default). On a
+network without an IPv6 address the TUN device takes IPv4 only, so a site that
+also answers over IPv6 is not sent into a route that leads nowhere. Turn it off
+for a server without IPv6 egress.
 
 What TUN asks for on each OS:
 
 | OS | TUN privileges |
 |---|---|
-| macOS | sudo-NOPASSWD rule (password once) or an osascript prompt on every Connect |
-| Windows | UAC prompt on every Connect |
+| macOS | one admin prompt installs a sudo-NOPASSWD rule: on macOS 15 and later for a root-owned launcher that takes the connection's config on stdin and keeps only what a Tunl config is made of, on 13–14 for the core's one command line; without it, an osascript prompt on every Connect |
+| Windows | UAC prompt on every Connect; while the tunnel is up, DNS queries outside it are blocked (WFP), so names do not leak to the network's resolver |
 | Linux | one-time `setcap` via PolicyKit (no prompts afterwards) or a pkexec prompt on Connect |
 
 ---
@@ -366,10 +368,10 @@ else saves on click.
 | | Auto-reconnect when unreachable | Recover after a core crash or when every check fails; retry delay doubles up to 5 minutes |
 | | Check interval / Reconnect delay | Seconds between checks (`5`) and before the first retry (`10`) |
 | Advanced | Proxy DNS | Resolver for tunnelled names, queried through the tunnel (`https://1.1.1.1/dns-query`) |
-| | Direct DNS | Resolver for direct-routed names — the bypass list, Direct rules, bypassed countries (`https://223.5.5.5/dns-query`) |
+| | Direct DNS | Resolver for direct-routed names — the bypass list, Direct rules, bypassed countries (`system`: the resolver of the network you are on) |
 | | TUN Interface Name | `utun99` on macOS and Linux, `VlessClientTun` on Windows |
 | | TUN IPv4 Address | `172.19.0.1/30` |
-| | Route IPv6 through the tunnel | On by default; off, IPv6 traffic bypasses the VPN on dual-stack networks |
+| | Route IPv6 through the tunnel | On by default, where the machine has an IPv6 address; off, IPv6 traffic bypasses the VPN on dual-stack networks |
 | | Store credentials in the system keychain | Seal server credentials and subscription URLs with Keychain / DPAPI / Secret Service instead of writing them into the JSON files |
 | | Device ID | The identifier sent with subscription requests, with a button to make a new one; random, made once per install |
 | Agent Control (MCP) | Enable MCP server, Port, Allow configuration changes, Copy command, Regenerate token | See [Agent control](#agent-control-mcp) |
