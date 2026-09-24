@@ -24,6 +24,12 @@
     <String role='FILE_NAME' value='/usr/local/libexec/vless-client'/>
     <SourceLine endBytecode='28' classname='com.vlessclient.platform.PrivilegeHelper' start='67' end='67' sourcepath='com/vlessclient/platform/PrivilegeHelper.java' sourcefile='PrivilegeHelper.java' startBytecode='28' primary='true'/>
   </BugInstance>
+  <BugInstance instanceOccurrenceNum='0' instanceHash='9b77f0e51dc6abc048f2d2a332eae571' cweid='440' rank='17' abbrev='DMI' category='STYLE' priority='2' type='DMI_HARDCODED_ABSOLUTE_FILENAME' instanceOccurrenceMax='0'>
+    <Class classname='com.vlessclient.platform.PrivilegeHelper' primary='true'/>
+    <Method isStatic='true' classname='com.vlessclient.platform.PrivilegeHelper' signature='()V' name='&lt;clinit&gt;' primary='true'/>
+    <String role='FILE_NAME' value='/usr/bin/jq'/>
+    <SourceLine endBytecode='69' classname='com.vlessclient.platform.PrivilegeHelper' start='96' end='96' sourcepath='com/vlessclient/platform/PrivilegeHelper.java' sourcefile='PrivilegeHelper.java' startBytecode='69' primary='true'/>
+  </BugInstance>
   <BugInstance instanceOccurrenceNum='0' instanceHash='b597f9a1bccae59f58eff8210d20b023' rank='20' abbrev='FS' category='BAD_PRACTICE' priority='2' type='VA_FORMAT_STRING_USES_NEWLINE' instanceOccurrenceMax='0'>
     <Class classname='com.vlessclient.platform.WindowsUpdateApplier' primary='true'/>
     <Method isStatic='true' classname='com.vlessclient.platform.WindowsUpdateApplier' signature='(JLjava/nio/file/Path;Ljava/nio/file/Path;)Ljava/lang/String;' name='relayScript' primary='true'/>
