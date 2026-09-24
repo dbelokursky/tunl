@@ -84,6 +84,10 @@ public class LogsViewController {
     private FilteredList<String> filteredLogLines;
     /** Whether the list is in a scene whose window is showing; see followLiveLog. */
     private ObservableValue<Boolean> listOnScreen;
+    /** The engine whose log the view shows; null when none was registered. */
+    private SingBoxEngine boundEngine;
+    /** Keeps the reader's place as lines arrive; moves with the list to a new engine's log. */
+    private final ListChangeListener<String> followNewLines = this::onNewLines;
     /** Where a reader with auto-scroll off was when the list went off screen. */
     private ViewportAnchor parkedAnchor;
     /** The rows selected when the list went off screen. */
@@ -148,16 +152,11 @@ public class LogsViewController {
                 .bind(I18n.binding("logs.diagnostics.tooltip"));
         clearButton.accessibleTextProperty().bind(I18n.binding("logs.clear.tooltip"));
 
-        SingBoxEngine engine = null;
-        try {
-            engine = ServiceLocator.get(SingBoxEngine.class);
-        } catch (IllegalArgumentException e) {
-            log.warn("SingBoxEngine not available; logs view will be empty");
-        }
-
-        if (engine != null) {
-            sourceLogLines = engine.getLogLines();
+        boundEngine = ServiceLocator.find(SingBoxEngine.class).orElse(null);
+        if (boundEngine != null) {
+            sourceLogLines = boundEngine.getLogLines();
         } else {
+            log.warn("SingBoxEngine not available; logs view will be empty");
             sourceLogLines = FXCollections.observableArrayList();
         }
 
@@ -239,31 +238,57 @@ public class LogsViewController {
             }
         });
 
-        filteredLogLines.addListener((ListChangeListener<String>) change -> {
-            // setPredicate() reports the whole FilteredList as a replacement
-            // from index zero. It is a user-requested refilter, not a ring-
-            // buffer trim, and applyFilter() applies its own viewport policy.
-            // Off screen there is no viewport to keep: followLiveLog() puts the
-            // list back in place when it is shown again.
-            if (filterChangeInProgress || !listOnScreen.getValue()) {
-                return;
-            }
-            if (filteredLogLines.isEmpty()) {
-                discardPendingViewportRestore();
-                return;
-            }
-            if (autoScrollCheckBox.isSelected()) {
-                discardPendingViewportRestore();
-                logListView.scrollTo(filteredLogLines.size() - 1);
-                return;
-            }
-            // Auto-scroll is off: hold the lines the user is reading in place.
-            // ListView.scrollTo(index) only makes a row visible. If that row
-            // is already on screen, VirtualFlow remains pinned to the tail and
-            // shifts it as new rows arrive. Capture both the first row and its
-            // exact pixel offset, then restore them after the list mutation.
-            queueViewportRestore(change);
-        });
+        filteredLogLines.addListener(followNewLines);
+    }
+
+    private void onNewLines(ListChangeListener.Change<? extends String> change) {
+        // setPredicate() reports the whole FilteredList as a replacement
+        // from index zero. It is a user-requested refilter, not a ring-
+        // buffer trim, and applyFilter() applies its own viewport policy.
+        // Off screen there is no viewport to keep: followLiveLog() puts the
+        // list back in place when it is shown again.
+        if (filterChangeInProgress || !listOnScreen.getValue()) {
+            return;
+        }
+        if (filteredLogLines.isEmpty()) {
+            discardPendingViewportRestore();
+            return;
+        }
+        if (autoScrollCheckBox.isSelected()) {
+            discardPendingViewportRestore();
+            logListView.scrollTo(filteredLogLines.size() - 1);
+            return;
+        }
+        // Auto-scroll is off: hold the lines the user is reading in place.
+        // ListView.scrollTo(index) only makes a row visible. If that row
+        // is already on screen, VirtualFlow remains pinned to the tail and
+        // shifts it as new rows arrive. Capture both the first row and its
+        // exact pixel offset, then restore them after the list mutation.
+        queueViewportRestore(change);
+    }
+
+    /**
+     * Moves the view onto the log of the engine registered now.
+     *
+     * <p>The view is built once and cached. Installing the core from the
+     * dashboard registers a new engine after it, and the view went on showing
+     * the log of the one that had no binary: empty, for the rest of the run.
+     * Asked each time the list comes back on screen, which a swap happens
+     * away from.</p>
+     */
+    private void followCurrentEngine() {
+        SingBoxEngine engine = ServiceLocator.find(SingBoxEngine.class).orElse(null);
+        if (engine == null || engine == boundEngine) {
+            return;
+        }
+        boundEngine = engine;
+        sourceLogLines = engine.getLogLines();
+        filteredLogLines.removeListener(followNewLines);
+        filteredLogLines = new FilteredList<>(sourceLogLines, filteredLogLines.getPredicate());
+        filteredLogLines.addListener(followNewLines);
+        // What was parked belongs to the old log.
+        parkedAnchor = null;
+        parkedSelection = List.of();
     }
 
     /**
@@ -296,6 +321,7 @@ public class LogsViewController {
             }
             return;
         }
+        followCurrentEngine();
         if (logListView.getItems() == filteredLogLines) {
             return;
         }

@@ -1,7 +1,10 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
+import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.testing.Await;
+import java.nio.file.Path;
 import com.vlessclient.testing.UiTest;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -219,6 +222,34 @@ public class LogsViewTest extends ApplicationTest {
 
         assertThat(saved).doesNotContain("s3cr3t").contains("https://sub.example.com/")
                 .contains("[2a02:6b8::2:242]:443");
+    }
+
+    /**
+     * Installing the core from the dashboard registers a new engine after this
+     * view was built, and the view went on showing the log of the engine that
+     * had no binary: empty, for the rest of the run.
+     */
+    @Test
+    void theLogOfAnEngineRegisteredLaterIsShownWhenTheViewComesBack() {
+        ListView<String> list = lookup("#logListView").query();
+        SingBoxEngine previous = ServiceLocator.find(SingBoxEngine.class).orElse(null);
+        SingBoxEngine installed = new SingBoxEngine(Path.of("target", "no-such-sing-box"));
+        try {
+            interact(() -> stage.hide());
+            ServiceLocator.register(SingBoxEngine.class, installed);
+            interact(() -> installed.getLogLines().add("INFO sing-box started (0.10s)"));
+
+            interact(() -> stage.show());
+            WaitForAsyncUtils.waitForFxEvents();
+
+            assertThat(list.getItems()).containsExactly("INFO sing-box started (0.10s)");
+            interact(() -> installed.getLogLines().add("INFO inbound/socks[socks-in]: ready"));
+            assertThat(list.getItems()).as("and it keeps following it").hasSize(2);
+        } finally {
+            if (previous != null) {
+                ServiceLocator.register(SingBoxEngine.class, previous);
+            }
+        }
     }
 
     /** Closing the window to the tray hides the stage and leaves the scene on it. */
