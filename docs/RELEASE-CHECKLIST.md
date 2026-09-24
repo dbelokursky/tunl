@@ -60,8 +60,9 @@ On a pushed `v*` tag:
   the tag object the run took its title and notes from, on the commit it
   built. Only then is that draft made public, by its id. A failed job leaves a
   draft to diagnose, never a partial public release.
-- **Pruning** (`prune-old-releases`): real releases older than the newest five
-  are deleted (tags kept; `dev-latest` and drafts untouched).
+- **No pruning.** Every release stays. A deleted release takes its download
+  counts with it: the job that kept only the newest five had cut the total the
+  README badge shows to what those five had, and every release lowered it.
 
 ## Before tagging (manual)
 
