@@ -298,5 +298,6 @@ public class LatencyTester {
 
     public void shutdown() {
         executor.shutdownNow();
+        delayProbe.close();
     }
 }

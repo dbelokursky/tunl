@@ -93,6 +93,10 @@ public class ServiceReachabilityChecker {
     @FunctionalInterface
     public interface GroupProbeExecutor {
         ProbeResult probe(HealthCheckTarget target, GroupRoute route);
+
+        /** Releases what the probe holds; nothing unless it says otherwise. */
+        default void close() {
+        }
     }
 
     private final ExecutorService executor;
@@ -191,6 +195,11 @@ public class ServiceReachabilityChecker {
     private static final class ClashGroupProbe implements GroupProbeExecutor {
 
         private final ClashApiDelayProbe delays = new ClashApiDelayProbe();
+
+        @Override
+        public void close() {
+            delays.close();
+        }
 
         @Override
         public ProbeResult probe(HealthCheckTarget target, GroupRoute route) {
@@ -451,10 +460,12 @@ public class ServiceReachabilityChecker {
     }
 
     /**
-     * Shuts down the probe thread pool and closes any cached HTTP client.
+     * Shuts down the probe thread pool and closes the HTTP clients: the
+     * cached one and the group probe's.
      */
     public void shutdown() {
         executor.shutdownNow();
+        groupProbeExecutor.close();
         synchronized (this) {
             if (cachedClient != null) {
                 cachedClient.close();

@@ -6,6 +6,7 @@ import com.vlessclient.model.Subscription;
 import com.vlessclient.service.SubscriptionService;
 import com.vlessclient.service.TestSubscriptionServices;
 import com.vlessclient.testing.Await;
+import com.vlessclient.testing.ThreadDump;
 import com.vlessclient.testing.UiTest;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -175,7 +176,13 @@ public class SubscriptionsViewTest extends ApplicationTest {
                 I18n.get("subscriptions.delete.confirm", "Provider").equals(pane.getHeaderText()));
         interact(() -> ((Button) confirm.lookupButton(ButtonType.OK)).fire());
 
-        assertThat(removed.await(PATIENCE.toSeconds(), TimeUnit.SECONDS)).as("the subscription is removed").isTrue();
+        assertThat(removed.await(PATIENCE.toSeconds(), TimeUnit.SECONDS))
+                .withFailMessage(() -> "the subscription was not removed; registered: "
+                        + ServiceLocator.find(SubscriptionService.class)
+                                .map(found -> found == service ? "this test's" : "another")
+                                .orElse("none")
+                        + "\n" + ThreadDump.forBackgroundWork())
+                .isTrue();
         assertThat(removedOnFxThread.get())
                 .as("removing waits for the refresh lock, which froze the window on the FX thread")
                 .isFalse();
