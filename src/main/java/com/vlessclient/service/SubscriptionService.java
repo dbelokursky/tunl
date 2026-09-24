@@ -811,16 +811,15 @@ public class SubscriptionService {
     }
 
     String fetchContent(String url) throws IOException, InterruptedException {
-        if (AppHttpClients.isTunnelBrokenWhileConnected()) {
-            // The selector falls back to a direct connection in this one
-            // state so the updater keeps working on hostile networks. A
-            // subscription URL carries the account token, and sending it
-            // directly also exposes the user's real address at the exact
-            // moment they believe they are tunneled. Fail the refresh instead;
-            // the next one runs after the tunnel recovers or is torn down.
-            throw new TunnelNotCarryingException("The tunnel is up but not carrying traffic, "
-                    + "so the subscription was not fetched outside it. Reconnect, or "
-                    + "disconnect and refresh again.");
+        if (AppHttpClients.isTunnelWantedButNotCarrying()) {
+            // The selector falls back to a direct connection while the tunnel
+            // carries nothing, so the updater keeps working on hostile
+            // networks. A subscription URL carries the account token, and
+            // sending it directly also exposes the user's real address at the
+            // exact moment they believe they are tunneled. Fail the refresh
+            // instead; the next one runs on schedule.
+            throw new TunnelNotCarryingException("The tunnel is wanted but not carrying "
+                    + "traffic, so the subscription was not fetched outside it.");
         }
         if (isInsecureHttpUrl(url)) {
             // Host only — the path and query can carry an account token.
