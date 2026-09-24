@@ -89,6 +89,36 @@ class SingBoxConfigGeneratorRoutingTest {
         return kept;
     }
 
+    /**
+     * A star between names and an internationalized name reach the core the
+     * way it compares them, in the route rule and in the rule that resolves
+     * those names through the direct DNS.
+     */
+    @Test
+    void bypassList_regexAndPunycodeReachTheRouteAndTheDns() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setBypassList(List.of("mail.*.com", "*.рф"));
+        AppSettings tun = new AppSettings();
+        tun.setProxyMode(com.vlessclient.model.ProxyMode.TUN);
+
+        JsonNode root = parse(generator.generate(createVlessServer(), tun, routingConfig));
+
+        JsonNode bypass = null;
+        for (JsonNode rule : root.get("route").get("rules")) {
+            if (rule.has("domain_regex")) {
+                bypass = rule;
+            }
+        }
+        assertThat(bypass).as("a route rule with the regex").isNotNull();
+        assertThat(bypass.get("domain_regex").get(0).asString()).isEqualTo("^mail\\..*\\.com$");
+        assertThat(bypass.get("domain_suffix").get(0).asString()).isEqualTo("xn--p1ai");
+        assertThat(bypass.get("outbound").asString()).isEqualTo("direct");
+        assertThat(root.get("dns").get("rules")).anySatisfy(rule -> {
+            assertThat(rule.path("server").asString()).isEqualTo("direct-dns");
+            assertThat(rule.get("domain_regex").get(0).asString()).isEqualTo("^mail\\..*\\.com$");
+        });
+    }
+
     @Test
     void bypassList_mergedIntoDirectRule() throws Exception {
         RoutingConfig routingConfig = new RoutingConfig();

@@ -225,10 +225,13 @@ class SingBoxConfigGeneratorTunTest {
         assertThat(servers.get(0).get("path").asString()).isEqualTo("/dns-query");
         assertThat(servers.get(0).get("detour").asString()).isEqualTo("proxy");
 
+        // What the rules send direct is resolved by the network's own resolver,
+        // from the address the connection leaves anyway. It was AliDNS over
+        // DoH: every .ru name left the user's real address for Alibaba.
         assertThat(servers.get(1).get("tag").asString()).isEqualTo("direct-dns");
-        assertThat(servers.get(1).get("type").asString()).isEqualTo("https");
-        assertThat(servers.get(1).get("server").asString()).isEqualTo("223.5.5.5");
-        assertThat(servers.get(1).get("path").asString()).isEqualTo("/dns-query");
+        assertThat(servers.get(1).get("type").asString()).isEqualTo("local");
+        assertThat(servers.get(1).has("server")).isFalse();
+        assertThat(servers.get(1).has("domain_resolver")).isFalse();
         // sing-box 1.13 rejects detour: "direct" pointing at an empty direct
         // outbound, so direct-dns no longer sets the detour field.
         assertThat(servers.get(1).has("detour")).isFalse();
