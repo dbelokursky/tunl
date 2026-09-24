@@ -7,6 +7,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.regex.Pattern;
 
 /**
@@ -48,14 +50,19 @@ public final class ThreadDump {
     private static final Pattern CARRIER =
             Pattern.compile("^#\\d+ \"ForkJoinPool-\\d+-worker-\\d+\" .*");
 
+    /** The selector thread every open java.net.http client keeps. */
+    private static final Pattern HTTP_SELECTOR =
+            Pattern.compile("^#\\d+ \"HttpClient-\\d+-SelectorManager\" .*");
+
     private static final int FRAMES = 14;
-    private static final int MAX_LINES = 160;
+    private static final int MAX_LINES = 150;
 
     /**
      * The part of the dump that says why background work did not run, short
-     * enough for a failure message: whether the carriers of virtual threads
-     * are free or each held by one, every virtual thread in this app's code
-     * or running, and the FX thread.
+     * enough for a failure message: the carriers of virtual threads counted
+     * by state, the HTTP clients' selector threads counted with two shown,
+     * every other virtual thread that runs or is in this app's code with its
+     * stack, and the FX thread.
      *
      * <p>Work the UI hands off runs on virtual threads. When it all stops at
      * once, which UI tests on Windows runners have shown, either the carriers
@@ -67,40 +74,49 @@ public final class ThreadDump {
     public static String forBackgroundWork() {
         String dump = ofAllThreads();
         List<String> kept = new ArrayList<>();
+        Map<String, Integer> carriers = new TreeMap<>();
         int virtual = 0;
         int running = 0;
-        int carriers = 0;
-        int carriersBusy = 0;
+        int selectors = 0;
+        int selectorsRunning = 0;
         for (String entry : dump.split("\\R\\R")) {
             String[] lines = entry.strip().split("\\R");
             String header = lines[0];
             if (!header.startsWith("#")) {
                 continue;
             }
-            boolean isVirtual = header.contains("\" virtual ");
-            if (isVirtual) {
-                virtual++;
-                boolean runs = header.contains(" RUNNABLE ");
-                if (runs) {
-                    running++;
-                }
-                if (runs || entry.contains("com.vlessclient")) {
+            if (CARRIER.matcher(header).matches()) {
+                carriers.merge(state(header), 1, Integer::sum);
+                continue;
+            }
+            if (!header.contains("\" virtual ")) {
+                if (header.contains("\"JavaFX Application Thread\"")) {
                     keep(kept, lines, FRAMES);
                 }
-            } else if (CARRIER.matcher(header).matches()) {
-                carriers++;
-                if (entry.contains("Continuation.run")) {
-                    carriersBusy++;
+                continue;
+            }
+            virtual++;
+            boolean runs = header.contains(" RUNNABLE ");
+            if (runs) {
+                running++;
+            }
+            if (HTTP_SELECTOR.matcher(header).matches()) {
+                selectors++;
+                if (runs) {
+                    selectorsRunning++;
                 }
-                keep(kept, lines, 3);
-            } else if (header.contains("\"JavaFX Application Thread\"")) {
+                if (selectors <= 2) {
+                    keep(kept, lines, 6);
+                }
+            } else if (runs || entry.contains("com.vlessclient")) {
                 keep(kept, lines, FRAMES);
             }
         }
         StringBuilder summary = new StringBuilder()
-                .append("threads: ").append(virtual).append(" virtual (")
-                .append(running).append(" running), ").append(carriersBusy).append(" of ")
-                .append(carriers).append(" carriers busy");
+                .append("threads: ").append(virtual).append(" virtual (").append(running)
+                .append(" running); carriers ").append(carriers)
+                .append("; HTTP client selectors: ").append(selectors).append(" (")
+                .append(selectorsRunning).append(" running)");
         int shown = 0;
         for (String line : kept) {
             if (shown++ == MAX_LINES) {
@@ -110,6 +126,12 @@ public final class ThreadDump {
             summary.append("\n  ").append(line);
         }
         return summary.toString();
+    }
+
+    /** The state in a dump header: {@code #12 "name" [virtual] STATE time}. */
+    private static String state(String header) {
+        String[] words = header.substring(header.lastIndexOf('"') + 1).trim().split(" ");
+        return words.length >= 2 && words[0].equals("virtual") ? words[1] : words[0];
     }
 
     private static void keep(List<String> kept, String[] lines, int frames) {

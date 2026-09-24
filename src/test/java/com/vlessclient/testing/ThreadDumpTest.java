@@ -31,7 +31,8 @@ class ThreadDumpTest {
     /**
      * The summary a timed-out wait carries names the virtual threads in this
      * app's code, with enough of their stacks to see what they wait on, and
-     * how many carriers are taken.
+     * counts the carriers rather than listing them: on a Windows runner there
+     * were 256, and listed they crowded out everything else.
      */
     @Test
     void theSummaryKeepsOurVirtualThreadsAndCountsTheCarriers() throws InterruptedException {
@@ -46,10 +47,11 @@ class ThreadDumpTest {
         try {
             String summary = ThreadDump.forBackgroundWork();
 
-            assertThat(summary).startsWith("threads: ").contains(" carriers busy")
+            assertThat(summary).startsWith("threads: ").contains("; carriers {")
+                    .contains("; HTTP client selectors: ")
                     .contains("\"summary-probe\" virtual")
                     .contains("CountDownLatch.await");
-            assertThat(summary.lines().count()).isLessThanOrEqualTo(162);
+            assertThat(summary.lines().count()).isLessThanOrEqualTo(152);
         } finally {
             release.countDown();
             parked.join();
