@@ -376,14 +376,16 @@ public class VlessClientApp extends Application {
     }
 
     /**
-     * Offers to replace a pre-hardening sudoers rule left by an older version.
+     * Offers to replace a sudoers rule an older version left behind.
      *
-     * <p>That rule authorized the root-owned sing-box with <em>any</em>
-     * arguments, which lets anything running as the user write a file as root
-     * without a prompt. Newer builds install a rule pinned to one command line,
-     * but only when a TUN connection is made — so a user who never enables TUN
-     * would keep the wide rule indefinitely after updating. This closes it at
-     * startup instead.</p>
+     * <p>The pre-hardening rule authorized the root-owned sing-box with
+     * <em>any</em> arguments, and the pinned rule that followed it with a
+     * config the user writes: either lets anything running as the user write
+     * a file as root without a prompt. Newer builds install a narrower rule
+     * (the launcher where this Mac has jq, the pinned one otherwise), but only
+     * when a TUN connection is made — so a user who never enables TUN would
+     * keep the old rule indefinitely after updating. This closes it at startup
+     * instead.</p>
      *
      * <p>Asks rather than acting silently: replacing it needs an admin prompt,
      * and an unexplained password request at launch is exactly the pattern
@@ -398,10 +400,10 @@ public class VlessClientApp extends Application {
         // The sudo probe shells out; keep it off the FX thread so it cannot
         // delay the window becoming interactive.
         Thread.startVirtualThread(() -> {
-            if (!PrivilegeHelper.hasLegacyWideRule()) {
+            if (!PrivilegeHelper.hasRuleToReplace()) {
                 return;
             }
-            log.warn("Pre-hardening sudoers rule detected; offering to replace it");
+            log.warn("An older build's sudoers rule is installed; offering to replace it");
             Platform.runLater(() -> promptToReplaceLegacyRule(owner));
         });
     }
@@ -432,7 +434,7 @@ public class VlessClientApp extends Application {
         Thread.startVirtualThread(() -> {
             try {
                 PrivilegeHelper.configure(binary);
-                log.info("Replaced the pre-hardening sudoers rule with the pinned one");
+                log.info("Replaced the older build's sudoers rule");
             } catch (IOException e) {
                 log.warn("Could not replace the legacy sudoers rule: {}", e.getMessage());
             }
