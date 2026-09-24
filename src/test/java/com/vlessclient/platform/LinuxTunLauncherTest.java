@@ -2,10 +2,15 @@ package com.vlessclient.platform;
 
 import com.vlessclient.testing.Await;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -163,5 +168,23 @@ class LinuxTunLauncherTest {
         } catch (IOException e) {
             return "";
         }
+    }
+
+    /**
+     * The capability setcap grants goes to whoever runs the binary, and the
+     * core was world-executable: another user of the machine could hold
+     * CAP_NET_ADMIN through it. The launch leaves it to its owner.
+     */
+    @Test
+    void theCoreIsLeftExecutableByItsOwnerAlone(@TempDir Path dir) throws IOException {
+        Assumptions.assumeTrue(
+                FileSystems.getDefault().supportedFileAttributeViews().contains("posix"));
+        Path binary = Files.createFile(dir.resolve("sing-box"));
+        Files.setPosixFilePermissions(binary, PosixFilePermissions.fromString("rwxr-xr-x"));
+
+        LinuxTunLauncher.restrictToOwner(binary);
+
+        assertThat(PosixFilePermissions.toString(Files.getPosixFilePermissions(binary)))
+                .isEqualTo("rwx------");
     }
 }

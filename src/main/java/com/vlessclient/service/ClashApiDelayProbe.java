@@ -94,6 +94,19 @@ public class ClashApiDelayProbe {
      *         which is not an error to surface
      */
     public Answer measure(int port, String secret, String tag) {
+        return measure(port, secret, tag, PROBE_URL);
+    }
+
+    /**
+     * Measures the delay of a request to {@code target} through one proxy.
+     *
+     * @param port   the Clash API port the core listens on
+     * @param secret the API token, blank when the config has none
+     * @param tag    the proxy's (or group's) sing-box tag
+     * @param target the URL the core requests through it
+     * @return as {@link #measure(int, String, String)}
+     */
+    public Answer measure(int port, String secret, String tag, String target) {
         if (tag == null || tag.isBlank() || port < 1) {
             return new Answer.NoAnswer();
         }
@@ -101,7 +114,7 @@ public class ClashApiDelayProbe {
             String url = "http://127.0.0.1:" + port + "/proxies/"
                     + URLEncoder.encode(tag, StandardCharsets.UTF_8)
                     + "/delay?timeout=" + PROBE_TIMEOUT_MS
-                    + "&url=" + URLEncoder.encode(PROBE_URL, StandardCharsets.UTF_8);
+                    + "&url=" + URLEncoder.encode(target, StandardCharsets.UTF_8);
 
             HttpRequest.Builder request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
