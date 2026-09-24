@@ -6,6 +6,7 @@ import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import javafx.application.ColorScheme;
 import javafx.application.Platform;
 import javafx.scene.Scene;
 import org.slf4j.Logger;
@@ -28,6 +29,12 @@ import org.slf4j.LoggerFactory;
  * macOS appearance changes on the JavaFX runtime this app bundles (its
  * listener never fires and its initial value is unreliable). The default, by
  * contrast, always reflects the current setting.</p>
+ *
+ * <p>The native title bar is not the stylesheet's to paint: JavaFX paints a
+ * window's frame from its scene's color scheme, and a scene given none takes
+ * that same unreliable platform value. So every scene dressed in a theme is
+ * also given the theme's color scheme; until it was, the frame stayed white
+ * over the dark theme.</p>
  */
 public class ThemeManager {
 
@@ -116,6 +123,16 @@ public class ThemeManager {
         return stylesheetsFor(resolveDark(isSystemDarkMode()));
     }
 
+    /**
+     * The color scheme in effect right now, for the native frame of a scene
+     * this manager does not own: a snapshot, like {@link #currentStylesheets()}.
+     *
+     * @return the scheme JavaFX is to paint the window's title bar in
+     */
+    public ColorScheme currentColorScheme() {
+        return colorSchemeFor(resolveDark(isSystemDarkMode()));
+    }
+
     private boolean isAutoMode() {
         return "auto".equals(currentTheme);
     }
@@ -137,7 +154,13 @@ public class ThemeManager {
             return;
         }
         scene.getStylesheets().setAll(stylesheetsFor(dark));
+        // A shown window repaints its frame when the scheme changes.
+        scene.getPreferences().setColorScheme(colorSchemeFor(dark));
         log.debug("Applied theme CSS: {} + {}", BASE_CSS, dark ? DARK_CSS : LIGHT_CSS);
+    }
+
+    private static ColorScheme colorSchemeFor(boolean dark) {
+        return dark ? ColorScheme.DARK : ColorScheme.LIGHT;
     }
 
     /**
