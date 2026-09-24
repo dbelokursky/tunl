@@ -89,6 +89,16 @@ jobs:
       # Windows, where the default shell is PowerShell and mvnw is a script.
       - run: ./mvnw -B clean verify -Psmoke
         shell: bash
+      - name: Lint the shell scripts
+        # What the build, the packaging and the app's own launchers run in a
+        # shell, some of it as root on a user's machine: a quoting slip fails
+        # here rather than there. shellcheck ships with the ubuntu image.
+        if: matrix.name == 'linux'
+        shell: bash
+        run: |
+          shopt -s nullglob
+          shellcheck scripts/*.sh src/main/resources/scripts/*.sh
+
       - name: Name the failed tests
         # The job log is readable only signed in, or as a download from blob
         # storage that some networks cannot reach; an annotation comes from
