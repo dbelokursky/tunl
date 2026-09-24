@@ -76,7 +76,7 @@ public class VlessClientApp extends Application {
         // support or when the ICON_IMAGE feature is unavailable.
         setDockIcon();
         installQuitHandler();
-        installMcpShutdownHook();
+        installShutdownHook();
         endLeftoverCore();
         ServiceLocator.initialize();
         clearStaleSystemProxy();
@@ -85,15 +85,20 @@ public class VlessClientApp extends Application {
 
     /**
      * Covers SIGTERM and direct {@link System#exit(int)} calls that do not
-     * reach the JavaFX {@link #stop()} callback. Runtime.halt and SIGKILL
-     * cannot run hooks, so the normal lifecycle also stops MCP explicitly.
+     * reach the JavaFX {@link #stop()} callback: stops MCP, then saves what
+     * only memory holds ({@link ServiceLocator#saveStateForExit()}).
+     * Runtime.halt and SIGKILL cannot run hooks, so the normal lifecycle does
+     * both explicitly.
      */
-    private void installMcpShutdownHook() {
-        Thread hook = new Thread(ServiceLocator::stopMcpServer, "tunl-mcp-shutdown");
+    static void installShutdownHook() {
+        Thread hook = new Thread(() -> {
+            ServiceLocator.stopMcpServer();
+            ServiceLocator.saveStateForExit();
+        }, "tunl-shutdown");
         try {
             Runtime.getRuntime().addShutdownHook(hook);
         } catch (IllegalStateException | SecurityException e) {
-            log.warn("Could not install MCP shutdown hook: {}", e.getMessage());
+            log.warn("Could not install the shutdown hook: {}", e.getMessage());
         }
     }
 
