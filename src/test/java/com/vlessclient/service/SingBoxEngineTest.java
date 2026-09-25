@@ -358,6 +358,61 @@ class SingBoxEngineTest {
         }
     }
 
+    /**
+     * What sing-box 1.14.2 logged when a REALITY server answered as the site
+     * it poses as (reproduced against www.microsoft.com with a key it does
+     * not hold), and what current Xray servers make it log for every client
+     * that is not a recent Xray.
+     */
+    private static final String REALITY_REFUSAL = "+0200 2026-09-25 23:05:44 ERROR "
+            + "[2809146892 683ms] connection: open connection to example.org:443 using "
+            + "outbound/selector[proxy]: reality verification failed";
+
+    /**
+     * Current Xray REALITY servers turn sing-box away, and the user saw
+     * "All services unreachable" and a reconnect loop, as for a dead server.
+     * The refusal is now reported for the run whose traffic met it: not for a
+     * member a group only probed, and not after the tunnel was pointed at
+     * another server.
+     */
+    @Test
+    void aRealityRefusalOnTheTunnelsTrafficIsReported() throws Exception {
+        SingBoxEngine engine = new SingBoxEngine(Path.of("sing-box"));
+
+        Platform.runLater(() -> engine.getLogLines().add("+0200 2026-09-25 23:05:44 ERROR "
+                + "outbound/urltest[proxy]: outbound/vless[srv-a]: reality verification failed"));
+        flushFxEvents();
+        assertThat(engine.realityRefusedProperty().get())
+                .as("a group member's probe is not the tunnel's traffic").isFalse();
+
+        Platform.runLater(() -> engine.getLogLines().add(REALITY_REFUSAL));
+        flushFxEvents();
+        assertThat(engine.realityRefusedProperty().get()).isTrue();
+
+        engine.forgetRealityRefusal();
+        flushFxEvents();
+        assertThat(engine.realityRefusedProperty().get())
+                .as("switched to another server without a restart").isFalse();
+    }
+
+    @Test
+    void aNewRunStartsWithoutTheLastRunsRealityRefusal(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+        Platform.runLater(() -> engine.getLogLines().add(REALITY_REFUSAL));
+        flushFxEvents();
+        assertThat(engine.realityRefusedProperty().get()).isTrue();
+
+        engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+        try {
+            awaitConnectionState(engine, ConnectionState.CONNECTED, AWAIT_STATE_TIMEOUT_MS);
+            flushFxEvents();
+            assertThat(engine.realityRefusedProperty().get()).isFalse();
+        } finally {
+            engine.stop();
+        }
+    }
+
     @Test
     void connectionStateTransitionsToErrorWhenProcessExitsUnexpectedly(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
         Path fake = createCrashingSingBox(tmp, "sing-box");

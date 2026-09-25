@@ -641,6 +641,11 @@ public class ConnectionService {
                 // The core kept running, so no state change will tell recovery.
                 recovery.keptUp(request);
                 appliedServerId = active.getId();
+                // Nor tell the engine that its log so far was another server's.
+                SingBoxEngine switched = engine;
+                if (switched != null) {
+                    switched.forgetRealityRefusal();
+                }
                 return new ConnectAttempt(Outcome.SWITCHED, active);
             }
             if (!recovery.isWanted(request)) {
