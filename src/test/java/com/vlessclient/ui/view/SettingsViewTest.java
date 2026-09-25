@@ -23,6 +23,8 @@ import javafx.scene.control.DialogPane;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.stage.Stage;
 import javafx.stage.Window;
 import org.junit.jupiter.api.Test;
@@ -97,6 +99,56 @@ public class SettingsViewTest extends ApplicationTest {
         } finally {
             interact(() -> combo.setValue(initial));
         }
+    }
+
+    /**
+     * JavaFX changes a combo box's value with every arrow key: Down on the
+     * closed Theme combo stepped to the next theme, and each step re-themed
+     * the whole window and wrote settings.json; Language re-translated it.
+     * Down now opens the list, a choice counts when the list closes, and
+     * Escape puts back the value the list opened with.
+     */
+    @Test
+    void theThemeComboAppliesAChoiceOnlyOnceTheListCloses() {
+        ComboBox<String> combo = lookup("#themeCombo").query();
+        ConfigStore store = ServiceLocator.get(ConfigStore.class);
+        String initial = store.getSettings().getTheme();
+        interact(combo::requestFocus);
+        try {
+            press(combo, KeyCode.DOWN);
+            assertThat(store.getSettings().getTheme())
+                    .as("the theme after Down on the closed combo").isEqualTo(initial);
+            assertThat(combo.isShowing()).as("Down opens the list").isTrue();
+
+            press(combo, KeyCode.DOWN);
+            assertThat(store.getSettings().getTheme())
+                    .as("the theme while the list is open").isEqualTo(initial);
+
+            press(combo, KeyCode.ESCAPE);
+            assertThat(combo.isShowing()).isFalse();
+            assertThat(combo.getValue()).as("Escape puts the value back").isEqualTo(initial);
+            assertThat(store.getSettings().getTheme()).isEqualTo(initial);
+
+            press(combo, KeyCode.DOWN);
+            press(combo, KeyCode.DOWN);
+            String chosen = combo.getValue();
+            press(combo, KeyCode.ENTER);
+            assertThat(combo.isShowing()).isFalse();
+            assertThat(chosen).isNotEqualTo(initial);
+            assertThat(store.getSettings().getTheme())
+                    .as("the theme chosen with Enter").isEqualTo(chosen);
+        } finally {
+            interact(() -> {
+                combo.hide();
+                combo.setValue(initial);
+            });
+        }
+    }
+
+    private void press(ComboBox<?> combo, KeyCode code) {
+        interact(() -> combo.fireEvent(
+                new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, false, false, false, false)));
+        WaitForAsyncUtils.waitForFxEvents();
     }
 
     /**
