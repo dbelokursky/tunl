@@ -1,0 +1,71 @@
+--- a/common/tls/reality_client.go
++++ b/common/tls/reality_client.go
+@@ -30,7 +30,6 @@
+ 	"github.com/sagernet/sing-box/adapter"
+ 	C "github.com/sagernet/sing-box/constant"
+ 	"github.com/sagernet/sing-box/option"
+-	"github.com/sagernet/sing/common"
+ 	"github.com/sagernet/sing/common/debug"
+ 	E "github.com/sagernet/sing/common/exceptions"
+ 	"github.com/sagernet/sing/common/logger"
+@@ -141,26 +140,16 @@
+ 	uConfig.VerifyPeerCertificate = verifier.VerifyPeerCertificate
+ 	uConn := utls.UClient(conn, uConfig, e.uClient.id)
+ 	verifier.UConn = uConn
++	// Tunl: the fingerprint's hello as it is, X25519MLKEM768 included.
++	// Upstream cut the hybrid share out, a workaround for utls 1.7, whose
++	// hybrid and plain X25519 keys were one; metacubex/utls 1.8 keeps them
++	// apart. XTLS/REALITY 8cdf7bf9 (Xray 26.9.8 and later) rejects a
++	// ClientHello without the hybrid share, and a Chrome hello with it cut
++	// out is one no browser sends.
+ 	err := uConn.BuildHandshakeState()
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	for _, extension := range uConn.Extensions {
+-		if ce, ok := extension.(*utls.SupportedCurvesExtension); ok {
+-			ce.Curves = common.Filter(ce.Curves, func(curveID utls.CurveID) bool {
+-				return curveID != utls.X25519MLKEM768
+-			})
+-		}
+-		if ks, ok := extension.(*utls.KeyShareExtension); ok {
+-			ks.KeyShares = common.Filter(ks.KeyShares, func(share utls.KeyShare) bool {
+-				return share.Group != utls.X25519MLKEM768
+-			})
+-		}
+-	}
+-	err = uConn.BuildHandshakeState()
+-	if err != nil {
+-		return nil, err
+-	}
+ 
+ 	if len(uConfig.NextProtos) > 0 {
+ 		for _, extension := range uConn.Extensions {
+@@ -183,9 +172,12 @@
+ 	}
+ 	binary.BigEndian.PutUint64(hello.SessionId, uint64(nowTime.Unix()))
+ 
+-	hello.SessionId[0] = 1
+-	hello.SessionId[1] = 8
+-	hello.SessionId[2] = 1
++	// Tunl: Xray 26.7.11 and later turn away a client below 26.3.27 unless
++	// the server's operator sets minClientVer; the check is >=, so the
++	// minimum. 26.3.27 is the Xray whose Chrome hello this one now matches.
++	hello.SessionId[0] = 26
++	hello.SessionId[1] = 3
++	hello.SessionId[2] = 27
+ 	binary.BigEndian.PutUint32(hello.SessionId[4:], uint32(time.Now().Unix()))
+ 	copy(hello.SessionId[8:], e.shortID[:])
+ 	if debug.Enabled {
+@@ -201,6 +193,11 @@
+ 	}
+ 	ecdheKey := keyShareKeys.Ecdhe
+ 	if ecdheKey == nil {
++		// Tunl: a hello with the hybrid share alone; the server then takes
++		// the X25519 half of it, as XTLS/REALITY 8cdf7bf9 does.
++		ecdheKey = keyShareKeys.MlkemEcdhe
++	}
++	if ecdheKey == nil {
+ 		return nil, E.New("nil ecdheKey")
+ 	}
+ 	authKey, err := ecdheKey.ECDH(publicKey)
