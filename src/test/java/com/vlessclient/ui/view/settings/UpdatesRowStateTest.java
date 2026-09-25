@@ -1,5 +1,6 @@
 package com.vlessclient.ui.view.settings;
 
+import com.vlessclient.platform.UpdateApplier.Hold;
 import com.vlessclient.ui.view.settings.UpdatesSection.AppRowState;
 import org.junit.jupiter.api.Test;
 
@@ -17,28 +18,46 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class UpdatesRowStateTest {
 
-    /** Reads as the row does: available, staged, downloading, selfUpdates. */
+    /** Reads as the row does: available, staged, downloading, and what holds updates back. */
     private static AppRowState state(
-            boolean available, boolean staged, boolean downloading, boolean selfUpdates) {
-        return UpdatesSection.rowState(available, staged, downloading, selfUpdates);
+            boolean available, boolean staged, boolean downloading, Hold hold) {
+        return UpdatesSection.rowState(available, staged, downloading, hold);
+    }
+
+    /**
+     * A macOS copy running from where it was downloaded, translocated or on
+     * the disk image, cannot update in place. The row reported a download and
+     * then a restart that installed nothing, launch after launch.
+     */
+    @Test
+    void aCopyRunningFromTheDownloadIsAskedToMoveToApplications() {
+        for (boolean staged : new boolean[] {false, true}) {
+            for (boolean downloading : new boolean[] {false, true}) {
+                assertThat(state(true, staged, downloading, Hold.MOVE_TO_APPLICATIONS))
+                        .as("staged=%s downloading=%s", staged, downloading)
+                        .isEqualTo(AppRowState.MOVE_TO_APPLICATIONS);
+            }
+        }
+        assertThat(state(false, false, false, Hold.MOVE_TO_APPLICATIONS))
+                .isEqualTo(AppRowState.UP_TO_DATE);
     }
 
     @Test
     void nothingIsSaidWithoutANewerRelease() {
-        assertThat(state(false, false, false, true)).isEqualTo(AppRowState.UP_TO_DATE);
+        assertThat(state(false, false, false, Hold.NONE)).isEqualTo(AppRowState.UP_TO_DATE);
         // Stale flags from an earlier run cannot talk the row into an offer.
-        assertThat(state(false, true, true, true)).isEqualTo(AppRowState.UP_TO_DATE);
+        assertThat(state(false, true, true, Hold.NONE)).isEqualTo(AppRowState.UP_TO_DATE);
     }
 
     @Test
     void aStagedUpdateIsTheOnlyStateWithSomethingToPress() {
-        assertThat(state(true, true, false, true)).isEqualTo(AppRowState.STAGED);
+        assertThat(state(true, true, false, Hold.NONE)).isEqualTo(AppRowState.STAGED);
 
         // Everything else an available update can be: no button in any of them.
-        assertThat(state(true, false, true, true)).isEqualTo(AppRowState.DOWNLOADING);
-        assertThat(state(true, false, false, true)).isEqualTo(AppRowState.AVAILABLE);
-        assertThat(state(false, false, false, true)).isEqualTo(AppRowState.UP_TO_DATE);
-        assertThat(state(true, false, false, false)).isEqualTo(AppRowState.PACKAGE_MANAGER);
+        assertThat(state(true, false, true, Hold.NONE)).isEqualTo(AppRowState.DOWNLOADING);
+        assertThat(state(true, false, false, Hold.NONE)).isEqualTo(AppRowState.AVAILABLE);
+        assertThat(state(false, false, false, Hold.NONE)).isEqualTo(AppRowState.UP_TO_DATE);
+        assertThat(state(true, false, false, Hold.PACKAGE_MANAGER)).isEqualTo(AppRowState.PACKAGE_MANAGER);
     }
 
     /**
@@ -60,8 +79,8 @@ class UpdatesRowStateTest {
      */
     @Test
     void aFoundUpdateReportsTheDownloadRatherThanOfferingIt() {
-        assertThat(state(true, false, true, true)).isEqualTo(AppRowState.DOWNLOADING);
-        assertThat(state(true, false, false, true)).isEqualTo(AppRowState.AVAILABLE);
+        assertThat(state(true, false, true, Hold.NONE)).isEqualTo(AppRowState.DOWNLOADING);
+        assertThat(state(true, false, false, Hold.NONE)).isEqualTo(AppRowState.AVAILABLE);
     }
 
     /**
@@ -73,7 +92,7 @@ class UpdatesRowStateTest {
     void aPackageManagedInstallIsNeverOfferedARestart() {
         for (boolean staged : new boolean[] {false, true}) {
             for (boolean downloading : new boolean[] {false, true}) {
-                assertThat(state(true, staged, downloading, false))
+                assertThat(state(true, staged, downloading, Hold.PACKAGE_MANAGER))
                         .as("staged=%s downloading=%s", staged, downloading)
                         .isEqualTo(AppRowState.PACKAGE_MANAGER);
             }

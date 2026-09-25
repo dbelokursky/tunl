@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -49,6 +50,61 @@ class UpdateApplierTest {
         assertThat(InstalledApp.isTranslocated(
                 Path.of("/Users/dev/AppTranslocationTests/Tunl.app"))).isFalse();
         assertThat(InstalledApp.isTranslocated(null)).isFalse();
+    }
+
+    /**
+     * A copy running from where it was downloaded cannot be updated in place,
+     * and moving it to Applications is what fixes that: a translocated copy (a
+     * quarantined app opened where it lies) or the disk image itself, which is
+     * mounted read-only.
+     */
+    @Test
+    void aCopyRunningFromTheDownloadIsRecognised() {
+        assertThat(InstalledApp.runsFromDownload(Path.of(
+                "/private/var/folders/ab/AppTranslocation/1234-5678/d/Tunl.app"), dir -> true))
+                .isTrue();
+        assertThat(InstalledApp.runsFromDownload(Path.of("/Volumes/Tunl/Tunl.app"), dir -> false))
+                .as("the mounted disk image").isTrue();
+        assertThat(InstalledApp.runsFromDownload(Path.of("/Volumes/Apps/Tunl.app"), dir -> true))
+                .as("a drive the user keeps apps on").isFalse();
+        assertThat(InstalledApp.runsFromDownload(Path.of("/Applications/Tunl.app"), dir -> false))
+                .as("an Applications folder this account cannot write is no download")
+                .isFalse();
+        assertThat(InstalledApp.runsFromDownload(null, dir -> true)).isFalse();
+    }
+
+    /**
+     * Such a copy used to count as self-updating: it fetched the installer
+     * (about a hundred megabytes), announced a restart, and at the restart
+     * refused to touch the copy, then fetched it again a week later. Now it
+     * fetches nothing and says why.
+     */
+    @Test
+    void aLaunchFromTheDownloadNeitherFetchesNorPromisesAnUpdate(@TempDir Path tmp)
+            throws IOException {
+        Path translocated = tmp.resolve("AppTranslocation/1234/d/Tunl.app/Contents/MacOS/Tunl");
+        Path installed = tmp.resolve("Applications/Tunl.app/Contents/MacOS/Tunl");
+        for (Path launcher : List.of(translocated, installed)) {
+            Files.createDirectories(launcher.getParent());
+            Files.writeString(launcher, "");
+        }
+        String prior = System.getProperty(InstalledApp.APP_PATH_PROPERTY);
+        try {
+            System.setProperty(InstalledApp.APP_PATH_PROPERTY, translocated.toString());
+            assertThat(new MacUpdateApplier().hold())
+                    .isEqualTo(UpdateApplier.Hold.MOVE_TO_APPLICATIONS);
+            assertThat(new MacUpdateApplier().selfUpdates()).isFalse();
+
+            System.setProperty(InstalledApp.APP_PATH_PROPERTY, installed.toString());
+            assertThat(new MacUpdateApplier().hold()).isEqualTo(UpdateApplier.Hold.NONE);
+            assertThat(new MacUpdateApplier().selfUpdates()).isTrue();
+        } finally {
+            if (prior == null) {
+                System.clearProperty(InstalledApp.APP_PATH_PROPERTY);
+            } else {
+                System.setProperty(InstalledApp.APP_PATH_PROPERTY, prior);
+            }
+        }
     }
 
     @Test

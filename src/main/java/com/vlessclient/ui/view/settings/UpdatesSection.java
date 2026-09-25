@@ -139,6 +139,12 @@ public final class UpdatesSection {
         /** Newer release exists, but this install updates through its packager. */
         PACKAGE_MANAGER,
 
+        /**
+         * Newer release exists, and this macOS copy runs from where it was
+         * downloaded, which cannot be updated in place.
+         */
+        MOVE_TO_APPLICATIONS,
+
         /** Its installer is being fetched right now. */
         DOWNLOADING,
 
@@ -172,18 +178,26 @@ public final class UpdatesSection {
      * @param updateAvailable whether a newer release was found
      * @param staged          whether its installer is already verified on disk
      * @param downloading     whether that installer is being fetched right now
-     * @param selfUpdates     whether this platform installs updates in-app
+     * @param hold            what keeps this installation from updating itself
      * @return the state to render
      */
     static AppRowState rowState(boolean updateAvailable, boolean staged,
-                                boolean downloading, boolean selfUpdates) {
+                                boolean downloading, UpdateApplier.Hold hold) {
         if (!updateAvailable) {
             return AppRowState.UP_TO_DATE;
         }
-        if (!selfUpdates) {
-            // Linux: the package belongs to whatever installed it, so the row
-            // reports the new version and offers nothing to press.
-            return AppRowState.PACKAGE_MANAGER;
+        switch (hold) {
+            case PACKAGE_MANAGER -> {
+                // Linux: the package belongs to whatever installed it, so the
+                // row reports the new version and offers nothing to press.
+                return AppRowState.PACKAGE_MANAGER;
+            }
+            case MOVE_TO_APPLICATIONS -> {
+                return AppRowState.MOVE_TO_APPLICATIONS;
+            }
+            default -> {
+                // Installs itself: what follows is where it has got to.
+            }
         }
         if (staged) {
             return AppRowState.STAGED;
@@ -199,7 +213,7 @@ public final class UpdatesSection {
                 updateManager.updateAvailableProperty().get(),
                 updateManager.hasStagedUpdate(),
                 updateManager.downloadingProperty().get(),
-                UpdateApplier.current().selfUpdates());
+                UpdateApplier.current().hold());
         appUpdateButton.setVisible(state.offersRestart());
         appUpdateButton.setManaged(state.offersRestart());
         appVersionValue.setText(versionText(state));
@@ -217,6 +231,8 @@ public final class UpdatesSection {
             case UP_TO_DATE -> AppVersion.VERSION;
             case PACKAGE_MANAGER ->
                     I18n.get("settings.version.packagemanager", AppVersion.VERSION, latest);
+            case MOVE_TO_APPLICATIONS ->
+                    I18n.get("settings.version.move", AppVersion.VERSION, latest);
             case DOWNLOADING ->
                     I18n.get("settings.version.downloading", AppVersion.VERSION, latest);
             case AVAILABLE -> I18n.get("settings.version.available", AppVersion.VERSION, latest);

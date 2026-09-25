@@ -36,6 +36,12 @@ public class UpdateBannerSection {
         /** A newer release exists but this install updates through apt/AUR. */
         PACKAGE_MANAGER,
 
+        /**
+         * Newer release exists, and this macOS copy runs from where it was
+         * downloaded, which cannot be updated in place.
+         */
+        MOVE_TO_APPLICATIONS,
+
         /** Newer release seen, and its installer is being fetched right now. */
         DOWNLOADING,
 
@@ -74,16 +80,24 @@ public class UpdateBannerSection {
      * @param updateAvailable whether a newer release was found
      * @param staged          whether its installer is already verified on disk
      * @param downloading     whether that installer is being fetched right now
-     * @param selfUpdates     whether this platform installs updates in-app
+     * @param hold            what keeps this installation from updating itself
      * @return the state to render
      */
     public static State stateFor(boolean updateAvailable, boolean staged,
-                                 boolean downloading, boolean selfUpdates) {
+                                 boolean downloading, UpdateApplier.Hold hold) {
         if (!updateAvailable) {
             return State.HIDDEN;
         }
-        if (!selfUpdates) {
-            return State.PACKAGE_MANAGER;
+        switch (hold) {
+            case PACKAGE_MANAGER -> {
+                return State.PACKAGE_MANAGER;
+            }
+            case MOVE_TO_APPLICATIONS -> {
+                return State.MOVE_TO_APPLICATIONS;
+            }
+            default -> {
+                // Installs itself: what follows is where it has got to.
+            }
         }
         if (staged) {
             return State.READY;
@@ -135,7 +149,7 @@ public class UpdateBannerSection {
         render(stateFor(updateManager.updateAvailableProperty().get(),
                         updateManager.hasStagedUpdate(),
                         updateManager.downloadingProperty().get(),
-                        UpdateApplier.current().selfUpdates()),
+                        UpdateApplier.current().hold()),
                 updateManager.latestVersionProperty().get());
     }
 
@@ -166,6 +180,7 @@ public class UpdateBannerSection {
         String hintKey = switch (state) {
             case READY -> "dashboard.update.hint.staged";
             case PACKAGE_MANAGER -> "dashboard.update.hint.packagemanager";
+            case MOVE_TO_APPLICATIONS -> "dashboard.update.hint.move";
             case AVAILABLE -> "dashboard.update.hint.pending";
             default -> "dashboard.update.hint.downloading";
         };

@@ -124,9 +124,10 @@ final class MacUpdateApplier implements UpdateApplier {
             log.warn("Launcher {} is not inside an .app bundle", launcher);
             return Outcome.UNSUPPORTED;
         }
-        if (InstalledApp.isTranslocated(bundle)) {
-            log.warn("Running translocated from {} — updating it would replace a "
-                    + "throwaway copy. Move Tunl to /Applications first.", bundle);
+        if (InstalledApp.runsFromDownload(bundle)) {
+            log.warn("Running from {}, where it was downloaded: updating it would replace a "
+                    + "throwaway copy or fail on the disk image. Move Tunl to /Applications "
+                    + "first.", bundle);
             return Outcome.UNSUPPORTED;
         }
 
@@ -159,9 +160,21 @@ final class MacUpdateApplier implements UpdateApplier {
         }
     }
 
+    /**
+     * Not while the app runs from where it was downloaded. Such a copy used
+     * to count as self-updating: it fetched the installer, offered a restart,
+     * refused the swap at every launch, and fetched it again a week later.
+     */
     @Override
     public boolean selfUpdates() {
-        return true;
+        return hold() == Hold.NONE;
+    }
+
+    @Override
+    public Hold hold() {
+        Path launcher = InstalledApp.launcher();
+        Path bundle = launcher == null ? null : bundleRoot(launcher);
+        return InstalledApp.runsFromDownload(bundle) ? Hold.MOVE_TO_APPLICATIONS : Hold.NONE;
     }
 
     /**
