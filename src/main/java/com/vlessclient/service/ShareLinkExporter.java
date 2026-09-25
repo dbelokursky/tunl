@@ -238,6 +238,12 @@ public class ShareLinkExporter {
             params.put("obfs-password", config.getFlow());
         }
 
+        // As mport, not in the authority: a reader that does not hop still
+        // reads the host and the port.
+        if (config.getServerPorts() != null && !config.getServerPorts().isBlank()) {
+            params.put("mport", config.getServerPorts());
+        }
+
         return buildStandardUri("hysteria2", config.getUuid(), config, params);
     }
 
