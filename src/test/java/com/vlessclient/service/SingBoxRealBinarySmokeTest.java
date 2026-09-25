@@ -75,6 +75,34 @@ class SingBoxRealBinarySmokeTest {
     }
 
     /**
+     * With {@code singbox.release} set, the bundled core is Tunl's own build,
+     * the one whose REALITY client current Xray servers accept; upstream's
+     * archive has the same name. core.yml marks the build with the tag
+     * {@code tunl}, and this is where a build that bundled the wrong one
+     * shows, on every system.
+     */
+    @Test
+    void theBundledCoreIsTheBuildTheReleasePropertyNames() throws Exception {
+        java.util.Properties pin = new java.util.Properties();
+        try (var in = SingBoxRealBinarySmokeTest.class.getResourceAsStream("/singbox.properties")) {
+            pin.load(in);
+        }
+        String release = pin.getProperty("singbox.release", "").trim();
+        String tags = run(binary, "version").output().lines()
+                .filter(line -> line.startsWith("Tags:"))
+                .findFirst().orElse("");
+
+        java.util.List<String> tagList = java.util.Arrays.asList(
+                tags.replace("Tags:", "").trim().split(","));
+        if (release.isEmpty()) {
+            assertThat(tagList).as("upstream's build, as singbox.release is empty")
+                    .doesNotContain("tunl");
+        } else {
+            assertThat(tagList).as("the build %s names", release).contains("tunl");
+        }
+    }
+
+    /**
      * The sentence a failed start is put into comes from matching the core's
      * own FATAL line, and those lines are the core's to reword. A core bump
      * that rewords them fails here, on every system the core ships for,

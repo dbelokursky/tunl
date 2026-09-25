@@ -14,10 +14,17 @@
 # $2 argument is cross-checked against the file to catch a stale Maven
 # property cache.
 #
-# Reuses a ~/.cache/vless-client-build/sing-box-<version> directory so repeated
-# builds don't re-download. A .singbox-version stamp next to each bundled
-# binary makes incremental builds re-bundle after a version bump instead of
-# silently keeping the old binary.
+# The archives come from singbox.release when it names one: Tunl's own build
+# of that version, a pre-release of this repository made by
+# .github/workflows/core.yml (packaging/sing-box/README.md says why). An empty
+# singbox.release means upstream's release on SagerNet/sing-box.
+#
+# Reuses a ~/.cache/vless-client-build/<release> directory (or
+# sing-box-<version> for upstream's) so repeated builds don't re-download; the
+# two are kept apart because their archives have the same names. A
+# .singbox-version stamp next to each bundled binary, naming the version and
+# the release, makes incremental builds re-bundle after either changes
+# instead of silently keeping the old binary.
 #
 set -euo pipefail
 
@@ -31,8 +38,10 @@ if [[ ! -f "${PROPS_FILE}" ]]; then
 fi
 
 # Bash-3.2-safe .properties lookup: last value wins, whitespace trimmed.
+# A missing key reads as empty (singbox.release may be absent); a missing
+# version or digest is reported where it is used.
 prop() {
-    grep -E "^[[:space:]]*$1[[:space:]]*=" "${PROPS_FILE}" \
+    { grep -E "^[[:space:]]*$1[[:space:]]*=" "${PROPS_FILE}" || true; } \
         | tail -n 1 \
         | cut -d= -f2- \
         | tr -d '[:space:]'
@@ -46,7 +55,16 @@ if [[ "${PROPS_VERSION}" != "${VERSION}" ]]; then
     exit 1
 fi
 
-CACHE_DIR="${HOME}/.cache/vless-client-build/sing-box-${VERSION}"
+RELEASE="$(prop singbox.release)"
+if [[ -n "${RELEASE}" ]]; then
+    BASE_URL="https://github.com/dbelokursky/tunl/releases/download/${RELEASE}"
+    CACHE_DIR="${HOME}/.cache/vless-client-build/${RELEASE}"
+    STAMP="${VERSION} ${RELEASE}"
+else
+    BASE_URL="https://github.com/SagerNet/sing-box/releases/download/v${VERSION}"
+    CACHE_DIR="${HOME}/.cache/vless-client-build/sing-box-${VERSION}"
+    STAMP="${VERSION}"
+fi
 mkdir -p "${CACHE_DIR}" "${OUT_DIR}"
 
 # The build host decides which binary gets bundled: its own OS and its own
@@ -92,14 +110,14 @@ for target in ${targets}; do
     stamp_file="${target_dir}/.singbox-version"
 
     if [[ -x "${target_binary}" && -f "${stamp_file}" ]] \
-            && [[ "$(cat "${stamp_file}")" == "${VERSION}" ]]; then
-        echo "[bundle-singbox] already present: ${target_binary} (${VERSION})"
+            && [[ "$(cat "${stamp_file}")" == "${STAMP}" ]]; then
+        echo "[bundle-singbox] already present: ${target_binary} (${STAMP})"
         continue
     fi
 
     tarball="${CACHE_DIR}/sing-box-${VERSION}-${os}-${arch}.tar.gz"
     if [[ ! -f "${tarball}" ]]; then
-        url="https://github.com/SagerNet/sing-box/releases/download/v${VERSION}/sing-box-${VERSION}-${os}-${arch}.tar.gz"
+        url="${BASE_URL}/sing-box-${VERSION}-${os}-${arch}.tar.gz"
         echo "[bundle-singbox] downloading ${url}"
         # Retries and timeouts: a runner's flaky connection to the GitHub CDN
         # is one retry away from a green build, and a stalled transfer must
@@ -131,6 +149,6 @@ for target in ${targets}; do
         --strip-components=1 \
         "sing-box-${VERSION}-${os}-${arch}/sing-box"
     chmod +x "${target_binary}"
-    printf '%s' "${VERSION}" > "${stamp_file}"
-    echo "[bundle-singbox] bundled ${target_binary} (${VERSION})"
+    printf '%s' "${STAMP}" > "${stamp_file}"
+    echo "[bundle-singbox] bundled ${target_binary} (${STAMP})"
 done

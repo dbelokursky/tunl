@@ -1,31 +1,50 @@
 name: Core
-# Builds the sing-box core Tunl bundles: the upstream source at the version
-# singbox.properties pins, with packaging/sing-box/reality-xray.patch applied
-# (packaging/sing-box/README.md says why). Every target is built and the
-# REALITY hello checked on each pull request that touches the core; a manual
-# run on main also publishes the build as a pre-release the bundling scripts
-# pin by digest.
+# Builds the sing-box core Tunl bundles: upstream's source at a version
+# (the one singbox.properties pins unless a run names another), with
+# packaging/sing-box/reality-xray.patch applied (packaging/sing-box/README.md
+# says why). Every target is built and the REALITY hello checked on each pull
+# request that touches the core. A run by hand, or one bump-singbox.yml
+# starts, also publishes the build as the pre-release core-v<version>-tunl<N>,
+# which singbox.properties then pins by digest.
 on:
   pull_request:
     paths:
       - 'packaging/sing-box/**'
       - '.github/workflows/core.yml'
       - 'src/main/resources/singbox.properties'
+  # By hand from any branch, so that a patch rebased onto a new version can be
+  # built, published and pinned in the same pull request.
   workflow_dispatch:
     inputs:
+      version:
+        description: 'sing-box version to build (x.y.z); the pinned one when empty'
+        required: false
+        type: string
       revision:
         description: 'The N in core-v<version>-tunlN: 1 for a new version, one more for a rebuild'
         required: true
         default: '1'
+        type: string
+  # From bump-singbox.yml, when upstream has a version no core-v…-tunl release
+  # has been built from yet.
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      revision:
+        required: true
         type: string
 
 # Each job asks for what it needs; nothing is granted by default.
 permissions:
   contents: read
 
+# A newer push supersedes a pull request's run; a run that publishes is never
+# cut off halfway, it waits.
 concurrency:
   group: core-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # What Tunl's configurations use, and nothing it does not: on macOS the
@@ -52,9 +71,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Read the pinned version
+      - name: Choose the version
         id: pin
-        run: echo "version=$(sed -n 's/^singbox.version=//p' src/main/resources/singbox.properties)" >> "$GITHUB_OUTPUT"
+        env:
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          version="${REQUESTED:-$(sed -n 's/^singbox\.version=//p' src/main/resources/singbox.properties)}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$version' is not a plain x.y.z version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -105,8 +132,9 @@ jobs:
 
       # The same check on upstream's own build of this version has to fail,
       # or it proves nothing: a check the unpatched core passes would pass
-      # a patch that did nothing too.
-      - name: Check that upstream's build fails it
+      # a patch that did nothing too. The token fetches the archive and is
+      # gone before the archive's binary runs.
+      - name: Fetch upstream's build
         if: matrix.target == 'linux-amd64'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -121,7 +149,13 @@ jobs:
             echo "upstream's $asset is $actual, the release says $expected" >&2
             exit 1
           fi
-          if packaging/sing-box/verify.sh "upstream/$asset"; then
+
+      - name: Check that upstream's build fails it
+        if: matrix.target == 'linux-amd64'
+        env:
+          VERSION: ${{ steps.pin.outputs.version }}
+        run: |
+          if packaging/sing-box/verify.sh "upstream/sing-box-${VERSION}-linux-amd64.tar.gz"; then
             echo "upstream's build passes the check, so the check cannot tell the patch apart" >&2
             exit 1
           fi
@@ -136,9 +170,9 @@ jobs:
   # archives the build jobs made, adds the digests and the corresponding
   # source (upstream's at the tag, plus the patch; sing-box is GPL-3.0), and
   # publishes them as a pre-release that never becomes "latest", which the
-  # app's updater reads.
+  # app's updater reads. Never for a pull request.
   publish:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-24.04
     permissions:
@@ -148,9 +182,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Read the pinned version
+      - name: Choose the version
         id: pin
-        run: echo "version=$(sed -n 's/^singbox.version=//p' src/main/resources/singbox.properties)" >> "$GITHUB_OUTPUT"
+        env:
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          version="${REQUESTED:-$(sed -n 's/^singbox\.version=//p' src/main/resources/singbox.properties)}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$version' is not a plain x.y.z version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

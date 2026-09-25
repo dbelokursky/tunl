@@ -5,6 +5,13 @@ name: Bump sing-box
 # per OS, on every PR. So the safe thing to automate is the pinning, not the
 # installing: this opens a pull request and lets that suite decide whether the
 # new core is usable before a single user sees it.
+#
+# The core pinned is Tunl's own build of the version, the pre-release
+# core-v<version>-tunl<N> that core.yml makes with a REALITY patch
+# (packaging/sing-box/README.md). When no such build exists yet, this run has
+# core.yml make and publish one first; a patch that no longer applies to the
+# new version fails that step, and the run with it, every day until the patch
+# is rebased.
 on:
   schedule:
     # Daily, not weekly. A weekly cron means the gap between a core release
@@ -26,26 +33,29 @@ on:
 permissions:
   contents: read
 
+# A run started by hand while the daily one is still building waits for it,
+# and then finds the build published and the pull request open.
+concurrency:
+  group: bump-singbox
+  cancel-in-progress: false
+
 jobs:
-  # Runs another project's code: bump-singbox.sh downloads the release and
-  # executes the host binary to confirm its version. So this job holds no
-  # secret and cannot write to the repository. On a hosted runner that code
-  # runs with passwordless sudo, and a token handed to any later step of the
-  # same job would be one git hook or wrapper away from being read — and a
-  # personal token that can push reaches main and a signed release without a
-  # review.
-  pin:
+  # Reads, and runs nothing it downloads: which version, and whether Tunl's
+  # build of it is published yet.
+  target:
     runs-on: ubuntu-latest
-    # bump-singbox.sh downloads and hashes five core archives; minutes, not hours.
-    timeout-minutes: 20
+    timeout-minutes: 5
     permissions:
       contents: read
       # For `gh pr list` below.
       pull-requests: read
     outputs:
       changed: ${{ steps.target.outputs.changed }}
+      build: ${{ steps.target.outputs.build }}
       have: ${{ steps.target.outputs.have }}
       want: ${{ steps.target.outputs.want }}
+      revision: ${{ steps.target.outputs.revision }}
+      release: ${{ steps.target.outputs.release }}
       branch: ${{ steps.target.outputs.branch }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -74,40 +84,98 @@ jobs:
             exit 1
           fi
           have="$(sed -n 's/^singbox\.version=//p' src/main/resources/singbox.properties)"
-          branch="chore/singbox-$want"
+          have_release="$(sed -n 's/^singbox\.release=//p' src/main/resources/singbox.properties)"
+
+          # The newest of Tunl's builds of that version, or a first one to make.
+          prefix="core-v$want-tunl"
+          revision="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq ".[] | select(.draft | not) | .tag_name | select(startswith(\"$prefix\"))
+                  | ltrimstr(\"$prefix\") | select(test(\"^[0-9]+$\"))" | sort -n | tail -1)"
+          build=false
+          if [ -z "$revision" ]; then
+            revision=1
+            build=true
+          fi
+          release="$prefix$revision"
+          branch="chore/singbox-$want-tunl$revision"
 
           {
             echo "have=$have"
             echo "want=$want"
+            echo "revision=$revision"
+            echo "release=$release"
+            echo "build=$build"
             echo "branch=$branch"
           } >> "$GITHUB_OUTPUT"
 
-          if [ "$want" = "$have" ]; then
+          if [ "$release" = "$have_release" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "pinned at $have, nothing to do"
+            echo "pinned at $have_release, nothing to do"
           elif [ "$(gh pr list --head "$branch" --state open --json number --jq 'length')" != "0" ]; then
-            # An earlier run already proposed this version and it is still
+            # An earlier run already proposed this build and it is still
             # being decided on. Proposing it again would only add noise.
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "a pull request for $branch is already open"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "pinned at $have, latest is $want"
+            if [ "$build" = true ]; then
+              echo "pinned at ${have_release:-$have}; $want has no build of Tunl's yet, making $release"
+            else
+              echo "pinned at ${have_release:-$have}, newest is $release"
+            fi
           fi
 
+  # core.yml builds every target, checks the REALITY hello, and publishes the
+  # pre-release. Its build jobs run upstream's code with a read-only token;
+  # only its publish job, which runs nothing downloaded, can write.
+  core:
+    needs: target
+    if: needs.target.outputs.changed == 'true' && needs.target.outputs.build == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/core.yml
+    with:
+      version: ${{ needs.target.outputs.want }}
+      revision: ${{ needs.target.outputs.revision }}
+
+  # Runs another project's code: bump-singbox.sh downloads the release and
+  # executes the host binary to confirm its version. So this job holds no
+  # secret and cannot write to the repository. On a hosted runner that code
+  # runs with passwordless sudo, and a token handed to any later step of the
+  # same job would be one git hook or wrapper away from being read — and a
+  # personal token that can push reaches main and a signed release without a
+  # review.
+  pin:
+    needs: [target, core]
+    # After core.yml when it had to build, straight after target when not.
+    # A job whose need was skipped is skipped too unless its condition says
+    # otherwise, hence the explicit results.
+    if: >-
+      ${{ !cancelled() && needs.target.outputs.changed == 'true'
+      && (needs.core.result == 'success' || needs.core.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    # bump-singbox.sh downloads and hashes five core archives; minutes, not hours.
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
       - name: Pin it
-        if: steps.target.outputs.changed == 'true'
         # Downloads every bundled asset, hashes it locally, and cross-checks
         # each hash against the digest the Releases API publishes — two
         # different paths for the same bytes, so a tampered download fails
         # the bump instead of getting pinned. Then runs the host's own binary
-        # to confirm it reports the version being pinned.
+        # to confirm it reports the version being pinned and is a build
+        # core.yml made.
         env:
-          WANT: ${{ steps.target.outputs.want }}
-        run: scripts/bump-singbox.sh "$WANT"
+          WANT: ${{ needs.target.outputs.want }}
+          REVISION: ${{ needs.target.outputs.revision }}
+        run: scripts/bump-singbox.sh "$WANT" "$REVISION"
 
       - name: Hand the pin to the job that proposes it
-        if: steps.target.outputs.changed == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: singbox-pin
@@ -119,8 +187,9 @@ jobs:
   # the pin job handed over, commits it, pushes the branch and opens the pull
   # request.
   propose:
-    needs: pin
-    if: needs.pin.outputs.changed == 'true'
+    needs: [target, pin]
+    # Explicit for the same reason as pin's: core may have been skipped.
+    if: ${{ !cancelled() && needs.pin.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -135,9 +204,10 @@ jobs:
       # signing and certificate steps. The token itself goes only to the two
       # steps that push and open the pull request.
       HAVE_BUMP_TOKEN: ${{ secrets.BUMP_TOKEN != '' }}
-      HAVE: ${{ needs.pin.outputs.have }}
-      WANT: ${{ needs.pin.outputs.want }}
-      BRANCH: ${{ needs.pin.outputs.branch }}
+      HAVE: ${{ needs.target.outputs.have }}
+      WANT: ${{ needs.target.outputs.want }}
+      RELEASE: ${{ needs.target.outputs.release }}
+      BRANCH: ${{ needs.target.outputs.branch }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -150,21 +220,24 @@ jobs:
 
       - name: Check the pinned file before committing it
         # It comes from the job that ran the downloaded core, so it is checked
-        # rather than trusted: apart from the version and the digests it must
-        # be the file main has, and those must be a plain version (the one the
-        # tag named) and hex digests.
+        # rather than trusted: apart from the version, the release and the
+        # digests it must be the file main has, and those must be a plain
+        # version (the one the tag named), the release target chose, and hex
+        # digests.
         run: |
           set -euo pipefail
           [[ "$WANT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$RELEASE" =~ ^core-v[0-9]+\.[0-9]+\.[0-9]+-tunl[0-9]+$ ]]
           current=src/main/resources/singbox.properties
           pinned=pin/singbox.properties
           assets='(darwin-(arm64|amd64)|windows-amd64|linux-(amd64|arm64))'
-          keys="^singbox\.(version|sha256\.$assets)="
+          keys="^singbox\.(version|release|sha256\.$assets)="
           diff <(grep -vE "$keys" "$current") <(grep -vE "$keys" "$pinned")
           grep -qx "singbox.version=$WANT" "$pinned"
+          grep -qx "singbox.release=$RELEASE" "$pinned"
           if grep -E "$keys" "$pinned" \
-              | grep -vE "^singbox\.(version=[0-9]+\.[0-9]+\.[0-9]+|sha256\.$assets=[0-9a-f]{64})$"; then
-            echo "::error::The pinned file holds a version or a digest in an unexpected form."
+              | grep -vE "^singbox\.(version=[0-9]+\.[0-9]+\.[0-9]+|release=core-v[0-9]+\.[0-9]+\.[0-9]+-tunl[0-9]+|sha256\.$assets=[0-9a-f]{64})$"; then
+            echo "::error::The pinned file holds a version, a release or a digest in an unexpected form."
             exit 1
           fi
           cp "$pinned" "$current"
@@ -183,7 +256,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git checkout -b "$BRANCH"
-          git commit -am "chore(singbox): pin the core at $WANT"
+          git commit -am "chore(singbox): pin the core at $RELEASE"
           # On the command line, because checkout left no credentials behind.
           git push "https://x-access-token:${PUSH_TOKEN}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git" "$BRANCH"
 
@@ -221,12 +294,12 @@ jobs:
           fi
 
           if ! gh pr create --base main --head "$BRANCH" \
-            --title "chore(singbox): bump the pinned core to $WANT" \
-            --body "sing-box core: \`$HAVE\` → \`$WANT\`. Opened automatically; a maintainer decides whether to merge it.
+            --title "chore(singbox): pin the core at $RELEASE" \
+            --body "sing-box core: \`$HAVE\` → \`$WANT\`, as Tunl's build \`$RELEASE\`. Opened automatically; a maintainer decides whether to merge it.
           $note
           ## Automated verification
 
-          \`scripts/bump-singbox.sh\` downloaded every asset, calculated its SHA-256 locally, and compared it with the digest returned by the Releases API. It then executed each platform binary and verified that it reports the requested version.
+          **Core** built \`$RELEASE\` from upstream's source at \`v$WANT\` with \`packaging/sing-box/reality-xray.patch\`, and checked its REALITY hello against a stand-in Xray server that upstream's own build of the version had to fail. \`scripts/bump-singbox.sh\` then downloaded every asset, calculated its SHA-256 locally, and compared it with the digest returned by the Releases API. It ran the Linux binary and verified that it reports the requested version and carries the \`tunl\` build tag.
 
           ## Maintainer review
 

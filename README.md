@@ -591,14 +591,18 @@ Edit the design in [GenerateAppIcon.java](scripts/GenerateAppIcon.java).
 
 ### Updating sing-box
 
-The version and SHA-256 live in a single file —
+The version, the release and the SHA-256 digests live in a single file —
 [singbox.properties](src/main/resources/singbox.properties). It is read by
 pom.xml (properties-maven-plugin), [scripts/bundle-singbox.sh](scripts/bundle-singbox.sh)
-and SingBoxInstaller, so they can never drift. Bumping is one command:
+and SingBoxInstaller, so they can never drift. The core is Tunl's own build of
+the version, with one REALITY patch, published here as the pre-release
+`core-v<version>-tunl<N>`; [packaging/sing-box](packaging/sing-box/README.md)
+says why and how. The **Bump sing-box** workflow builds and proposes each new
+version by itself; by hand, bumping is one command:
 
 ```bash
-scripts/bump-singbox.sh 1.13.14   # downloads tarballs, checks SHA-256 against the GitHub API digest, updates the properties
-./mvnw clean verify -Psmoke          # full tests + smoke on the real binary
+scripts/bump-singbox.sh 1.14.2 1   # downloads core-v1.14.2-tunl1, checks SHA-256 against the GitHub API digest, updates the properties
+./mvnw clean verify -Psmoke        # full tests + smoke on the real binary
 ```
 
 The smoke profile (`-Psmoke`,
@@ -679,7 +683,8 @@ scripts/
 
 sing-box is licensed under
 [GPL-3.0](https://github.com/SagerNet/sing-box/blob/main/LICENSE); the
-installers and dev builds bundle its binary unmodified, as a separate process
-invoked over a documented interface. The bundled version is pinned in
-[`singbox.properties`](src/main/resources/singbox.properties) and its source is
-available upstream.
+installers and dev builds bundle a build of it with one patch,
+[reality-xray.patch](packaging/sing-box/reality-xray.patch), as a separate
+process invoked over a documented interface. The bundled build is pinned in
+[`singbox.properties`](src/main/resources/singbox.properties), and its
+`core-v…` release on this repository carries the corresponding source.

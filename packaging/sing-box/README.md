@@ -2,7 +2,9 @@
 
 Tunl bundles sing-box at the version `src/main/resources/singbox.properties`
 pins. It is built from upstream's source at that tag with one patch,
-`reality-xray.patch`, by `.github/workflows/core.yml`.
+`reality-xray.patch`, by `.github/workflows/core.yml`, and published here as
+the pre-release `singbox.release` names (`core-v<version>-tunl<N>`), whose
+archives the same file pins by digest.
 
 ## Why a patch
 
@@ -58,21 +60,38 @@ hybrid one. Tunl has no such switch yet.
   X25519MLKEM768 share and its session id, opened with the server's private
   key, names 26.3.27.
 - Every pull request that touches the core runs this.
-- A manual run of **Core** on `main` also publishes the archives, their
-  `SHA256SUMS`, the upstream source and the patch as the pre-release
+- A run by hand (**Core**, *Run workflow*, from any branch), or one
+  **Bump sing-box** starts, also publishes the archives, their `SHA256SUMS`,
+  the upstream source and the patch as the pre-release
   `core-v<version>-tunl<N>`. That release is never "latest", which the app's
   updater reads.
+- `bundle-singbox.sh`/`.ps1` and the runtime fallback in `SingBoxInstaller`
+  download from that release, and `SingBoxRealBinarySmokeTest` fails on every
+  system if the bundled core lacks the `tunl` tag while `singbox.release` is
+  set. Upstream's archives have the same names, so the build cache keeps them
+  apart by release.
 
 To check the patch locally (Go 1.25), build the tree the workflow builds and
 run `verify.sh` on the archive.
 
 ## Moving to a new sing-box version
 
-- The version bump's pull request runs **Core**. A patch that no longer
-  applies fails `git apply`, and gets rebased onto the new tag.
-- Once it is merged, run **Core** on `main` with revision 1, then pin the new
-  archives' digests.
-- When upstream fixes #4520, the patch goes, and the core is upstream's again.
+- **Bump sing-box** runs daily. For a new upstream version with no build of
+  Tunl's yet, it has **Core** build, check and publish `core-v<version>-tunl1`,
+  then pins it (`scripts/bump-singbox.sh <version> 1`) and opens the pull
+  request. It pins an existing build of the version instead of making one.
+- A patch that no longer applies fails that run at *Apply the patch*, every
+  day until it is rebased. Rebase it onto the new tag on a branch, run
+  **Core** by hand on that branch with the new version and revision 1, run
+  `scripts/bump-singbox.sh <version> 1` there, and open one pull request with
+  both.
+- A change to the patch for the version already pinned needs a new build:
+  after merging it, run **Core** on `main` with the next revision, then
+  **Bump sing-box** with that version, which pins the newest build.
+- When upstream fixes #4520, the patch goes: `scripts/bump-singbox.sh
+  <version>` with no revision pins upstream's release again and empties
+  `singbox.release`, and **Bump sing-box** has to go back to pinning
+  upstream's releases.
 
 ## Licence
 

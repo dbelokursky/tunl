@@ -9,18 +9,24 @@ Version 2.0. See the LICENSE file for the full text.
 
 Bundled third-party component: sing-box
 
-The installers and dev builds distributed by this project bundle an
-unmodified sing-box binary (https://github.com/SagerNet/sing-box), which is
-licensed under the GNU General Public License v3.0:
+The installers and dev builds distributed by this project bundle a sing-box
+binary (https://github.com/SagerNet/sing-box), which is licensed under the
+GNU General Public License v3.0:
 
     https://github.com/SagerNet/sing-box/blob/main/LICENSE
 
+The binary is built by this project from sing-box's source at the version
+pinned in src/main/resources/singbox.properties, with one modification:
+packaging/sing-box/reality-xray.patch, which lets its REALITY client connect
+to current Xray servers (packaging/sing-box/README.md says what it changes
+and why). The patch is licensed under the GPL-3.0 as sing-box is. Each build
+is published as a pre-release named core-v<version>-tunl<N> in this
+repository, together with the corresponding source: sing-box's source at
+that version and the patch.
+
 sing-box is invoked as a separate process over a documented interface; it is
 neither linked into nor derived from the Apache-2.0 licensed code in this
-repository, and the two are distributed together as an aggregation. The exact
-version bundled by any given build is pinned in
-src/main/resources/singbox.properties, and its corresponding source is
-available from the upstream repository above.
+repository, and the two are distributed together as an aggregation.
 
 --------------------------------------------------------------------------
 

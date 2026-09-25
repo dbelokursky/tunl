@@ -29,6 +29,8 @@ Older releases are removed from the page as new ones are published.
 - Privilege boundaries: the macOS sudoers rule and privileged core, the
   Windows UAC launch scripts, the Linux pkexec / setcap path.
 - System-proxy handling and its crash-recovery guard.
+- The core build: the REALITY patch in `packaging/sing-box` and the
+  `core.yml` workflow that builds and publishes the bundled core.
 - The in-app updater: download, SHA-256 and Ed25519 verification, staging and
   the platform relay that replaces the installed files.
 - The loopback MCP server: token handling, mutation gating, the audit log.
@@ -36,6 +38,7 @@ Older releases are removed from the page as new ones are published.
 
 ## Out of scope
 
-- sing-box itself and the protocols it implements: report those upstream at
+- sing-box itself and the protocols it implements, outside what the patch
+  changes: report those upstream at
   <https://github.com/SagerNet/sing-box/security>.
 - The servers you connect to, or the services reached through them.
