@@ -1,5 +1,6 @@
 package com.vlessclient.service;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import java.util.ArrayList;
@@ -28,7 +29,9 @@ import java.util.Map;
  *
  * <p>Unsupported-but-common keys are reported rather than dropped: a config
  * carrying {@code PresharedKey} would connect without it and fail in a way
- * that looks like a server problem, so the caller is told instead.</p>
+ * that looks like a server problem, so the caller is told instead. So is an
+ * AmneziaWG config, which looks like WireGuard but is for a server that
+ * plain WireGuard cannot reach.</p>
  */
 public class WireguardConfigParser {
 
@@ -36,6 +39,14 @@ public class WireguardConfigParser {
 
     /** Keys the generator cannot express yet; silently ignoring them misleads. */
     private static final List<String> UNSUPPORTED = List.of("presharedkey");
+
+    /**
+     * AmneziaWG's obfuscation keys, in [Interface]. An AmneziaWG server
+     * answers only a client that shapes its packets the same way, and the
+     * core runs plain WireGuard, so such a config can never connect.
+     */
+    private static final List<String> AMNEZIA_KEYS = List.of("jc", "jmin", "jmax",
+            "s1", "s2", "s3", "s4", "h1", "h2", "h3", "h4", "i1", "i2", "i3", "i4", "i5");
 
     /** Thrown when the config cannot produce a working server. */
     public static class InvalidConfigException extends IllegalArgumentException {
@@ -65,6 +76,16 @@ public class WireguardConfigParser {
         }
         if (peer.isEmpty()) {
             throw new InvalidConfigException("No [Peer] section");
+        }
+
+        // Before the PresharedKey check: AmneziaWG configs carry one too, and
+        // the key is not why this one cannot work.
+        List<String> amnezia = AMNEZIA_KEYS.stream().filter(iface::containsKey)
+                .map(key -> Character.toUpperCase(key.charAt(0)) + key.substring(1))
+                .toList();
+        if (!amnezia.isEmpty()) {
+            throw new InvalidConfigException(
+                    I18n.get("refusal.amneziawg", String.join(", ", amnezia)));
         }
 
         List<String> unsupported = new ArrayList<>();
