@@ -1,0 +1,192 @@
+name: Core
+# Builds the sing-box core Tunl bundles: the upstream source at the version
+# singbox.properties pins, with packaging/sing-box/reality-xray.patch applied
+# (packaging/sing-box/README.md says why). Every target is built and the
+# REALITY hello checked on each pull request that touches the core; a manual
+# run on main also publishes the build as a pre-release the bundling scripts
+# pin by digest.
+on:
+  pull_request:
+    paths:
+      - 'packaging/sing-box/**'
+      - '.github/workflows/core.yml'
+      - 'src/main/resources/singbox.properties'
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: 'The N in core-v<version>-tunlN: 1 for a new version, one more for a rebuild'
+        required: true
+        default: '1'
+        type: string
+
+# Each job asks for what it needs; nothing is granted by default.
+permissions:
+  contents: read
+
+concurrency:
+  group: core-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # What Tunl's configurations use, and nothing it does not: on macOS the
+  # core runs as administrator, so tailscale, acme, cloudflared, openvpn and
+  # the like are left out. badlinkname and tfogo_checklinkname0 are upstream's,
+  # for Go's linkname checks. tunl marks the build in `sing-box version`.
+  TAGS: with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0,tunl
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - {target: darwin-arm64, goos: darwin, goarch: arm64}
+          - {target: darwin-amd64, goos: darwin, goarch: amd64}
+          - {target: windows-amd64, goos: windows, goarch: amd64}
+          - {target: linux-amd64, goos: linux, goarch: amd64}
+          - {target: linux-arm64, goos: linux, goarch: arm64}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Read the pinned version
+        id: pin
+        run: echo "version=$(sed -n 's/^singbox.version=//p' src/main/resources/singbox.properties)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: SagerNet/sing-box
+          ref: v${{ steps.pin.outputs.version }}
+          path: sing-box
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: sing-box/go.mod
+          cache-dependency-path: sing-box/go.sum
+
+      - name: Apply the patch
+        working-directory: sing-box
+        run: git apply --verbose ../packaging/sing-box/reality-xray.patch
+
+      - name: Build
+        working-directory: sing-box
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ steps.pin.outputs.version }}
+        run: |
+          ext=""
+          if [ "$GOOS" = windows ]; then ext=.exe; fi
+          out="sing-box-${VERSION}-${TARGET}"
+          mkdir -p "../dist/$out"
+          go build -v -trimpath -o "../dist/$out/sing-box$ext" -tags "$TAGS" \
+            -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=${VERSION}' $(cat release/LDFLAGS) -s -w -buildid=" \
+            ./cmd/sing-box
+          cp LICENSE "../dist/$out/"
+          cd ../dist
+          if [ "$GOOS" = windows ]; then
+            zip -qr "$out.zip" "$out"
+          else
+            tar -czf "$out.tar.gz" "$out"
+          fi
+          rm -rf "$out"
+
+      - name: Check the REALITY hello
+        if: matrix.target == 'linux-amd64'
+        env:
+          VERSION: ${{ steps.pin.outputs.version }}
+        run: packaging/sing-box/verify.sh "dist/sing-box-${VERSION}-linux-amd64.tar.gz"
+
+      # The same check on upstream's own build of this version has to fail,
+      # or it proves nothing: a check the unpatched core passes would pass
+      # a patch that did nothing too.
+      - name: Check that upstream's build fails it
+        if: matrix.target == 'linux-amd64'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.pin.outputs.version }}
+        run: |
+          asset="sing-box-${VERSION}-linux-amd64.tar.gz"
+          gh release download "v${VERSION}" --repo SagerNet/sing-box --pattern "$asset" --dir upstream
+          expected=$(gh release view "v${VERSION}" --repo SagerNet/sing-box --json assets \
+            --jq ".assets[] | select(.name == \"$asset\") | .digest")
+          actual="sha256:$(sha256sum "upstream/$asset" | cut -d' ' -f1)"
+          if [ "$actual" != "$expected" ]; then
+            echo "upstream's $asset is $actual, the release says $expected" >&2
+            exit 1
+          fi
+          if packaging/sing-box/verify.sh "upstream/$asset"; then
+            echo "upstream's build passes the check, so the check cannot tell the patch apart" >&2
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: core-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  # The only job with write access, and it runs no build: it takes the
+  # archives the build jobs made, adds the digests and the corresponding
+  # source (upstream's at the tag, plus the patch; sing-box is GPL-3.0), and
+  # publishes them as a pre-release that never becomes "latest", which the
+  # app's updater reads.
+  publish:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Read the pinned version
+        id: pin
+        run: echo "version=$(sed -n 's/^singbox.version=//p' src/main/resources/singbox.properties)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: SagerNet/sing-box
+          ref: v${{ steps.pin.outputs.version }}
+          path: sing-box
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: core-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.pin.outputs.version }}
+          REVISION: ${{ inputs.revision }}
+        run: |
+          case "$REVISION" in ''|*[!0-9]*) echo "revision must be a number" >&2; exit 1 ;; esac
+          tag="core-v${VERSION}-tunl${REVISION}"
+          git -C sing-box archive --format=tar.gz --prefix="sing-box-${VERSION}/" \
+            -o "../dist/sing-box-${VERSION}-source.tar.gz" HEAD
+          cp packaging/sing-box/reality-xray.patch dist/
+          (cd dist && sha256sum -- * > SHA256SUMS)
+          cat > notes.md <<EOF
+          sing-box ${VERSION}, built from upstream's source at v${VERSION} with
+          [reality-xray.patch](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/packaging/sing-box/reality-xray.patch)
+          applied, for Tunl to bundle. The patch lets REALITY connect to Xray 26.7
+          and later: the unmodified Chrome hello with its X25519MLKEM768 key share,
+          and client version 26.3.27. See packaging/sing-box/README.md.
+
+          Built by run ${GITHUB_RUN_ID} of ${GITHUB_SHA}. sing-box is GPL-3.0: the
+          corresponding source is sing-box-${VERSION}-source.tar.gz with the patch.
+          EOF
+          gh release create "$tag" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Core ${VERSION} (tunl${REVISION})" --notes-file notes.md \
+            --prerelease --latest=false
