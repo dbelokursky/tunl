@@ -906,7 +906,10 @@ public class SubscriptionService {
             try {
                 String decoded = decodeBase64(trimmed);
                 ParsedContent parsed = parseLines(decoded);
-                if (!parsed.servers().isEmpty()) {
+                // A list of links this client cannot run is still the list:
+                // read again as plain text, the blob is one unreadable line,
+                // and the row blamed an expired subscription or a portal.
+                if (!parsed.servers().isEmpty() || !parsed.unsupportedSchemes().isEmpty()) {
                     return parsed;
                 }
             } catch (Exception e) {

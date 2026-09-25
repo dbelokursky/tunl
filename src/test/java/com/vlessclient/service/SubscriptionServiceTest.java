@@ -224,6 +224,33 @@ class SubscriptionServiceTest {
     }
 
     /**
+     * The same list in the form panels serve by default, base64. When it held
+     * nothing this client runs — an XHTTP-only VLESS list, say — the decoded
+     * result was dropped for having no servers, the blob was read again as
+     * one unreadable line, and the row suggested the subscription had
+     * expired or a captive portal had answered.
+     */
+    @Test
+    void refreshSubscription_aBase64ListOfOnlyUnsupportedLinksSaysSoToo() {
+        service.setFetchedContent("vless://uuid1@server1.com:443?security=tls&type=tcp#Server1\n");
+        service.addSubscription("Sub", "https://example.com/sub");
+        Subscription sub = service.getSubscriptions().get(0);
+
+        service.setFetchedContent(java.util.Base64.getEncoder().encodeToString((
+                "tuic://uuid:pass@tuic.example:443#Tuic\n"
+                        + "vless://11111111-2222-3333-4444-555555555555@x.example:443"
+                        + "?security=tls&type=xhttp&path=%2F#Xhttp\n")
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        service.refreshSubscription(sub.getId());
+
+        assertThat(sub.getLastErrorKey()).isEqualTo("subscriptions.error.unsupported");
+        assertThat(sub.getLastErrorArgs()).singleElement().asString().contains("tuic");
+        assertThat(configStore.getServers())
+                .as("nothing usable came back, so nothing is removed")
+                .hasSize(1);
+    }
+
+    /**
      * A link the core would refuse is not a server this client can use, and it
      * is not a line the parser failed to read either. Counted as unreadable,
      * one xhttp link among twenty working ones kept every later refresh from
