@@ -205,6 +205,36 @@ class SubscriptionServiceTest {
                 .containsExactly("server2.com");
     }
 
+    /**
+     * A list that mixes servers this client runs with links it cannot — XHTTP,
+     * TUIC — kept the servers and dropped the rest with an INFO line in the
+     * log, so the row counted fewer servers than the provider lists and said
+     * nothing about why. The refresh now records what it left out.
+     */
+    @Test
+    void refreshSubscription_aMixedListSaysWhatItLeftOut() {
+        service.setFetchedContent("vless://uuid1@server1.com:443?security=tls&type=tcp#Server1\n");
+        service.addSubscription("Sub", "https://example.com/sub");
+        Subscription sub = service.getSubscriptions().get(0);
+        assertThat(sub.getLeftOutLinks()).isZero();
+
+        service.setFetchedContent("vless://uuid1@server1.com:443?security=tls&type=tcp#Server1\n"
+                + "tuic://uuid:pass@tuic.example:443#Tuic\n"
+                + "vless://11111111-2222-3333-4444-555555555555@x.example:443"
+                + "?security=tls&type=xhttp&path=%2F#Xhttp\n");
+        service.refreshSubscription(sub.getId());
+
+        assertThat(sub.getLeftOutLinks()).isEqualTo(2);
+        assertThat(sub.getLeftOutSummary()).contains("tuic");
+        assertThat(sub.getLastError()).isNull();
+
+        service.setFetchedContent("vless://uuid1@server1.com:443?security=tls&type=tcp#Server1\n");
+        service.refreshSubscription(sub.getId());
+
+        assertThat(sub.getLeftOutLinks()).isZero();
+        assertThat(sub.getLeftOutSummary()).isEmpty();
+    }
+
     @Test
     void refreshSubscription_onlyUnsupportedLinksSaysSoInsteadOfHintingAtExpiry() {
         service.setFetchedContent("vless://uuid1@server1.com:443?security=tls&type=tcp#Server1\n");

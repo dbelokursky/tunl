@@ -408,6 +408,8 @@ public class SubscriptionService {
             } else {
                 sub.clearLastError();
             }
+            // Said on the row: a mixed list lost them with only the line below.
+            sub.setLeftOut(parsed.unsupportedSchemes().size(), parsed.unsupportedSummary());
             if (!parsed.unsupportedSchemes().isEmpty()) {
                 // Not an error and not a reason to keep withdrawn servers: the
                 // provider also hands out protocols this client lacks.
