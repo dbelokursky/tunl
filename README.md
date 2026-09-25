@@ -134,8 +134,8 @@ not where it stores things.
    **Subscriptions** tab with a subscription URL — the server list will keep
    itself in sync.) On a fresh install the Dashboard card links straight to
    the Servers view.
-2. **Check the active server** — clicking a server row gives it the
-   **ACTIVE** badge; that's the server used when you connect.
+2. **Check the selected server** — clicking a server row gives it the
+   **SELECTED** badge; that's the server used when you connect.
 3. **Hit Connect** on the **Dashboard** tab (or `⌘⇧C` / `Ctrl+Shift+C`).
    Green indicator — connected, orange — connecting, red — error (check the
    **Logs** tab).
@@ -153,9 +153,10 @@ The **Mode** dropdown on the Dashboard:
 | When to pick | everyday browsing | messengers, games, system services |
 
 Next to it, **Server** decides who carries the traffic: **Selected server** —
-the one with the ACTIVE badge — or **Fastest available**, where the core
-measures every server, moves traffic to the quickest one on its own, and the
-status line names the server it actually picked.
+the one with the SELECTED badge — or **Fastest available**, where the core
+measures every server and moves traffic to the quickest one on its own. The
+status line then reads "Now via …", and the server list (a **NOW** badge) and
+the tray mark the server the core picked.
 
 Either way, Tunl's own requests — subscription refreshes, update checks and
 downloads, the country database — go **through the tunnel** while it is up, so
@@ -193,7 +194,7 @@ whatever the search currently shows. While the tunnel is up the measurement
 goes *through* each proxy rather than to its address, so a server that answers
 but does not work ranks where it belongs.
 
-Click a server to make it active; Cmd/Shift-click builds a selection, and
+Click a server to select it; Cmd/Shift-click builds a selection, and
 deleting one asks once for the whole batch. Right-click for **Edit**,
 **Duplicate**, **Copy Share Link** (greyed out for WireGuard, which has no
 share-link format), **Delete**.
@@ -358,7 +359,7 @@ else saves on click.
 |---|---|---|
 | Appearance | Theme | Auto (follows the OS) / Light / Dark |
 | | Language | English / Russian |
-| Connection | Auto-connect on startup | Connect to the active server on launch |
+| Connection | Auto-connect on startup | Connect to the selected server on launch |
 | | Launch at login | Start Tunl with the OS (see [Autostart](#autostart)) |
 | | SOCKS Port / HTTP Port | The local proxy listeners, `1080` and `1081` by default; both bind to `127.0.0.1` only |
 | | Core log level | How much sing-box writes to the Logs tab: Debug / Info / Warning / Error; takes effect on the next connect |
@@ -495,8 +496,8 @@ up; fix the cause and press **Retry saving**. Quitting before it succeeds
 loses the change, not the whole file.
 
 **Connect button is disabled**
-No active server — on the Servers tab click a server so it gets the
-**ACTIVE** badge (on a fresh install the Dashboard card links straight there).
+No server selected — on the Servers tab click a server so it gets the
+**SELECTED** badge (on a fresh install the Dashboard card links straight there).
 
 **"Process exited unexpectedly (code N)"**
 sing-box crashed; the tray posts a "Tunnel stopped" notification. The reason
@@ -663,7 +664,7 @@ scripts/
 - **Transports:** TCP, WebSocket, gRPC, HTTP/2, HTTP Upgrade, QUIC
 - **TLS / Reality / XTLS-Vision**
 - **Modes:** System Proxy, TUN (IPv4 and IPv6)
-- **Server selection** — the pinned server, or the fastest available (sing-box `urltest`)
+- **Server selection** — the selected server, or the fastest available (sing-box `urltest`), with the server in use marked
 - **Subscriptions** — hourly-refreshing server lists from a URL, with the provider's quota
 - **Routing** — bypass countries, a bypass list, custom rules by domain / suffix / keyword / regex / GeoSite / IP CIDR / GeoIP → Proxy, Direct or Block
 - **Share links** — import of `vless://`, `vmess://`, `trojan://`, `ss://`, `hysteria2://` (`hy2://`) and WireGuard `.conf`; export of everything but WireGuard

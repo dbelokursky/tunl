@@ -94,7 +94,7 @@ class EngineReRegistrationTest {
         private int rebinds;
 
         RecordingTray() {
-            super(() -> null, null, null, null, null);
+            super(() -> null, null, null, null, null, null);
         }
 
         @Override

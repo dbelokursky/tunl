@@ -7,11 +7,13 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.CountryResolver;
 import com.vlessclient.service.LatencyTester;
+import com.vlessclient.service.ProxyGroupMonitor;
 import com.vlessclient.service.Redact;
 import com.vlessclient.service.ServerBackupService;
 import com.vlessclient.service.ShareLinkExporter;
 import com.vlessclient.service.WireguardConfigParser;
 import com.vlessclient.service.outbound.CoreSettings;
+import com.vlessclient.service.outbound.OutboundTags;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -31,6 +33,8 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
+import javafx.beans.property.ReadOnlyStringProperty;
+import javafx.beans.value.ObservableValue;
 import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
 import javafx.collections.transformation.SortedList;
@@ -106,6 +110,13 @@ public class ServersViewController {
     private FilteredList<ServerConfig> filtered;
     private SortedList<ServerConfig> sorted;
     private LatencyTester latencyTester;
+
+    /** The tag of the server the core picked itself (the Fastest mode), or null. */
+    private ReadOnlyStringProperty corePick;
+    /** Held, so the binding lives as long as the view. */
+    private ObservableValue<Boolean> listOnScreen;
+    /** The core re-picked while the list was not on screen. */
+    private boolean corePickStale;
 
     /**
      * Where the clipboard import reads its text: the system clipboard, or a
@@ -193,6 +204,41 @@ public class ServersViewController {
             // drawn: the rows get their flags when it lands, not on a scroll.
             resolver.onDatabaseReady(() -> Platform.runLater(serverListView::refresh));
         }
+
+        ProxyGroupMonitor groupMonitor = optionalService(ProxyGroupMonitor.class);
+        if (groupMonitor != null) {
+            followCorePick(groupMonitor.corePickTagProperty());
+        }
+    }
+
+    /**
+     * Moves the "now" badge with the server the core picked itself. A re-pick
+     * while the page is not on screen repaints the list once it is: repainting
+     * a cached page, or one in a window hidden to the tray, costs a pulse and
+     * shows nobody anything.
+     */
+    private void followCorePick(ReadOnlyStringProperty pick) {
+        corePick = pick;
+        listOnScreen = OnScreen.of(serverListView);
+        pick.addListener((obs, oldTag, newTag) -> {
+            if (listOnScreen.getValue()) {
+                serverListView.refresh();
+            } else {
+                corePickStale = true;
+            }
+        });
+        listOnScreen.addListener((obs, wasOnScreen, isOnScreen) -> {
+            if (isOnScreen && corePickStale) {
+                corePickStale = false;
+                serverListView.refresh();
+            }
+        });
+    }
+
+    /** Whether the core picked {@code server} itself and routes through it now. */
+    private boolean isCorePick(ServerConfig server) {
+        String tag = corePick != null ? corePick.get() : null;
+        return tag != null && tag.equals(OutboundTags.server(server));
     }
 
     /**
@@ -1091,6 +1137,7 @@ public class ServersViewController {
         private final Label protocolBadge = new Label();
         private final Label insecureBadge = new Label();
         private final Label activeBadge = new Label();
+        private final Label nowBadge = new Label();
         private final ContextMenu contextMenu = new ContextMenu();
 
         /**
@@ -1143,8 +1190,18 @@ public class ServersViewController {
             Tooltip insecureTooltip = new Tooltip();
             insecureTooltip.textProperty().bind(I18n.binding("servers.badge.insecure.tooltip"));
             insecureBadge.setTooltip(insecureTooltip);
+            // Two marks, because in the Fastest mode they are two servers:
+            // the one the user selected, and the one the core routes through.
             activeBadge.getStyleClass().add("active-badge");
             activeBadge.textProperty().bind(I18n.binding("servers.active.badge"));
+            Tooltip activeTooltip = new Tooltip();
+            activeTooltip.textProperty().bind(I18n.binding("servers.active.badge.tooltip"));
+            activeBadge.setTooltip(activeTooltip);
+            nowBadge.getStyleClass().add("now-badge");
+            nowBadge.textProperty().bind(I18n.binding("servers.now.badge"));
+            Tooltip nowTooltip = new Tooltip();
+            nowTooltip.textProperty().bind(I18n.binding("servers.now.badge.tooltip"));
+            nowBadge.setTooltip(nowTooltip);
 
             // Context menu for right-click. Every item reads getItem() when it
             // fires, so the one menu serves whichever server the cell shows.
@@ -1210,6 +1267,9 @@ public class ServersViewController {
             }
             if (server.isActive()) {
                 row.getChildren().add(activeBadge);
+            }
+            if (isCorePick(server)) {
+                row.getChildren().add(nowBadge);
             }
 
             setContextMenu(contextMenu);

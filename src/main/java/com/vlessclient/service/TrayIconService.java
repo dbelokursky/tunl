@@ -5,6 +5,7 @@ import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TunnelHealth;
 import com.vlessclient.model.TunnelStatus;
+import com.vlessclient.service.outbound.OutboundTags;
 import java.awt.AWTException;
 import java.awt.Color;
 import java.awt.EventQueue;
@@ -22,13 +23,16 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 import javafx.application.Platform;
+import javafx.beans.property.ReadOnlyStringProperty;
 import javafx.collections.ListChangeListener;
 import javafx.stage.Stage;
 import org.slf4j.Logger;
@@ -89,6 +93,11 @@ public class TrayIconService {
     private final ConfigStore configStore;
     private final ConnectionService connectionService;
     private final TunnelHealthState healthState;
+    /** The tag of the server the core picked itself; FX-owned, like the list. */
+    private final ReadOnlyStringProperty corePick;
+    /** {@link #corePick} as AWT sees it, copied on the FX thread. */
+    private volatile String corePickSnapshot;
+    private javafx.beans.value.ChangeListener<String> corePickListener;
     private final Stage stage;
     private final FailureNotices failureNotices;
 
@@ -129,17 +138,22 @@ public class TrayIconService {
      * @param healthState       reachability verdict refining a running tunnel,
      *                          may be null (the icon then reports process
      *                          state alone)
+     * @param corePick          the tag of the server the core picked itself
+     *                          in the Fastest mode, marked in the servers
+     *                          submenu as the one in use now; may be null
      * @param stage             main window shown/hidden from the tray
      */
     public TrayIconService(Supplier<SingBoxEngine> engineSupplier,
                            ConfigStore configStore,
                            ConnectionService connectionService,
                            TunnelHealthState healthState,
+                           ReadOnlyStringProperty corePick,
                            Stage stage) {
         this.engineSupplier = engineSupplier;
         this.configStore = configStore;
         this.connectionService = connectionService;
         this.healthState = healthState;
+        this.corePick = corePick;
         this.stage = stage;
         // Automatic retries stay within the user's request; a connect,
         // reconnect or disconnect starts another.
@@ -194,6 +208,8 @@ public class TrayIconService {
             healthState.healthProperty().addListener(healthListener);
         }
 
+        followCorePick();
+
         // Listen for server list changes.
         if (configStore != null) {
             // Fires on the FX thread, which is the only place the list may be
@@ -207,6 +223,28 @@ public class TrayIconService {
         }
     }
 
+
+    /**
+     * Follows the server the core picked itself, which the servers submenu
+     * marks. The property changes on the FX thread; AWT reads the copy.
+     * Package-private for a test: install() needs a system tray.
+     */
+    void followCorePick() {
+        if (corePick == null || corePickListener != null) {
+            return;
+        }
+        corePickListener = (obs, oldTag, newTag) -> {
+            corePickSnapshot = newTag;
+            refreshTrayState();
+        };
+        corePick.addListener(corePickListener);
+        corePickSnapshot = corePick.get();
+    }
+
+    /** The core's pick as the servers submenu last read it; for a test. */
+    String corePick() {
+        return corePickSnapshot;
+    }
 
     /**
      * Removes the tray icon from the system tray and detaches listeners.
@@ -239,6 +277,10 @@ public class TrayIconService {
         if (configStore != null && serversListener != null) {
             configStore.getServers().removeListener(serversListener);
             serversListener = null;
+        }
+        if (corePick != null && corePickListener != null) {
+            corePick.removeListener(corePickListener);
+            corePickListener = null;
         }
 
         Runnable removeTask = () -> {
@@ -410,9 +452,10 @@ public class TrayIconService {
      *
      * @param id     the server's id
      * @param label  its name, or its address when it has none
-     * @param active whether it is the picked one
+     * @param active whether it is the selected one
+     * @param now    whether the core picked it itself and routes through it now
      */
-    record MenuServer(String id, String label, boolean active) {
+    record MenuServer(String id, String label, boolean active, boolean now) {
     }
 
     /**
@@ -425,32 +468,49 @@ public class TrayIconService {
     }
 
     /**
-     * The submenu for a server list: the first {@link #MAX_MENU_SERVERS} and
-     * the picked one wherever it is, the rest counted. A native menu of
-     * hundreds of items from a big subscription could not be read anyway.
+     * The submenu for a server list: the selected server and the one the core
+     * picked itself wherever they are, then the first of the rest up to
+     * {@link #MAX_MENU_SERVERS}, in list order, and the others counted. A
+     * native menu of hundreds of items from a big subscription could not be
+     * read anyway.
+     *
+     * @param servers     the server list
+     * @param corePickTag the tag of the server the core picked itself, or null
      */
-    static ServerMenu serverMenu(List<ServerConfig> servers) {
-        List<MenuServer> items = new ArrayList<>();
-        ServerConfig picked = servers.stream().filter(ServerConfig::isActive)
+    static ServerMenu serverMenu(List<ServerConfig> servers, String corePickTag) {
+        ServerConfig selected = servers.stream().filter(ServerConfig::isActive)
                 .findFirst().orElse(null);
-        int room = picked != null && servers.indexOf(picked) >= MAX_MENU_SERVERS
-                ? MAX_MENU_SERVERS - 1 : MAX_MENU_SERVERS;
+        ServerConfig current = corePickTag == null ? null : servers.stream()
+                .filter(server -> corePickTag.equals(OutboundTags.server(server)))
+                .findFirst().orElse(null);
+        int room = MAX_MENU_SERVERS - (int) Stream.of(selected, current)
+                .filter(Objects::nonNull).distinct().count();
+        List<MenuServer> items = new ArrayList<>();
+        int others = 0;
         for (ServerConfig server : servers) {
-            if (items.size() < room || server == picked) {
-                items.add(menuServer(server));
-            }
-            if (items.size() == MAX_MENU_SERVERS) {
-                break;
+            boolean kept = server == selected || server == current;
+            if (kept || others < room) {
+                items.add(menuServer(server, server == current));
+                others += kept ? 0 : 1;
             }
         }
         return new ServerMenu(List.copyOf(items), servers.size() - items.size());
     }
 
-    private static MenuServer menuServer(ServerConfig server) {
+    private static MenuServer menuServer(ServerConfig server, boolean now) {
         String label = server.getName() != null && !server.getName().isBlank()
                 ? server.getName()
                 : server.getAddress();
-        return new MenuServer(server.getId(), label, server.isActive());
+        return new MenuServer(server.getId(), label, server.isActive(), now);
+    }
+
+    /**
+     * An item's text: a tick on the selected server, and the server the core
+     * routes through now named as such.
+     */
+    static String itemLabel(MenuServer server) {
+        return (server.active() ? "✓ " : "    ")
+                + (server.now() ? I18n.get("tray.servers.now", server.label()) : server.label());
     }
 
     private void rebuildServersMenu() {
@@ -458,7 +518,8 @@ public class TrayIconService {
             return;
         }
         List<ServerConfig> current = configStore == null ? List.of() : serverSnapshot;
-        if (!current.isEmpty() && serverMenu(current).equals(shownServerMenu)) {
+        if (!current.isEmpty()
+                && serverMenu(current, corePickSnapshot).equals(shownServerMenu)) {
             // Most refreshes change the icon or a label, not the servers; a
             // subscription refresh re-applies every server, changed or not.
             return;
@@ -481,9 +542,9 @@ public class TrayIconService {
             return;
         }
 
-        ServerMenu menu = serverMenu(snapshot);
+        ServerMenu menu = serverMenu(snapshot, corePickSnapshot);
         for (MenuServer server : menu.items()) {
-            MenuItem item = new MenuItem((server.active() ? "✓ " : "    ") + server.label());
+            MenuItem item = new MenuItem(itemLabel(server));
             item.addActionListener(e -> Platform.runLater(() -> selectActiveServer(server.id())));
             serversMenu.add(item);
         }

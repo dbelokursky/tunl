@@ -28,7 +28,7 @@ class TrayEngineRebindTest {
 
     /** Headless: the constructor only assigns fields, install() is never called. */
     private static TrayIconService tray(AtomicReference<SingBoxEngine> current) {
-        return new TrayIconService(current::get, null, null, null, null);
+        return new TrayIconService(current::get, null, null, null, null, null);
     }
 
     @Test

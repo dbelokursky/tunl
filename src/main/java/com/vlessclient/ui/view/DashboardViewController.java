@@ -269,6 +269,7 @@ public class DashboardViewController implements ViewShownAware {
                         statusTitle, statusLabel, serverNameLabel, connectButton),
                 this::cardServer,
                 this::routedServer,
+                () -> serverTagged(corePickTag()) != null,
                 this::currentHealth,
                 () -> singBoxEngine,
                 this::refreshConnectButtonAvailability);
@@ -326,6 +327,8 @@ public class DashboardViewController implements ViewShownAware {
             // The pick can change under a live tunnel (urltest re-probes), so
             // the card repaints on its own signal, like the health verdict.
             groupMonitor.currentMemberTagProperty().addListener(
+                    (obs, oldTag, newTag) -> updateUi(currentConnectionState()));
+            groupMonitor.corePickTagProperty().addListener(
                     (obs, oldTag, newTag) -> updateUi(currentConnectionState()));
         }
 
@@ -403,18 +406,31 @@ public class DashboardViewController implements ViewShownAware {
      * pick when the core has reported one, otherwise the pinned server.
      */
     private ServerConfig routedServer() {
-        String tag = groupMonitor != null ? groupMonitor.currentMemberTagProperty().get() : null;
-        if (tag != null) {
-            ConfigStore configStore = ServiceLocator.find(ConfigStore.class).orElse(null);
-            if (configStore != null) {
-                for (ServerConfig server : configStore.getServers()) {
-                    if (tag.equals(OutboundTags.server(server))) {
-                        return server;
-                    }
-                }
+        ServerConfig routed = serverTagged(
+                groupMonitor != null ? groupMonitor.currentMemberTagProperty().get() : null);
+        return routed != null ? routed : activeServer;
+    }
+
+    /** The tag of the server the core picked itself (the Fastest mode), or null. */
+    private String corePickTag() {
+        return groupMonitor != null ? groupMonitor.corePickTagProperty().get() : null;
+    }
+
+    /** The stored server an outbound tag names, or null for none or an unknown one. */
+    private static ServerConfig serverTagged(String tag) {
+        if (tag == null) {
+            return null;
+        }
+        ConfigStore configStore = ServiceLocator.find(ConfigStore.class).orElse(null);
+        if (configStore == null) {
+            return null;
+        }
+        for (ServerConfig server : configStore.getServers()) {
+            if (tag.equals(OutboundTags.server(server))) {
+                return server;
             }
         }
-        return activeServer;
+        return null;
     }
 
     /**

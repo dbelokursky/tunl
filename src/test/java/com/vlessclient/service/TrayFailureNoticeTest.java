@@ -79,7 +79,7 @@ class TrayFailureNoticeTest {
         final AtomicInteger notices = new AtomicInteger();
 
         CountingTray(SingBoxEngine engine) {
-            super(() -> engine, null, null, null, null);
+            super(() -> engine, null, null, null, null, null);
         }
 
         @Override
