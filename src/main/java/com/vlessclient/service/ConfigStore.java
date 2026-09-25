@@ -289,12 +289,19 @@ public class ConfigStore {
 
     /**
      * Removes the server with the given id and persists the change. Logs a
-     * warning if no matching server is found.
+     * warning if no matching server is found. Removing the picked server
+     * picks another, as a batch does, so a non-empty list always has one.
      *
      * @param serverId the id of the server to remove
      */
     public void removeServer(String serverId) {
-        boolean removed = mutateList(() -> servers.removeIf(s -> s.getId().equals(serverId)));
+        boolean removed = mutateList(() -> {
+            boolean gone = servers.removeIf(s -> s.getId().equals(serverId));
+            if (gone) {
+                keepOnePicked(List.of(), List.of());
+            }
+            return gone;
+        });
         if (removed) {
             synchronized (this) {
                 evictSealCache(serverId);
@@ -372,7 +379,9 @@ public class ConfigStore {
     }
 
     /**
-     * Picks a server again when a batch removed the picked one. Upserts ran
+     * Picks a server again when a removal took the picked one. Deleting it
+     * from the list left the Dashboard asking to "add a server" with servers
+     * in the list. In a batch, upserts ran
      * first and activated a newcomer only while nothing was active, so a
      * subscription that moved the picked server to a new address and name
      * (withdrawn and added, as nothing ties the two) was left with no server

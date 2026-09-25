@@ -117,6 +117,41 @@ class ConfigStoreTest {
     }
 
     /**
+     * Deleting the picked server left none picked: the Dashboard then asked to
+     * "add a server to get started" with servers in the list, and Connect had
+     * nothing to connect to until one was picked by hand. A batch already
+     * picks another when it removes the picked one; a single removal now does
+     * the same, and the pick reaches disk.
+     */
+    @Test
+    void removingThePickedServerPicksAnother() {
+        ServerConfig first = createTestServer("First");
+        store.addServer(first);
+        store.addServer(createTestServer("Second"));
+        store.addServer(createTestServer("Third"));
+
+        store.removeServer(first.getId());
+
+        assertThat(store.getServers()).filteredOn(ServerConfig::isActive)
+                .extracting(ServerConfig::getName).containsExactly("Second");
+        assertThat(new ConfigStore(tempDir).getServers()).filteredOn(ServerConfig::isActive)
+                .extracting(ServerConfig::getName).containsExactly("Second");
+    }
+
+    /** Removing a server that was not the pick leaves the pick alone. */
+    @Test
+    void removingAnotherServerKeepsThePick() {
+        store.addServer(createTestServer("First"));
+        ServerConfig second = createTestServer("Second");
+        store.addServer(second);
+
+        store.removeServer(second.getId());
+
+        assertThat(store.getServers()).filteredOn(ServerConfig::isActive)
+                .extracting(ServerConfig::getName).containsExactly("First");
+    }
+
+    /**
      * The suffix goes into the server's name, and the name is saved: a Russian
      * UI produced "Мой сервер (copy)" and wrote the English word into
      * servers.json, where it stays.
