@@ -209,6 +209,11 @@ x64 box, ideally a clean user profile.
 - [ ] TUN connect prompts for privileges, tunnels traffic; quit-while-connected
       leaves no orphaned `sing-box` and restores the proxy.
 - [ ] Tray/menu-bar minimize / restore / quit.
+- [ ] **Launch at login** — enable it in Settings; `plutil -extract
+      ProgramArguments.0 raw ~/Library/LaunchAgents/com.vlessclient.client.plist`
+      prints `/Applications/Tunl.app/Contents/MacOS/Tunl`, and after logging
+      out and in Tunl is running. *The item used to name the runtime's `bin/java`, which jlink strips,
+      and launchd refused it at every login.*
 
 ## Linux
 

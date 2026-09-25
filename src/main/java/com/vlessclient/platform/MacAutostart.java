@@ -14,8 +14,9 @@ import org.slf4j.LoggerFactory;
  * <p>The agent is a property-list file at
  * {@code ~/Library/LaunchAgents/com.vlessclient.client.plist}. launchd scans
  * that directory when the user logs in and, because the plist sets
- * {@code RunAtLoad}, starts the application. Enabling autostart writes the
- * file; disabling it deletes the file.</p>
+ * {@code RunAtLoad}, starts the application: the installed app's launcher
+ * ({@code Tunl.app/Contents/MacOS/Tunl}), see {@link #launchCommand()}.
+ * Enabling autostart writes the file; disabling it deletes the file.</p>
  *
  * <p>No {@code launchctl load} is performed: the running app is already
  * started, and loading a {@code RunAtLoad} agent would immediately spawn a
@@ -66,9 +67,38 @@ public final class MacAutostart implements Autostart {
     }
 
     private void install() throws IOException {
+        List<String> command = launchCommand();
         Files.createDirectories(launchAgentsDir);
-        Files.writeString(plistPath(), buildPlist(JvmLaunchCommand.current()));
+        Files.writeString(plistPath(), buildPlist(command));
         log.info("Login item installed: {}", plistPath());
+    }
+
+    /**
+     * What launchd runs at login: the installed app's own launcher, or, for a
+     * run from the IDE or a jar, this run's JVM invocation.
+     *
+     * <p>Never the JVM invocation of an installed app. jlink strips
+     * {@code bin/java} from the runtime every installer ships
+     * ({@code scripts/jlink-options.txt}), so a login item built from
+     * {@code java.home} named a file the app does not have: launchd gave up at
+     * each login with EX_CONFIG while Settings showed the box ticked. The
+     * launcher is also what an update leaves in place, the way the Windows Run
+     * value and the Linux desktop entry already use theirs.</p>
+     *
+     * @return the argv-style command
+     * @throws IOException when the app runs from a translocated copy, a
+     *     randomized mount macOS removes again
+     */
+    static List<String> launchCommand() throws IOException {
+        Path launcher = InstalledApp.launcher();
+        if (launcher == null) {
+            return JvmLaunchCommand.current();
+        }
+        if (InstalledApp.isTranslocated(launcher)) {
+            throw new IOException("Tunl runs from a temporary copy macOS made of it;"
+                    + " move Tunl to Applications to start it at login");
+        }
+        return List.of(launcher.toString());
     }
 
     private void uninstall() throws IOException {
