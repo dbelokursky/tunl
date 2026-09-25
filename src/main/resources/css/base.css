@@ -763,10 +763,19 @@
     -fx-effect: dropshadow(gaussian, -c-shadow-focus-error, 6, 0, 0, 0);
 }
 
-.form-checkbox {
+.form-checkbox,
+.form-radio {
     -fx-font-size: 13px;
     -fx-text-fill: -c-text-body;
     -fx-padding: 4 0;
+}
+
+/* Modena gives a link the accent and a followed one the ladder's text colour,
+   white on these pages: the first-run "Add a server" link vanished from the
+   light theme's dashboard once clicked. */
+.hyperlink,
+.hyperlink:visited {
+    -fx-text-fill: -c-info;
 }
 
 .form-actions {
@@ -1360,9 +1369,15 @@
 }
 
 /* ===== Content scroll wrapper ===== */
+/* -fx-text-background-color is stated because Modena derives it from
+   -fx-background with a ladder, and the ladder reads transparent as dark:
+   every label, radio button or visited link a page left unstyled came out
+   white, invisible on the light theme's cards (the Routing page's "What goes
+   through the VPN" choices). The same repair .dialog-pane makes, for text. */
 .content-scroll {
     -fx-background-color: transparent;
     -fx-background: transparent;
+    -fx-text-background-color: -c-text;
     -fx-border-color: transparent;
 }
 
