@@ -117,6 +117,7 @@ public class TrayIconService {
     private ServerMenu shownServerMenu;
     private javafx.beans.value.ChangeListener<ConnectionState> stateListener;
     private javafx.beans.value.ChangeListener<TunnelHealth> healthListener;
+    private javafx.beans.value.ChangeListener<String> recoveryStopListener;
     private MenuItem showItem;
     private MenuItem quitItem;
     /** The language the menu was last labeled in; a switch labels it again. */
@@ -199,6 +200,7 @@ public class TrayIconService {
 
         // Listen for state changes and forward to AWT thread.
         attachEngineListener();
+        followRecovery();
 
         // Listen for reachability verdicts: a tunnel that stops carrying
         // traffic changes nothing about the process, so this is the only
@@ -270,6 +272,11 @@ public class TrayIconService {
      */
     public void uninstall() {
         detachEngineListener();
+        if (connectionService != null && recoveryStopListener != null) {
+            connectionService.getRecoveryService().stopReasonProperty()
+                    .removeListener(recoveryStopListener);
+            recoveryStopListener = null;
+        }
         if (healthState != null && healthListener != null) {
             healthState.healthProperty().removeListener(healthListener);
             healthListener = null;
@@ -663,6 +670,28 @@ public class TrayIconService {
         };
         engine.connectionStateProperty().addListener(stateListener);
         listeningTo = engine;
+    }
+
+    /**
+     * Says when automatic recovery stops. The user's request for a tunnel
+     * then stands with nothing restarting it, and subscriptions are held back
+     * rather than fetched outside it; with the window hidden, the tray's
+     * colour was all that changed. Package-private for a test: install()
+     * needs a system tray.
+     */
+    void followRecovery() {
+        if (connectionService == null || recoveryStopListener != null) {
+            return;
+        }
+        recoveryStopListener = (obs, was, reason) -> {
+            refreshTrayState();
+            if (reason != null) {
+                notifier.accept(I18n.get("tray.notify.stopped.title"),
+                        I18n.get("tray.notify.stopped.body", reason));
+            }
+        };
+        connectionService.getRecoveryService().stopReasonProperty()
+                .addListener(recoveryStopListener);
     }
 
     /**

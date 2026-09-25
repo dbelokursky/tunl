@@ -70,6 +70,7 @@ class HealthCheckCoordinatorTest {
     private VBox statusList;
     private HBox banner;
     private Label bannerLabel;
+    private Button bannerButton;
     private FakeEngine engine;
     private TunnelHealthState healthState;
 
@@ -194,6 +195,7 @@ class HealthCheckCoordinatorTest {
         statusList = new VBox();
         banner = new HBox();
         bannerLabel = new Label();
+        bannerButton = new Button();
         banner.getChildren().setAll(bannerLabel);
         healthCard.getChildren().setAll(summaryLabel, statusList, banner);
         engine = new FakeEngine();
@@ -238,7 +240,7 @@ class HealthCheckCoordinatorTest {
         healthState.healthProperty().addListener((obs, old, next) -> recovery.onHealth(next));
         return new HealthCheckCoordinator(
                 new HealthCheckCoordinator.Controls(
-                        healthCard, summaryLabel, statusList, banner, bannerLabel),
+                        healthCard, summaryLabel, statusList, banner, bannerLabel, bannerButton),
                 checker,
                 healthState,
                 () -> engine,
@@ -407,9 +409,17 @@ class HealthCheckCoordinatorTest {
                         && expected.equals(bannerLabel.getText())),
                 Duration.ofSeconds(10));
         assertThat(healthCard.isVisible()).as("the card holding the banner").isTrue();
+        assertThat(recovery.isTunnelWanted())
+                .as("the user's request, which recovery stopping does not withdraw")
+                .isTrue();
+        assertThat(bannerButton.getText())
+                .as("with no countdown to cancel, the button withdraws that request")
+                .isEqualTo(I18n.get("button.disconnect"));
 
         onFxAndWait(coordinator::cancelReconnectCountdown);
         assertThat(banner.isVisible()).as("the banner once dismissed").isFalse();
+        assertThat(recovery.isTunnelWanted()).as("the request once withdrawn").isFalse();
+        assertThat(bannerButton.getText()).isEqualTo(I18n.get("button.cancel"));
     }
 
     @Test

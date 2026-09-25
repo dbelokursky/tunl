@@ -25,6 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
 import javafx.beans.value.ObservableValue;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
@@ -73,7 +74,8 @@ public final class HealthCheckCoordinator {
             Label healthSummaryLabel,
             VBox serviceStatusList,
             HBox reconnectBanner,
-            Label reconnectBannerLabel) {
+            Label reconnectBannerLabel,
+            Button cancelReconnectButton) {
     }
 
     private final VBox healthCard;
@@ -156,6 +158,7 @@ public final class HealthCheckCoordinator {
         this.serviceStatusList = controls.serviceStatusList();
         this.reconnectBanner = controls.reconnectBanner();
         this.reconnectBannerLabel = controls.reconnectBannerLabel();
+        bindBannerButton(controls.cancelReconnectButton(), recovery);
         this.reachabilityChecker = reachabilityChecker;
         this.healthState = healthState;
         this.engineSupplier = engineSupplier;
@@ -180,6 +183,22 @@ public final class HealthCheckCoordinator {
 
     private SingBoxEngine engine() {
         return engineSupplier.get();
+    }
+
+    /**
+     * Cancel stops a countdown to a restart. Once recovery has stopped there
+     * is none, and the same button withdraws the request for a tunnel that
+     * the stop leaves standing, which is what a disconnect does.
+     */
+    private static void bindBannerButton(Button button, TunnelRecoveryService recovery) {
+        if (button == null) {
+            return;
+        }
+        button.textProperty().bind(recovery == null
+                ? I18n.binding("button.cancel")
+                : Bindings.when(recovery.stopReasonProperty().isNotNull())
+                        .then(I18n.binding("button.disconnect"))
+                        .otherwise(I18n.binding("button.cancel")));
     }
 
     /**

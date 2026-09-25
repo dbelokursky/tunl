@@ -309,8 +309,10 @@
             </padding>
             <Label fx:id="reconnectBannerLabel" text="" styleClass="reconnect-banner-label"
                    wrapText="true" HBox.hgrow="ALWAYS" maxWidth="Infinity"/>
+            <!-- Pinned to its own width: the label beside it wraps, and in a
+                 narrow window it would squeeze "Disconnect" to "Disc…". -->
             <Button fx:id="cancelReconnectButton" text="Cancel" styleClass="secondary-button"
-                    onAction="#onCancelReconnectClicked"/>
+                    minWidth="-Infinity" onAction="#onCancelReconnectClicked"/>
         </HBox>
     </VBox>
 </VBox>
