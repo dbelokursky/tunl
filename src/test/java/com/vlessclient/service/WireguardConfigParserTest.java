@@ -1,5 +1,6 @@
 package com.vlessclient.service;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import org.junit.jupiter.api.Test;
@@ -114,6 +115,30 @@ class WireguardConfigParserTest {
                 "PresharedKey = 4kR0F5b0m9nqmTFcnAF3n5Vq0LN2ScK5EsAV3o2xUFo=\nAllowedIPs = 0.0.0.0/0")))
                 .isInstanceOf(WireguardConfigParser.InvalidConfigException.class)
                 .hasMessageContaining("PresharedKey".toLowerCase());
+    }
+
+    /**
+     * AmneziaWG, which is what users in Russia hold since plain WireGuard is
+     * blocked there, writes its obfuscation keys into the same file. Read as
+     * plain WireGuard, the config became a server the core brought up and that
+     * carried nothing, like a dead one; with a PresharedKey as well it was
+     * refused for the key, the wrong reason.
+     */
+    @Test
+    void anAmneziaWgConfigIsRefusedForWhatItIs() {
+        String amnezia = TYPICAL.replace("DNS = 1.1.1.1\n", "DNS = 1.1.1.1\n"
+                + "Jc = 4\nJmin = 40\nJmax = 70\nS1 = 0\nS2 = 0\n"
+                + "H1 = 1\nH2 = 2\nH3 = 3\nH4 = 4\n");
+        String reason = I18n.get("refusal.amneziawg", "Jc, Jmin, Jmax, S1, S2, H1, H2, H3, H4");
+
+        assertThatThrownBy(() -> parser.parse(amnezia))
+                .isInstanceOf(WireguardConfigParser.InvalidConfigException.class)
+                .hasMessage(reason);
+        assertThatThrownBy(() -> parser.parse(amnezia.replace("AllowedIPs = 0.0.0.0/0, ::/0",
+                "PresharedKey = 4kR0F5b0m9nqmTFcnAF3n5Vq0LN2ScK5EsAV3o2xUFo=\n"
+                        + "AllowedIPs = 0.0.0.0/0")))
+                .as("with a PresharedKey too, the reason is still AmneziaWG")
+                .hasMessage(reason);
     }
 
     @Test
