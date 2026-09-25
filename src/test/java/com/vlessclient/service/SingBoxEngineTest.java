@@ -74,6 +74,24 @@ class SingBoxEngineTest {
     }
 
     /**
+     * Like {@link #createFakeSingBox} but silent, as the real core is when it
+     * logs at "warn" or "error": nothing on stdout, however long it runs.
+     */
+    private Path createSilentFakeSingBox(Path dir, String name, int sleepSeconds)
+            throws Exception {
+        if (WINDOWS) {
+            return writeScript(dir, name,
+                    "@echo off\r\n"
+                    + "if \"%1\"==\"check\" exit /b 0\r\n"
+                    + windowsSleep(sleepSeconds));
+        }
+        return writeScript(dir, name,
+                "#!/bin/bash\n"
+                + "[ \"$1\" = check ] && exit 0\n"
+                + "sleep " + sleepSeconds + "\n");
+    }
+
+    /**
      * A sleep for a Windows fake core. {@code timeout} is the stock one, but it
      * exits at once, with an error, when its stdin is not a console, and
      * ProcessBuilder gives it a pipe: the fake "core" was gone before a test
@@ -298,6 +316,45 @@ class SingBoxEngineTest {
             awaitConnectionState(engine, ConnectionState.CONNECTED, AWAIT_STATE_TIMEOUT_MS);
         } finally {
             engine.stop();
+        }
+    }
+
+    /**
+     * A core logging at "warn" or "error" never prints "sing-box started",
+     * an INFO line. Outside TUN that line was the only way to Connected, so a
+     * user who lowered the core's log level in Settings saw "Establishing
+     * tunnel…" for the whole session while traffic flowed: no health checks,
+     * no reconnect, no subscription refresh, no traffic history.
+     */
+    @Test
+    void aSystemProxyCoreThatLogsNothingIsConnectedOnceItsControllerAnswers(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        int port;
+        try (java.net.ServerSocket free = new java.net.ServerSocket(0)) {
+            port = free.getLocalPort();
+        }
+        // The core's clash API, which the fake core script cannot serve itself.
+        com.sun.net.httpserver.HttpServer controller = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), port), 0);
+        controller.createContext("/version", exchange -> {
+            boolean thisCore = "Bearer this-core"
+                    .equals(exchange.getRequestHeaders().getFirst("Authorization"));
+            byte[] body = "{\"version\":\"sing-box 1.14.1\"}"
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(thisCore ? 200 : 401, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        controller.start();
+        String config = "{\"log\":{\"level\":\"warn\"},\"experimental\":{\"clash_api\":"
+                + "{\"external_controller\":\"127.0.0.1:" + port + "\",\"secret\":\"this-core\"}}}";
+        SingBoxEngine engine = new SingBoxEngine(createSilentFakeSingBox(tmp, "sing-box", 30));
+        try {
+            engine.start(config, ProxyMode.SYSTEM_PROXY);
+            awaitConnectionState(engine, ConnectionState.CONNECTED, AWAIT_STATE_TIMEOUT_MS);
+        } finally {
+            engine.stop();
+            controller.stop(0);
         }
     }
 

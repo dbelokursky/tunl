@@ -288,45 +288,47 @@ public class SingBoxEngine {
         );
         logReader.start();
 
-        // In TUN mode the launcher's wrapper may buffer or delay the core's
-        // stdout (osascript buffers until the script exits; the Windows
-        // outer script polls log files). LogReader may never see the
-        // "started" line in real time, so the UI would otherwise be stuck on
-        // CONNECTING forever; the watchdog promotes the session once the core
-        // answers instead.
-        if (proxyMode == ProxyMode.TUN) {
-            startTunConnectedWatchdog(extractController(configJson));
-        }
+        // The "started" line is only the fast path. In TUN mode the launcher's
+        // wrapper may buffer or delay the core's stdout (osascript buffers
+        // until the script exits; the Windows outer script polls log files),
+        // and in any mode a core logging at "warn" or "error" never prints
+        // the line at all: it is an INFO line. The UI would otherwise be stuck
+        // on CONNECTING for the whole session; the watchdog promotes the
+        // session once the core answers instead.
+        startConnectedWatchdog(extractController(configJson));
 
         startProcessMonitor();
     }
 
-    private static final long TUN_CONNECTED_DELAY_MS = 1800;
+    private static final long CONNECTED_FALLBACK_DELAY_MS = 1800;
     private static final Duration CONTROLLER_PROBE_TIMEOUT = Duration.ofSeconds(1);
     private static final long CONTROLLER_PROBE_INTERVAL_MS = 200;
     private static final ObjectMapper CONTROLLER_JSON = JsonMapper.builder().build();
 
     /**
-     * Promotes a TUN session to CONNECTED once its core answers.
+     * Promotes the session to CONNECTED once its core answers, whatever the
+     * core writes to its log.
      *
-     * <p>The launcher process is not the core. On Windows it is the wrapper
-     * waiting on the UAC prompt, alive for as long as the prompt stays open,
-     * so its being alive says nothing about the tunnel. The watchdog asks the
-     * core's clash API controller instead ({@link #coreAnswers}). The
-     * controller opens only once every inbound, the TUN adapter included, has
-     * started, and the requests leave nothing in the core's log, where a bare
-     * connect to the http inbound logs an error. A config without a controller
-     * falls back to the launcher still being alive after
-     * {@code TUN_CONNECTED_DELAY_MS}.</p>
+     * <p>A process being alive says nothing about the tunnel. In TUN mode the
+     * process is the launcher, not the core: on Windows it is the wrapper
+     * waiting on the UAC prompt, alive for as long as the prompt stays open.
+     * And a core at log level "warn" or "error" prints no "started" line, so
+     * outside TUN the log is no answer either. The watchdog asks the core's
+     * clash API controller instead ({@link #coreAnswers}). The controller
+     * opens only once every inbound, the TUN adapter included, has started,
+     * and the requests leave nothing in the core's log, where a bare connect
+     * to the http inbound logs an error. A config without a controller falls
+     * back to the process still being alive after
+     * {@code CONNECTED_FALLBACK_DELAY_MS}.</p>
      */
-    private void startTunConnectedWatchdog(Controller controller) {
+    private void startConnectedWatchdog(Controller controller) {
         // Same session-capture discipline as the process monitor: a stale
         // watchdog outliving its session must not promote the next one.
         Process proc = process;
         Thread watchdog = new Thread(() -> {
             try {
                 if (controller == null) {
-                    Thread.sleep(TUN_CONNECTED_DELAY_MS);
+                    Thread.sleep(CONNECTED_FALLBACK_DELAY_MS);
                 } else if (!awaitController(proc, controller)) {
                     return;
                 }
@@ -340,7 +342,7 @@ public class SingBoxEngine {
                     connectionState.set(ConnectionState.CONNECTED);
                 }
             });
-        }, "singbox-tun-watchdog");
+        }, "singbox-connected-watchdog");
         watchdog.setDaemon(true);
         watchdog.start();
     }
