@@ -42,6 +42,7 @@ import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.DialogPane;
 import javafx.scene.control.Label;
@@ -166,6 +167,7 @@ public class ViewDialogThemeTest extends ApplicationTest {
         assertThat(confirm.getHeaderText())
                 .isEqualTo(I18n.get("servers.delete.header", "Amsterdam 01"));
         assertBelongsToTheWindow(confirm, "dark");
+        assertEnterKeeps(confirm);
     }
 
     @Test
@@ -184,6 +186,7 @@ public class ViewDialogThemeTest extends ApplicationTest {
         assertThat(confirm.getHeaderText())
                 .isEqualTo(I18n.plural("servers.delete.count", 2));
         assertBelongsToTheWindow(confirm, "dark");
+        assertEnterKeeps(confirm);
     }
 
     @ParameterizedTest
@@ -265,6 +268,7 @@ public class ViewDialogThemeTest extends ApplicationTest {
 
         assertThat(confirm.getHeaderText()).contains("example.com");
         assertBelongsToTheWindow(confirm, "dark");
+        assertEnterKeeps(confirm);
     }
 
     // ===== Subscriptions =====
@@ -301,6 +305,7 @@ public class ViewDialogThemeTest extends ApplicationTest {
         assertThat(confirm.getHeaderText())
                 .isEqualTo(I18n.get("subscriptions.delete.confirm", "Provider"));
         assertBelongsToTheWindow(confirm, "dark");
+        assertEnterKeeps(confirm);
     }
 
     /**
@@ -447,6 +452,23 @@ public class ViewDialogThemeTest extends ApplicationTest {
      * the first showing window that was not showing before, with a dialog pane
      * for its root. The window is kept for {@link #closeTheDialogs}.
      */
+    /**
+     * Enter keeps what the dialog would delete: the button it presses is the
+     * one that cancels, and the one that deletes has to be clicked
+     * ({@link Confirmations#confirmIrreversible}). The stock confirmation made
+     * OK its default, so Delete and a reflexive Enter removed a server, a
+     * subscription with all its servers, or a rule, with no undo.
+     */
+    private static void assertEnterKeeps(DialogPane confirm) {
+        List<ButtonBar.ButtonData> pressedByEnter = confirm.getButtonTypes().stream()
+                .filter(type -> confirm.lookupButton(type) instanceof Button button
+                        && button.isDefaultButton())
+                .map(ButtonType::getButtonData)
+                .toList();
+        assertThat(pressedByEnter).as("what Enter presses")
+                .containsExactly(ButtonBar.ButtonData.CANCEL_CLOSE);
+    }
+
     private DialogPane open(Runnable opener) {
         List<Window> before = onFx(() -> List.copyOf(Window.getWindows()));
         Platform.runLater(opener);

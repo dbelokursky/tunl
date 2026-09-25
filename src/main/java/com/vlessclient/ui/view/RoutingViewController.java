@@ -18,7 +18,6 @@ import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
-import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
@@ -410,15 +409,12 @@ public class RoutingViewController {
      * servers and subscriptions, which both ask first.
      */
     private void deleteRule(RoutingRule rule) {
-        Alert confirm = Dialogs.alert(Alert.AlertType.CONFIRMATION);
-        confirm.setTitle(I18n.get("routing.rule.delete.title"));
-        confirm.setHeaderText(I18n.get("routing.rule.delete.header",
-                formatRuleType(rule.getType()) + " " + rule.getValue()));
-        confirm.setContentText(I18n.get("servers.delete.warning"));
-        confirm.initOwner(ownerWindow());
-
-        java.util.Optional<ButtonType> result = confirm.showAndWait();
-        if (result.isPresent() && result.get() == ButtonType.OK) {
+        // Enter keeps the rule; the button that deletes has to be clicked.
+        if (Confirmations.confirmIrreversible(ownerWindow(),
+                I18n.get("routing.rule.delete.title"),
+                I18n.get("routing.rule.delete.header",
+                        formatRuleType(rule.getType()) + " " + rule.getValue()),
+                I18n.get("servers.delete.warning"), I18n.get("button.delete"))) {
             routingService.removeRule(rule.getId());
             loadRules();
         }

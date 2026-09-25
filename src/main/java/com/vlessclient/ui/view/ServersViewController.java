@@ -495,12 +495,9 @@ public class ServersViewController {
             deleteServer(targets.get(0));
             return;
         }
-        Alert confirm = Dialogs.alert(Alert.AlertType.CONFIRMATION);
-        confirm.setTitle(I18n.get("dialog.delete.server"));
-        confirm.setHeaderText(I18n.plural("servers.delete.count", targets.size()));
-        confirm.setContentText(I18n.get("servers.delete.warning"));
-        confirm.initOwner(ownerWindow());
-        if (confirm.showAndWait().filter(button -> button == ButtonType.OK).isPresent()) {
+        if (Confirmations.confirmIrreversible(ownerWindow(), I18n.get("dialog.delete.server"),
+                I18n.plural("servers.delete.count", targets.size()),
+                I18n.get("servers.delete.warning"), I18n.get("button.delete"))) {
             // Clear first: otherwise the selection model reshuffles onto
             // surviving rows as each removal lands.
             serverListView.getSelectionModel().clearSelection();
@@ -1029,14 +1026,11 @@ public class ServersViewController {
     }
 
     private void deleteServer(ServerConfig server) {
-        Alert confirm = Dialogs.alert(Alert.AlertType.CONFIRMATION);
-        confirm.setTitle(I18n.get("dialog.delete.server"));
-        confirm.setHeaderText(I18n.get("servers.delete.header", server.getName()));
-        confirm.setContentText(I18n.get("servers.delete.warning"));
-        confirm.initOwner(ownerWindow());
-
-        Optional<ButtonType> result = confirm.showAndWait();
-        if (result.isPresent() && result.get() == ButtonType.OK) {
+        // Enter keeps the server: the stock confirmation's OK took it, and
+        // Delete then a reflexive Enter removed a server with no undo.
+        if (Confirmations.confirmIrreversible(ownerWindow(), I18n.get("dialog.delete.server"),
+                I18n.get("servers.delete.header", server.getName()),
+                I18n.get("servers.delete.warning"), I18n.get("button.delete"))) {
             configStore.removeServer(server.getId());
             log.info("Deleted server: {}", server.getName());
         }
