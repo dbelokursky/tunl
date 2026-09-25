@@ -114,6 +114,8 @@ public class DashboardViewController implements ViewShownAware {
     @FXML private Label skippedServersLabel;
     @FXML private HBox movedPortsBanner;
     @FXML private Label movedPortsLabel;
+    @FXML private HBox realityRefusedBanner;
+    @FXML private Label realityRefusedLabel;
     @FXML private HBox tunnelDroppedBanner;
     @FXML private Label tunnelDroppedLabel;
     @FXML private Button tunnelDroppedButton;
@@ -201,6 +203,9 @@ public class DashboardViewController implements ViewShownAware {
         ServiceLocator.find(ConnectionService.class).ifPresent(service ->
                 new MovedPortsSection(movedPortsBanner, movedPortsLabel)
                         .bind(service.movedPortsProperty()));
+        // Shown by bindEngine while the running core's traffic meets a REALITY
+        // server that turns it away.
+        realityRefusedLabel.textProperty().bind(I18n.binding("dashboard.reality.refused"));
         // A dropped tunnel whose restart would ask for elevation again waits
         // for the user rather than raising the prompt unasked.
         tunnelDroppedLabel.textProperty().bind(I18n.binding("dashboard.tunnel.dropped"));
@@ -342,6 +347,8 @@ public class DashboardViewController implements ViewShownAware {
      * two sites used to carry their own copies of the same listeners.
      */
     private void bindEngine(SingBoxEngine engine) {
+        realityRefusedBanner.visibleProperty().bind(engine.realityRefusedProperty());
+        realityRefusedBanner.managedProperty().bind(engine.realityRefusedProperty());
         engine.connectionStateProperty().addListener(
                 (obs, oldState, newState) -> onEngineState(newState));
         engine.errorMessageProperty().addListener(

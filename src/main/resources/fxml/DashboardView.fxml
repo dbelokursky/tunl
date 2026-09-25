@@ -93,6 +93,18 @@
                wrapText="true" HBox.hgrow="ALWAYS" maxWidth="Infinity" minWidth="0"/>
     </HBox>
 
+    <!-- A REALITY server turned the core away: current Xray lets in only
+         recent Xray clients by default. Hidden unless this run's traffic met
+         such a refusal (SingBoxEngine.realityRefusedProperty). -->
+    <HBox fx:id="realityRefusedBanner" styleClass="skipped-servers-banner"
+          alignment="CENTER_LEFT" visible="false" managed="false">
+        <padding>
+            <Insets top="8" right="12" bottom="8" left="12"/>
+        </padding>
+        <Label fx:id="realityRefusedLabel" styleClass="skipped-servers-label"
+               wrapText="true" HBox.hgrow="ALWAYS" maxWidth="Infinity" minWidth="0"/>
+    </HBox>
+
     <!-- A tunnel that dropped where restarting it would raise the elevation
          prompt again: recovery leaves that reconnect to the user
          (TunnelRecoveryService). Hidden unless the service offers it.

@@ -17,11 +17,14 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import javafx.application.Platform;
+import javafx.beans.property.ReadOnlyBooleanProperty;
+import javafx.beans.property.ReadOnlyBooleanWrapper;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.beans.property.ReadOnlyStringProperty;
 import javafx.beans.property.ReadOnlyStringWrapper;
 import javafx.collections.FXCollections;
+import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,6 +57,20 @@ public class SingBoxEngine {
     private final ReadOnlyObjectWrapper<ConnectionState> connectionState;
     private final ReadOnlyStringWrapper errorMessage;
     private final ReadOnlyStringWrapper errorDetail = new ReadOnlyStringWrapper("");
+
+    /**
+     * What the core logs when a REALITY server answered as the site it poses
+     * as: current Xray (26.7 and later) turns away a client that is not a
+     * recent Xray, and 26.9 also one without the post-quantum key share, and
+     * sing-box sends neither. Counted on the tunnel's own traffic only, a
+     * "connection: open connection … using …" line, and not on a probe of a
+     * group member, so a "Fastest" group carrying traffic on a member that
+     * works raises nothing.
+     */
+    private static final java.util.regex.Pattern REALITY_REFUSED = java.util.regex.Pattern
+            .compile("connection: open connection .* reality verification failed");
+
+    private final ReadOnlyBooleanWrapper realityRefused = new ReadOnlyBooleanWrapper();
 
     /**
      * Serializes the process lifecycle. start(), stop() and forceStop() run
@@ -142,6 +159,16 @@ public class SingBoxEngine {
         this.logLines = FXCollections.observableArrayList();
         this.connectionState = new ReadOnlyObjectWrapper<>(ConnectionState.DISCONNECTED);
         this.errorMessage = new ReadOnlyStringWrapper("");
+        // The list is written on the FX thread, one batch of the reader at a
+        // time, and cleared at each start, so this reads one run's lines.
+        logLines.addListener((ListChangeListener<String>) change -> {
+            while (!realityRefused.get() && change.next()) {
+                if (change.wasAdded() && change.getAddedSubList().stream()
+                        .anyMatch(SingBoxEngine::isRealityRefusal)) {
+                    realityRefused.set(true);
+                }
+            }
+        });
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             if (isRunning()) {
@@ -221,6 +248,7 @@ public class SingBoxEngine {
             errorMessage.set("");
             errorDetail.set("");
             logLines.clear();
+            realityRefused.set(false);
         });
 
         tempConfigFile = Files.createTempFile(
@@ -606,6 +634,32 @@ public class SingBoxEngine {
      */
     public ObservableList<String> getLogLines() {
         return logLines;
+    }
+
+    /**
+     * Whether this run's traffic met a REALITY server that turned the core
+     * away. The Dashboard says why: to the user it looked like a dead server
+     * or a blocked network, "All services unreachable" and a reconnect loop.
+     * Cleared at each start and by {@link #forgetRealityRefusal()}.
+     *
+     * @return the property, changed on the FX thread
+     */
+    public ReadOnlyBooleanProperty realityRefusedProperty() {
+        return realityRefused.getReadOnlyProperty();
+    }
+
+    /**
+     * Forgets a REALITY refusal: the running core was pointed at another
+     * server without a restart, so the lines seen so far no longer describe
+     * the tunnel. Callable from any thread.
+     */
+    public void forgetRealityRefusal() {
+        Platform.runLater(() -> realityRefused.set(false));
+    }
+
+    static boolean isRealityRefusal(String line) {
+        return line != null && line.contains("reality verification failed")
+                && REALITY_REFUSED.matcher(line).find();
     }
 
     /**
