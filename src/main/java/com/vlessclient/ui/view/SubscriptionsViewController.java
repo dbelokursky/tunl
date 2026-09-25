@@ -364,11 +364,9 @@ public class SubscriptionsViewController implements ViewShownAware {
                     TrafficText.bytes(sub.getUploadBytes() + sub.getDownloadBytes()),
                     TrafficText.bytes(sub.getTotalBytes())));
         }
-        if (sub.getExpiresAt() > 0) {
-            String date = DATE_FORMAT.format(Instant.ofEpochSecond(sub.getExpiresAt()));
-            boolean expired = sub.getExpiresAt() < Instant.now().getEpochSecond();
-            parts.add(I18n.get(expired ? "subscriptions.expired" : "subscriptions.expires", date));
-        }
+        sub.expiry().ifPresent(expiry -> parts.add(I18n.get(
+                expiry.isBefore(Instant.now()) ? "subscriptions.expired" : "subscriptions.expires",
+                DATE_FORMAT.format(expiry))));
         return parts.isEmpty() ? null : String.join(" · ", parts);
     }
 
