@@ -47,6 +47,7 @@ class SubscriptionProviderSignalsTest {
 
     private HttpServer server;
     private volatile String body = TWO_SERVERS;
+    private volatile int status = 200;
     private final Map<String, String> headers = new LinkedHashMap<>();
     private ConfigStore store;
     private SubscriptionService service;
@@ -59,7 +60,7 @@ class SubscriptionProviderSignalsTest {
             synchronized (headers) {
                 headers.forEach(exchange.getResponseHeaders()::add);
             }
-            exchange.sendResponseHeaders(200, bytes.length == 0 ? -1 : bytes.length);
+            exchange.sendResponseHeaders(status, bytes.length == 0 ? -1 : bytes.length);
             if (bytes.length > 0) {
                 exchange.getResponseBody().write(bytes);
             }
@@ -143,6 +144,38 @@ class SubscriptionProviderSignalsTest {
         assertTheServersWereKept(sub, refreshed);
         assertThat(sub.getLastErrorKey()).isEqualTo("subscriptions.error.device.limit");
         assertThat(sub.getLastErrorArgs()).containsExactly("Remove a device in your account");
+    }
+
+    /**
+     * 3x-ui (3.7 and later) refuses a device over the plan's limit with HTTP
+     * 404 and X-Hwid-Max-Devices-Reached, where Remnawave answers 200. Only a
+     * 200 had its headers read, so the row said the provider had no
+     * subscription at this link — which reads as "delete it" to someone who
+     * has paid for it and only needs to free a device.
+     */
+    @Test
+    void aDeviceLimitRefusedWithA404IsNotReportedAsAGoneSubscription() {
+        Subscription sub = subscribed();
+        long refreshed = sub.getLastRefreshedAt();
+
+        status = 404;
+        answer("", "X-Hwid-Max-Devices-Reached", "true", "X-Hwid-Limit", "true");
+        service.refreshSubscription(sub.getId());
+
+        assertTheServersWereKept(sub, refreshed);
+        assertThat(sub.getLastErrorKey()).isEqualTo("subscriptions.error.device.limit.plain");
+    }
+
+    /** A plain 404, with no device header, still says the link is gone. */
+    @Test
+    void aPlain404StillSaysTheSubscriptionIsGone() {
+        Subscription sub = subscribed();
+
+        status = 404;
+        answer("");
+        service.refreshSubscription(sub.getId());
+
+        assertThat(sub.getLastErrorKey()).isEqualTo("subscriptions.error.http.gone");
     }
 
     /** An expired or disabled account: the entries carry the provider's message. */
