@@ -32,7 +32,7 @@ class SubscriptionAutoRefreshShutdownTest {
                 new ConfigStore(tempDir), new ShareLinkParser(), tempDir,
                 HttpClient.newHttpClient()) {
             @Override
-            public void refreshAll() {
+            void refreshDue() {
                 entered.countDown();
                 try {
                     // Blocks the way a slow fetch would; shutdownNow's interrupt
@@ -46,7 +46,7 @@ class SubscriptionAutoRefreshShutdownTest {
         };
 
         // Initial delay 0: the scheduler runs one cycle immediately and parks
-        // inside refreshAll(), simulating a refresh in flight at quit time.
+        // inside refreshDue(), simulating a refresh in flight at quit time.
         service.startAutoRefresh(0, 1, TimeUnit.HOURS);
         assertThat(entered.await(5, TimeUnit.SECONDS))
                 .as("the scheduled refresh started before we stop it")

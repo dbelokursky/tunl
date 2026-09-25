@@ -421,6 +421,7 @@ public class SubscriptionService {
                 applyUserInfo(sub, headers);
             }
             sub.setAnnounce(announce(headers));
+            sub.setUpdateIntervalHours(updateIntervalHours(headers));
             sub.setLastRefreshedAt(System.currentTimeMillis());
             saveSubscriptions();
             log.info("Refreshed subscription '{}': {} servers",
@@ -739,11 +740,32 @@ public class SubscriptionService {
         }
     }
 
+    /** How soon after start the auto-refresh first looks for due subscriptions. */
+    private static final long FIRST_CHECK_SECONDS = 60;
+
+    /** How often it looks again. */
+    private static final long DUE_CHECK_SECONDS = 5 * 60;
+
+    /** The refresh interval when the provider names none: hourly, as before. */
+    static final Duration DEFAULT_INTERVAL = Duration.ofHours(1);
+
+    /** The longest interval a provider may ask for: a week. */
+    private static final int MAX_INTERVAL_HOURS = 7 * 24;
+
+    /** When each subscription was last tried in this run, successful or not. */
+    private final Map<String, Long> lastAttemptAt = new java.util.concurrent.ConcurrentHashMap<>();
+
     /**
-     * Starts hourly background auto-refresh of all subscriptions. No-op if already running.
+     * Starts the background auto-refresh. No-op if already running.
+     *
+     * <p>It used to refresh every subscription hourly, the first time an hour
+     * after launch: a list last refreshed yesterday stayed stale for the first
+     * hour of a session, however often the provider changed it. Now a minute
+     * after start, and every five minutes after, it refreshes the ones due
+     * ({@link #refreshDue()}).</p>
      */
     public void startAutoRefresh() {
-        startAutoRefresh(1, 1, TimeUnit.HOURS);
+        startAutoRefresh(FIRST_CHECK_SECONDS, DUE_CHECK_SECONDS, TimeUnit.SECONDS);
     }
 
     /**
@@ -758,8 +780,61 @@ public class SubscriptionService {
             }
             scheduler = Executors.newSingleThreadScheduledExecutor(
                     DaemonThreads.factory("subscription-auto-refresh"));
-            scheduler.scheduleAtFixedRate(this::guardedRefreshAll, initialDelay, period, unit);
+            scheduler.scheduleAtFixedRate(this::guardedRefreshDue, initialDelay, period, unit);
             log.info("Started subscription auto-refresh");
+        }
+    }
+
+    /**
+     * Refreshes the subscriptions due a refresh: their provider's interval
+     * ({@code profile-update-interval}), or an hour, since both the last
+     * success and the last attempt, so a failing one is tried again an
+     * interval later, not at every check.
+     */
+    void refreshDue() {
+        long now = System.currentTimeMillis();
+        for (Subscription sub : new ArrayList<>(subscriptions)) {
+            long last = Math.max(sub.getLastRefreshedAt(),
+                    lastAttemptAt.getOrDefault(sub.getId(), 0L));
+            if (now - last >= intervalOf(sub).toMillis()) {
+                lastAttemptAt.put(sub.getId(), now);
+                refreshSubscription(sub.getId());
+                if ("subscriptions.error.tunnel".equals(sub.getLastErrorKey())) {
+                    // Declined, not tried: the tunnel the user wants is not up
+                    // yet, as at the first check after an auto-connect. The
+                    // next check tries again rather than an interval later.
+                    lastAttemptAt.remove(sub.getId());
+                }
+            }
+        }
+    }
+
+    /**
+     * How often a subscription is refreshed.
+     *
+     * @param sub the subscription
+     * @return its provider's interval, at most a week, or an hour
+     */
+    static Duration intervalOf(Subscription sub) {
+        int hours = sub.getUpdateIntervalHours();
+        return hours > 0 ? Duration.ofHours(Math.min(hours, MAX_INTERVAL_HOURS)) : DEFAULT_INTERVAL;
+    }
+
+    /**
+     * The provider's {@code profile-update-interval}, in hours; 0 when absent
+     * or unreadable.
+     */
+    static int updateIntervalHours(HttpHeaders headers) {
+        if (headers == null) {
+            return 0;
+        }
+        try {
+            return headers.firstValue("profile-update-interval")
+                    .map(value -> Integer.parseInt(value.strip()))
+                    .filter(hours -> hours > 0)
+                    .orElse(0);
+        } catch (NumberFormatException e) {
+            return 0;
         }
     }
 
@@ -771,11 +846,11 @@ public class SubscriptionService {
      * so a single transient error — a CME from an off-thread list read, an
      * FX-thread timeout inside applyServerBatch — would otherwise stop
      * auto-refresh forever, with no log line and no UI signal, until the app
-     * restarts. Guarding here keeps the next hour firing.</p>
+     * restarts. Guarding here keeps the next check firing.</p>
      */
-    private void guardedRefreshAll() {
+    private void guardedRefreshDue() {
         try {
-            refreshAll();
+            refreshDue();
         } catch (Exception e) {
             log.error("Scheduled subscription refresh failed", e);
         }
