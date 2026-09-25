@@ -309,7 +309,12 @@ public class SubscriptionService {
             // subscription with a dead URL or an expired token silently went
             // stale while still looking healthy. In the app's own words where
             // it knows the failure, the technical reason where it does not.
-            Declined worded = wordedFailure(e, sub.getUrl());
+            // A panel that refuses this device can say so with a failure
+            // status too (3x-ui: 404), and its headers say more than the code.
+            Declined worded = deviceRefusal(responseHeaders.get());
+            if (worded == null) {
+                worded = wordedFailure(e, sub.getUrl());
+            }
             if (worded != null) {
                 sub.recordFailure(worded.key(), worded.args());
             } else {
@@ -538,14 +543,9 @@ public class SubscriptionService {
      * watching.</p>
      */
     static Declined declined(HttpHeaders headers, String content, List<ServerConfig> fetched) {
-        if (headerIsTrue(headers, "x-hwid-max-devices-reached")) {
-            String announce = announce(headers);
-            return announce.isEmpty()
-                    ? new Declined("subscriptions.error.device.limit.plain", List.of())
-                    : new Declined("subscriptions.error.device.limit", List.of(announce));
-        }
-        if (headerIsTrue(headers, "x-hwid-not-supported")) {
-            return new Declined("subscriptions.error.device.id", List.of());
+        Declined device = deviceRefusal(headers);
+        if (device != null) {
+            return device;
         }
         if (!fetched.isEmpty() && fetched.stream().allMatch(SubscriptionService::isMessageEntry)) {
             String messages = fetched.stream()
@@ -557,6 +557,29 @@ public class SubscriptionService {
         }
         if (content == null || content.isBlank()) {
             return new Declined("subscriptions.error.empty", List.of());
+        }
+        return null;
+    }
+
+    /**
+     * A panel refusing this device, by its {@code x-hwid-*} headers, or null.
+     *
+     * <p>Remnawave says it with HTTP 200 and 3x-ui (3.7 and later) with 404, so
+     * the headers are read whatever the status; on a 404 alone the row said
+     * the provider had no subscription at this link.</p>
+     *
+     * @param headers the answer's headers, or null when there was no answer
+     * @return the refusal to record, or null
+     */
+    static Declined deviceRefusal(HttpHeaders headers) {
+        if (headerIsTrue(headers, "x-hwid-max-devices-reached")) {
+            String announce = announce(headers);
+            return announce.isEmpty()
+                    ? new Declined("subscriptions.error.device.limit.plain", List.of())
+                    : new Declined("subscriptions.error.device.limit", List.of(announce));
+        }
+        if (headerIsTrue(headers, "x-hwid-not-supported")) {
+            return new Declined("subscriptions.error.device.id", List.of());
         }
         return null;
     }
