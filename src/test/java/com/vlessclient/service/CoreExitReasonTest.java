@@ -81,6 +81,32 @@ class CoreExitReasonTest {
     }
 
     /**
+     * A dismissed prompt is the user cancelling the connect, on each system:
+     * AppleScript's -128, the Windows launcher's line, and pkexec's line for a
+     * dismissed PolicyKit dialog, which used to read "exited with code 126".
+     * A core that failed on its own is not one.
+     */
+    @Test
+    void aDismissedPromptIsToldApartFromAFailure() {
+        assertThat(CoreExitReason.declined("0:245: execution error: User canceled. (-128)"))
+                .isTrue();
+        assertThat(CoreExitReason.declined("FATAL: administrator elevation was declined or "
+                + "failed: The operation was canceled by the user.")).isTrue();
+        assertThat(CoreExitReason.declined(
+                "Error executing command as another user: Request dismissed")).isTrue();
+        assertThat(CoreExitReason.describe(126,
+                "Error executing command as another user: Request dismissed"))
+                .isEqualTo(I18n.get("engine.exit.rights"));
+
+        assertThat(CoreExitReason.declined(
+                "Error executing command as another user: Not authorized")).isFalse();
+        assertThat(CoreExitReason.declined("FATAL[0000] start service: start inbound/"
+                + "http[http-in]: listen tcp 127.0.0.1:1081: bind: address already in use"))
+                .isFalse();
+        assertThat(CoreExitReason.declined(null)).isFalse();
+    }
+
+    /**
      * Run under the administrator prompt, the core's output comes back in
      * osascript's error: its lines joined with carriage returns, which the log
      * reader splits, and the exit status after the last one.

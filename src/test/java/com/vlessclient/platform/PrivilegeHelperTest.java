@@ -29,6 +29,39 @@ class PrivilegeHelperTest {
     @TempDir
     Path tempDir;
 
+    /**
+     * The administrator dialog said that "osascript" wanted to make changes;
+     * it now says why Tunl asks. The prompt is an AppleScript string, so a
+     * quote or a backslash in a translation must not end it early.
+     */
+    @Test
+    void theAdministratorDialogSaysWhyItAsks() {
+        assertThat(PrivilegeHelper.adminScript("echo ok", "Tunl needs a password"))
+                .isEqualTo("do shell script \"echo ok\" with prompt \"Tunl needs a password\""
+                        + " with administrator privileges");
+        assertThat(PrivilegeHelper.adminScript("echo ok", "Say \"TUN\" \\ then"))
+                .contains("with prompt \"Say \\\"TUN\\\" \\\\ then\"");
+        assertThat(PrivilegeHelper.adminScript("echo ok", " "))
+                .isEqualTo("do shell script \"echo ok\" with administrator privileges");
+    }
+
+    /**
+     * AppleScript's error -128 is the dialog dismissed, in the system's
+     * language: the connect is cancelled, not failed, and no every-connect
+     * prompt follows it.
+     */
+    @Test
+    void aDismissedDialogIsTheUserCancellingNotAFailure() {
+        assertThat(PrivilegeHelper.failure(1, "0:245: execution error: User canceled. (-128)"))
+                .isInstanceOf(ElevationDeclinedException.class);
+        assertThat(PrivilegeHelper.failure(1,
+                "0:12: execution error: Пользователь отменил. (-128)"))
+                .isInstanceOf(ElevationDeclinedException.class);
+        assertThat(PrivilegeHelper.failure(1, "visudo: parse error"))
+                .isNotInstanceOf(ElevationDeclinedException.class)
+                .hasMessageContaining("visudo: parse error");
+    }
+
     @Test
     void sudoersRulePinsTheRootOwnedPathNotAUserPath() {
         String rule = PrivilegeHelper.sudoersRule("alice");

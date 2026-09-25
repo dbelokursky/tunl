@@ -42,6 +42,12 @@ public final class LinuxTunLauncher implements TunLauncher {
      */
     private static final Duration PROMPT_TIMEOUT = Duration.ofMinutes(5);
 
+    /**
+     * pkexec's exit status for an authentication dialog the user dismissed,
+     * apart from 127 for one that failed or was not allowed.
+     */
+    public static final int PKEXEC_DISMISSED = 126;
+
     private final CommandRunner runner;
     private final String elevator;
 
@@ -55,8 +61,13 @@ public final class LinuxTunLauncher implements TunLauncher {
         this.elevator = elevator;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>PolicyKit shows a text of its own, so {@code prompt} goes unused.</p>
+     */
     @Override
-    public Launched launch(Path binary, Path configFile) throws IOException {
+    public Launched launch(Path binary, Path configFile, Prompt prompt) throws IOException {
         // Owner-only and unguessable, where java.io.tmpdir is usually the
         // shared /tmp; the root-side wrapper can read it there.
         Path stopSignalFile = StopSignals.newStopSignalFile();
@@ -111,19 +122,25 @@ public final class LinuxTunLauncher implements TunLauncher {
     }
 
     /**
-     * One-time grant via PolicyKit; declining just leaves the fallback path.
+     * One-time grant via PolicyKit. A failure leaves the fallback path; a
+     * dismissed dialog is the user cancelling the connect, which the
+     * fallback's own prompt used to follow at once.
      */
-    private void grantNetAdminCapability(Path binary) {
+    private void grantNetAdminCapability(Path binary) throws ElevationDeclinedException {
         try {
             CommandRunner.Result result = runner.run(List.of(
                     elevator, "setcap", "cap_net_admin+ep",
                     binary.toAbsolutePath().toString()));
             if (result.exitCode() == 0) {
                 log.info("Granted cap_net_admin to {} (one-time setup)", binary);
+            } else if (result.exitCode() == PKEXEC_DISMISSED) {
+                throw new ElevationDeclinedException("the PolicyKit prompt was dismissed");
             } else {
-                log.warn("setcap declined or failed (exit {}): falling back to "
-                        + "per-connect elevation", result.exitCode());
+                log.warn("setcap failed (exit {}): falling back to per-connect elevation",
+                        result.exitCode());
             }
+        } catch (ElevationDeclinedException declined) {
+            throw declined;
         } catch (IOException e) {
             log.warn("Could not run {} setcap: {}", elevator, e.getMessage());
         }

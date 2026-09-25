@@ -175,9 +175,9 @@ What TUN asks for on each OS:
 
 | OS | TUN privileges |
 |---|---|
-| macOS | one admin prompt installs a sudo-NOPASSWD rule: on macOS 15 and later for a root-owned launcher that takes the connection's config on stdin and keeps only what a Tunl config is made of, on 13–14 for the core's one command line; without it, an osascript prompt on every Connect |
+| macOS | one admin prompt installs a sudo-NOPASSWD rule: on macOS 15 and later for a root-owned launcher that takes the connection's config on stdin and keeps only what a Tunl config is made of, on 13–14 for the core's one command line; where the rule cannot be installed, a password prompt on every Connect. The prompts say why Tunl asks, and Cancel cancels the connect |
 | Windows | UAC prompt on every Connect; while the tunnel is up, DNS queries outside it are blocked (WFP), so names do not leak to the network's resolver |
-| Linux | one-time `setcap` via PolicyKit (no prompts afterwards) or a pkexec prompt on Connect |
+| Linux | one-time `setcap` via PolicyKit (no prompts afterwards), or a pkexec prompt on Connect where the grant fails; dismissing a prompt cancels the connect |
 
 ---
 
@@ -506,9 +506,11 @@ is in the **Logs** tab. Common ones: wrong UUID, wrong transport, unreachable
 server, port conflict.
 
 **TUN mode asks for a password every time**
-Creating a TUN interface requires root/admin: macOS shows an osascript prompt
-(or set up sudo-NOPASSWD — then the password is asked once), Windows — UAC,
-Linux — pkexec (or a one-time `setcap`).
+Creating a TUN interface requires root/admin. macOS asks once, to install a
+sudo-NOPASSWD rule, and again after Tunl or its core is updated; it asks at
+every Connect only where the rule cannot be installed. Windows asks through
+UAC every time; Linux asks once for `setcap` (pkexec at every Connect where
+that fails). Cancelling a prompt cancels the connect.
 
 **Port 1080 or 1081 is busy**
 The core fails to start and the **Logs** tab shows the bind error. Change

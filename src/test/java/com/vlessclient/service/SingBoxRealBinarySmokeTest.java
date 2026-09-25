@@ -1402,7 +1402,8 @@ class SingBoxRealBinarySmokeTest {
         Files.writeString(configFile, mapper.writeValueAsString(config));
 
         com.vlessclient.platform.TunLauncher.Launched launched =
-                new com.vlessclient.platform.WindowsTunLauncher().launch(binary, configFile);
+                new com.vlessclient.platform.WindowsTunLauncher().launch(binary, configFile,
+                        new com.vlessclient.platform.TunLauncher.Prompt("", ""));
         Process outer = launched.process();
         List<String> lines = new java.util.concurrent.CopyOnWriteArrayList<>();
         Thread collector = new Thread(() -> {

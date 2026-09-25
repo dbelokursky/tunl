@@ -32,12 +32,26 @@ final class CoreExitReason {
     /**
      * Administrator rights not granted: AppleScript's error -128 from the
      * macOS prompt, worded in the system's language, so only the number is
-     * matched; or the Windows launcher's own line for a declined UAC prompt.
+     * matched; the Windows launcher's own line for a declined UAC prompt; or
+     * pkexec's line for a dismissed PolicyKit dialog, which it exits 126 after.
      */
     private static final Pattern RIGHTS = Pattern.compile("execution error: .*\\(-128\\)\\s*$|^"
-            + Pattern.quote(WindowsTunLauncher.ELEVATION_DECLINED));
+            + Pattern.quote(WindowsTunLauncher.ELEVATION_DECLINED)
+            + "|: Request dismissed\\s*$");
 
     private CoreExitReason() {
+    }
+
+    /**
+     * Whether a core that exited never ran because the user dismissed the
+     * administrator prompt its start raised: the user cancelling the connect,
+     * which was reported as the tunnel failing.
+     *
+     * @param lastLine the last line of the launch's output, or null
+     * @return true for a dismissed prompt
+     */
+    static boolean declined(String lastLine) {
+        return lastLine != null && RIGHTS.matcher(lastLine).find();
     }
 
     /**
@@ -57,7 +71,7 @@ final class CoreExitReason {
             if (ruleSet.find()) {
                 return I18n.get("engine.exit.rule.set", ruleSet.group(1));
             }
-            if (RIGHTS.matcher(lastLine).find()) {
+            if (declined(lastLine)) {
                 return I18n.get("engine.exit.rights");
             }
         }
