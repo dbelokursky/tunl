@@ -537,7 +537,8 @@ public class DashboardViewController implements ViewShownAware {
                 .map(AppSettings::getServerSelection)
                 .orElse(ServerSelection.SINGLE));
 
-        serverSelectionCombo.valueProperty().addListener((obs, oldVal, newVal) -> {
+        // Committed, not every arrow press: each change restarts a live tunnel.
+        ComboCommits.committed(serverSelectionCombo).addListener((obs, oldVal, newVal) -> {
             if (newVal == null || newVal == oldVal || syncingFromSettings) {
                 return;
             }

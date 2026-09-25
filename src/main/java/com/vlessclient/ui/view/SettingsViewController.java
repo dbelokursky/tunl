@@ -252,7 +252,7 @@ public class SettingsViewController implements ViewShownAware {
             }
         });
 
-        onUserChange(themeCombo.valueProperty(), (oldVal, newVal) -> {
+        onUserChange(ComboCommits.committed(themeCombo), (oldVal, newVal) -> {
             if (newVal != null && !newVal.equals(oldVal)) {
                 settings.setTheme(newVal);
                 if (themeManager != null) {
@@ -287,7 +287,7 @@ public class SettingsViewController implements ViewShownAware {
             }
         });
 
-        onUserChange(languageCombo.valueProperty(), (oldVal, newVal) -> {
+        onUserChange(ComboCommits.committed(languageCombo), (oldVal, newVal) -> {
             if (newVal != null && !newVal.equals(oldVal)) {
                 settings.setLanguage(newVal);
                 Locale newLocale = "ru".equals(newVal) ? Locale.of("ru") : Locale.ENGLISH;
