@@ -18,6 +18,7 @@ import com.vlessclient.service.ProxyGroupMonitor;
 import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.SingBoxInstaller;
+import com.vlessclient.service.SubscriptionService;
 import com.vlessclient.service.TrafficHistoryStore;
 import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.service.TunnelHealthState;
@@ -27,6 +28,7 @@ import com.vlessclient.ui.view.dashboard.HealthCheckCoordinator;
 import com.vlessclient.ui.view.dashboard.MovedPortsSection;
 import com.vlessclient.ui.view.dashboard.SkippedServersSection;
 import com.vlessclient.ui.view.dashboard.StatusPresenter;
+import com.vlessclient.ui.view.dashboard.SubscriptionEndSection;
 import com.vlessclient.ui.view.dashboard.TrafficDisplayBinder;
 import com.vlessclient.ui.view.dashboard.TrafficHistorySection;
 import com.vlessclient.ui.view.dashboard.UpdateBannerSection;
@@ -110,6 +112,8 @@ public class DashboardViewController implements ViewShownAware {
     @FXML private Label updateBannerTitle;
     @FXML private Label updateBannerHint;
     @FXML private Button updateBannerButton;
+    @FXML private HBox subscriptionEndBanner;
+    @FXML private Label subscriptionEndLabel;
     @FXML private HBox skippedServersBanner;
     @FXML private Label skippedServersLabel;
     @FXML private HBox movedPortsBanner;
@@ -195,6 +199,10 @@ public class DashboardViewController implements ViewShownAware {
         updateBannerSection = new UpdateBannerSection(new UpdateBannerSection.Controls(
                 updateBanner, updateBannerTitle, updateBannerHint, updateBannerButton));
         updateBannerSection.init();
+        // Subscriptions near their end, read again whenever the card is shown.
+        ServiceLocator.find(SubscriptionService.class).ifPresent(service ->
+                new SubscriptionEndSection(subscriptionEndBanner, subscriptionEndLabel)
+                        .bind(service.getSubscriptions(), OnScreen.of(statusTitle)));
         // Servers the core refused and the connection went ahead without.
         ServiceLocator.find(ConnectionService.class).ifPresent(service ->
                 new SkippedServersSection(skippedServersBanner, skippedServersLabel)
