@@ -666,7 +666,13 @@ public class SubscriptionService {
                     case "upload" -> sub.setUploadBytes(number);
                     case "download" -> sub.setDownloadBytes(number);
                     case "total" -> sub.setTotalBytes(number);
-                    case "expire" -> sub.setExpiresAt(number);
+                    case "expire" -> {
+                        // 0 says the plan does not expire; a value no date can
+                        // show is noise, and the row would throw rendering it.
+                        if (number >= 0 && number <= Subscription.LAST_EXPIRY) {
+                            sub.setExpiresAt(number);
+                        }
+                    }
                     default -> { }
                 }
             }

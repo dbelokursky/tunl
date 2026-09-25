@@ -2,8 +2,10 @@ package com.vlessclient.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -200,9 +202,27 @@ public class Subscription extends KeepsUnknownFields {
         this.totalBytes = totalBytes;
     }
 
+    /**
+     * The last expiry a date can show: 9999-12-31T23:59:59Z. "expire" comes
+     * from the provider as Unix seconds and nothing bounds it; past this the
+     * page's date has no four-digit year to write, and past about 3.2e16 an
+     * {@link Instant} cannot hold it at all.
+     */
+    public static final long LAST_EXPIRY = 253_402_300_799L;
+
     /** The plan's expiry as Unix seconds, or 0 when the provider did not say. */
     public long getExpiresAt() {
         return expiresAt;
+    }
+
+    /**
+     * The plan's expiry when the provider named one a date can show.
+     *
+     * @return the expiry, or empty for none or for a value out of range
+     */
+    public Optional<Instant> expiry() {
+        return expiresAt > 0 && expiresAt <= LAST_EXPIRY
+                ? Optional.of(Instant.ofEpochSecond(expiresAt)) : Optional.empty();
     }
 
     public void setExpiresAt(long expiresAt) {

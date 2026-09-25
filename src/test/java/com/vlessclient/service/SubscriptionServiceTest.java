@@ -319,6 +319,30 @@ class SubscriptionServiceTest {
     }
 
     /**
+     * "expire" is seconds since 1970, and the Subscriptions page renders it
+     * as a date on every layout of the row. A value no date can hold threw
+     * there each time, so one header from a provider — or from anyone on the
+     * path of a plain-http refresh — broke the page until the next answer.
+     */
+    @Test
+    void applyUserInfo_ignoresAnExpiryNoDateCanShow() {
+        Subscription sub = new Subscription();
+        sub.setExpiresAt(1767225600L);
+
+        for (String absurd : List.of("9223372036854775807", "253402300800", "-1")) {
+            SubscriptionService.applyUserInfo(sub, java.net.http.HttpHeaders.of(
+                    java.util.Map.of("subscription-userinfo", List.of("expire=" + absurd)),
+                    (name, value) -> true));
+            assertThat(sub.getExpiresAt()).as("after expire=%s", absurd).isEqualTo(1767225600L);
+        }
+
+        SubscriptionService.applyUserInfo(sub, java.net.http.HttpHeaders.of(
+                java.util.Map.of("subscription-userinfo", List.of("expire=0")),
+                (name, value) -> true));
+        assertThat(sub.getExpiresAt()).as("0: the plan does not expire").isZero();
+    }
+
+    /**
      * Changing a URL used to mean deleting the subscription, and its servers,
      * and adding it again.
      */
