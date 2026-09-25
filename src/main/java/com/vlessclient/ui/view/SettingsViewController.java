@@ -7,6 +7,7 @@ import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.platform.Autostart;
+import com.vlessclient.platform.SecretSealer;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ThemeManager;
 import com.vlessclient.service.TrafficHistoryStore;
@@ -19,6 +20,8 @@ import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import javafx.application.Platform;
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.value.ObservableValue;
 import javafx.fxml.FXML;
 import javafx.scene.Scene;
@@ -89,6 +92,7 @@ public class SettingsViewController implements ViewShownAware {
     @FXML private ComboBox<ProxyMode> proxyModeCombo;
     @FXML private CheckBox systemProxyAutoConfigCheck;
     @FXML private CheckBox storeSecretsCheck;
+    @FXML private Label storeSecretsHint;
     @FXML private Label deviceIdLabel;
     @FXML private Label deviceIdValue;
     @FXML private Button deviceIdResetButton;
@@ -125,6 +129,8 @@ public class SettingsViewController implements ViewShownAware {
     private ConfigStore configStore;
     private ThemeManager themeManager;
     private Autostart autostart;
+    /** The keychain did not work when last asked; see {@link #showSecretStore}. */
+    private final BooleanProperty secretStoreMissing = new SimpleBooleanProperty();
     private UpdatesSection updatesSection;
     private TrafficHistorySettingsSection trafficHistorySection;
     private McpServerService mcpServerService;
@@ -404,6 +410,24 @@ public class SettingsViewController implements ViewShownAware {
     }
 
     /**
+     * Asks whether the keychain works, which the box alone did not say: with
+     * no {@code secret-tool} on a Linux desktop, say, the credentials went
+     * into the files with the box still ticked. Off the FX thread, because
+     * the first answer is a round-trip through the backend's own processes;
+     * the backend keeps it for the rest of the run.
+     */
+    private void showSecretStore() {
+        SecretSealer sealer = ServiceLocator.find(SecretSealer.class).orElse(null);
+        if (sealer == null) {
+            return;
+        }
+        Thread.startVirtualThread(() -> {
+            boolean available = sealer.isAvailable();
+            Platform.runLater(() -> secretStoreMissing.set(!available));
+        });
+    }
+
+    /**
      * Puts {@code enabled} in the checkbox without the listener reading it as
      * the user's doing and writing it back to the system.
      *
@@ -533,6 +557,14 @@ public class SettingsViewController implements ViewShownAware {
         systemProxyAutoConfigCheck.textProperty()
                 .bind(I18n.binding("settings.proxy.autoconfig"));
         storeSecretsCheck.textProperty().bind(I18n.binding("settings.store.secrets"));
+        storeSecretsHint.textProperty().bind(I18n.binding(
+                com.vlessclient.platform.Platform.current()
+                        == com.vlessclient.platform.Platform.LINUX
+                        ? "settings.store.secrets.unavailable.linux"
+                        : "settings.store.secrets.unavailable"));
+        storeSecretsHint.visibleProperty().bind(
+                storeSecretsCheck.selectedProperty().and(secretStoreMissing));
+        storeSecretsHint.managedProperty().bind(storeSecretsHint.visibleProperty());
         deviceIdLabel.textProperty().bind(I18n.binding("settings.device.id"));
         deviceIdHint.textProperty().bind(I18n.binding("settings.device.id.hint"));
         ButtonLabels.bindStatic(deviceIdResetButton, "settings.device.id.reset");
@@ -814,6 +846,7 @@ public class SettingsViewController implements ViewShownAware {
             showCommitted(directDnsField, settings.getDirectDns());
             showCommitted(tunInterfaceNameField, settings.getTunInterfaceName());
             storeSecretsCheck.setSelected(settings.isStoreSecretsSecurely());
+            showSecretStore();
             showCommitted(tunIpv4Field, settings.getTunIpv4Address());
             tunIpv6Check.setSelected(settings.isTunIpv6Enabled());
             mcpEnabledCheck.setSelected(settings.isMcpEnabled());

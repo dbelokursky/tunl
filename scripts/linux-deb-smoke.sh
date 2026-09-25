@@ -108,6 +108,19 @@ if ! sudo dpkg -i "${DEB}"; then
     sudo apt-get install -f -y
 fi
 
+# The keyring client the credentials are sealed with comes with the package:
+# jpackage's own dependency list names only the runtime's libraries, and the
+# one package-linux.sh adds has to join that list, not replace it.
+DEPENDS="$(dpkg-deb -f "${DEB}" Depends)"
+secret_tools='(^|[ ,])libsecret-tools([ ,]|$)'
+libc='(^|[ ,])libc6([ ,(]|$)'
+[[ "${DEPENDS}" =~ ${secret_tools} ]] \
+    || fail "the package does not depend on libsecret-tools: ${DEPENDS}"
+[[ "${DEPENDS}" =~ ${libc} ]] \
+    || fail "the package lost jpackage's own dependencies: ${DEPENDS}"
+command -v secret-tool >/dev/null 2>&1 \
+    || fail "secret-tool is not installed after installing the package"
+
 for required in "${LAUNCHER}" "${LAUNCHER_CFG}" "${RUNTIME_JVM}"; do
     [[ -e "${required}" ]] || fail "installed payload is missing: ${required}"
 done

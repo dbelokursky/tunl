@@ -7,6 +7,8 @@ import com.vlessclient.model.HealthCheckTarget;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.Subscription;
+import com.vlessclient.platform.InMemorySecretSealer;
+import com.vlessclient.platform.SecretSealer;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.CountryResolver;
 import com.vlessclient.service.GeoIpDatabase;
@@ -90,6 +92,9 @@ public class ScreenshotGenerator extends ApplicationTest {
                 new ServiceReachabilityChecker(ScreenshotGenerator::sampleProbe));
         ServiceLocator.register(CountryResolver.class,
                 new SampleCountryResolver(ServiceLocator.get(GeoIpDatabase.class)));
+        // And a keychain that works, which the test graph deliberately lacks,
+        // so Settings does not say credentials are kept in files.
+        ServiceLocator.register(SecretSealer.class, new InMemorySecretSealer());
         // The runner has no sing-box, so ServiceLocator leaves the engine
         // unregistered and the dashboard renders its "not installed" branch.
         // Registering an engine that is never started gives the same view a
