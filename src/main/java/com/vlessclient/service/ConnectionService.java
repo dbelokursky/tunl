@@ -973,12 +973,14 @@ public class ConnectionService {
     }
 
     /**
-     * Keeps this run's HTTP port for the next start when it is not the chosen
-     * one: a run that dies leaves the system's proxy pointing at it, and the
-     * next start looks for such a proxy on the chosen port.
+     * Keeps this run's HTTP port for the next start when the core points the
+     * system's proxy at it: a run that dies leaves the proxy there, and the
+     * next start clears it. A run that does not set the proxy leaves nothing
+     * to clear, and a start with nothing recorded skips the check.
      */
     private void recordSessionHttpPort(AppSettings settings) {
-        if (settings.listenHttpPort() != settings.getHttpPort()) {
+        if (settings.getProxyMode() == ProxyMode.SYSTEM_PROXY
+                && settings.isSystemProxyAutoConfig()) {
             SessionPorts.record(configStore.getDataDir(), settings.listenHttpPort());
         } else {
             SessionPorts.forget(configStore.getDataDir());

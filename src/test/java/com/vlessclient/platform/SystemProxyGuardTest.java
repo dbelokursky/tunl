@@ -158,6 +158,103 @@ class SystemProxyGuardTest {
         }
     }
 
+    /**
+     * sing-box writes KDE's proxy too, in a KDE session, and only GNOME's was
+     * looked at: after a dead core every KDE application stayed behind a
+     * proxy that no longer answered.
+     */
+    @Nested
+    class KdeGuard {
+
+        /** A KDE whose kreadconfig answers as given; kreadconfig6 missing unless plasma6. */
+        private static FakeRunner kde(boolean plasma6, String proxyType, String key,
+                                      String value) {
+            return new FakeRunner(cmd -> {
+                String tool = cmd.getFirst();
+                if (tool.equals("kreadconfig6") && !plasma6) {
+                    throw new java.io.UncheckedIOException(new IOException("not found"));
+                }
+                if (tool.startsWith("kreadconfig") && cmd.contains("ProxyType")) {
+                    return ok(proxyType);
+                }
+                if (tool.startsWith("kreadconfig") && cmd.contains(key)) {
+                    return ok(value);
+                }
+                return ok("");
+            });
+        }
+
+        /** The fake throws unchecked; the guard sees the IOException a missing tool gives. */
+        private static CommandRunner unwrapping(FakeRunner fake) {
+            return cmd -> {
+                try {
+                    return fake.run(cmd);
+                } catch (java.io.UncheckedIOException e) {
+                    throw e.getCause();
+                }
+            };
+        }
+
+        @Test
+        void turnsOffAKdeProxyPointingAtOurInbound() {
+            FakeRunner fake = kde(true, "1", "httpProxy", "http://127.0.0.1:1081");
+
+            new LinuxSystemProxyGuard(unwrapping(fake), true).clearIfPointsAt("127.0.0.1", 1081);
+
+            assertThat(fake.calls).anySatisfy(cmd -> assertThat(cmd).containsExactly(
+                    "kwriteconfig6", "--file", "kioslaverc", "--group", "Proxy Settings",
+                    "--key", "ProxyType", "0"));
+            assertThat(fake.calls.getLast()).startsWith("dbus-send");
+        }
+
+        @Test
+        void readsKdesOwnFormWithASpace() {
+            FakeRunner fake = kde(true, "1", "socksProxy", "socks://127.0.0.1 1081");
+
+            new LinuxSystemProxyGuard(unwrapping(fake), true).clearIfPointsAt("127.0.0.1", 1081);
+
+            assertThat(fake.calls).anyMatch(cmd -> cmd.getFirst().equals("kwriteconfig6"));
+        }
+
+        @Test
+        void usesPlasma5sToolsWhenPlasma6sAreMissing() {
+            FakeRunner fake = kde(false, "1", "httpProxy", "http://127.0.0.1:1081");
+
+            new LinuxSystemProxyGuard(unwrapping(fake), true).clearIfPointsAt("127.0.0.1", 1081);
+
+            assertThat(fake.calls).anyMatch(cmd -> cmd.getFirst().equals("kwriteconfig5"));
+            assertThat(fake.calls).noneMatch(cmd -> cmd.getFirst().equals("kwriteconfig6"));
+        }
+
+        @Test
+        void leavesAForeignKdeProxyAlone() {
+            FakeRunner fake = kde(true, "1", "httpProxy", "http://proxy.corp.example:8080");
+
+            new LinuxSystemProxyGuard(unwrapping(fake), true).clearIfPointsAt("127.0.0.1", 1081);
+
+            assertThat(fake.calls).noneMatch(cmd -> cmd.getFirst().startsWith("kwriteconfig"));
+        }
+
+        @Test
+        void leavesKdeAloneOutsideAKdeSession() {
+            FakeRunner fake = kde(true, "1", "httpProxy", "http://127.0.0.1:1081");
+
+            new LinuxSystemProxyGuard(unwrapping(fake), false).clearIfPointsAt("127.0.0.1", 1081);
+
+            assertThat(fake.calls).noneMatch(cmd -> cmd.getFirst().startsWith("k"));
+        }
+
+        @Test
+        void aKdeSessionIsTheOneSingBoxWritesKdesProxyIn() {
+            assertThat(LinuxSystemProxyGuard.isKdeSession(
+                    java.util.Map.of("KDE_SESSION_VERSION", "6"))).isTrue();
+            assertThat(LinuxSystemProxyGuard.isKdeSession(
+                    java.util.Map.of("XDG_CURRENT_DESKTOP", "KDE"))).isTrue();
+            assertThat(LinuxSystemProxyGuard.isKdeSession(
+                    java.util.Map.of("XDG_CURRENT_DESKTOP", "ubuntu:GNOME"))).isFalse();
+        }
+    }
+
     @Nested
     class MacGuard {
 

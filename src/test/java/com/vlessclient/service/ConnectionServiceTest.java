@@ -802,6 +802,44 @@ class ConnectionServiceTest {
         }
     }
 
+    /**
+     * A session that points the system's proxy at the chosen port is
+     * recorded too: the next start looks only where a record says a run may
+     * have left a proxy, and one on the chosen port was not recorded.
+     */
+    @Test
+    void aSystemProxySessionOnTheChosenPortIsRecordedUntilTheDisconnect() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        int base = freeBlockOf(3);
+        store.getSettings().setSocksPort(base);
+        store.getSettings().setHttpPort(base + 1);
+        store.getSettings().setClashApiPort(base + 2);
+        store.getSettings().setProxyMode(com.vlessclient.model.ProxyMode.SYSTEM_PROXY);
+        store.getSettings().setSystemProxyAutoConfig(true);
+        ConnectionService service = service(engine());
+
+        assertThat(service.connect().started()).isTrue();
+
+        assertThat(SessionPorts.recorded(tempDir)).hasValue(base + 1);
+        service.disconnect();
+        assertThat(SessionPorts.recorded(tempDir)).isEmpty();
+    }
+
+    @Test
+    void aSessionThatLeavesTheSystemsProxyAloneIsNotRecorded() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        int base = freeBlockOf(3);
+        store.getSettings().setSocksPort(base);
+        store.getSettings().setHttpPort(base + 1);
+        store.getSettings().setClashApiPort(base + 2);
+        store.getSettings().setProxyMode(com.vlessclient.model.ProxyMode.SYSTEM_PROXY);
+        store.getSettings().setSystemProxyAutoConfig(false);
+
+        assertThat(service(engine()).connect().started()).isTrue();
+
+        assertThat(SessionPorts.recorded(tempDir)).isEmpty();
+    }
+
     private static List<ConnectionService.MovedPort> movedAsTheUiSeesThem(
             ConnectionService service) throws InterruptedException {
         AtomicReference<List<ConnectionService.MovedPort>> seen = new AtomicReference<>();

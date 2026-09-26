@@ -17,6 +17,7 @@ import com.vlessclient.service.ProxyGroupMonitor;
 import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ServerBackupService;
 import com.vlessclient.service.ServiceReachabilityChecker;
+import com.vlessclient.service.SessionPorts;
 import com.vlessclient.service.ShareLinkExporter;
 import com.vlessclient.service.ShareLinkParser;
 import com.vlessclient.service.SingBoxConfigGenerator;
@@ -340,6 +341,12 @@ public class ServiceLocator {
             if (engine instanceof SingBoxEngine singBoxEngine && singBoxEngine.isRunning()) {
                 log.info("Stopping sing-box engine");
                 singBoxEngine.stop();
+                // Stopped, the core put the system's proxy back (the engine
+                // clears it itself where the stop is a kill): nothing is left
+                // for the next start to look for.
+                if (services.get(ConfigStore.class) instanceof ConfigStore store) {
+                    SessionPorts.forget(store.getDataDir());
+                }
             }
         } catch (Exception e) {
             log.error("Error stopping SingBoxEngine during shutdown", e);

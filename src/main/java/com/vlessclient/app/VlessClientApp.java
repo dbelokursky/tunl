@@ -143,18 +143,14 @@ public class VlessClientApp extends Application {
             log.debug("Skipping stale-proxy cleanup; services unavailable");
             return;
         }
-        if (settings.getProxyMode() != ProxyMode.SYSTEM_PROXY) {
-            return;
-        }
-        engine.clearStaleSystemProxyOnStartup("127.0.0.1", settings.getHttpPort());
-        // A run that had moved off the chosen port, because another program
-        // held it, left its proxy on the port it moved to.
+        // Only where a run left a record: one that stopped its core had the
+        // proxy put back, and the check costs a networksetup process per
+        // network service and proxy type on a Mac, before the window shows.
         Path dataDir = store.getDataDir();
-        SessionPorts.recorded(dataDir).ifPresent(port -> {
-            if (port != settings.getHttpPort()) {
-                engine.clearStaleSystemProxyOnStartup("127.0.0.1", port);
-            }
-        });
+        for (int port : SessionPorts.stalePorts(dataDir,
+                settings.getProxyMode() == ProxyMode.SYSTEM_PROXY, settings.getHttpPort())) {
+            engine.clearStaleSystemProxyOnStartup("127.0.0.1", port);
+        }
         SessionPorts.forget(dataDir);
     }
 
