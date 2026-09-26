@@ -87,8 +87,48 @@ jobs:
       # the arm64 image carries 3.9.12 and the others 3.9.16, and a plugin
       # version can come from the Maven rather than from the POM. bash also on
       # Windows, where the default shell is PowerShell and mvnw is a script.
+      - name: Timer probe (experiment)
+        if: matrix.name == 'macos' || matrix.name == 'linux'
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/TimerProbe.java" <<'JAVA'
+          import java.util.concurrent.locks.LockSupport;
+          public class TimerProbe {
+              public static void main(String[] a) throws Exception {
+                  for (long want : new long[] {1, 10, 16}) {
+                      long total = 0, worst = 0;
+                      for (int i = 0; i < 100; i++) {
+                          long t = System.nanoTime();
+                          Thread.sleep(want);
+                          long took = System.nanoTime() - t;
+                          total += took; worst = Math.max(worst, took);
+                      }
+                      System.out.printf("sleep(%d ms): mean %.2f ms, worst %.2f ms%n",
+                              want, total / 100 / 1e6, worst / 1e6);
+                  }
+                  long total = 0;
+                  for (int i = 0; i < 100; i++) {
+                      long t = System.nanoTime();
+                      LockSupport.parkNanos(1_000_000);
+                      total += System.nanoTime() - t;
+                  }
+                  System.out.printf("parkNanos(1 ms): mean %.2f ms%n", total / 100 / 1e6);
+              }
+          }
+          JAVA
+          java "$RUNNER_TEMP/TimerProbe.java"
+          nproc 2>/dev/null || sysctl -n hw.ncpu
+          mkdir -p "$RUNNER_TEMP/jfr"
       - run: ./mvnw -B clean verify -Psmoke
         shell: bash
+        env:
+          JAVA_TOOL_OPTIONS: ${{ matrix.name == 'macos' && format('-XX:StartFlightRecording=filename={0}/jfr/%p.jfr,settings=profile', runner.temp) || '' }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always() && matrix.name == 'macos'
+        with:
+          name: macos-jfr-${{ github.sha }}
+          path: ${{ runner.temp }}/jfr/
+          retention-days: 3
       - name: Lint the shell scripts
         # What the build, the packaging and the app's own launchers run in a
         # shell, some of it as root on a user's machine: a quoting slip fails
