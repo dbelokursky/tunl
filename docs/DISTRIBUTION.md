@@ -66,13 +66,62 @@ To publish it:
    and push.
 4. On each release, copy the newly attached pair over the old one and push.
 
+### winget (Windows) — not published
+
+winget does **not** require a signed installer. Microsoft's
+[repository policies](https://learn.microsoft.com/en-us/windows/package-manager/package/windows-package-manager-policies)
+have no code-signing rule. The winget maintainers
+[answered](https://github.com/microsoft/winget-cli/discussions/4327) that
+WinGet does not require signing, and that its checks of unsigned code do not
+block a submission or warn at install.
+
+What an unsigned MSI does get:
+
+- Windows' usual SmartScreen reputation, as for a download from the release
+  page;
+- a Defender scan in winget's validation pipeline, which a new, unknown
+  binary fails more often than a signed one. A false positive is cleared
+  through the Defender submission portal.
+
+The installer URL has to be the project's own release asset, which it is.
+
+To publish it, with [`wingetcreate`](https://github.com/microsoft/winget-create)
+(`winget install wingetcreate`):
+
+1. First release:
+
+   ```powershell
+   wingetcreate new https://github.com/dbelokursky/tunl/releases/download/v1.23.0/tunl_1.23.0.msi
+   ```
+
+   It reads the MSI and asks for the rest. Use:
+   - `PackageIdentifier`: `dbelokursky.Tunl`;
+   - `Publisher`: `Dmitry Belokursky`;
+   - `License`: `Apache-2.0`;
+   - `Scope`: `user`, since the MSI installs per user;
+   - `UpgradeCode`: `ff1f0b21-e3d2-420f-80ce-95d5d9ab61fb`, the fixed
+     `--win-upgrade-uuid` in `package-windows.ps1`, so winget recognises an
+     installed copy;
+   - a short description and tags from the README.
+
+   `--submit` opens the pull request to `microsoft/winget-pkgs` under your
+   GitHub account.
+2. Each later release:
+
+   ```powershell
+   wingetcreate update dbelokursky.Tunl --version 1.23.1 `
+     --urls https://github.com/dbelokursky/tunl/releases/download/v1.23.1/tunl_1.23.1.msi `
+     --submit
+   ```
+
+   It downloads the MSI and fills in its SHA-256.
+
+Users then run `winget install dbelokursky.Tunl`, and `winget upgrade`
+finds new releases. Nothing in `release.yml` does this: a submission is a
+pull request to Microsoft's repository under a maintainer's account.
+
 ## Deferred (with rationale)
 
-- **winget** — submitting to
-  [`microsoft/winget-pkgs`](https://github.com/microsoft/winget-pkgs)
-  effectively requires a **signed** installer (unsigned MSIs get flagged in
-  validation and by SmartScreen on install). Revisit once Windows signing lands
-  (`SIGNING.md`).
 - **Flatpak** — the app creates a **TUN device** and **elevates** to do it,
   and it runs the bundled **sing-box** as a separate process. The Flatpak
   sandbox fights the first two (no raw TUN, no privilege escalation). Making

@@ -94,6 +94,33 @@ certificates too since 2024. What a signature does change at once is Smart App
 Control on Windows 11, which runs a validly signed app and blocks an unsigned
 one.
 
+### Signing through SignPath Foundation
+
+SignPath Foundation signs open-source projects for free with a certificate
+it holds in its own HSM. The project needs an OSI license (Apache-2.0), no
+proprietary components, a code signing policy page, and automated builds
+from source. The policy page is [CODE-SIGNING-POLICY.md](CODE-SIGNING-POLICY.md),
+which the README links.
+
+**The application is the maintainer's to make.** It opens an account and
+accepts SignPath's terms. Apply at <https://signpath.org/apply> with the
+repository and the policy page. Once approved, SignPath sends the
+organization and project slugs and an API token. Then:
+
+1. Store the token as the `SIGNPATH_API_TOKEN` secret, and the slugs as
+   repository variables.
+2. Allow SignPath's GitHub action alongside GitHub's own, pinned by commit
+   SHA (*Settings → Actions → General*, see
+   [REPOSITORY-SETTINGS.md](REPOSITORY-SETTINGS.md)).
+3. In `release-windows`, hand the unsigned MSI to SignPath after the install
+   smoke test and before the checksum is recorded. Pass the step the token,
+   and gate it on the secret's presence, like the signing steps above. The
+   checksum, the updater signature and the upload then cover the signed file.
+4. Add the attribution line from the policy page to the release notes.
+
+The `WINDOWS_CERTIFICATE_*` steps stay for a certificate held some other
+way; the two are alternatives.
+
 ## How to verify
 
 macOS (against the installed app and the DMG):

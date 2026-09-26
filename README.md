@@ -656,8 +656,11 @@ per the [migration guide](https://sing-box.sagernet.org/migration/), then bump.
 - [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md) — the Homebrew cask and AUR
   PKGBUILD templates in [packaging/](packaging/), filled in by
   [scripts/update-packaging.sh](scripts/update-packaging.sh) and attached to
-  every release; no tap or AUR package is published yet. winget/Flatpak
-  deferred with rationale.
+  every release; no tap, AUR package or winget entry is published yet, and
+  the doc says how to publish each. Flatpak deferred with rationale.
+- [docs/CODE-SIGNING-POLICY.md](docs/CODE-SIGNING-POLICY.md) — what will be
+  signed, by whom, and what the app sends where; the page SignPath
+  Foundation's free signing asks for.
 
 ### Layout
 
