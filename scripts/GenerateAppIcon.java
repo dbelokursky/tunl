@@ -2,7 +2,10 @@
 // Run with: java scripts/GenerateAppIcon.java
 //
 // The source artwork stays separate from generated application resources so
-// every PNG, ICNS and ICO can be reproduced from the same master image.
+// every PNG, ICNS and ICO can be reproduced from the same master image. The
+// PNGs the running app loads go into its resources; the 1024 px PNG, the ICNS
+// and the ICO are read only by jpackage, so they go to packaging/icons and
+// stay out of the jar, which every installer and every update carries.
 
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
@@ -21,7 +24,8 @@ public final class GenerateAppIcon {
 
     private static final Path SOURCE = Path.of("assets/app-icon-artwork.png");
     private static final Path OUTPUT = Path.of("src/main/resources/icons");
-    private static final int[] PNG_SIZES = {16, 32, 64, 128, 256, 512, 1024};
+    private static final Path PACKAGING = Path.of("packaging/icons");
+    private static final int[] PNG_SIZES = {16, 32, 64, 128, 256, 512};
     private static final int[] ICO_SIZES = {16, 24, 32, 48, 64, 128, 256};
 
     private GenerateAppIcon() {
@@ -34,18 +38,20 @@ public final class GenerateAppIcon {
         }
         PixelBounds artworkBounds = opaqueBounds(artwork, 128);
         Files.createDirectories(OUTPUT);
+        Files.createDirectories(PACKAGING);
 
         for (int size : PNG_SIZES) {
             ImageIO.write(render(artwork, artworkBounds, size), "png",
                     OUTPUT.resolve("app-icon-" + size + ".png").toFile());
         }
-        ImageIO.write(render(artwork, artworkBounds, 512), "png",
-                OUTPUT.resolve("app-icon.png").toFile());
-        System.out.println("Generated " + (PNG_SIZES.length + 1)
-                + " PNGs in " + OUTPUT.toAbsolutePath());
+        ImageIO.write(render(artwork, artworkBounds, 1024), "png",
+                PACKAGING.resolve("app-icon-1024.png").toFile());
+        System.out.println("Generated " + PNG_SIZES.length + " PNGs in "
+                + OUTPUT.toAbsolutePath() + " and the 1024 px one in "
+                + PACKAGING.toAbsolutePath());
 
-        buildIcns(OUTPUT);
-        buildIco(artwork, artworkBounds, OUTPUT.resolve("app-icon.ico"));
+        buildIcns();
+        buildIco(artwork, artworkBounds, PACKAGING.resolve("app-icon.ico"));
     }
 
     /**
@@ -90,13 +96,13 @@ public final class GenerateAppIcon {
      * Assembles an Apple iconset and asks iconutil to compile the ICNS used by
      * jpackage. The step is skipped when iconutil is unavailable.
      */
-    private static void buildIcns(Path output) throws Exception {
+    private static void buildIcns() throws Exception {
         if (!commandExists("iconutil")) {
             System.out.println("iconutil is unavailable; app-icon.icns was not regenerated");
             return;
         }
 
-        Path iconset = output.resolve("AppIcon.iconset");
+        Path iconset = PACKAGING.resolve("AppIcon.iconset");
         deleteRecursive(iconset);
         Files.createDirectories(iconset);
 
@@ -113,11 +119,13 @@ public final class GenerateAppIcon {
                 {"1024", "icon_512x512@2x.png"},
         };
         for (String[] entry : mapping) {
-            Files.copy(output.resolve("app-icon-" + entry[0] + ".png"),
-                    iconset.resolve(entry[1]));
+            Path png = "1024".equals(entry[0])
+                    ? PACKAGING.resolve("app-icon-1024.png")
+                    : OUTPUT.resolve("app-icon-" + entry[0] + ".png");
+            Files.copy(png, iconset.resolve(entry[1]));
         }
 
-        Path icns = output.resolve("app-icon.icns");
+        Path icns = PACKAGING.resolve("app-icon.icns");
         Process process = new ProcessBuilder(
                 "iconutil", "-c", "icns", iconset.toString(), "-o", icns.toString())
                 .inheritIO()

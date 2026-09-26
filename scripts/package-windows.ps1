@@ -107,7 +107,7 @@ Copy-Item $jarPath staging/
     --input staging `
     --main-jar $jarName `
     --main-class com.vlessclient.app.Launcher `
-    --icon src/main/resources/icons/app-icon.ico `
+    --icon packaging/icons/app-icon.ico `
     --dest dist `
     --win-upgrade-uuid 'ff1f0b21-e3d2-420f-80ce-95d5d9ab61fb' `
     --win-menu `

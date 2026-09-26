@@ -125,4 +125,14 @@ jpackage \
     --jlink-options "${JLINK_OPTIONS}" \
     --verbose
 
-echo "[package-linux] built: $(ls dist/*.deb) (app-version=${VERSION}, deb Version=${DEB_VERSION})"
+# jpackage builds the package with dpkg-deb's default compression, which is
+# zstd on the Ubuntu runners. xz packs the same files smaller, and every dpkg
+# that can install Tunl reads it. The rebuild keeps the files, their modes
+# and the maintainer scripts, all owned by root as jpackage had them.
+DEB="$(ls dist/*.deb)"
+REPACK="$(mktemp -d)"
+dpkg-deb --raw-extract "${DEB}" "${REPACK}/tree"
+dpkg-deb --root-owner-group -Zxz --build "${REPACK}/tree" "${DEB}"
+rm -rf "${REPACK}"
+
+echo "[package-linux] built: ${DEB} (app-version=${VERSION}, deb Version=${DEB_VERSION})"

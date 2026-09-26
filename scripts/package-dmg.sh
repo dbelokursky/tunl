@@ -121,7 +121,7 @@ jpackage \
     --input staging \
     --main-jar "${JAR_NAME}" \
     --main-class com.vlessclient.app.Launcher \
-    --icon src/main/resources/icons/app-icon.icns \
+    --icon packaging/icons/app-icon.icns \
     --dest dist \
     --mac-package-name "Tunl" \
     --java-options "-Dapp.version=${VERSION}" \
@@ -137,5 +137,15 @@ jpackage \
 # .deb and .msi share so all three installers use one scheme.
 ASSET="dist/tunl_${MAC_VERSION}.dmg"
 mv dist/*.dmg "${ASSET}"
+
+# jpackage writes a zlib image (UDZO). LZMA (ULMO), which macOS mounts since
+# 10.15, holds the same app in about a third less, and the in-app update
+# downloads the whole DMG too. A signed build keeps jpackage's image until a
+# signed release has been tried with the conversion: it rewrites the file
+# jpackage produced, and the notarization that follows submits that file.
+if [[ -z "${MACOS_SIGN_IDENTITY:-}" ]]; then
+    hdiutil convert "${ASSET}" -format ULMO -o "dist/converted.dmg" -quiet
+    mv -f "dist/converted.dmg" "${ASSET}"
+fi
 
 echo "[package-dmg] built: ${ASSET} (app-version=${VERSION}, CFBundleVersion=${MAC_VERSION})"

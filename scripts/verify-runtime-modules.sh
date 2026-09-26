@@ -22,13 +22,21 @@ if [[ -z "${MODULES}" ]]; then
     exit 1
 fi
 
+# The packaged runtime's own jlink options (scripts/jlink-options.txt), so
+# what they strip is stripped here too: --include-locales keeps only the
+# locales the UI speaks, and the probe's Russian check runs against that.
+# All but --strip-native-commands: the probe needs this image's own bin/java
+# to run on.
+JLINK_OPTIONS=()
+while IFS= read -r option; do
+    [[ "${option}" == --strip-native-commands ]] || JLINK_OPTIONS+=("${option}")
+done < <(awk '{ sub(/#.*/, ""); gsub(/^[[:space:]]+|[[:space:]]+$/, ""); if ($0 != "") print }' \
+    "${REPO_ROOT}/scripts/jlink-options.txt")
+
 echo "[verify-runtime] linking: ${MODULES}"
+echo "[verify-runtime] with: ${JLINK_OPTIONS[*]}"
 rm -rf "${OUT_DIR}"
-# Deliberately WITHOUT --strip-native-commands, unlike the packaged runtime:
-# the probe needs this image's own bin/java to run on.
-jlink --add-modules "${MODULES}" \
-    --strip-debug --no-man-pages --no-header-files \
-    --output "${OUT_DIR}/image"
+jlink --add-modules "${MODULES}" "${JLINK_OPTIONS[@]}" --output "${OUT_DIR}/image"
 
 mkdir -p "${OUT_DIR}/classes"
 javac -d "${OUT_DIR}/classes" "${REPO_ROOT}/scripts/RuntimeProbe.java"
