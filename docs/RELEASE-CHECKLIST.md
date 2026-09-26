@@ -73,8 +73,9 @@ On a pushed `v*` tag:
       `mvn test -Dtest=ScreenshotGenerator -Dtunl.screenshots=true -Djacoco.skip=true`.
 - [ ] **README.md and README.ru.md**: the feature list, the Settings table and
       the hotkeys still describe the app, in both languages.
-- [ ] **Core pin**: `singbox.properties` holds the core you mean to ship — it
-      moves only with app releases.
+- [ ] **Core pin**: `singbox.properties` holds the core you mean to ship —
+      `singbox.release` names Tunl's build (`core-v<version>-tunl<N>`) of
+      `singbox.version`, and it moves only with app releases.
 - [ ] **Desktop checks** below, on the `dev-latest` build of the release
       commit, for the paths CI cannot exercise.
 - [ ] **Release notes** in English, written into the annotated tag (layout

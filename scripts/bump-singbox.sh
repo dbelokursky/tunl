@@ -4,7 +4,12 @@
 # the single source of truth for pom.xml, bundle-singbox.sh, and
 # SingBoxInstaller.
 #
-# Usage: scripts/bump-singbox.sh <version>       (e.g. 1.13.14)
+# Usage: scripts/bump-singbox.sh <version> [<revision>]   (e.g. 1.14.2 1)
+#
+# With a revision the pin is Tunl's own build of that version, the
+# pre-release core-v<version>-tunl<revision> of this repository, made by
+# .github/workflows/core.yml with packaging/sing-box/reality-xray.patch.
+# Without one it is upstream's release on SagerNet/sing-box.
 #
 # For each bundled asset (darwin and linux tar.gz per arch, windows amd64 zip)
 # the script downloads the release archive, computes its SHA-256 locally, and
@@ -21,7 +26,12 @@
 #
 set -euo pipefail
 
-VERSION="${1:?usage: $0 <version>   (e.g. 1.13.14)}"
+VERSION="${1:?usage: $0 <version> [<revision>]   (e.g. 1.14.2 1)}"
+REVISION="${2:-}"
+if [[ -n "${REVISION}" && ! "${REVISION}" =~ ^[0-9]+$ ]]; then
+    echo "[bump-singbox] '${REVISION}' is not a revision number" >&2
+    exit 1
+fi
 if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "[bump-singbox] '${VERSION}' is not a plain x.y.z version" >&2
     exit 1
@@ -29,8 +39,17 @@ fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROPS_FILE="${REPO_ROOT}/src/main/resources/singbox.properties"
-CACHE_DIR="${HOME}/.cache/vless-client-build/sing-box-${VERSION}"
-API_URL="https://api.github.com/repos/SagerNet/sing-box/releases/tags/v${VERSION}"
+if [[ -n "${REVISION}" ]]; then
+    RELEASE="core-v${VERSION}-tunl${REVISION}"
+    CACHE_DIR="${HOME}/.cache/vless-client-build/${RELEASE}"
+    API_URL="https://api.github.com/repos/dbelokursky/tunl/releases/tags/${RELEASE}"
+    DOWNLOAD_BASE="https://github.com/dbelokursky/tunl/releases/download/${RELEASE}"
+else
+    RELEASE=""
+    CACHE_DIR="${HOME}/.cache/vless-client-build/sing-box-${VERSION}"
+    API_URL="https://api.github.com/repos/SagerNet/sing-box/releases/tags/v${VERSION}"
+    DOWNLOAD_BASE="https://github.com/SagerNet/sing-box/releases/download/v${VERSION}"
+fi
 
 mkdir -p "${CACHE_DIR}"
 
@@ -64,9 +83,15 @@ release_json="$(curl "${CURL_OPTS[@]}" \
     -H 'X-GitHub-Api-Version: 2022-11-28' \
     "${API_URL}")"
 
-release_state="$(jq -r '.prerelease or .draft' <<<"${release_json}")"
+# Tunl's own builds are pre-releases by design (never "latest", which the
+# app's updater reads); upstream's pre-releases are alphas and betas.
+if [[ -n "${RELEASE}" ]]; then
+    release_state="$(jq -r '.draft' <<<"${release_json}")"
+else
+    release_state="$(jq -r '.prerelease or .draft' <<<"${release_json}")"
+fi
 if [[ "${release_state}" != "false" ]]; then
-    echo "[bump-singbox] v${VERSION} is a prerelease or draft — refusing to pin it" >&2
+    echo "[bump-singbox] ${RELEASE:-v${VERSION}} is a draft or an upstream prerelease — refusing to pin it" >&2
     exit 1
 fi
 
@@ -98,7 +123,7 @@ process_asset() {
     local os="$1" arch="$2" ext="$3"
     local asset="sing-box-${VERSION}-${os}-${arch}.${ext}"
     local file="${CACHE_DIR}/${asset}"
-    local url="https://github.com/SagerNet/sing-box/releases/download/v${VERSION}/${asset}"
+    local url="${DOWNLOAD_BASE}/${asset}"
 
     if [[ ! -f "${file}" ]]; then
         echo "[bump-singbox] downloading ${url}"
@@ -157,20 +182,26 @@ else
         echo "[bump-singbox] binary reports '${reported}', expected 'sing-box version ${VERSION}'" >&2
         exit 1
     fi
+    if [[ -n "${RELEASE}" ]] \
+            && ! "${probe_dir}/sing-box" version | grep -qE '^Tags:.*[ ,]tunl(,|$)'; then
+        echo "[bump-singbox] ${RELEASE} is not a build core.yml marked (no 'tunl' tag)" >&2
+        exit 1
+    fi
     echo "[bump-singbox] binary check OK: ${reported}"
 fi
 
 tmp_props="$(mktemp)"
 {
     # Preserve everything except the managed keys, then append them in order.
-    grep -vE '^[[:space:]]*singbox\.(version|sha256\.(darwin-(arm64|amd64)|windows-amd64|linux-(amd64|arm64)))[[:space:]]*=' \
+    grep -vE '^[[:space:]]*singbox\.(version|release|sha256\.(darwin-(arm64|amd64)|windows-amd64|linux-(amd64|arm64)))[[:space:]]*=' \
         "${PROPS_FILE}"
     printf 'singbox.version=%s\n' "${VERSION}"
+    printf 'singbox.release=%s\n' "${RELEASE}"
     for line in "${pinned_lines[@]}"; do
         printf '%s\n' "${line}"
     done
 } > "${tmp_props}"
 mv "${tmp_props}" "${PROPS_FILE}"
 
-echo "[bump-singbox] pinned sing-box ${VERSION} in ${PROPS_FILE}"
+echo "[bump-singbox] pinned sing-box ${VERSION}${RELEASE:+ as ${RELEASE}} in ${PROPS_FILE}"
 echo "[bump-singbox] next: mvn clean verify -Psmoke"

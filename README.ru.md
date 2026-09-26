@@ -588,14 +588,18 @@ java --source 27 scripts/GenerateAppIcon.java
 
 ### Обновление sing-box
 
-Версия и SHA-256 живут в одном файле —
+Версия, релиз и SHA-256 живут в одном файле —
 [singbox.properties](src/main/resources/singbox.properties). Его читают
 pom.xml (properties-maven-plugin), [scripts/bundle-singbox.sh](scripts/bundle-singbox.sh)
-и SingBoxInstaller, так что разъехаться они не могут. Бамп — одна команда:
+и SingBoxInstaller, так что разъехаться они не могут. Ядро — собственная
+сборка Tunl этой версии с одним патчем для REALITY, опубликованная здесь как
+пре-релиз `core-v<версия>-tunl<N>`; зачем и как — в
+[packaging/sing-box](packaging/sing-box/README.md). Workflow **Bump sing-box**
+сам собирает и предлагает каждую новую версию; вручную бамп — одна команда:
 
 ```bash
-scripts/bump-singbox.sh 1.13.14   # качает tarballs, сверяет SHA-256 с digest из GitHub API, обновляет properties
-./mvnw clean verify -Psmoke      # полные тесты + smoke на реальном бинарнике
+scripts/bump-singbox.sh 1.14.2 1   # качает core-v1.14.2-tunl1, сверяет SHA-256 с digest из GitHub API, обновляет properties
+./mvnw clean verify -Psmoke        # полные тесты + smoke на реальном бинарнике
 ```
 
 Smoke-профиль (`-Psmoke`,
@@ -676,10 +680,11 @@ scripts/
 
 sing-box лицензируется под
 [GPL-3.0](https://github.com/SagerNet/sing-box/blob/main/LICENSE); установщики
-и dev-сборки бандлят его бинарь без изменений, отдельным процессом,
-вызываемым по документированному интерфейсу. Забандленная версия закреплена в
-[`singbox.properties`](src/main/resources/singbox.properties), исходники
-доступны в апстриме.
+и dev-сборки бандлят его сборку с одним патчем,
+[reality-xray.patch](packaging/sing-box/reality-xray.patch), отдельным
+процессом, вызываемым по документированному интерфейсу. Забандленная сборка
+закреплена в [`singbox.properties`](src/main/resources/singbox.properties), а
+её релиз `core-v…` в этом репозитории содержит соответствующие исходники.
 
 Ручное переключение сервера использует API работающего ядра, если загруженная
 конфигурация не изменилась. Новые соединения идут через выбранный сервер;

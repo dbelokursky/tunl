@@ -17,10 +17,17 @@
     -Version argument is cross-checked against the file to catch a stale Maven
     property cache.
 
-    A ~/.cache/vless-client-build/sing-box-<version> directory is reused so
-    repeated builds don't re-download. A .singbox-version stamp next to the
-    bundled binary makes incremental builds re-bundle after a version bump
-    instead of silently keeping the old binary.
+    The archive comes from singbox.release when it names one: Tunl's own
+    build of that version, a pre-release of this repository made by
+    .github/workflows/core.yml (packaging/sing-box/README.md says why). An
+    empty singbox.release means upstream's release on SagerNet/sing-box.
+
+    A ~/.cache/vless-client-build/<release> directory (or sing-box-<version>
+    for upstream's) is reused so repeated builds don't re-download; the two are
+    kept apart because their archives have the same names. A .singbox-version
+    stamp next to the bundled binary, naming the version and the release,
+    makes incremental builds re-bundle after either changes instead of
+    silently keeping the old binary.
 #>
 [CmdletBinding()]
 param(
@@ -67,10 +74,20 @@ switch ("$osArch") {
 $targetDir = Join-Path $OutDir "windows-$arch"
 $targetBinary = Join-Path $targetDir 'sing-box.exe'
 $stampFile = Join-Path $targetDir '.singbox-version'
+$release = Get-Prop 'singbox.release'
+if ($release) {
+    $baseUrl = "https://github.com/dbelokursky/tunl/releases/download/$release"
+    $cacheName = $release
+    $stamp = "$Version $release"
+} else {
+    $baseUrl = "https://github.com/SagerNet/sing-box/releases/download/v$Version"
+    $cacheName = "sing-box-$Version"
+    $stamp = $Version
+}
 
 if ((Test-Path $targetBinary) -and (Test-Path $stampFile) -and
-    ((Get-Content -LiteralPath $stampFile -Raw).Trim() -eq $Version)) {
-    Write-Host "[bundle-singbox] already present: $targetBinary ($Version)"
+    ((Get-Content -LiteralPath $stampFile -Raw).Trim() -eq $stamp)) {
+    Write-Host "[bundle-singbox] already present: $targetBinary ($stamp)"
     exit 0
 }
 
@@ -79,12 +96,12 @@ if ([string]::IsNullOrWhiteSpace($expected)) {
     throw "[bundle-singbox] no singbox.sha256.windows-$arch in $propsFile"
 }
 
-$cacheDir = Join-Path $env:USERPROFILE ".cache/vless-client-build/sing-box-$Version"
+$cacheDir = Join-Path $env:USERPROFILE ".cache/vless-client-build/$cacheName"
 New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
 $zip = Join-Path $cacheDir "sing-box-$Version-windows-$arch.zip"
 
 if (-not (Test-Path $zip)) {
-    $url = "https://github.com/SagerNet/sing-box/releases/download/v$Version/sing-box-$Version-windows-$arch.zip"
+    $url = "$baseUrl/sing-box-$Version-windows-$arch.zip"
     Write-Host "[bundle-singbox] downloading $url"
     $part = "$zip.part"
     # Windows PowerShell 5.1 has no -MaximumRetryCount, so the retry loop is
@@ -150,5 +167,5 @@ try {
 } finally {
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -LiteralPath $extractDir
 }
-Set-Content -LiteralPath $stampFile -Value $Version -NoNewline
-Write-Host "[bundle-singbox] bundled $targetBinary ($Version)"
+Set-Content -LiteralPath $stampFile -Value $stamp -NoNewline
+Write-Host "[bundle-singbox] bundled $targetBinary ($stamp)"

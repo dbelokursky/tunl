@@ -78,6 +78,12 @@ public class SingBoxInstaller {
      */
     private static final Map<String, String> EXPECTED_SHA256;
 
+    /**
+     * Tunl's own build of the pinned version to download, the pre-release of
+     * that name in this repository; empty for upstream's release.
+     */
+    private static final String RELEASE;
+
     static {
         java.util.Properties props = new java.util.Properties();
         try (InputStream in = SingBoxInstaller.class.getResourceAsStream("/singbox.properties")) {
@@ -105,13 +111,25 @@ public class SingBoxInstaller {
         }
         PINNED_VERSION = version;
         EXPECTED_SHA256 = Map.copyOf(checksums);
+        RELEASE = props.getProperty("singbox.release", "").trim();
     }
 
-    private static final String DOWNLOAD_URL_TEMPLATE =
-            "https://github.com/SagerNet/sing-box/releases/download/v%s/sing-box-%s-"
-                    + com.vlessclient.platform.CorePlatform.current().osKey()
-                    + "-%s."
-                    + com.vlessclient.platform.CorePlatform.current().archiveExtension();
+    private static final String DOWNLOAD_URL_TEMPLATE = downloadUrlTemplate(RELEASE,
+            com.vlessclient.platform.CorePlatform.current().osKey(),
+            com.vlessclient.platform.CorePlatform.current().archiveExtension());
+
+    /**
+     * Where the runtime fallback downloads the core, as a template formatted
+     * with the version, the version and the arch: Tunl's own build when
+     * {@code release} names one (packaging/sing-box/README.md says why),
+     * upstream's release when it is empty. Same archive names either way.
+     */
+    static String downloadUrlTemplate(String release, String osKey, String extension) {
+        return (release.isEmpty()
+                ? "https://github.com/SagerNet/sing-box/releases/download/v%1$s/"
+                : "https://github.com/dbelokursky/tunl/releases/download/" + release + "/")
+                + "sing-box-%2$s-" + osKey + "-%3$s." + extension;
+    }
 
     private final com.vlessclient.platform.CorePlatform corePlatform =
             com.vlessclient.platform.CorePlatform.current();
