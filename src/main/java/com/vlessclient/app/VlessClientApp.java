@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javafx.application.Application;
@@ -71,20 +72,32 @@ public class VlessClientApp extends Application {
 
     @Override
     public void init() {
-        // Set the macOS Dock icon early, before any stage is shown, so the
-        // generic "exec" icon never flashes. Must happen on a thread with an
-        // AWT toolkit available. Safe no-op on platforms without Taskbar
-        // support or when the ICON_IMAGE feature is unavailable.
-        setDockIcon();
-        installQuitHandler();
-        installShutdownHook();
-        endLeftoverCore();
-        ServiceLocator.initialize();
-        clearStaleSystemProxy();
-        refreshLoginItem();
-        // Points tunl:// links at this launcher on Windows; off this thread,
-        // since it waits on reg, and nothing here waits for it.
-        Thread.startVirtualThread(WindowsUrlScheme::registerCurrent);
+        AppSteps.run("startup", startupSteps());
+    }
+
+    /**
+     * What the app does before its window, in the order the steps depend on
+     * ({@link AppSteps}). Package-private for the test that reads the order.
+     *
+     * @return the steps, in order
+     */
+    List<AppSteps.Step> startupSteps() {
+        return List.of(
+                // Before any stage is shown, so the generic "exec" icon never
+                // flashes; a no-op where there is no Taskbar icon to set.
+                AppSteps.step("dock icon", this::setDockIcon),
+                AppSteps.step("quit handler", this::installQuitHandler),
+                AppSteps.step("shutdown hook", VlessClientApp::installShutdownHook),
+                // Before the service graph, which would race it for its ports.
+                AppSteps.step("leftover core", this::endLeftoverCore),
+                AppSteps.required("services", ServiceLocator::initialize),
+                // Needs the graph, and runs before the window can connect.
+                AppSteps.step("stale system proxy", this::clearStaleSystemProxy),
+                AppSteps.step("login item", this::refreshLoginItem),
+                // Points tunl:// links at this launcher on Windows, on a thread
+                // of its own: it waits on reg, and nothing here waits for it.
+                AppSteps.step("tunl links",
+                        () -> Thread.startVirtualThread(WindowsUrlScheme::registerCurrent)));
     }
 
     /**
@@ -452,21 +465,7 @@ public class VlessClientApp extends Application {
         // that actually happened.
         armTeardownWatchdog();
 
-        // Release the loopback control port before AWT tray teardown, which
-        // can consume its full timeout on macOS. Update relays start the new
-        // process as soon as this one exits, so MCP cannot be left until a
-        // later, potentially unreachable cleanup step.
-        ServiceLocator.stopMcpServer();
-
-        if (trayIconService != null) {
-            try {
-                trayIconService.uninstall();
-            } catch (Exception e) {
-                log.debug("Error uninstalling tray icon", e);
-            }
-            trayIconService = null;
-        }
-        shutdown();
+        AppSteps.run("shutdown", shutdownSteps());
 
         // JavaFX has stopped its event loop, but AWT (SystemTray, Taskbar,
         // Toolkit) keeps its non-daemon EventQueue thread alive, preventing
@@ -482,6 +481,31 @@ public class VlessClientApp extends Application {
         // directly too. It waits for shutdown hooks (including our sing-box
         // stop) before handing control to `halt`.
         System.exit(0);
+    }
+
+    /**
+     * What the app does on the way out, before the process ends, in the order
+     * the steps depend on. Package-private for the test that reads the order.
+     *
+     * @return the steps, in order
+     */
+    List<AppSteps.Step> shutdownSteps() {
+        return List.of(
+                // The loopback control port goes before the tray's AWT
+                // teardown, which can use its whole timeout on macOS: an
+                // update relay starts the new process as soon as this one
+                // exits, and the new one needs the port.
+                AppSteps.step("MCP server", ServiceLocator::stopMcpServer),
+                AppSteps.step("tray icon", this::removeTrayIcon),
+                AppSteps.step("services", this::shutdown));
+    }
+
+    private void removeTrayIcon() {
+        TrayIconService tray = trayIconService;
+        trayIconService = null;
+        if (tray != null) {
+            tray.uninstall();
+        }
     }
 
     /**
@@ -562,21 +586,7 @@ public class VlessClientApp extends Application {
 
     private void installTrayIcon(Stage stage) {
         try {
-            ConfigStore configStore = ServiceLocator.get(ConfigStore.class);
-            ConnectionService connectionService = ServiceLocator.get(ConnectionService.class);
-            TunnelHealthState healthState =
-                    ServiceLocator.find(TunnelHealthState.class).orElse(null);
-            if (healthState == null) {
-                log.debug("TunnelHealthState not available; "
-                        + "tray icon will report process state only");
-            }
-
-            trayIconService = new TrayIconService(
-                    ServiceLocator.get(SingBoxEngine.class),
-                    configStore, connectionService, healthState,
-                    ServiceLocator.find(ProxyGroupMonitor.class)
-                            .map(ProxyGroupMonitor::corePickTagProperty).orElse(null),
-                    stage);
+            trayIconService = newTray(stage);
             ServiceLocator.register(TrayIconService.class, trayIconService);
             trayIconService.install();
         } catch (Throwable e) {
@@ -585,6 +595,30 @@ public class VlessClientApp extends Application {
             // display — the app must still run, just without a tray icon.
             log.warn("Failed to install tray icon service: {}", e.toString());
         }
+    }
+
+    /**
+     * The tray over the service graph as the app builds it, not yet on the
+     * system tray. Package-private for a test: with no core installed, the
+     * lookup of the engine used to throw here, and the app had no tray.
+     *
+     * @param stage the main window the tray shows and hides
+     * @return the tray
+     */
+    static TrayIconService newTray(Stage stage) {
+        TunnelHealthState healthState = ServiceLocator.find(TunnelHealthState.class).orElse(null);
+        if (healthState == null) {
+            log.debug("TunnelHealthState not available; "
+                    + "tray icon will report process state only");
+        }
+        return new TrayIconService(
+                ServiceLocator.get(SingBoxEngine.class),
+                ServiceLocator.get(ConfigStore.class),
+                ServiceLocator.get(ConnectionService.class),
+                healthState,
+                ServiceLocator.find(ProxyGroupMonitor.class)
+                        .map(ProxyGroupMonitor::corePickTagProperty).orElse(null),
+                stage);
     }
 
     private void shutdown() {
