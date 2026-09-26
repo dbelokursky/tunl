@@ -334,6 +334,8 @@ public class SingBoxEngine {
     }
 
     private static final long CONNECTED_FALLBACK_DELAY_MS = 1800;
+    /** How long an exited core's last output may still take to be read. */
+    private static final Duration LAST_LINES_WAIT = Duration.ofSeconds(2);
     private static final Duration CONTROLLER_PROBE_TIMEOUT = Duration.ofSeconds(1);
     private static final long CONTROLLER_PROBE_INTERVAL_MS = 200;
     private static final ObjectMapper CONTROLLER_JSON = JsonMapper.builder().build();
@@ -727,12 +729,20 @@ public class SingBoxEngine {
         SystemProxyTarget sessionProxyTarget = systemProxyTarget;
         boolean sessionUsedTun = activeProxyMode == ProxyMode.TUN;
         CoreRecord.Entry sessionRecord = recordedCore;
+        LogReader sessionReader = logReader;
         if (proc == null) {
             return;
         }
         Thread monitor = new Thread(() -> {
             try {
                 int exitCode = proc.waitFor();
+                // The exit can be seen before the reader has read the core's
+                // last line, the one that says why: the card then said only
+                // "exited unexpectedly" where the line named the port in use.
+                // The reader hands every line over before the stream ends.
+                if (sessionReader != null) {
+                    sessionReader.awaitEnd(LAST_LINES_WAIT);
+                }
                 Platform.runLater(() -> {
                     if (!stopRequested
                             && proc == process

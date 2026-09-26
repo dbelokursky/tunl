@@ -32,6 +32,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static com.vlessclient.testing.FxTestSupport.flushFxEvents;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 // Fake cores are shell scripts on Unix and .cmd files on Windows, so the whole
@@ -466,6 +467,32 @@ class SingBoxEngineTest {
                 .isEqualTo(I18n.get("engine.exit.port", "1081"));
         assertThat(engine.errorDetailProperty().get())
                 .isEqualTo("sing-box exited with code 1: " + fatal);
+    }
+
+    /**
+     * The exit can be seen before the core's last line is read: then the card
+     * said only "exited unexpectedly". Here the line comes half a second after
+     * the process has gone, from a child still holding its output, which makes
+     * the race certain rather than a matter of scheduling (it failed a CI leg).
+     */
+    @Test
+    void aLastLineReadAfterTheExitStillNamesTheCause(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        assumeFalse(WINDOWS, "the fake core backgrounds a POSIX subshell");
+        String fatal = "FATAL[0000] start service: start inbound/http[http-in]: listen tcp "
+                + "127.0.0.1:1081: bind: address already in use";
+        Path core = writeScript(tmp, "sing-box",
+                "#!/bin/sh\n"
+                + "[ \"$1\" = check ] && exit 0\n"
+                + "( sleep 0.5; echo '" + fatal + "' ) &\n"
+                + "exit 1\n");
+        SingBoxEngine engine = new SingBoxEngine(core);
+
+        engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+
+        awaitConnectionState(engine, ConnectionState.ERROR, AWAIT_STATE_TIMEOUT_MS);
+        assertThat(engine.errorMessageProperty().get())
+                .isEqualTo(I18n.get("engine.exit.port", "1081"));
     }
 
     @Test
