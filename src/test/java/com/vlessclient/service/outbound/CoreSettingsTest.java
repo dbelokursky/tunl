@@ -40,6 +40,24 @@ class CoreSettingsTest {
                 .isEmpty();
     }
 
+    /**
+     * A credential the keychain did not return on load is kept as its sealed
+     * tag, so the entry recovers once the keychain does. Handed to the core,
+     * the tag failed the connect in the core's own words, which said nothing
+     * about the keychain.
+     */
+    @Test
+    void aCredentialTheKeychainDidNotReturnIsRefusedForWhatItIs() {
+        String sealed = com.vlessclient.platform.SecretSealer.SEAL_PREFIX + "keychain:v1";
+        assertThat(CoreSettings.refusal(reality(server -> server.setUuid(sealed))))
+                .hasValueSatisfying(refusal -> assertThat(refusal.reason())
+                        .isEqualTo(com.vlessclient.app.I18n.get(
+                                "refusal.credential.unreadable")));
+        assertThat(CoreSettings.refusal(reality(server -> server.setFlow(sealed))))
+                .as("Hysteria2 keeps its obfuscation password in flow")
+                .isPresent();
+    }
+
     @Test
     void aPortOutsideTheRangeIsRefused() {
         assertThat(CoreSettings.refusal(reality(server -> server.setPort(70000))))

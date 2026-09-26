@@ -1,8 +1,10 @@
 package com.vlessclient.service;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
+import com.vlessclient.service.outbound.CoreSettings;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
@@ -30,6 +32,10 @@ public class ShareLinkExporter {
     public String export(ServerConfig config) {
         if (config == null) {
             throw new IllegalArgumentException("ServerConfig must not be null");
+        }
+        if (CoreSettings.hasUnreadableCredential(config)) {
+            // The link would carry the sealed tag where the credential goes.
+            throw new IllegalArgumentException(I18n.get("refusal.credential.unreadable"));
         }
         return switch (config.getProtocol()) {
             case VLESS -> exportVless(config);
