@@ -425,6 +425,28 @@ class SingBoxEngineTest {
     }
 
     /**
+     * A dismissed administrator prompt ends a start the way a crash does: the
+     * launched process prints one line and exits. It is the user cancelling
+     * the connect, and it was an ERROR, with a "Tunnel stopped" notification.
+     */
+    @Test
+    void aDismissedAdministratorPromptLeavesTheEngineDisconnectedNotFailed(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        SingBoxEngine engine = new SingBoxEngine(createCrashingSingBox(tmp, "sing-box",
+                "0:245: execution error: User canceled. (-128)"));
+
+        engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+
+        Await.until("the exit to be read as a dismissed prompt", engine::lastExitWasDeclined,
+                Duration.ofMillis(AWAIT_STATE_TIMEOUT_MS));
+        flushFxEvents();
+        assertThat(engine.connectionStateProperty().get()).isEqualTo(ConnectionState.DISCONNECTED);
+        assertThat(engine.errorMessageProperty().get())
+                .as("kept for an agent, not shown as a failure")
+                .isEqualTo(I18n.get("engine.exit.rights"));
+    }
+
+    /**
      * The card and the notification showed the exit code and the core's last
      * line as it came, English inside a Russian window. They now say what the
      * line means where the core states it in a known way; the line itself is
@@ -677,7 +699,7 @@ class SingBoxEngineTest {
         SingBoxEngine engine = new SingBoxEngine(fakeBinary);
         java.util.concurrent.atomic.AtomicReference<Process> wrapperProc =
                 new java.util.concurrent.atomic.AtomicReference<>();
-        engine.setTunLauncher((binary, config) -> {
+        engine.setTunLauncher((binary, config, prompt) -> {
             Process p = new ProcessBuilder(wrapper.toString()).redirectErrorStream(true).start();
             wrapperProc.set(p);
             return new com.vlessclient.platform.TunLauncher.Launched(p, stopFile);
@@ -714,7 +736,7 @@ class SingBoxEngineTest {
         SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
 
         for (boolean prompts : new boolean[] {true, false}) {
-            engine.setTunLauncher((binary, cfg) -> new com.vlessclient.platform.TunLauncher.Launched(
+            engine.setTunLauncher((binary, cfg, prompt) -> new com.vlessclient.platform.TunLauncher.Launched(
                     new ProcessBuilder(wrapper.toString()).redirectErrorStream(true).start(),
                     stopFile, prompts));
             engine.start(DUMMY_CONFIG, ProxyMode.TUN);
@@ -759,7 +781,7 @@ class SingBoxEngineTest {
         String config = "{\"experimental\":{\"clash_api\":{\"external_controller\":\"127.0.0.1:"
                 + port + "\",\"secret\":\"this-core\"}}}";
         SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
-        engine.setTunLauncher((binary, cfg) -> new com.vlessclient.platform.TunLauncher.Launched(
+        engine.setTunLauncher((binary, cfg, prompt) -> new com.vlessclient.platform.TunLauncher.Launched(
                 new ProcessBuilder(wrapper.toString()).redirectErrorStream(true).start(),
                 stopFile));
 
@@ -839,7 +861,7 @@ class SingBoxEngineTest {
         SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
         java.util.concurrent.atomic.AtomicInteger launches =
                 new java.util.concurrent.atomic.AtomicInteger();
-        engine.setTunLauncher((binary, config) -> {
+        engine.setTunLauncher((binary, config, prompt) -> {
             launches.incrementAndGet();
             try {
                 Thread.sleep(150);
@@ -911,7 +933,8 @@ class SingBoxEngineTest {
         }
 
         @Override
-        public Launched launch(Path binary, Path configFile) throws java.io.IOException {
+        public Launched launch(Path binary, Path configFile, Prompt prompt)
+                throws java.io.IOException {
             launches.incrementAndGet();
             if (wrapper == null) {
                 throw new java.io.IOException("elevation refused");

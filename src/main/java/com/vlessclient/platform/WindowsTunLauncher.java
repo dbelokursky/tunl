@@ -54,8 +54,13 @@ public final class WindowsTunLauncher implements TunLauncher {
     public static final String ELEVATION_DECLINED =
             "FATAL: administrator elevation was declined or failed: ";
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>UAC shows a text of its own, so {@code prompt} goes unused.</p>
+     */
     @Override
-    public Launched launch(Path binary, Path configFile) throws IOException {
+    public Launched launch(Path binary, Path configFile, Prompt prompt) throws IOException {
         Path tempDir = Path.of(System.getProperty("java.io.tmpdir"));
         String token = Long.toString(System.nanoTime());
         Path stopSignalFile = StopSignals.newStopSignalFile();

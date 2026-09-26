@@ -340,15 +340,55 @@ public final class PrivilegeHelper {
     }
 
     /**
+     * The AppleScript that runs {@code shellCommand} as root after the
+     * administrator dialog. The dialog shows {@code prompt} as the reason it
+     * asks; without one it said that "osascript" wanted to make changes.
+     *
+     * @param shellCommand the command for {@code do shell script}
+     * @param prompt       why the dialog asks, or null or blank for none
+     * @return the script for {@code osascript -e}
+     */
+    static String adminScript(String shellCommand, String prompt) {
+        String script = "do shell script " + appleScriptString(shellCommand);
+        if (prompt != null && !prompt.isBlank()) {
+            script += " with prompt " + appleScriptString(prompt);
+        }
+        return script + " with administrator privileges";
+    }
+
+    /** An AppleScript string literal: backslashes and quotes escaped. */
+    private static String appleScriptString(String text) {
+        return "\"" + text.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+    }
+
+    /**
+     * What a failed {@code osascript} run means: the user dismissing the
+     * dialog, which AppleScript reports as error -128 in the system's
+     * language, or a failure.
+     *
+     * @param code   osascript's exit code
+     * @param output what it printed
+     * @return the exception to throw
+     */
+    static IOException failure(int code, String output) {
+        if (output != null && output.contains("(-128)")) {
+            return new ElevationDeclinedException("the administrator prompt was dismissed");
+        }
+        return new IOException("osascript exited with code " + code + ": " + output);
+    }
+
+    /**
      * Installs the root-owned sing-box copy, the launcher where
      * {@link #usesLauncher()}, and the NOPASSWD rule, in one
      * {@code osascript ... with administrator privileges} prompt.
      *
      * @param userBinary absolute path to the current sing-box executable
+     * @param prompt     why the administrator dialog asks, in the UI's language
+     * @throws ElevationDeclinedException if the user dismissed the dialog
      * @throws IOException if the privileged step failed or sudoers validation
      *                     rejected the rule
      */
-    public static void configure(Path userBinary) throws IOException {
+    public static void configure(Path userBinary, String prompt) throws IOException {
         if (userBinary == null) {
             throw new IOException("null binary path");
         }
@@ -365,11 +405,7 @@ public final class PrivilegeHelper {
         String shellCommand = configureShellCommand(userBinary, user, launcher);
 
         ProcessBuilder pb = new ProcessBuilder(
-                "osascript",
-                "-e",
-                "do shell script \""
-                        + shellCommand.replace("\\", "\\\\").replace("\"", "\\\"")
-                        + "\" with administrator privileges");
+                "osascript", "-e", adminScript(shellCommand, prompt));
         pb.redirectErrorStream(true);
         Process proc = pb.start();
 
@@ -387,8 +423,7 @@ public final class PrivilegeHelper {
         }
         int code = proc.exitValue();
         if (code != 0) {
-            String output = new String(proc.getInputStream().readAllBytes());
-            throw new IOException("osascript exited with code " + code + ": " + output);
+            throw failure(code, new String(proc.getInputStream().readAllBytes()));
         }
         log.info("Installed root-owned sing-box and the NOPASSWD rule for {}",
                 launcher ? LAUNCHER : ELEVATED_BINARY);

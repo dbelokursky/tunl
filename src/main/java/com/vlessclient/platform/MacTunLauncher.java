@@ -28,16 +28,20 @@ public final class MacTunLauncher implements TunLauncher {
     private static final Logger log = LoggerFactory.getLogger(MacTunLauncher.class);
 
     @Override
-    public Launched launch(Path binary, Path configFile) throws IOException {
+    public Launched launch(Path binary, Path configFile, Prompt prompt) throws IOException {
         // Owner-only and unguessable; the wrapper runs as this user (sudo
         // path) or as root (osascript path), and both can read it there.
         Path stopSignalFile = StopSignals.newStopSignalFile();
 
         // Try to install the sudoers rule on first run (one password prompt,
-        // ever). If it's already installed this is a fast no-op.
+        // ever). If it's already installed this is a fast no-op. A dismissed
+        // dialog is the user cancelling the connect: the every-connect prompt
+        // used to follow it at once, asking again for what was just declined.
         if (!PrivilegeHelper.isConfigured(binary)) {
             try {
-                PrivilegeHelper.configure(binary);
+                PrivilegeHelper.configure(binary, prompt.setup());
+            } catch (ElevationDeclinedException declined) {
+                throw declined;
             } catch (IOException e) {
                 log.warn("Could not install sudoers NOPASSWD rule, "
                         + "falling back to osascript prompt: {}", e.getMessage());
@@ -47,7 +51,8 @@ public final class MacTunLauncher implements TunLauncher {
         boolean withoutPrompt = PrivilegeHelper.isConfigured(binary);
         Process process;
         if (!withoutPrompt) {
-            process = startViaOsascriptPrompt(binary, configFile, stopSignalFile);
+            process = startViaOsascriptPrompt(binary, configFile, stopSignalFile,
+                    prompt.eachConnect());
         } else if (PrivilegeHelper.usesLauncher()) {
             process = startViaLauncher(binary, configFile, stopSignalFile);
         } else {
@@ -168,15 +173,12 @@ public final class MacTunLauncher implements TunLauncher {
      * one-time install dialog).
      */
     private Process startViaOsascriptPrompt(Path binary, Path configFile,
-                                            Path stopSignalFile) throws IOException {
+                                            Path stopSignalFile, String prompt)
+            throws IOException {
         String shellCommand = osascriptWrapperCommand(binary, configFile, stopSignalFile);
 
         ProcessBuilder pb = new ProcessBuilder(
-                "osascript",
-                "-e",
-                "do shell script \"" + shellCommand.replace("\\", "\\\\")
-                        .replace("\"", "\\\"") + "\" with administrator privileges"
-        );
+                "osascript", "-e", PrivilegeHelper.adminScript(shellCommand, prompt));
         pb.directory(SecureFiles.parentDirectory(binary).toFile());
         pb.redirectErrorStream(true);
         Process process = pb.start();

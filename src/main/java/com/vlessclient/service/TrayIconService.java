@@ -602,6 +602,9 @@ public class TrayIconService {
                     showMainWindow();
                 }
                 case ALREADY_RUNNING -> log.debug("sing-box already running");
+                // A dismissed administrator prompt, or a newer request: the
+                // user's own doing, so nothing to report.
+                case CANCELLED -> log.info("Connect from tray cancelled");
                 default -> log.info("Connected from tray to {}", attempt.server().getName());
             }
         } catch (IOException e) {

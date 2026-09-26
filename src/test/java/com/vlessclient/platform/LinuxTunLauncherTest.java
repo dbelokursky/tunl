@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class LinuxTunLauncherTest {
 
@@ -50,6 +51,29 @@ class LinuxTunLauncherTest {
             handle.descendants().forEach(ProcessHandle::destroyForcibly);
             handle.destroyForcibly();
         }
+    }
+
+    /**
+     * A dismissed PolicyKit dialog for the one-time grant is the user
+     * cancelling the connect. The fallback's own prompt used to follow it at
+     * once, asking again for what had just been declined, and dismissing that
+     * one read as "exited with code 126".
+     */
+    @Test
+    void aDismissedGrantCancelsTheConnectInsteadOfPromptingAgain(@TempDir Path dir)
+            throws IOException {
+        Path core = Files.writeString(dir.resolve("sing-box"), "");
+        FakeRunner runner = new FakeRunner(cmd -> cmd.getFirst().equals("getcap")
+                ? new CommandRunner.Result(0, "")
+                : new CommandRunner.Result(LinuxTunLauncher.PKEXEC_DISMISSED, ""));
+        LinuxTunLauncher launcher = new LinuxTunLauncher(runner, "elevator-that-must-not-launch");
+
+        assertThatThrownBy(() -> launcher.launch(core, dir.resolve("config.json"),
+                new TunLauncher.Prompt("setup", "each connect")))
+                .isInstanceOf(ElevationDeclinedException.class);
+        assertThat(runner.calls).extracting(List::getFirst)
+                .as("what ran: the check and the grant, and no every-connect elevation")
+                .containsExactly("getcap", "elevator-that-must-not-launch");
     }
 
     @Test

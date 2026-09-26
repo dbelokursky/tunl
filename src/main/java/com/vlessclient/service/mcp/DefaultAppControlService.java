@@ -312,6 +312,8 @@ public class DefaultAppControlService implements AppControlService {
                 case NO_ACTIVE_SERVER ->
                         "No active server. Pass serverId or select one with select_server.";
                 case ALREADY_RUNNING -> "sing-box is already running.";
+                case CANCELLED -> "The connect was cancelled: the user dismissed the "
+                        + "administrator prompt, or a newer request superseded it.";
                 default -> "Unexpected connect outcome: " + attempt.outcome();
             };
             throw new McpToolException(reason);

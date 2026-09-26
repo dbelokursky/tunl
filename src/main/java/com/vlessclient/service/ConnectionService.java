@@ -7,6 +7,7 @@ import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.ServerSelection;
+import com.vlessclient.platform.ElevationDeclinedException;
 import com.vlessclient.service.outbound.CoreSettings;
 import com.vlessclient.service.outbound.OutboundTags;
 import java.io.IOException;
@@ -199,6 +200,14 @@ public class ConnectionService {
                 movedPorts.set(List.of());
             }
             recovery.onConnectionState(state);
+            // A dismissed administrator prompt is the user cancelling the
+            // connect, and the request for a tunnel goes with it: kept, it
+            // held subscriptions back for a tunnel nobody wanted any more.
+            SingBoxEngine current = this.engine;
+            if (state == ConnectionState.DISCONNECTED && current != null
+                    && current.lastExitWasDeclined()) {
+                recovery.cancel();
+            }
             if (state == ConnectionState.CONNECTED) {
                 followActiveServer();
             }
@@ -439,6 +448,13 @@ public class ConnectionService {
                     if (!allowed.getAsBoolean()) {
                         return new ConnectAttempt(Outcome.CANCELLED, active);
                     }
+                } catch (ElevationDeclinedException declined) {
+                    // The setup prompt dismissed: the connect is cancelled,
+                    // not failed, and the request goes with it.
+                    run = previous;
+                    recovery.cancel();
+                    log.info("TUN connect cancelled: {}", declined.getMessage());
+                    return new ConnectAttempt(Outcome.CANCELLED, active);
                 } catch (IOException | IllegalStateException e) {
                     run = previous;
                     throw e;

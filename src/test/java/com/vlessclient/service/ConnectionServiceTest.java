@@ -404,6 +404,30 @@ class ConnectionServiceTest {
         }
     }
 
+    /**
+     * A dismissed administrator prompt is the user cancelling the connect. It
+     * surfaced as a failed start, and it left the request for a tunnel
+     * standing, so subscriptions were held back for a tunnel nobody wanted.
+     */
+    @Test
+    void aDismissedAdministratorPromptCancelsTheConnectAndWithdrawsTheRequest()
+            throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        SingBoxEngine declining = new SingBoxEngine(tempDir.resolve("sing-box")) {
+            @Override
+            public void start(String configJson, ProxyMode proxyMode) throws IOException {
+                throw new com.vlessclient.platform.ElevationDeclinedException(
+                        "the administrator prompt was dismissed");
+            }
+        };
+        ConnectionService service = service(declining);
+
+        ConnectionService.ConnectAttempt attempt = service.connect(ProxyMode.TUN);
+
+        assertThat(attempt.outcome()).isEqualTo(ConnectionService.Outcome.CANCELLED);
+        assertThat(service.isTunnelWanted()).as("the user's request once cancelled").isFalse();
+    }
+
     /** The position the core would quote for this server's outbound. */
     private static int outboundIndex(String configJson, String serverId) {
         var outbounds = tools.jackson.databind.json.JsonMapper.builder().build()

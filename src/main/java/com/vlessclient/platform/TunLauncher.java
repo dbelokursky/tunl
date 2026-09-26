@@ -45,16 +45,32 @@ public interface TunLauncher {
     }
 
     /**
+     * What an elevation prompt says to the user about why it asks, in the
+     * language of the UI. The macOS dialog shows it; without it the dialog
+     * said that "osascript" wanted to make changes. UAC and PolicyKit show
+     * texts of their own.
+     *
+     * @param setup       for the one-time setup that spares later prompts
+     * @param eachConnect for a start that asks every time
+     */
+    record Prompt(String setup, String eachConnect) {
+    }
+
+    /**
      * Launches sing-box elevated with the given config.
      *
      * @param binary     the sing-box executable
      * @param configFile the generated config to run
+     * @param prompt     what an elevation prompt says about why it asks
      * @return the launch handle
+     * @throws ElevationDeclinedException if the user dismissed the one-time
+     *                     setup prompt: the connect is cancelled, and no
+     *                     every-connect prompt follows it
      * @throws IOException if the launch could not even be attempted; a user
-     *                     declining the elevation prompt is reported through
-     *                     the process exiting instead
+     *                     declining an every-connect prompt is reported
+     *                     through the process exiting instead
      */
-    Launched launch(Path binary, Path configFile) throws IOException;
+    Launched launch(Path binary, Path configFile, Prompt prompt) throws IOException;
 
     /**
      * Removes whatever {@link #launch} had to publish outside the caller's

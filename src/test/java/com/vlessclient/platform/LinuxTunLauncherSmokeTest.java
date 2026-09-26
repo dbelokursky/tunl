@@ -72,7 +72,7 @@ class LinuxTunLauncherSmokeTest {
         LinuxTunLauncher launcher = new LinuxTunLauncher();
         assertThat(launcher.hasNetAdminCapability(capBinary)).isTrue();
 
-        TunLauncher.Launched launched = launcher.launch(capBinary, configFile);
+        TunLauncher.Launched launched = launcher.launch(capBinary, configFile, new TunLauncher.Prompt("", ""));
         try {
             awaitPort(clashPort, launched.process());
 
@@ -104,7 +104,7 @@ class LinuxTunLauncherSmokeTest {
         Path configFile = Files.createTempFile("smoke-tun-sudo-", ".json");
         Files.writeString(configFile, tunProbeConfig(clashPort));
 
-        TunLauncher.Launched launched = launcher.launch(binary, configFile);
+        TunLauncher.Launched launched = launcher.launch(binary, configFile, new TunLauncher.Prompt("", ""));
         try {
             awaitPort(clashPort, launched.process());
 

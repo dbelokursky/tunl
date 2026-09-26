@@ -434,7 +434,7 @@ public class VlessClientApp extends Application {
         }
         Thread.startVirtualThread(() -> {
             try {
-                PrivilegeHelper.configure(binary);
+                PrivilegeHelper.configure(binary, I18n.get("security.legacy.rule.prompt"));
                 log.info("Replaced the older build's sudoers rule");
             } catch (IOException e) {
                 log.warn("Could not replace the legacy sudoers rule: {}", e.getMessage());

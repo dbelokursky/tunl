@@ -1,5 +1,6 @@
 package com.vlessclient.service;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.platform.CoreRecord;
@@ -136,6 +137,9 @@ public class SingBoxEngine {
      */
     private volatile boolean launchPrompts;
 
+    /** The last run ended with the user dismissing its administrator prompt. */
+    private volatile boolean exitDeclined;
+
     /**
      * Creates a new SingBoxEngine that writes its core down nowhere.
      *
@@ -242,6 +246,7 @@ public class SingBoxEngine {
         this.activeProxyMode = proxyMode;
         this.stopRequested = false;
         this.launchPrompts = false;
+        this.exitDeclined = false;
 
         Platform.runLater(() -> {
             connectionState.set(ConnectionState.CONNECTING);
@@ -463,7 +468,9 @@ public class SingBoxEngine {
      * privileged side to shut sing-box down.
      */
     private void startWithPrivileges() throws IOException {
-        TunLauncher.Launched launched = tunLauncher.launch(singBoxBinary, tempConfigFile);
+        TunLauncher.Launched launched = tunLauncher.launch(singBoxBinary, tempConfigFile,
+                new TunLauncher.Prompt(I18n.get("tun.prompt.setup"),
+                        I18n.get("tun.prompt.connect")));
         process = launched.process();
         stopSignalFile = launched.stopSignalFile();
         launchPrompts = launched.promptsEachLaunch();
@@ -585,6 +592,18 @@ public class SingBoxEngine {
      */
     public boolean isStopping() {
         return stopRequested && isRunning();
+    }
+
+    /**
+     * Whether the last run ended because the user dismissed the administrator
+     * prompt its start raised, which leaves the engine DISCONNECTED rather
+     * than in ERROR. Set before that state change, and cleared by the next
+     * start.
+     *
+     * @return true when the last exit was a dismissed prompt
+     */
+    public boolean lastExitWasDeclined() {
+        return exitDeclined;
     }
 
     /**
@@ -719,13 +738,19 @@ public class SingBoxEngine {
                             && proc == process
                             && connectionState.get() != ConnectionState.DISCONNECTED) {
                         String lastLine = logLines.isEmpty() ? null : logLines.getLast();
+                        // A dismissed administrator prompt is the user
+                        // cancelling the connect, not the tunnel failing: it
+                        // was an ERROR, with a "Tunnel stopped" notification.
+                        boolean declined = CoreExitReason.declined(lastLine);
                         // Message before state: state listeners fire
                         // synchronously inside set(), and they read the
                         // message the moment they see ERROR.
                         errorDetail.set("sing-box exited with code " + exitCode
                                 + (lastLine != null ? ": " + lastLine : ""));
                         errorMessage.set(CoreExitReason.describe(exitCode, lastLine));
-                        connectionState.set(ConnectionState.ERROR);
+                        exitDeclined = declined;
+                        connectionState.set(declined
+                                ? ConnectionState.DISCONNECTED : ConnectionState.ERROR);
                     }
                 });
             } catch (InterruptedException e) {
