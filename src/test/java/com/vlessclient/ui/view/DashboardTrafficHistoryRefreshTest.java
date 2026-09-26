@@ -7,6 +7,7 @@ import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.TrafficHistoryStore;
+import com.vlessclient.testing.TestServers;
 import com.vlessclient.testing.UiTest;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -113,9 +114,9 @@ public class DashboardTrafficHistoryRefreshTest extends ApplicationTest {
     }
 
     private static ServerConfig server() {
-        ServerConfig config = new ServerConfig();
-        config.setId("test-server");
-        config.setName("Amsterdam 01");
-        return config;
+        return TestServers.server()
+                .id("test-server")
+                .name("Amsterdam 01")
+                .build();
     }
 }

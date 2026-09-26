@@ -9,6 +9,7 @@ import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.SubscriptionService;
 import com.vlessclient.service.TestSubscriptionServices;
+import com.vlessclient.testing.TestServers;
 import com.vlessclient.testing.UiTest;
 import java.nio.file.Path;
 import javafx.fxml.FXMLLoader;
@@ -82,13 +83,13 @@ public class ServerFormSubscriptionNoticeTest extends ApplicationTest {
     }
 
     private static ServerConfig server(String id) {
-        ServerConfig server = new ServerConfig();
-        server.setId(id);
-        server.setName("Tokyo");
-        server.setProtocol(Protocol.VLESS);
-        server.setAddress("198.51.100.7");
-        server.setPort(443);
-        server.setUuid("11111111-2222-3333-4444-555555555555");
-        return server;
+        return TestServers.server()
+                .id(id)
+                .name("Tokyo")
+                .protocol(Protocol.VLESS)
+                .address("198.51.100.7")
+                .port(443)
+                .uuid("11111111-2222-3333-4444-555555555555")
+                .build();
     }
 }

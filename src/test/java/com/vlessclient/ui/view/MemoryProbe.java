@@ -12,6 +12,7 @@ import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TrafficHistoryStore;
 import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.testing.FxPulses;
+import com.vlessclient.testing.TestServers;
 import com.vlessclient.testing.UiTest;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -313,12 +314,12 @@ public class MemoryProbe extends ApplicationTest {
     }
 
     private static ServerConfig server(String name, String address, int port) {
-        ServerConfig config = new ServerConfig();
-        config.setName(name);
-        config.setAddress(address);
-        config.setPort(port);
-        config.setProtocol(Protocol.VLESS);
-        return config;
+        return TestServers.server()
+                .name(name)
+                .address(address)
+                .port(port)
+                .protocol(Protocol.VLESS)
+                .build();
     }
 
     /** A month of days for two servers, so the open panel has thirty bars to paint. */

@@ -5,6 +5,7 @@ import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.testing.Await;
+import com.vlessclient.testing.TestServers;
 import com.vlessclient.testing.ThreadDump;
 import com.vlessclient.testing.UiTest;
 import java.time.Duration;
@@ -162,13 +163,13 @@ public class MainViewTest extends ApplicationTest {
     }
 
     private static ServerConfig server(String name) {
-        ServerConfig config = new ServerConfig();
-        config.setName(name);
-        config.setProtocol(Protocol.VLESS);
-        config.setAddress("203.0.113.10");
-        config.setPort(443);
-        config.setUuid("b1c2d3e4-f5a6-7890-abcd-ef1234567890");
-        return config;
+        return TestServers.server()
+                .name(name)
+                .protocol(Protocol.VLESS)
+                .address("203.0.113.10")
+                .port(443)
+                .uuid("b1c2d3e4-f5a6-7890-abcd-ef1234567890")
+                .build();
     }
 
     /**

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.vlessclient.app.I18n;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.testing.TestServers;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.Consumer;
@@ -278,48 +279,43 @@ class CoreSettingsTest {
     }
 
     static ServerConfig reality(Consumer<ServerConfig> change) {
-        ServerConfig server = new ServerConfig();
-        server.setId("reality");
-        server.setName("reality");
-        server.setProtocol(Protocol.VLESS);
-        server.setAddress("203.0.113.1");
-        server.setPort(443);
-        server.setUuid("b1c2d3e4-f5a6-7890-abcd-ef1234567890");
-        server.setFlow("xtls-rprx-vision");
-        server.getTls().setEnabled(true);
-        server.getTls().setReality(true);
-        server.getTls().setServerName("www.microsoft.com");
-        server.getTls().setFingerprint("chrome");
-        server.getTls().setRealityPublicKey(REALITY_KEY);
-        server.getTls().setRealityShortId("0123abcd");
+        ServerConfig server = TestServers.server()
+                .id("reality")
+                .name("reality")
+                .protocol(Protocol.VLESS)
+                .address("203.0.113.1")
+                .port(443)
+                .uuid("b1c2d3e4-f5a6-7890-abcd-ef1234567890")
+                .flow("xtls-rprx-vision")
+                .reality("www.microsoft.com", REALITY_KEY, "0123abcd")
+                .fingerprint("chrome")
+                .build();
         change.accept(server);
         return server;
     }
 
     static ServerConfig shadowsocks(String method, String password) {
-        ServerConfig server = new ServerConfig();
-        server.setId("ss-" + method);
-        server.setName("ss-" + method);
-        server.setProtocol(Protocol.SHADOWSOCKS);
-        server.setAddress("203.0.113.3");
-        server.setPort(8388);
-        server.setUuid(password);
-        server.setEncryption(method);
-        return server;
+        return TestServers.server()
+                .id("ss-" + method)
+                .name("ss-" + method)
+                .protocol(Protocol.SHADOWSOCKS)
+                .address("203.0.113.3")
+                .port(8388)
+                .uuid(password)
+                .encryption(method)
+                .build();
     }
 
     static ServerConfig quic(Protocol protocol, boolean tls) {
-        ServerConfig server = new ServerConfig();
-        server.setId("quic-" + protocol);
-        server.setName("quic-" + protocol);
-        server.setProtocol(protocol);
-        server.setAddress("203.0.113.4");
-        server.setPort(443);
-        server.setUuid("b1c2d3e4-f5a6-7890-abcd-ef1234567890");
-        server.getTransport().setType(com.vlessclient.model.TransportType.QUIC);
-        server.getTls().setEnabled(tls);
-        server.getTls().setServerName(tls ? "quic.example" : null);
-        return server;
+        TestServers.Builder server = TestServers.server()
+                .id("quic-" + protocol)
+                .name("quic-" + protocol)
+                .protocol(protocol)
+                .address("203.0.113.4")
+                .port(443)
+                .uuid("b1c2d3e4-f5a6-7890-abcd-ef1234567890")
+                .transport(com.vlessclient.model.TransportType.QUIC, null, null);
+        return tls ? server.tls("quic.example").build() : server.build();
     }
 
     static ServerConfig withPlugin(String plugin, String options) {

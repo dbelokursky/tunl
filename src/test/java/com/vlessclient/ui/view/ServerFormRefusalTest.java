@@ -4,8 +4,8 @@ import com.vlessclient.app.I18n;
 import com.vlessclient.app.ThemeCss;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
-import com.vlessclient.model.TlsConfig;
 import com.vlessclient.testing.Await;
+import com.vlessclient.testing.TestServers;
 import com.vlessclient.testing.UiTest;
 import java.time.Duration;
 import java.util.List;
@@ -110,21 +110,15 @@ public class ServerFormRefusalTest extends ApplicationTest {
     }
 
     private static ServerConfig realityServer(String shortId) {
-        ServerConfig server = new ServerConfig();
-        server.setId("srv-1");
-        server.setName("Tokyo");
-        server.setProtocol(Protocol.VLESS);
-        server.setAddress("198.51.100.7");
-        server.setPort(443);
-        server.setUuid("11111111-2222-3333-4444-555555555555");
-        TlsConfig tls = new TlsConfig();
-        tls.setEnabled(true);
-        tls.setServerName("example.com");
-        tls.setReality(true);
-        tls.setRealityPublicKey(REALITY_KEY);
-        tls.setRealityShortId(shortId);
-        server.setTls(tls);
-        return server;
+        return TestServers.server()
+                .id("srv-1")
+                .name("Tokyo")
+                .protocol(Protocol.VLESS)
+                .address("198.51.100.7")
+                .port(443)
+                .uuid("11111111-2222-3333-4444-555555555555")
+                .reality("example.com", REALITY_KEY, shortId)
+                .build();
     }
 
     private void text(String query, String value) {

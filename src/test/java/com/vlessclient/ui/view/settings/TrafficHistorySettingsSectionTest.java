@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.vlessclient.app.I18n;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.TrafficHistoryStore;
+import com.vlessclient.testing.TestServers;
 import com.vlessclient.testing.UiTest;
 import com.vlessclient.ui.view.TrafficText;
 import java.nio.file.Path;
@@ -139,9 +140,9 @@ public class TrafficHistorySettingsSectionTest extends ApplicationTest {
     }
 
     private static ServerConfig server() {
-        ServerConfig config = new ServerConfig();
-        config.setId("a");
-        config.setName("Amsterdam 01");
-        return config;
+        return TestServers.server()
+                .id("a")
+                .name("Amsterdam 01")
+                .build();
     }
 }

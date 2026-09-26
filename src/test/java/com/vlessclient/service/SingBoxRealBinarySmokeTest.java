@@ -11,6 +11,7 @@ import com.vlessclient.model.RoutingRule;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.ServerSelection;
 import com.vlessclient.testing.BundledCore;
+import com.vlessclient.testing.TestServers;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
@@ -307,59 +308,54 @@ class SingBoxRealBinarySmokeTest {
     }
 
     private static ServerConfig realityServer(String name, String fingerprint, String publicKey) {
-        ServerConfig server = new ServerConfig();
-        server.setId(name);
-        server.setName(name);
-        server.setProtocol(Protocol.VLESS);
-        server.setAddress("203.0.113.10");
-        server.setPort(443);
-        server.setUuid(TEST_UUID);
-        server.setFlow("xtls-rprx-vision");
-        server.getTls().setEnabled(true);
-        server.getTls().setReality(true);
-        server.getTls().setServerName("www.microsoft.com");
-        server.getTls().setFingerprint(fingerprint);
-        server.getTls().setRealityPublicKey(publicKey);
-        server.getTls().setRealityShortId("0123abcd");
-        return server;
+        return TestServers.server()
+                .id(name)
+                .name(name)
+                .protocol(Protocol.VLESS)
+                .address("203.0.113.10")
+                .port(443)
+                .uuid(TEST_UUID)
+                .flow("xtls-rprx-vision")
+                .reality("www.microsoft.com", publicKey, "0123abcd")
+                .fingerprint(fingerprint)
+                .build();
     }
 
     private static ServerConfig wireguardServer(String name, String address) {
-        ServerConfig server = new ServerConfig();
-        server.setId(name);
-        server.setName(name);
-        server.setProtocol(Protocol.WIREGUARD);
-        server.setAddress("203.0.113.11");
-        server.setPort(51820);
-        server.setUuid(WG_PRIVATE_KEY);
-        server.setEncryption(WG_PEER_PUBLIC_KEY);
-        server.setFlow(address);
-        return server;
+        return TestServers.server()
+                .id(name)
+                .name(name)
+                .protocol(Protocol.WIREGUARD)
+                .address("203.0.113.11")
+                .port(51820)
+                .uuid(WG_PRIVATE_KEY)
+                .encryption(WG_PEER_PUBLIC_KEY)
+                .flow(address)
+                .build();
     }
 
     private static ServerConfig hysteria2Server(String name) {
-        ServerConfig server = new ServerConfig();
-        server.setId(name);
-        server.setName(name);
-        server.setProtocol(Protocol.HYSTERIA2);
-        server.setAddress("203.0.113.13");
-        server.setPort(443);
-        server.setUuid("smoke-password");
-        server.getTls().setEnabled(true);
-        server.getTls().setServerName("example.com");
-        return server;
+        return TestServers.server()
+                .id(name)
+                .name(name)
+                .protocol(Protocol.HYSTERIA2)
+                .address("203.0.113.13")
+                .port(443)
+                .uuid("smoke-password")
+                .tls("example.com")
+                .build();
     }
 
     private static ServerConfig shadowsocksServer(String name, String method) {
-        ServerConfig server = new ServerConfig();
-        server.setId(name);
-        server.setName(name);
-        server.setProtocol(Protocol.SHADOWSOCKS);
-        server.setAddress("203.0.113.12");
-        server.setPort(8388);
-        server.setUuid("smoke-password");
-        server.setEncryption(method);
-        return server;
+        return TestServers.server()
+                .id(name)
+                .name(name)
+                .protocol(Protocol.SHADOWSOCKS)
+                .address("203.0.113.12")
+                .port(8388)
+                .uuid("smoke-password")
+                .encryption(method)
+                .build();
     }
 
     /**
@@ -476,19 +472,15 @@ class SingBoxRealBinarySmokeTest {
     }
 
     private static ServerConfig quicServer(String name, boolean tls) {
-        ServerConfig server = new ServerConfig();
-        server.setId(name);
-        server.setName(name);
-        server.setProtocol(Protocol.VLESS);
-        server.setAddress("203.0.113.13");
-        server.setPort(443);
-        server.setUuid(TEST_UUID);
-        server.getTransport().setType(com.vlessclient.model.TransportType.QUIC);
-        server.getTls().setEnabled(tls);
-        if (tls) {
-            server.getTls().setServerName("example.com");
-        }
-        return server;
+        TestServers.Builder server = TestServers.server()
+                .id(name)
+                .name(name)
+                .protocol(Protocol.VLESS)
+                .address("203.0.113.13")
+                .port(443)
+                .uuid(TEST_UUID)
+                .transport(com.vlessclient.model.TransportType.QUIC, null, null);
+        return tls ? server.tls("example.com").build() : server.build();
     }
 
     private static ServerConfig with(ServerConfig server,

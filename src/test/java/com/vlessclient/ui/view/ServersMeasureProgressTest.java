@@ -11,6 +11,7 @@ import com.vlessclient.service.LatencyTester;
 import com.vlessclient.service.TestConfigStores;
 import com.vlessclient.service.TestLatencyTesters;
 import com.vlessclient.testing.Await;
+import com.vlessclient.testing.TestServers;
 import com.vlessclient.testing.UiTest;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -110,13 +111,13 @@ public class ServersMeasureProgressTest extends ApplicationTest {
     }
 
     private static ServerConfig server(String name) {
-        ServerConfig server = new ServerConfig();
-        server.setId(UUID.randomUUID().toString());
-        server.setName(name);
-        server.setProtocol(Protocol.VLESS);
-        server.setAddress(name.toLowerCase() + ".example");
-        server.setPort(443);
-        server.setUuid("11111111-2222-3333-4444-555555555555");
-        return server;
+        return TestServers.server()
+                .id(UUID.randomUUID().toString())
+                .name(name)
+                .protocol(Protocol.VLESS)
+                .address(name.toLowerCase() + ".example")
+                .port(443)
+                .uuid("11111111-2222-3333-4444-555555555555")
+                .build();
     }
 }

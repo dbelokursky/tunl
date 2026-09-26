@@ -7,6 +7,7 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.LatencyTester;
 import com.vlessclient.service.TestConfigStores;
+import com.vlessclient.testing.TestServers;
 import com.vlessclient.testing.UiTest;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -90,12 +91,12 @@ public class ServersViewSearchSortTest extends ApplicationTest {
     }
 
     private static ServerConfig server(String name, String address, int port, Protocol proto) {
-        ServerConfig config = new ServerConfig();
-        config.setName(name);
-        config.setAddress(address);
-        config.setPort(port);
-        config.setProtocol(proto);
-        return config;
+        return TestServers.server()
+                .name(name)
+                .address(address)
+                .port(port)
+                .protocol(proto)
+                .build();
     }
 
     @SuppressWarnings("unchecked")

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.testing.FxToolkitExtension;
+import com.vlessclient.testing.TestServers;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,12 +35,12 @@ class ConfigStoreFxThreadTest {
     Path tempDir;
 
     private static ServerConfig server(String name) {
-        ServerConfig config = new ServerConfig();
-        config.setName(name);
-        config.setAddress(name + ".example");
-        config.setPort(443);
-        config.setUuid("uuid-of-" + name);
-        return config;
+        return TestServers.server()
+                .name(name)
+                .address(name + ".example")
+                .port(443)
+                .uuid("uuid-of-" + name)
+                .build();
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.vlessclient.service;
 
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.testing.TestServers;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystems;
@@ -42,13 +43,13 @@ class ServerBackupServiceTest {
     }
 
     private static ServerConfig server(String name, Protocol protocol, String credential) {
-        ServerConfig config = new ServerConfig();
-        config.setName(name);
-        config.setProtocol(protocol);
-        config.setAddress("198.51.100.7");
-        config.setPort(443);
-        config.setUuid(credential);
-        return config;
+        return TestServers.server()
+                .name(name)
+                .protocol(protocol)
+                .address("198.51.100.7")
+                .port(443)
+                .uuid(credential)
+                .build();
     }
 
     @Test

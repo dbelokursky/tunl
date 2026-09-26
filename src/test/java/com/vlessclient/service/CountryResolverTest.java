@@ -2,6 +2,7 @@ package com.vlessclient.service;
 
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.testing.Await;
+import com.vlessclient.testing.TestServers;
 import java.net.http.HttpClient;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -50,9 +51,9 @@ class CountryResolverTest {
     }
 
     private static ServerConfig server(String address) {
-        ServerConfig server = new ServerConfig();
-        server.setAddress(address);
-        return server;
+        return TestServers.server()
+                .address(address)
+                .build();
     }
 
     @Test

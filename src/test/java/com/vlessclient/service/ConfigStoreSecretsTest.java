@@ -5,6 +5,7 @@ import com.vlessclient.model.Protocol;
 import com.vlessclient.platform.InMemorySecretSealer;
 import com.vlessclient.platform.SecretSealer;
 import com.vlessclient.testing.Await;
+import com.vlessclient.testing.TestServers;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -25,12 +26,12 @@ class ConfigStoreSecretsTest {
     Path tempDir;
 
     private static ServerConfig server(String name, String uuid) {
-        ServerConfig config = new ServerConfig();
-        config.setName(name);
-        config.setAddress("192.0.2.1");
-        config.setPort(443);
-        config.setUuid(uuid);
-        return config;
+        return TestServers.server()
+                .name(name)
+                .address("192.0.2.1")
+                .port(443)
+                .uuid(uuid)
+                .build();
     }
 
     private String rawServersJson() throws Exception {

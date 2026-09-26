@@ -13,6 +13,7 @@ import com.vlessclient.service.SingBoxConfigGenerator;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TestSubscriptionServices;
 import com.vlessclient.testing.FxToolkitExtension;
+import com.vlessclient.testing.TestServers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -55,13 +56,13 @@ class DefaultAppControlServiceTest {
     }
 
     private ServerConfig server(String id, String name) {
-        ServerConfig s = new ServerConfig();
-        s.setId(id);
-        s.setName(name);
-        s.setProtocol(com.vlessclient.model.Protocol.VLESS);
-        s.setAddress("example.com");
-        s.setPort(443);
-        return s;
+        return TestServers.server()
+                .id(id)
+                .name(name)
+                .protocol(com.vlessclient.model.Protocol.VLESS)
+                .address("example.com")
+                .port(443)
+                .build();
     }
 
     private static final class RecordingConnectionService extends ConnectionService {

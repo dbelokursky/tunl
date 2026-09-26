@@ -4,6 +4,7 @@ import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.testing.TestServers;
 import java.net.http.HttpRequest;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -26,12 +27,12 @@ class ClashApiSecretTest {
     private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
     private static ServerConfig vlessServer() {
-        ServerConfig s = new ServerConfig();
-        s.setProtocol(Protocol.VLESS);
-        s.setAddress("203.0.113.10");
-        s.setPort(443);
-        s.setUuid("3fa85f64-5717-4562-b3fc-2c963f66afa6");
-        return s;
+        return TestServers.server()
+                .protocol(Protocol.VLESS)
+                .address("203.0.113.10")
+                .port(443)
+                .uuid("3fa85f64-5717-4562-b3fc-2c963f66afa6")
+                .build();
     }
 
     private static JsonNode clashApi(String configJson) throws Exception {
