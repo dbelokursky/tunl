@@ -7,6 +7,8 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -29,14 +31,48 @@ class SigtermSavesStateTest {
     @TempDir
     Path dataDir;
 
+    @TempDir
+    Path logDir;
+
     @Test
     void aSigtermWritesTheTrafficCountedSinceTheLastFlush() throws Exception {
+        stopTheProbeWithSigterm();
+
+        Path history = dataDir.resolve("traffic-history.json");
+        assertThat(history).exists();
+        assertThat(Files.readString(history)).contains("sigterm-probe").contains("60000");
+    }
+
+    /**
+     * The probe logged into the developer's own log, the one the installed
+     * app writes: surefire keeps the tests' directories out of the real
+     * profile, and its settings do not reach a JVM a test starts. There it
+     * logged an ERROR at every run, because the hook's save could not tell
+     * the settings page about itself in a process that never started JavaFX.
+     */
+    @Test
+    void theProbeLogsIntoTheTestsDirectoryAndSavesWithoutAnError() throws Exception {
+        stopTheProbeWithSigterm();
+
+        Path log = logDir.resolve("tunl.log");
+        assertThat(log).as("the probe's log, in the directory the test gave it").exists();
+        assertThat(Files.readAllLines(log, StandardCharsets.UTF_8))
+                .noneMatch(line -> line.contains(" ERROR "));
+    }
+
+    private void stopTheProbeWithSigterm() throws Exception {
         Path java = Path.of(System.getProperty("java.home"), "bin", "java");
-        Process probe = new ProcessBuilder(java.toString(), "-cp",
-                System.getProperty("java.class.path"),
-                ShutdownHookProbe.class.getName(), dataDir.toString())
-                .redirectErrorStream(true)
-                .start();
+        List<String> command = new ArrayList<>(List.of(java.toString()));
+        // What surefire redirects for this JVM, redirected for the probe's too.
+        for (String name : System.getProperties().stringPropertyNames()) {
+            if (name.startsWith("vless.") && !name.equals("vless.log.dir")) {
+                command.add("-D" + name + "=" + System.getProperty(name));
+            }
+        }
+        command.add("-Dvless.log.dir=" + logDir);
+        command.addAll(List.of("-cp", System.getProperty("java.class.path"),
+                ShutdownHookProbe.class.getName(), dataDir.toString()));
+        Process probe = new ProcessBuilder(command).redirectErrorStream(true).start();
         try (BufferedReader out = new BufferedReader(
                 new InputStreamReader(probe.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
@@ -50,9 +86,5 @@ class SigtermSavesStateTest {
         } finally {
             probe.destroyForcibly();
         }
-
-        Path history = dataDir.resolve("traffic-history.json");
-        assertThat(history).exists();
-        assertThat(Files.readString(history)).contains("sigterm-probe").contains("60000");
     }
 }
