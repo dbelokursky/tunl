@@ -28,6 +28,8 @@ public final class Launcher {
      * @param args the command-line arguments passed on to the JavaFX application
      */
     public static void main(String[] args) {
+        // Before any HTTP client exists: the JDK reads it once.
+        com.vlessclient.service.LocalProxyCredentials.allowBasicThroughTunnels();
         // Nothing to do about logging here any more: logback asks
         // PlatformPaths for the directory itself, through
         // LogDirPropertyDefiner, so there is no property to set before the

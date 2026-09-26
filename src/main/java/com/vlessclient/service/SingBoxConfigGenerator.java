@@ -873,6 +873,7 @@ public class SingBoxConfigGenerator {
         socks.put("tag", "socks-in");
         socks.put("listen", "127.0.0.1");
         socks.put("listen_port", settings.listenSocksPort());
+        requirePasswordIfNeeded(socks, settings);
         inbounds.add(socks);
 
         ObjectNode http = mapper.createObjectNode();
@@ -880,6 +881,7 @@ public class SingBoxConfigGenerator {
         http.put("tag", "http-in");
         http.put("listen", "127.0.0.1");
         http.put("listen_port", settings.listenHttpPort());
+        requirePasswordIfNeeded(http, settings);
         // In SYSTEM_PROXY mode sing-box itself registers this inbound as the
         // OS proxy on start and restores the previous state on a graceful
         // stop — one cross-platform mechanism (networksetup on macOS, WinINET
@@ -904,6 +906,22 @@ public class SingBoxConfigGenerator {
         inbounds.add(http);
 
         return inbounds;
+    }
+
+    /**
+     * Gives a local inbound this run's user in TUN mode: the tunnel carries
+     * every program's traffic already, and an open proxy on 127.0.0.1 let any
+     * of them, or any other account on the machine, send traffic through the
+     * user's server. The system proxy cannot carry a password, so in
+     * system-proxy mode the inbounds stay open.
+     */
+    private void requirePasswordIfNeeded(ObjectNode inbound, AppSettings settings) {
+        if (!settings.localProxyNeedsPassword()) {
+            return;
+        }
+        ObjectNode user = inbound.putArray("users").addObject();
+        user.put("username", LocalProxyCredentials.username());
+        user.put("password", LocalProxyCredentials.password());
     }
 
     /**
