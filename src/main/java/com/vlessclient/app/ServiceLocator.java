@@ -303,6 +303,11 @@ public class ServiceLocator {
         services.put(type, instance);
     }
 
+    /** Test seam: forgets a service, as before it was ever registered. */
+    static void remove(Class<?> type) {
+        services.remove(type);
+    }
+
     /**
      * Returns the resolved path to the sing-box binary, or null if not found.
      */

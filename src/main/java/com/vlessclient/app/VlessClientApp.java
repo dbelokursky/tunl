@@ -28,6 +28,7 @@ import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
@@ -279,19 +280,26 @@ public class VlessClientApp extends Application {
     }
 
     /**
-     * Whether an AWT system tray exists, defaulting to {@code false} if AWT
-     * can't answer. {@code SystemTray.isSupported()} triggers Toolkit init;
-     * with {@code -Djava.awt.headless=false} on a display-less/broken host
-     * that fails with an {@link Error} (poisoned Toolkit) — which must not
-     * abort startup, or the app never connects. Found by the desktop-VM QA.
+     * Whether closing the main window hides it: only when a tray icon is
+     * showing to bring it back from.
+     *
+     * @param tray the tray service, or null when it could not be created
+     * @return true to hide the window, false to quit
      */
-    private static boolean systemTraySupported() {
-        try {
-            return java.awt.SystemTray.isSupported();
-        } catch (Throwable e) {
-            log.warn("Could not query the system tray; assuming none: {}", e.toString());
-            return false;
-        }
+    static boolean closeHidesToTray(TrayIconService tray) {
+        return tray != null && tray.isShowing();
+    }
+
+    /**
+     * The engine the tray follows: the one registered now, or none before a
+     * core is installed. Resolved at every read, since installing the core
+     * from the app registers a new engine. Not {@link ServiceLocator#get},
+     * which throws for a missing engine: the tray was then never created.
+     *
+     * @return a supplier of the current engine, which supplies null without one
+     */
+    static Supplier<SingBoxEngine> trayEngine() {
+        return () -> ServiceLocator.find(SingBoxEngine.class).orElse(null);
     }
 
     @Override
@@ -326,17 +334,19 @@ public class VlessClientApp extends Application {
         loadAppIcon(primaryStage);
 
         // Keep the app alive when the main window is closed — it continues
-        // running in the tray, where the user can reopen or quit it. On
-        // desktops with no system tray (notably stock GNOME) hiding would
-        // strand the app with no way back, so there closing the window quits.
+        // running in the tray, where the user can reopen or quit it. Without a
+        // tray icon to reopen it from (stock GNOME has no tray, and the icon
+        // can fail to install) hiding would strand the app with no way back,
+        // so there closing the window quits. Asked at the close rather than
+        // at startup: a desktop with a tray whose icon never appeared used to
+        // hide the window anyway.
         Platform.setImplicitExit(false);
-        boolean trayAvailable = systemTraySupported();
         primaryStage.setOnCloseRequest(event -> {
-            if (trayAvailable) {
+            if (closeHidesToTray(trayIconService)) {
                 event.consume();
                 primaryStage.hide();
             } else {
-                log.info("No system tray on this desktop — window close quits the app");
+                log.info("No tray icon to reopen the window from — window close quits the app");
                 Platform.exit();
             }
         });
@@ -569,12 +579,6 @@ public class VlessClientApp extends Application {
 
     private void installTrayIcon(Stage stage) {
         try {
-            SingBoxEngine engine = null;
-            try {
-                engine = ServiceLocator.get(SingBoxEngine.class);
-            } catch (IllegalArgumentException e) {
-                log.debug("SingBoxEngine not available for tray icon");
-            }
             ConfigStore configStore = ServiceLocator.get(ConfigStore.class);
             ConnectionService connectionService = ServiceLocator.get(ConnectionService.class);
             TunnelHealthState healthState = null;
@@ -585,10 +589,8 @@ public class VlessClientApp extends Application {
                         + "tray icon will report process state only");
             }
 
-            // Supplied, not captured: registerSingBoxEngine swaps the engine
-            // after an in-app core install.
             trayIconService = new TrayIconService(
-                    () -> ServiceLocator.get(SingBoxEngine.class),
+                    trayEngine(),
                     configStore, connectionService, healthState,
                     ServiceLocator.find(ProxyGroupMonitor.class)
                             .map(ProxyGroupMonitor::corePickTagProperty).orElse(null),

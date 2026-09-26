@@ -101,7 +101,7 @@ public class TrayIconService {
     private final Stage stage;
     private final FailureNotices failureNotices;
 
-    private TrayIcon trayIcon;
+    private volatile TrayIcon trayIcon;
     /** Puts up a system notification: a title and a body. */
     private volatile BiConsumer<String, String> notifier = this::displayError;
     private PopupMenu popupMenu;
@@ -643,6 +643,17 @@ public class TrayIconService {
 
     private void onQuit() {
         Platform.runLater(Platform::exit);
+    }
+
+    /**
+     * Whether the icon is in the system tray, where a hidden window can be
+     * brought back from. False until the AWT thread has added it, and for good
+     * on a desktop without a tray. Safe from any thread.
+     *
+     * @return true once the icon is showing
+     */
+    public boolean isShowing() {
+        return trayIcon != null;
     }
 
     private SingBoxEngine engine() {
