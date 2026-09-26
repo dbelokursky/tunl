@@ -191,17 +191,9 @@ public class SubscriptionsViewController implements ViewShownAware {
         });
     }
 
-    /**
-     * The failure to show: one the app worded itself is rendered from its key
-     * now, in the current language; a sentence from an older file is shown as
-     * it stands, because that is all such a file holds.
-     */
+    /** The failure to show, worded as the MCP tool words it too. */
     private static String failureText(Subscription sub) {
-        String key = sub.getLastErrorKey();
-        if (key != null && !key.isBlank()) {
-            return I18n.get(key, sub.getLastErrorArgs().toArray());
-        }
-        return sub.getLastError();
+        return SubscriptionService.failureText(sub);
     }
 
     /**

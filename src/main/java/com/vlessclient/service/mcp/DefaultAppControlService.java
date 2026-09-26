@@ -151,6 +151,11 @@ public class DefaultAppControlService implements AppControlService {
             ServerConfig routed = tag == null ? null : configStore.getServers().stream()
                     .filter(server -> tag.equals(OutboundTags.server(server)))
                     .findFirst().orElse(null);
+            // The settings' mode is what the next start uses; a mode changed
+            // there does not change the running core's, and get_status said
+            // the new one as if it were running.
+            String runningMode = connectionService == null ? null
+                    : connectionService.runningMode().map(ProxyMode::getValue).orElse(null);
             return new StatusInfo(
                     state.name(), state == ConnectionState.CONNECTED,
                     active != null ? active.getId() : null,
@@ -160,7 +165,8 @@ public class DefaultAppControlService implements AppControlService {
                     error != null ? error : "", health.name(),
                     TunnelStatus.of(state, health).name(),
                     routed != null ? routed.getId() : null,
-                    routed != null ? routed.getName() : null);
+                    routed != null ? routed.getName() : null,
+                    runningMode);
         });
     }
 
@@ -358,8 +364,16 @@ public class DefaultAppControlService implements AppControlService {
             List<LatencyResult> out = new ArrayList<>();
             for (ServerConfig s : servers) {
                 com.vlessclient.service.LatencyTester.Result r = results.get(s.getId());
-                long ms = r != null && r.reachable() ? r.millis() : -1;
-                out.add(new LatencyResult(s.getId(), s.getName(), ms));
+                if (r == null || !r.measured()) {
+                    out.add(new LatencyResult(s.getId(), s.getName(), -1,
+                            LatencyResult.NOT_MEASURED));
+                } else if (r.reachable()) {
+                    out.add(new LatencyResult(s.getId(), s.getName(), r.millis(),
+                            LatencyResult.MEASURED));
+                } else {
+                    out.add(new LatencyResult(s.getId(), s.getName(), -1,
+                            LatencyResult.UNREACHABLE));
+                }
             }
             return out;
         } catch (InterruptedException e) {
@@ -379,7 +393,17 @@ public class DefaultAppControlService implements AppControlService {
         }
         subscriptionService.refreshSubscription(subscriptionId);
         ensureSaved();
-        return "Refresh triggered for subscription '" + sub.get().getName() + "'.";
+        // The refresh has run by now, and records its failure on the
+        // subscription rather than throwing: the tool said "Refresh triggered"
+        // for a dead URL or an expired token alike.
+        Subscription refreshed = subscriptionService.getSubscriptions().stream()
+                .filter(s -> s.getId().equals(subscriptionId)).findFirst().orElse(sub.get());
+        if (refreshed.hasLastError()) {
+            throw new McpToolException("Refreshing subscription '" + refreshed.getName()
+                    + "' failed: " + SubscriptionService.failureText(refreshed));
+        }
+        return "Refreshed subscription '" + refreshed.getName() + "': "
+                + refreshed.getServerIds().size() + " servers.";
     }
 
     @Override

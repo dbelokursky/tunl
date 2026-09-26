@@ -1,6 +1,7 @@
 package com.vlessclient.service;
 
 import com.vlessclient.app.AppVersion;
+import com.vlessclient.app.I18n;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.Subscription;
 import com.vlessclient.platform.PlatformPaths;
@@ -277,6 +278,23 @@ public class SubscriptionService {
         saveSubscriptions();
         Thread.startVirtualThread(() -> sealer.delete(urlSecretKey(sub.getId())));
         log.info("Removed subscription '{}' and {} servers", sub.getName(), members.size());
+    }
+
+    /**
+     * The last refresh's failure as the app words it: one the app worded
+     * itself is rendered from its key now, in the current language; a sentence
+     * from an older file is shown as it stands, because that is all such a
+     * file holds.
+     *
+     * @param sub a subscription whose last refresh failed
+     * @return the failure's text
+     */
+    public static String failureText(Subscription sub) {
+        String key = sub.getLastErrorKey();
+        if (key != null && !key.isBlank()) {
+            return I18n.get(key, sub.getLastErrorArgs().toArray());
+        }
+        return sub.getLastError();
     }
 
     /**

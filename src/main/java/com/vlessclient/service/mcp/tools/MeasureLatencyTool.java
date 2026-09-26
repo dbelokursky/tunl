@@ -30,7 +30,10 @@ public class MeasureLatencyTool implements McpTool {
 
     @Override
     public String description() {
-        return "Measure latency to one server ('serverId') or all servers if omitted.";
+        return "Measure latency to one server ('serverId') or all servers if omitted. "
+                + "Each result's 'outcome' is 'measured', 'unreachable' or 'not_measured' "
+                + "(nothing could be measured, e.g. a UDP server); 'latencyMs' is -1 "
+                + "unless measured.";
     }
 
     @Override

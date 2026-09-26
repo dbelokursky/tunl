@@ -3,12 +3,15 @@ package com.vlessclient.service.mcp;
 import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.model.Subscription;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
+import com.vlessclient.service.LatencyTester;
 import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ShareLinkParser;
 import com.vlessclient.service.SingBoxConfigGenerator;
 import com.vlessclient.service.SingBoxEngine;
+import com.vlessclient.service.TestSubscriptionServices;
 import com.vlessclient.testing.FxToolkitExtension;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,11 +22,15 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * Direct tests of {@link DefaultAppControlService} that don't need a running
@@ -392,5 +399,101 @@ class DefaultAppControlServiceTest {
         store.getSettings().setCoreLogLevel(CoreLogLevel.ERROR);
 
         assertThat(service.getSettings().coreLogLevel()).isEqualTo("error");
+    }
+
+    /**
+     * The refresh records a failure on the subscription rather than throwing,
+     * and the tool said "Refresh triggered" for a dead URL or an expired
+     * token alike. It reports the failure, in the app's words, as a tool error.
+     */
+    @Test
+    void refreshSubscription_aFailedFetchIsAToolErrorWithTheReason() throws Exception {
+        TestSubscriptionServices.Scripted subscriptions =
+                TestSubscriptionServices.scripted(tempDir.resolve("subs"));
+        subscriptions.addSubscription("Provider", "https://sub.example.com/s");
+        Subscription sub = subscriptions.getSubscriptions().getFirst();
+        subscriptions.onRefresh(id -> sub.recordFailure("HTTP 403"));
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, subscriptions,
+                null, null, null, null, new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        assertThatThrownBy(() -> svc.refreshSubscription(sub.getId()))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining("Provider")
+                .hasMessageContaining("HTTP 403");
+    }
+
+    @Test
+    void refreshSubscription_aRefreshThatWorkedSaysHowManyServers() throws Exception {
+        TestSubscriptionServices.Scripted subscriptions =
+                TestSubscriptionServices.scripted(tempDir.resolve("subs"));
+        subscriptions.addSubscription("Provider", "https://sub.example.com/s");
+        Subscription sub = subscriptions.getSubscriptions().getFirst();
+        subscriptions.onRefresh(id -> {
+            sub.clearLastError();
+            sub.setServerIds(List.of("a", "b"));
+        });
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, subscriptions,
+                null, null, null, null, new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        assertThat(svc.refreshSubscription(sub.getId()))
+                .isEqualTo("Refreshed subscription 'Provider': 2 servers.");
+    }
+
+    /**
+     * A server nothing could be measured for, such as one over UDP, came out
+     * as -1, the same as one that did not answer.
+     */
+    @Test
+    void measureLatency_tellsANotMeasuredServerFromAnUnreachableOne() throws Exception {
+        store.addServer(server("srv-2", "Hysteria"));
+        store.addServer(server("srv-3", "Down"));
+        LatencyTester tester = new LatencyTester() {
+            @Override
+            public CompletableFuture<Map<String, Result>> testAll(List<ServerConfig> servers) {
+                return CompletableFuture.completedFuture(Map.of(
+                        "srv-1", new Result(42, true),
+                        "srv-2", Result.notMeasured(),
+                        "srv-3", new Result(-1, true)));
+            }
+        };
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, null, null,
+                null, tester, null, new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        assertThat(svc.measureLatency(null))
+                .extracting(LatencyResult::serverId, LatencyResult::latencyMs,
+                        LatencyResult::outcome)
+                .containsExactly(
+                        tuple("srv-1", 42L, LatencyResult.MEASURED),
+                        tuple("srv-2", -1L, LatencyResult.NOT_MEASURED),
+                        tuple("srv-3", -1L, LatencyResult.UNREACHABLE));
+    }
+
+    /**
+     * A mode changed in Settings applies at the next start. get_status gave
+     * the settings' mode, so an agent read the new one as running.
+     */
+    @Test
+    void getStatus_saysTheModeTheRunningCoreUses() {
+        ConnectionService running = new ConnectionService(null, null, null, null) {
+            @Override
+            public Optional<ProxyMode> runningMode() {
+                return Optional.of(ProxyMode.TUN);
+            }
+        };
+        StatusInfo status = new DefaultAppControlService(store, null, null, null, running,
+                null, null, new SingBoxEngine(tempDir.resolve("sing-box"))).getStatus();
+
+        assertThat(status.proxyMode()).as("the settings' mode")
+                .isEqualTo(ProxyMode.SYSTEM_PROXY.getValue());
+        assertThat(status.runningProxyMode()).as("the running core's")
+                .isEqualTo(ProxyMode.TUN.getValue());
+    }
+
+    @Test
+    void getStatus_namesNoRunningModeWithoutACore() {
+        StatusInfo status = serviceWith(new RecordingConnectionService(null),
+                new SingBoxEngine(tempDir.resolve("sing-box"))).getStatus();
+
+        assertThat(status.runningProxyMode()).isNull();
     }
 }
