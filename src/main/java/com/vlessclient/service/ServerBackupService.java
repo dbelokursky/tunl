@@ -105,25 +105,50 @@ public class ServerBackupService {
     }
 
     /**
+     * What an export wrote.
+     *
+     * @param written how many servers the file holds
+     * @param leftOut the names of the servers left out because a credential
+     *                of theirs could not be read from the keychain
+     */
+    public record Export(int written, List<String> leftOut) {
+
+        /** Copies the list so the result cannot change under its reader. */
+        public Export {
+            leftOut = List.copyOf(leftOut);
+        }
+    }
+
+    /**
      * Writes every configured server to {@code file} as JSON, credentials in
-     * plain text, owner-only.
+     * plain text, owner-only. A server whose credential the keychain did not
+     * return holds its sealed tag, which restores to nothing on another
+     * machine, so it is left out and named.
      *
      * @param file the file to write; an existing file is replaced
-     * @return how many servers were written
+     * @return what was written and what was left out
      * @throws IOException if the file could not be written
      */
-    public int exportAll(Path file) throws IOException {
+    public Export exportAll(Path file) throws IOException {
         // One marshalled read of the FX-owned list, for the same reason
         // ConnectionService takes one: iterating it from a background thread
         // races the FX thread's mutations.
         List<ServerConfig> snapshot =
                 FxExecutor.get(() -> List.copyOf(configStore.getServers()));
+        List<ServerConfig> readable = snapshot.stream()
+                .filter(server -> !CoreSettings.hasUnreadableCredential(server))
+                .toList();
+        final List<String> leftOut = snapshot.stream()
+                .filter(CoreSettings::hasUnreadableCredential)
+                .map(ServerConfig::getName)
+                .toList();
         ObjectNode envelope = objectMapper.createObjectNode();
         envelope.put("config_version", BACKUP_VERSION);
-        envelope.set("servers", objectMapper.valueToTree(snapshot));
+        envelope.set("servers", objectMapper.valueToTree(readable));
         SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(envelope));
-        log.info("Exported {} servers to {}", snapshot.size(), file);
-        return snapshot.size();
+        log.info("Exported {} servers to {}, left out {} with unreadable credentials",
+                readable.size(), file, leftOut.size());
+        return new Export(readable.size(), leftOut);
     }
 
     /**

@@ -6,6 +6,7 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TlsConfig;
 import com.vlessclient.model.TransportConfig;
 import com.vlessclient.model.TransportType;
+import com.vlessclient.platform.SecretSealer;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Locale;
@@ -254,6 +255,11 @@ public final class CoreSettings {
      * @return the refusal, or empty when the core accepts the server
      */
     public static Optional<Refusal> refusal(ServerConfig server) {
+        if (hasUnreadableCredential(server)) {
+            // Kept as its sealed tag so the entry recovers once the keychain
+            // does; handed to the core, the tag failed in words about neither.
+            return refused("unreadable credential", "refusal.credential.unreadable");
+        }
         int port = server.getPort();
         if (port < 1 || port > 65535) {
             return refused("port " + port, "refusal.port", String.valueOf(port));
@@ -301,6 +307,18 @@ public final class CoreSettings {
             return refused("obfs " + obfs, "refusal.hysteria2.obfs", obfs);
         }
         return Optional.empty();
+    }
+
+    /**
+     * Whether a credential of {@code server} is the sealed tag the keychain
+     * did not return on load, standing in for it until it does: the uuid, or
+     * the flow, which carries Hysteria2's obfuscation password.
+     *
+     * @param server the server
+     * @return true when a credential could not be read
+     */
+    public static boolean hasUnreadableCredential(ServerConfig server) {
+        return SecretSealer.isSealed(server.getUuid()) || SecretSealer.isSealed(server.getFlow());
     }
 
     private static Optional<Refusal> tlsRefusal(TlsConfig tls) {

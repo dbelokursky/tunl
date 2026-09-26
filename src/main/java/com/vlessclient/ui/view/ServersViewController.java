@@ -882,7 +882,19 @@ public class ServersViewController {
             return;
         }
         try {
-            log.info("Exported {} servers", backup.exportAll(file.toPath()));
+            ServerBackupService.Export export = backup.exportAll(file.toPath());
+            log.info("Exported {} servers", export.written());
+            if (!export.leftOut().isEmpty()) {
+                // Their sealed tags would restore to nothing: they were left
+                // out, which the user has to hear, or the backup looks whole.
+                Alert notice = Dialogs.alert(Alert.AlertType.WARNING);
+                notice.setTitle(I18n.get("servers.backup.export.title"));
+                notice.setHeaderText(I18n.get("servers.backup.export.left.out.header"));
+                notice.setContentText(I18n.get("servers.backup.export.left.out.content",
+                        String.join(", ", export.leftOut())));
+                notice.initOwner(ownerWindow());
+                notice.showAndWait();
+            }
         } catch (IOException | RuntimeException e) {
             log.error("Failed to export servers", e);
             Alert alert = Dialogs.alert(Alert.AlertType.ERROR);
@@ -1136,6 +1148,7 @@ public class ServersViewController {
         private final Tooltip latencyTooltip = new Tooltip();
         private final Label protocolBadge = new Label();
         private final Label insecureBadge = new Label();
+        private final Label credentialBadge = new Label();
         private final Label activeBadge = new Label();
         private final Label nowBadge = new Label();
         private final ContextMenu contextMenu = new ContextMenu();
@@ -1190,6 +1203,13 @@ public class ServersViewController {
             Tooltip insecureTooltip = new Tooltip();
             insecureTooltip.textProperty().bind(I18n.binding("servers.badge.insecure.tooltip"));
             insecureBadge.setTooltip(insecureTooltip);
+            // A credential the keychain did not return on load: the server
+            // stays listed and is left out of every connect until it is back.
+            credentialBadge.getStyleClass().add("insecure-badge");
+            credentialBadge.textProperty().bind(I18n.binding("servers.badge.credential"));
+            Tooltip credentialTooltip = new Tooltip();
+            credentialTooltip.textProperty().bind(I18n.binding("refusal.credential.unreadable"));
+            credentialBadge.setTooltip(credentialTooltip);
             // Two marks, because in the Fastest mode they are two servers:
             // the one the user selected, and the one the core routes through.
             activeBadge.getStyleClass().add("active-badge");
@@ -1264,6 +1284,9 @@ public class ServersViewController {
             row.getChildren().add(protocolBadge);
             if (server.getTls() != null && server.getTls().isAllowInsecure()) {
                 row.getChildren().add(insecureBadge);
+            }
+            if (CoreSettings.hasUnreadableCredential(server)) {
+                row.getChildren().add(credentialBadge);
             }
             if (server.isActive()) {
                 row.getChildren().add(activeBadge);

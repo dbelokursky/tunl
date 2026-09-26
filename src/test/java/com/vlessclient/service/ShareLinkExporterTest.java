@@ -17,6 +17,23 @@ class ShareLinkExporterTest {
         exporter = new ShareLinkExporter();
     }
 
+    /**
+     * A credential the keychain did not return is its sealed tag in memory,
+     * and the copied link carried the tag where the credential belongs.
+     */
+    @Test
+    void aServerWhoseCredentialWasNotReadIsNotExported() {
+        ServerConfig config = new ServerConfig();
+        config.setProtocol(Protocol.VLESS);
+        config.setUuid(com.vlessclient.platform.SecretSealer.SEAL_PREFIX + "keychain:v1");
+        config.setAddress("example.com");
+        config.setPort(443);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> exporter.export(config))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(com.vlessclient.app.I18n.get("refusal.credential.unreadable"));
+    }
+
     @Test
     void exportMinimalVless() {
         ServerConfig config = new ServerConfig();

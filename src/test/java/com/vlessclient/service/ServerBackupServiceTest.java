@@ -60,7 +60,7 @@ class ServerBackupServiceTest {
         List<String> originalIds = store.getServers().stream().map(ServerConfig::getId).toList();
 
         Path file = tempDir.resolve("backup.json");
-        assertThat(backup.exportAll(file)).isEqualTo(2);
+        assertThat(backup.exportAll(file).written()).isEqualTo(2);
 
         ConfigStore elsewhere = new ConfigStore(tempDir.resolve("other"));
         ServerBackupService restore = new ServerBackupService(elsewhere, new ShareLinkParser());
@@ -77,6 +77,28 @@ class ServerBackupServiceTest {
         assertThat(elsewhere.getServers())
                 .extracting(ServerConfig::getProtocol)
                 .contains(Protocol.WIREGUARD);
+    }
+
+    /**
+     * A server whose credential the keychain did not return holds its sealed
+     * tag, which restores to nothing on another machine. It went into the
+     * backup that way; now it is left out, and named.
+     */
+    @Test
+    void aServerWhoseCredentialWasNotReadIsLeftOutOfTheBackupAndNamed() throws IOException {
+        store.addServer(server("Netherlands 01", Protocol.VLESS, "vless-secret-uuid"));
+        store.addServer(server("Locked 02", Protocol.VLESS,
+                com.vlessclient.platform.SecretSealer.SEAL_PREFIX + "keychain:v1"));
+        Path file = tempDir.resolve("backup.json");
+
+        ServerBackupService.Export export = backup.exportAll(file);
+
+        assertThat(export.written()).isEqualTo(1);
+        assertThat(export.leftOut()).containsExactly("Locked 02");
+        assertThat(Files.readString(file, StandardCharsets.UTF_8))
+                .contains("Netherlands 01")
+                .doesNotContain("Locked 02")
+                .doesNotContain(com.vlessclient.platform.SecretSealer.SEAL_PREFIX);
     }
 
     @Test
