@@ -348,8 +348,11 @@ public class ServiceReachabilityChecker {
     private ProbeResult tcpProbe(
             String name, String display, HostPort hostPort, int httpProxyPort) {
         String target = hostPort.host() + ":" + hostPort.port();
+        // The password is sent whether the proxy asks or not: it asks in TUN
+        // mode, and an open proxy ignores the header.
         String connect = "CONNECT " + target + " HTTP/1.1\r\n"
                 + "Host: " + target + "\r\n"
+                + "Proxy-Authorization: " + LocalProxyCredentials.basicHeader() + "\r\n"
                 + "Proxy-Connection: close\r\n\r\n";
         String lastDetail = "unreachable";
 
@@ -454,6 +457,7 @@ public class ServiceReachabilityChecker {
                 .connectTimeout(Duration.ofMillis(CONNECT_TIMEOUT_MS))
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .proxy(ProxySelector.of(new InetSocketAddress("127.0.0.1", httpProxyPort)))
+                .authenticator(LocalProxyCredentials.authenticator())
                 .build();
         cachedPort = httpProxyPort;
         return cachedClient;

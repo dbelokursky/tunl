@@ -103,6 +103,8 @@ public class SettingsViewController implements ViewShownAware {
     @FXML private TextField tunIpv4Field;
     @FXML private CheckBox tunIpv6Check;
     @FXML private Label tunIpv6Hint;
+    @FXML private CheckBox shareLocalProxyCheck;
+    @FXML private Label shareLocalProxyHint;
 
     @FXML private Button checkUpdatesButton;
 
@@ -217,6 +219,11 @@ public class SettingsViewController implements ViewShownAware {
 
         onUserChange(tunIpv6Check.selectedProperty(), (oldVal, newVal) -> {
             settings.setTunIpv6Enabled(newVal);
+            saveSettings(settings);
+        });
+
+        onUserChange(shareLocalProxyCheck.selectedProperty(), (oldVal, newVal) -> {
+            settings.setShareLocalProxyInTun(newVal);
             saveSettings(settings);
         });
     }
@@ -598,6 +605,8 @@ public class SettingsViewController implements ViewShownAware {
         tunIpv4Label.textProperty().bind(I18n.binding("settings.tun.ipv4"));
         tunIpv6Check.textProperty().bind(I18n.binding("settings.tun.ipv6"));
         tunIpv6Hint.textProperty().bind(I18n.binding("settings.tun.ipv6.hint"));
+        shareLocalProxyCheck.textProperty().bind(I18n.binding("settings.tun.share.proxy"));
+        shareLocalProxyHint.textProperty().bind(I18n.binding("settings.tun.share.proxy.hint"));
         // The whole MCP block sat in the FXML in English.
         mcpSectionTitle.textProperty().bind(I18n.binding("settings.mcp.title"));
         mcpHintLabel.textProperty().bind(I18n.binding("settings.mcp.hint"));
@@ -852,6 +861,7 @@ public class SettingsViewController implements ViewShownAware {
             showSecretStore();
             showCommitted(tunIpv4Field, settings.getTunIpv4Address());
             tunIpv6Check.setSelected(settings.isTunIpv6Enabled());
+            shareLocalProxyCheck.setSelected(settings.isShareLocalProxyInTun());
             mcpEnabledCheck.setSelected(settings.isMcpEnabled());
             showCommitted(mcpPortField, String.valueOf(settings.getMcpPort()));
             mcpAllowMutationsCheck.setSelected(settings.isMcpAllowMutations());

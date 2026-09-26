@@ -33,7 +33,9 @@ class McpSettingsCoverageTest {
             "health_check_delay_seconds", "tuned on the reachability card with its targets",
             "health_check_targets", "tuned on the reachability card with its targets",
             "store_secrets_securely", "moves every credential in or out of the keychain",
-            "device_id", "identifies this install to subscription providers");
+            "device_id", "identifies this install to subscription providers",
+            "share_local_proxy_in_tun",
+            "opens the local proxy to every program; the user's choice, in Settings");
 
     /** A reported name that is not the key in camel case, kept for agents that read it. */
     private static final Map<String, String> REPORTED_AS = Map.of(

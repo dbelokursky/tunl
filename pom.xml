@@ -340,6 +340,14 @@
                         <testfx.robot>glass</testfx.robot>
                         <testfx.headless>true</testfx.headless>
                         <java.awt.headless>true</java.awt.headless>
+                        <!--
+                            As Launcher.main sets it for the app: the local
+                            proxy asks for a password in TUN mode, and the JDK
+                            keeps Basic off HTTPS tunnels unless told. Here
+                            rather than in a test, since the JDK reads it once
+                            per JVM.
+                        -->
+                        <jdk.http.auth.tunneling.disabledSchemes></jdk.http.auth.tunneling.disabledSchemes>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>

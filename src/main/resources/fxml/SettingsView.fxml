@@ -156,6 +156,11 @@
         <Label fx:id="tunIpv6Hint" styleClass="hint-label" wrapText="true" maxWidth="520"
                text="Off, IPv6 traffic bypasses the VPN on dual-stack networks. Applies in TUN mode."/>
 
+        <CheckBox fx:id="shareLocalProxyCheck" text="Let other programs use the local proxy in TUN mode"
+                  styleClass="form-checkbox"/>
+        <Label fx:id="shareLocalProxyHint" styleClass="hint-label" wrapText="true" maxWidth="520"
+               text="Off, the local SOCKS and HTTP proxies ask for a password only Tunl knows."/>
+
         <CheckBox fx:id="storeSecretsCheck" text="Store credentials in the system keychain"
                   styleClass="form-checkbox"/>
         <!-- Shown while the box is on and the keychain does not work, when the

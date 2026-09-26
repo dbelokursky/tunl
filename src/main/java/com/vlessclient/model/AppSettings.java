@@ -138,6 +138,14 @@ public class AppSettings extends KeepsUnknownFields {
     @JsonProperty("tun_ipv6_enabled")
     private boolean tunIpv6Enabled = true;
 
+    /**
+     * Whether other programs may use the local SOCKS and HTTP proxies in TUN
+     * mode. Off, the proxies ask for a password only the app knows, as the
+     * tunnel carries every program's traffic already.
+     */
+    @JsonProperty("share_local_proxy_in_tun")
+    private boolean shareLocalProxyInTun;
+
     @JsonProperty("health_check_enabled")
     private boolean healthCheckEnabled = true;
 
@@ -415,6 +423,24 @@ public class AppSettings extends KeepsUnknownFields {
 
     public void setTunIpv6Enabled(boolean tunIpv6Enabled) {
         this.tunIpv6Enabled = tunIpv6Enabled;
+    }
+
+    public boolean isShareLocalProxyInTun() {
+        return shareLocalProxyInTun;
+    }
+
+    public void setShareLocalProxyInTun(boolean shareLocalProxyInTun) {
+        this.shareLocalProxyInTun = shareLocalProxyInTun;
+    }
+
+    /**
+     * Whether the local proxies ask for this run's password: in TUN mode,
+     * unless the user opened them to other programs.
+     *
+     * @return true when the core is to be given the password
+     */
+    public boolean localProxyNeedsPassword() {
+        return proxyMode == ProxyMode.TUN && !shareLocalProxyInTun;
     }
 
     public boolean isHealthCheckEnabled() {
