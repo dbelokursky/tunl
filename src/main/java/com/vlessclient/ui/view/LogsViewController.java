@@ -105,6 +105,10 @@ public class LogsViewController {
     public void initialize() {
         titleLabel.textProperty().bind(I18n.binding("logs.title"));
         searchField.promptTextProperty().bind(I18n.binding("logs.search.prompt"));
+        // No label stands beside these two, so each carries its own name for
+        // a screen reader: the prompt the field shows, the filter's tooltip.
+        searchField.accessibleTextProperty().bind(searchField.promptTextProperty());
+        logLevelFilter.accessibleTextProperty().bind(I18n.binding("logs.filter.tooltip"));
         ButtonLabels.bindStatic(autoScrollCheckBox, "logs.auto.scroll");
         // Items are the filter codes buildLevelPredicate() switches on; the
         // converter renders the localized names, so translating the UI can

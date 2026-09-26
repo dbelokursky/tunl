@@ -194,6 +194,11 @@ public class DashboardViewController implements ViewShownAware {
         // Section headers and the two health-card buttons sat in the FXML as
         // English literals; in Russian the dashboard was half-translated.
         modeLabel.textProperty().bind(I18n.binding("dashboard.mode"));
+        // A screen reader names a field by the label that says it is for it;
+        // drawn beside it, the label named nothing, and every field was read
+        // out as "edit" or "combo box".
+        modeLabel.setLabelFor(proxyModeCombo);
+        serverSelectionLabel.setLabelFor(serverSelectionCombo);
         healthSectionTitle.textProperty().bind(I18n.binding("dashboard.health.title"));
         ButtonLabels.bindStatic(recheckButton, "dashboard.health.recheck");
         // "+" is a symbol: a screen reader read out nothing for it.

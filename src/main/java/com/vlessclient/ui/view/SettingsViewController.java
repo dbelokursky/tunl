@@ -550,6 +550,23 @@ public class SettingsViewController implements ViewShownAware {
         launchAtLoginCheck.textProperty().bind(I18n.binding("settings.launch.at.login"));
         proxyPortsLabel.textProperty().bind(I18n.binding("settings.proxy.ports"));
         socksPortLabel.textProperty().bind(I18n.binding("settings.socks.port"));
+        // A screen reader names a field by the label that says it is for it;
+        // drawn beside it, the label named nothing, and every field was read
+        // out as "edit" or "combo box".
+        themeLabel.setLabelFor(themeCombo);
+        languageLabel.setLabelFor(languageCombo);
+        socksPortLabel.setLabelFor(socksPortField);
+        httpPortLabel.setLabelFor(httpPortField);
+        coreLogLevelLabel.setLabelFor(coreLogLevelCombo);
+        proxyModeLabel.setLabelFor(proxyModeCombo);
+        healthCheckIntervalLabel.setLabelFor(healthCheckIntervalField);
+        healthCheckReconnectDelayLabel.setLabelFor(healthCheckReconnectDelayField);
+        proxyDnsLabel.setLabelFor(proxyDnsField);
+        directDnsLabel.setLabelFor(directDnsField);
+        tunInterfaceNameLabel.setLabelFor(tunInterfaceNameField);
+        tunIpv4Label.setLabelFor(tunIpv4Field);
+        mcpPortLabel.setLabelFor(mcpPortField);
+        mcpCommandLabel.setLabelFor(mcpCommandArea);
         httpPortLabel.textProperty().bind(I18n.binding("settings.http.port"));
         coreLogLevelLabel.textProperty().bind(I18n.binding("settings.core.log.level"));
         coreLogLevelHint.textProperty().bind(I18n.binding("settings.core.log.level.hint"));
