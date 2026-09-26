@@ -11,6 +11,7 @@ import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.CountryResolver;
 import com.vlessclient.service.DiagnosticsBundle;
+import com.vlessclient.service.FxExecutor;
 import com.vlessclient.service.GeoIpDatabase;
 import com.vlessclient.service.LatencyTester;
 import com.vlessclient.service.ProxyGroupMonitor;
@@ -111,6 +112,10 @@ public class ServiceLocator {
 
         ThemeManager themeManager = new ThemeManager();
         register(ThemeManager.class, themeManager);
+        // Whoever saves the settings, the Settings screen or an agent over
+        // MCP, the window follows a change of their language or theme.
+        SettingsEffects effects = new SettingsEffects(configStore.getSettings(), themeManager);
+        configStore.addSettingsListener(saved -> FxExecutor.later(() -> effects.accept(saved)));
 
         LatencyTester latencyTester = new LatencyTester();
         register(LatencyTester.class, latencyTester);

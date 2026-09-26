@@ -289,6 +289,21 @@ class SingBoxConfigGeneratorTunTest {
     }
 
     /**
+     * An agent could store any word as the DNS strategy through MCP, and the
+     * core refused the whole configuration over it, whichever server was
+     * picked.
+     */
+    @Test
+    void aDnsStrategyTheCoreDoesNotTakeIsAskedForAsTheDefault() throws Exception {
+        AppSettings settings = tunSettings();
+        settings.setDnsStrategy("fastest");
+
+        JsonNode dns = parse(generator.generate(createVlessServer(), settings)).get("dns");
+
+        assertThat(dns.get("strategy").asString()).isEqualTo("prefer_ipv4");
+    }
+
+    /**
      * The core refuses a DNS server named by host unless it knows how to
      * resolve that name ("missing domain resolver for domain server address"),
      * so a Direct DNS such as {@code tls://dns.quad9.net} kept TUN mode from

@@ -3,6 +3,7 @@ package com.vlessclient.ui.view;
 import com.vlessclient.app.AppVersion;
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.app.SettingsEffects;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.model.ProxyMode;
@@ -15,7 +16,6 @@ import com.vlessclient.service.mcp.McpServerService;
 import com.vlessclient.ui.view.settings.TrafficHistorySettingsSection;
 import com.vlessclient.ui.view.settings.UpdatesSection;
 import java.io.IOException;
-import java.util.Locale;
 import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -89,6 +89,8 @@ public class SettingsViewController implements ViewShownAware {
     @FXML private TextField healthCheckIntervalField;
     @FXML private TextField healthCheckReconnectDelayField;
     @FXML private ComboBox<CoreLogLevel> coreLogLevelCombo;
+    @FXML private Label dnsStrategyLabel;
+    @FXML private ComboBox<String> dnsStrategyCombo;
     @FXML private ComboBox<ProxyMode> proxyModeCombo;
     @FXML private CheckBox systemProxyAutoConfigCheck;
     @FXML private CheckBox storeSecretsCheck;
@@ -166,6 +168,7 @@ public class SettingsViewController implements ViewShownAware {
         initConnectionSettings(settings);
         initHealthCheckSettings(settings);
         initCoreLogLevelCombo(settings);
+        initDnsStrategyCombo(settings);
         initProxyModeCombo(settings);
         initSystemProxyAutoConfig(settings);
         initAdvancedSettings(settings);
@@ -288,8 +291,7 @@ public class SettingsViewController implements ViewShownAware {
         onUserChange(ComboCommits.committed(languageCombo), (oldVal, newVal) -> {
             if (newVal != null && !newVal.equals(oldVal)) {
                 settings.setLanguage(newVal);
-                Locale newLocale = "ru".equals(newVal) ? Locale.of("ru") : Locale.ENGLISH;
-                I18n.setLocale(newLocale);
+                I18n.setLocale(SettingsEffects.localeFor(newVal));
                 saveSettings(settings);
                 refreshLabels();
             }
@@ -465,6 +467,46 @@ public class SettingsViewController implements ViewShownAware {
         });
     }
 
+    /**
+     * Wires the DNS strategy combo. The setting was in settings.json, and
+     * agents could set it through MCP, but the screen had no control for it.
+     */
+    private void initDnsStrategyCombo(AppSettings settings) {
+        dnsStrategyCombo.getItems().addAll(AppSettings.DNS_STRATEGIES);
+        dnsStrategyCombo.setCellFactory(cb -> new ListCell<>() {
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : formatDnsStrategy(item));
+            }
+        });
+        dnsStrategyCombo.setButtonCell(new ListCell<>() {
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : formatDnsStrategy(item));
+            }
+        });
+
+        onUserChange(ComboCommits.committed(dnsStrategyCombo), (oldVal, newVal) -> {
+            if (newVal != null && !newVal.equals(oldVal)) {
+                settings.setDnsStrategy(newVal);
+                saveSettings(settings);
+            }
+        });
+    }
+
+    /** A strategy's name in the UI's language; a stored word the app does not know, as it is. */
+    private static String formatDnsStrategy(String strategy) {
+        return switch (strategy) {
+            case "prefer_ipv4" -> I18n.get("settings.dns.strategy.prefer_ipv4");
+            case "prefer_ipv6" -> I18n.get("settings.dns.strategy.prefer_ipv6");
+            case "ipv4_only" -> I18n.get("settings.dns.strategy.ipv4_only");
+            case "ipv6_only" -> I18n.get("settings.dns.strategy.ipv6_only");
+            default -> strategy;
+        };
+    }
+
     private void initProxyModeCombo(AppSettings settings) {
         proxyModeCombo.getItems().addAll(ProxyMode.values());
         proxyModeCombo.setCellFactory(cb -> new ListCell<>() {
@@ -555,6 +597,8 @@ public class SettingsViewController implements ViewShownAware {
         healthCheckReconnectDelayLabel.setLabelFor(healthCheckReconnectDelayField);
         proxyDnsLabel.setLabelFor(proxyDnsField);
         directDnsLabel.setLabelFor(directDnsField);
+        dnsStrategyLabel.setLabelFor(dnsStrategyCombo);
+        dnsStrategyLabel.textProperty().bind(I18n.binding("settings.dns.strategy"));
         tunInterfaceNameLabel.setLabelFor(tunInterfaceNameField);
         tunIpv4Label.setLabelFor(tunIpv4Field);
         mcpPortLabel.setLabelFor(mcpPortField);
@@ -638,6 +682,17 @@ public class SettingsViewController implements ViewShownAware {
         CoreLogLevel currentLevel = coreLogLevelCombo.getValue();
         coreLogLevelCombo.setValue(null);
         coreLogLevelCombo.setValue(currentLevel);
+
+        // ...and the DNS strategy combo, which is showing, not choosing
+        boolean wasShowingStored = showingStored;
+        showingStored = true;
+        try {
+            String currentStrategy = dnsStrategyCombo.getValue();
+            dnsStrategyCombo.setValue(null);
+            dnsStrategyCombo.setValue(currentStrategy);
+        } finally {
+            showingStored = wasShowingStored;
+        }
     }
 
     private String formatCoreLogLevel(CoreLogLevel level) {
@@ -856,6 +911,7 @@ public class SettingsViewController implements ViewShownAware {
             systemProxyAutoConfigCheck.setSelected(settings.isSystemProxyAutoConfig());
             showCommitted(proxyDnsField, settings.getProxyDns());
             showCommitted(directDnsField, settings.getDirectDns());
+            dnsStrategyCombo.setValue(settings.getDnsStrategy());
             showCommitted(tunInterfaceNameField, settings.getTunInterfaceName());
             storeSecretsCheck.setSelected(settings.isStoreSecretsSecurely());
             showSecretStore();

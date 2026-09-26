@@ -111,8 +111,15 @@ public class AppSettings extends KeepsUnknownFields {
     @JsonProperty("direct_dns")
     private String directDns = SYSTEM_DNS;
 
+    /**
+     * The DNS strategies the core takes, the default first. A value outside
+     * them stopped the core at startup, whichever server was picked.
+     */
+    public static final List<String> DNS_STRATEGIES =
+            List.of("prefer_ipv4", "prefer_ipv6", "ipv4_only", "ipv6_only");
+
     @JsonProperty("dns_strategy")
-    private String dnsStrategy = "prefer_ipv4";
+    private String dnsStrategy = DNS_STRATEGIES.getFirst();
 
     @JsonProperty("tun_interface_name")
     private String tunInterfaceName = defaultTunInterfaceName();

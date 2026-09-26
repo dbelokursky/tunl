@@ -1,6 +1,7 @@
 package com.vlessclient.service.outbound;
 
 import com.vlessclient.app.I18n;
+import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TlsConfig;
@@ -150,6 +151,20 @@ public final class CoreSettings {
         }
         boolean tls = server.getTls() != null && server.getTls().isEnabled();
         return VMESS_CLEAR.contains(cipher) && !tls ? "auto" : cipher;
+    }
+
+    /**
+     * The DNS strategy to ask the core for: the stored one, or the default,
+     * {@code prefer_ipv4}, for one it does not take. An agent could store any
+     * word through MCP, and the core refused the whole configuration over it.
+     *
+     * @param stored the stored strategy
+     * @return one of {@link AppSettings#DNS_STRATEGIES}
+     */
+    public static String dnsStrategy(String stored) {
+        String strategy = stored == null ? "" : stored.strip().toLowerCase(Locale.ROOT);
+        return AppSettings.DNS_STRATEGIES.contains(strategy)
+                ? strategy : AppSettings.DNS_STRATEGIES.getFirst();
     }
 
     /**

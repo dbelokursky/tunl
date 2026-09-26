@@ -351,4 +351,26 @@ public class SettingsViewTest extends ApplicationTest {
                         command.getPrefRowCount())
                 .isGreaterThan(singleLineField);
     }
+
+    /**
+     * The DNS strategy was in settings.json, and agents could set it through
+     * MCP, but the screen had no control for it.
+     */
+    @Test
+    void theDnsStrategyIsShownAndChosenHere() {
+        ComboBox<String> combo = lookup("#dnsStrategyCombo").query();
+        ConfigStore store = ServiceLocator.get(ConfigStore.class);
+        String before = store.getSettings().getDnsStrategy();
+        try {
+            assertThat(combo.getValue()).isEqualTo(before);
+            assertThat(combo.getItems())
+                    .containsExactly("prefer_ipv4", "prefer_ipv6", "ipv4_only", "ipv6_only");
+
+            interact(() -> combo.setValue("ipv6_only"));
+
+            assertThat(store.getSettings().getDnsStrategy()).isEqualTo("ipv6_only");
+        } finally {
+            interact(() -> combo.setValue(before));
+        }
+    }
 }

@@ -26,7 +26,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.nio.file.Path;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
@@ -306,9 +305,7 @@ public class VlessClientApp extends Application {
         // installer can open before the main window does, and it speaks the
         // language I18n holds, in the theme ThemeManager holds.
         AppSettings settings = ServiceLocator.get(AppSettings.class);
-        String lang = settings.getLanguage();
-        Locale locale = "ru".equals(lang) ? Locale.of("ru") : Locale.ENGLISH;
-        I18n.setLocale(locale);
+        I18n.setLocale(SettingsEffects.localeFor(settings.getLanguage()));
         ThemeManager themeManager = ServiceLocator.get(ThemeManager.class);
         themeManager.setTheme(settings.getTheme());
 

@@ -106,6 +106,25 @@ public final class FxExecutor {
     }
 
     /**
+     * Runs {@code action} on the FX thread without waiting for it: at once when
+     * already there, queued otherwise, and inline when no toolkit is running,
+     * as in a test without one.
+     *
+     * @param action what to run
+     */
+    public static void later(Runnable action) {
+        if (Platform.isFxApplicationThread()) {
+            action.run();
+            return;
+        }
+        try {
+            Platform.runLater(action);
+        } catch (IllegalStateException toolkitNotRunning) {
+            action.run();
+        }
+    }
+
+    /**
      * Runs {@code action} on the FX thread and blocks until it finishes.
      */
     public static void run(Runnable action) {
