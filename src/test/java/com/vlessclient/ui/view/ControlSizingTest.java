@@ -214,7 +214,8 @@ public class ControlSizingTest extends ApplicationTest {
      * view: all of its fields sit inside a scroll pane, and while the filter
      * stopped at the pane's viewport not one of them was measured and both
      * checks passed. The fields of the sections a VLESS server hides have to
-     * stay out just as firmly, or they would read as clipped.
+     * stay out just as firmly, or they would read as clipped: the transport's
+     * and TLS's own fields, and the cipher box, since VLESS has no cipher.
      */
     @Test
     void bothChecksMeasureExactlyTheFieldsTheServerFormShows() {
@@ -231,8 +232,7 @@ public class ControlSizingTest extends ApplicationTest {
         assertThat(measured)
                 .as("the ServerFormView fields the sizing checks measure")
                 .containsExactlyInAnyOrder("protocolCombo", "nameField", "addressField",
-                        "portField", "uuidField", "encryptionCombo", "flowCombo",
-                        "transportTypeCombo");
+                        "portField", "uuidField", "flowCombo", "transportTypeCombo");
     }
 
     private void collectClipped(String view, String theme, Locale locale, Parent root,

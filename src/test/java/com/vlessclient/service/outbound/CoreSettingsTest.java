@@ -324,4 +324,43 @@ class CoreSettingsTest {
         server.setPluginOpts(options);
         return server;
     }
+
+    /**
+     * The core was asked for {@code auto} whatever cipher a VMess server had,
+     * a link's {@code scy} or the form's choice.
+     */
+    @Test
+    void aVmessServersOwnCipherIsAskedFor() {
+        assertThat(CoreSettings.vmessSecurity(vmess("aes-128-gcm", false)))
+                .isEqualTo("aes-128-gcm");
+        assertThat(CoreSettings.vmessSecurity(vmess(" CHACHA20-POLY1305 ", false)))
+                .isEqualTo("chacha20-poly1305");
+        assertThat(CoreSettings.vmessSecurity(vmess("zero", true)))
+                .as("no cipher of its own inside TLS")
+                .isEqualTo("zero");
+        assertThat(CoreSettings.vmessSecurity(vmess("none", true))).isEqualTo("none");
+    }
+
+    /**
+     * Without TLS nothing else encrypts the payload, and servers made in the
+     * form were stored with none, its default, while the core got auto.
+     */
+    @Test
+    void aVmessCipherThatLeavesThePayloadClearIsAskedForOnlyInsideTls() {
+        assertThat(CoreSettings.vmessSecurity(vmess("none", false))).isEqualTo("auto");
+        assertThat(CoreSettings.vmessSecurity(vmess("zero", false))).isEqualTo("auto");
+    }
+
+    @Test
+    void aVmessCipherTheCoreDoesNotKnowIsAskedForAsAuto() {
+        assertThat(CoreSettings.vmessSecurity(vmess("aes-256-cfb", true))).isEqualTo("auto");
+        assertThat(CoreSettings.vmessSecurity(vmess(null, true))).isEqualTo("auto");
+    }
+
+    private static ServerConfig vmess(String cipher, boolean tls) {
+        ServerConfig server = TestServers.vless("Tokyo").protocol(Protocol.VMESS)
+                .encryption(cipher).build();
+        server.getTls().setEnabled(tls);
+        return server;
+    }
 }

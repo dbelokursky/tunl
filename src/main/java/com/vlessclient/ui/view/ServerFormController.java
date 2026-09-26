@@ -47,6 +47,10 @@ public class ServerFormController {
     /** Copies the server under edit into the draft a refusal is checked on. */
     private static final ObjectMapper COPIER = JsonMapper.builder().build();
 
+    /** The VMess ciphers the form offers; auto first, the one to pick. */
+    private static final List<String> VMESS_CIPHERS = List.of(
+            "auto", "aes-128-gcm", "chacha20-poly1305", "none", "zero");
+
     /** Appended to a required field's label. Lives here so the two places
      *  that build one cannot drift apart. */
     private static final String REQUIRED_MARKER = " *";
@@ -145,7 +149,7 @@ public class ServerFormController {
         protocolCombo.setItems(FXCollections.observableArrayList(Protocol.values()));
         protocolCombo.setValue(Protocol.VLESS);
 
-        encryptionCombo.setItems(FXCollections.observableArrayList("none", "auto", "zero"));
+        encryptionCombo.setItems(FXCollections.observableArrayList(VMESS_CIPHERS));
         encryptionCombo.setValue("none");
 
         flowCombo.setItems(FXCollections.observableArrayList("", "xtls-rprx-vision"));
@@ -422,8 +426,9 @@ public class ServerFormController {
         encryptionCombo.setEditable(false);
         flowCombo.setEditable(false);
 
-        // Reset encryption combo to VLESS defaults
-        encryptionCombo.setItems(FXCollections.observableArrayList("none", "auto", "zero"));
+        // Reset the encryption combo to VMess's ciphers, the one protocol
+        // that has a choice of them here.
+        encryptionCombo.setItems(FXCollections.observableArrayList(VMESS_CIPHERS));
         if (encryptionCombo.getValue() == null
                 || !encryptionCombo.getItems().contains(encryptionCombo.getValue())) {
             encryptionCombo.setValue("none");
@@ -438,12 +443,17 @@ public class ServerFormController {
 
         switch (protocol) {
             case VLESS -> {
-                // All fields shown — defaults are fine
+                // No cipher of its own: TLS or REALITY encrypts it. The box
+                // offered VMess's ciphers, which VLESS ignores.
+                setNodeVisible(encryptionBox, false);
+                encryptionCombo.setValue("none");
             }
             case VMESS -> {
-                // No Flow, no Reality
+                // No Flow, no Reality. A new VMess server asks for auto; the
+                // server being edited brings its own cipher after this.
                 setNodeVisible(flowBox, false);
                 setNodeVisible(realitySection, false);
+                encryptionCombo.setValue("auto");
             }
             case TROJAN -> {
                 // UUID label -> "Password", no Flow. REALITY stays: a Trojan
