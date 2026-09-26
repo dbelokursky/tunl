@@ -762,7 +762,7 @@ public class ConfigStore {
                             e.getMessage());
                 }
             }
-            loaded.forEach(this::unsealInPlace);
+            Unsealing.each(loaded, this::unsealInPlace);
             servers.addAll(loaded);
             if (unreadable > 0) {
                 persistence.couldNotRead(SERVERS_FILE, unreadable);

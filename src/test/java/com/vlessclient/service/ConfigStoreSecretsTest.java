@@ -8,6 +8,7 @@ import com.vlessclient.testing.Await;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -58,6 +59,65 @@ class ConfigStoreSecretsTest {
         ConfigStore reloaded = new ConfigStore(tempDir, sealer);
         assertThat(reloaded.getServers()).hasSize(1);
         assertThat(reloaded.getServers().get(0).getUuid()).isEqualTo("super-secret-uuid");
+    }
+
+    /**
+     * Every sealed credential is a keychain process of its own, and a load
+     * read them one after another before the window first appeared: 1.6 s
+     * for a hundred servers on macOS. They are read a few at a time now, and
+     * each still lands on its own server.
+     */
+    @Test
+    void sealedCredentialsAreReadAFewAtATime() {
+        InMemorySecretSealer sealer = new InMemorySecretSealer();
+        ConfigStore store = new ConfigStore(tempDir, sealer);
+        List<String> uuids = java.util.stream.IntStream.range(0, 12)
+                .mapToObj(i -> "uuid-" + i).toList();
+        for (int i = 0; i < uuids.size(); i++) {
+            store.addServer(server("s" + i, uuids.get(i)));
+        }
+        java.util.concurrent.atomic.AtomicInteger inFlight =
+                new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger most =
+                new java.util.concurrent.atomic.AtomicInteger();
+        SecretSealer slow = new SecretSealer() {
+            @Override
+            public boolean isAvailable() {
+                return true;
+            }
+
+            @Override
+            public String seal(String key, String plaintext) {
+                return sealer.seal(key, plaintext);
+            }
+
+            @Override
+            public java.util.Optional<String> unseal(String key, String stored) {
+                most.accumulateAndGet(inFlight.incrementAndGet(), Math::max);
+                try {
+                    Thread.sleep(40);
+                    synchronized (sealer) {
+                        return sealer.unseal(key, stored);
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return java.util.Optional.empty();
+                } finally {
+                    inFlight.decrementAndGet();
+                }
+            }
+
+            @Override
+            public void delete(String key) {
+                sealer.delete(key);
+            }
+        };
+
+        ConfigStore reloaded = new ConfigStore(tempDir, slow);
+
+        assertThat(reloaded.getServers()).extracting(ServerConfig::getUuid)
+                .containsExactlyElementsOf(uuids);
+        assertThat(most.get()).as("credentials read at once").isGreaterThan(1);
     }
 
     @Test
