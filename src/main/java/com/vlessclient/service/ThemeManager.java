@@ -1,6 +1,10 @@
 package com.vlessclient.service;
 
 import com.vlessclient.platform.MacAppearance;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.Executors;
@@ -9,6 +13,7 @@ import java.util.concurrent.TimeUnit;
 import javafx.application.ColorScheme;
 import javafx.application.Platform;
 import javafx.scene.Scene;
+import javafx.scene.text.Font;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -57,8 +62,32 @@ public class ThemeManager {
     private Scene scene;
 
     private ScheduledExecutorService watcher;
+
+    /**
+     * The OS's text size as a factor on base.css's font sizes, or null until
+     * the first stylesheet is asked for: JavaFX knows its default font only
+     * once the toolkit runs.
+     */
+    private Double textScale;
+
+    /** base.css's font rules at {@link #textScale}, as a data URL; null at 1. */
+    private String scaledFonts;
+
     /** Last OS appearance observed by the watcher (true = dark, null = unknown). */
     private volatile Boolean lastSystemDark;
+
+    /** A manager that follows the OS's text size. */
+    public ThemeManager() {
+    }
+
+    /**
+     * A manager at a fixed text size, for tests.
+     *
+     * @param textScale the factor on base.css's font sizes
+     */
+    ThemeManager(double textScale) {
+        this.textScale = textScale;
+    }
 
     /**
      * Sets the theme preference. Valid values: {@code "auto"}, {@code "light"},
@@ -169,7 +198,40 @@ public class ThemeManager {
      * look like anything at all.
      */
     private List<String> stylesheetsFor(boolean dark) {
-        return List.of(externalForm(BASE_CSS), externalForm(dark ? DARK_CSS : LIGHT_CSS));
+        List<String> sheets = new ArrayList<>(List.of(
+                externalForm(BASE_CSS), externalForm(dark ? DARK_CSS : LIGHT_CSS)));
+        String fonts = scaledFonts();
+        if (fonts != null) {
+            // Last, so its sizes win over base.css's for the same selectors.
+            sheets.add(fonts);
+        }
+        return sheets;
+    }
+
+    /** base.css's font rules at the OS's text size, or null at the usual size. */
+    private synchronized String scaledFonts() {
+        if (textScale == null) {
+            textScale = TextScale.factor(Font.getDefault().getSize(),
+                    System.getProperty("os.name", "").toLowerCase().contains("win"));
+            if (textScale > 1) {
+                log.info("Text size {}x the usual: scaling the font sizes", textScale);
+            }
+        }
+        if (textScale <= 1) {
+            return null;
+        }
+        if (scaledFonts == null) {
+            try (InputStream in = Objects.requireNonNull(
+                    getClass().getResourceAsStream(BASE_CSS), BASE_CSS)) {
+                String css = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+                scaledFonts = TextScale.dataUrl(TextScale.scaledRules(css, textScale));
+            } catch (IOException e) {
+                log.warn("Could not scale the font sizes to the OS's text size", e);
+                textScale = 1.0;
+                return null;
+            }
+        }
+        return scaledFonts;
     }
 
     private String externalForm(String cssPath) {
