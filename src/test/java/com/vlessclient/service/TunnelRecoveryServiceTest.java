@@ -233,6 +233,39 @@ class TunnelRecoveryServiceTest {
                 .hasSize(1);
     }
 
+    /**
+     * Recovery giving up is not the user giving up. It used to withdraw the
+     * user's request for a tunnel with it, so the next subscription refresh
+     * went out direct, with its token and the user's address: the leak #394
+     * closed for a tunnel that is down or restarting. The request now stands
+     * until the user connects, disconnects or cancels, and nothing restarts
+     * the refused configuration meanwhile.
+     */
+    @Test
+    void aRefusalStopsRecoveryButNotTheUsersRequest() {
+        recovery.close();
+        ManualScheduler other = new ManualScheduler();
+        recovery = new TunnelRecoveryService(() -> settings, guard -> {
+            throw new ConfigRejectedException("unknown field \"download_detour\"");
+        }, () -> false, other);
+        recovery.connectionRequested();
+        recovery.onConnectionState(ConnectionState.ERROR);
+        other.jobs.getFirst().run();
+
+        assertThat(recovery.isTunnelWanted())
+                .as("the user's request once recovery stopped").isTrue();
+        recovery.onConnectionState(ConnectionState.ERROR);
+        recovery.onHealth(TunnelHealth.BROKEN);
+        recovery.onHealth(TunnelHealth.HEALTHY);
+        assertThat(other.jobs).as("restarts scheduled after the stop").hasSize(1);
+        assertThat(recovery.stopReason())
+                .as("the reason, which a later verdict does not clear").isNotNull();
+
+        recovery.cancel();
+        assertThat(recovery.isTunnelWanted()).as("once the user cancels").isFalse();
+        assertThat(recovery.stopReason()).isNull();
+    }
+
     /** The refusal stays on record until the user's next request, which clears it. */
     @Test
     void aRefusalIsKeptAsTheReasonUntilTheUserConnectsAgain() {

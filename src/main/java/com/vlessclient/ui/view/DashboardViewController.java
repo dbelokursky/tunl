@@ -192,7 +192,6 @@ public class DashboardViewController implements ViewShownAware {
         ButtonLabels.bindStatic(recheckButton, "dashboard.health.recheck");
         // "+" is a symbol: a screen reader read out nothing for it.
         addTargetButton.accessibleTextProperty().bind(I18n.binding("health.target.add.title"));
-        ButtonLabels.bindStatic(cancelReconnectButton, "button.cancel");
         addServerLink.textProperty().bind(I18n.binding("dashboard.cta.add.server"));
         bindInstallBannerLabels();
         ButtonLabels.bind(updateBannerButton, "settings.update.restart");
@@ -281,7 +280,8 @@ public class DashboardViewController implements ViewShownAware {
         // in a new SingBoxEngine after an in-app install.
         healthChecks = new HealthCheckCoordinator(
                 new HealthCheckCoordinator.Controls(healthCard, healthSummaryLabel,
-                        serviceStatusList, reconnectBanner, reconnectBannerLabel),
+                        serviceStatusList, reconnectBanner, reconnectBannerLabel,
+                        cancelReconnectButton),
                 reachabilityChecker, healthState, () -> singBoxEngine,
                 connectionService() != null ? connectionService().getRecoveryService() : null);
 

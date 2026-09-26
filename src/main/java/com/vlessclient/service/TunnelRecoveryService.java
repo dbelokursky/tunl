@@ -44,7 +44,11 @@ public final class TunnelRecoveryService implements AutoCloseable {
     private boolean connectedSinceRequest;
     /** A dropped tunnel waits for the user, because a restart would prompt. */
     private boolean waitingForTheUser;
-    /** Why recovery stopped for the current request, or null while it has not. */
+    /**
+     * Why recovery stopped for the current request, or null while it has not.
+     * While it is set nothing restarts the tunnel, and the user's request for
+     * one stands until they connect, disconnect or cancel.
+     */
     private String stoppedBecause;
     private ConnectionState lastState = ConnectionState.DISCONNECTED;
     /** The last reachability verdict, to re-arm a retry a request cancelled. */
@@ -169,6 +173,7 @@ public final class TunnelRecoveryService implements AutoCloseable {
 
     /** Records a new user connect/reconnect intent and supersedes any older attempt. */
     public synchronized long connectionRequested() {
+        stoppedBecause = null;
         cancelPending();
         wanted = !closed;
         attempts = 0;
@@ -220,6 +225,7 @@ public final class TunnelRecoveryService implements AutoCloseable {
         generation++;
         attempts = 0;
         connectedSinceRequest = false;
+        stoppedBecause = null;
         cancelPending();
     }
 
@@ -270,7 +276,7 @@ public final class TunnelRecoveryService implements AutoCloseable {
      */
     private void schedule(Reason why) {
         AppSettings config = settings.get();
-        if (!wanted || closed || running || pending != null
+        if (!wanted || closed || running || pending != null || stoppedBecause != null
                 || !config.isHealthCheckAutoReconnect()) {
             return;
         }
@@ -344,9 +350,15 @@ public final class TunnelRecoveryService implements AutoCloseable {
         }
     }
 
-    /** Gives recovery up until the user's next request, and publishes why. */
+    /**
+     * Gives recovery up until the user's next request, and publishes why.
+     *
+     * <p>The request itself stands: recovery giving up is not the user giving
+     * up. It used to be withdrawn here, and with it the app's refusal to send
+     * a subscription link outside a tunnel the user wants, so the next refresh
+     * went out direct with its token and the user's address.</p>
+     */
     private void stop(String reason) {
-        wanted = false;
         generation++;
         attempts = 0;
         connectedSinceRequest = false;
@@ -354,7 +366,8 @@ public final class TunnelRecoveryService implements AutoCloseable {
             pending.cancel(false);
             pending = null;
         }
-        publish(null, false, reason);
+        stoppedBecause = reason;
+        publish(null, false);
     }
 
     private void cancelPending() {
@@ -366,16 +379,13 @@ public final class TunnelRecoveryService implements AutoCloseable {
     }
 
     private void publish(Retry value) {
-        publish(value, false, null);
+        publish(value, false);
     }
 
+    /** Publishes a retry, the reconnect offer, and the stop reason as it now stands. */
     private void publish(Retry value, boolean userReconnect) {
-        publish(value, userReconnect, null);
-    }
-
-    private void publish(Retry value, boolean userReconnect, String stopped) {
         waitingForTheUser = userReconnect;
-        stoppedBecause = stopped;
+        String stopped = stoppedBecause;
         // Never wait for FX while holding this monitor: a UI Cancel calls back here.
         long version = ++publication;
         Runnable update = () -> {

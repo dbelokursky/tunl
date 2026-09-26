@@ -3,9 +3,13 @@ package com.vlessclient.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vlessclient.app.I18n;
+import com.vlessclient.model.AppSettings;
+import com.vlessclient.model.ConnectionState;
+import com.vlessclient.testing.Await;
 import com.vlessclient.testing.FxToolkitExtension;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -76,6 +80,43 @@ class TrayConnectFailureTest {
         tray.toggleConnection();
 
         assertThat(notices).isEmpty();
+    }
+
+    /**
+     * Recovery giving up leaves the user's request for a tunnel standing,
+     * with nothing restarting it and the subscriptions held back. With the
+     * window hidden, the tray's colour was all that changed.
+     */
+    @Test
+    void recoveryThatStopsSaysWhy() {
+        AppSettings settings = new AppSettings();
+        settings.setHealthCheckAutoReconnect(true);
+        settings.setHealthCheckDelaySeconds(1);
+        ConfigRejectedException refusal =
+                new ConfigRejectedException("unknown field \"download_detour\"");
+        TunnelRecoveryService recovery = new TunnelRecoveryService(() -> settings, guard -> {
+            throw refusal;
+        }, () -> false);
+        try {
+            TrayIconService tray = trayOver(new StubConnections(tempDir) {
+                @Override
+                public TunnelRecoveryService getRecoveryService() {
+                    return recovery;
+                }
+            });
+            tray.followRecovery();
+
+            recovery.connectionRequested();
+            recovery.onConnectionState(ConnectionState.ERROR);
+
+            assertThat(Await.untilValue("the notice",
+                    () -> FxExecutor.get(() -> List.copyOf(notices)),
+                    shown -> !shown.isEmpty(), Duration.ofSeconds(10)))
+                    .containsExactly(List.of(I18n.get("tray.notify.stopped.title"),
+                            I18n.get("tray.notify.stopped.body", refusal.getMessage())));
+        } finally {
+            recovery.close();
+        }
     }
 
     /** A connection owner with no core behind it, whose connect a test decides. */
