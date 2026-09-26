@@ -117,19 +117,37 @@ jobs:
           }
           JAVA
           mkdir -p "$RUNNER_TEMP/jfr"
-          { java "$RUNNER_TEMP/TimerProbe.java"; nproc 2>/dev/null || sysctl -n hw.ncpu; } \
-            | tee "$RUNNER_TEMP/jfr/timer-probe.txt"
-      - name: Profile the slowest UI tests (experiment)
+          out="$RUNNER_TEMP/jfr/timer-probe.txt"
+          echo "== plain" | tee "$out"
+          java "$RUNNER_TEMP/TimerProbe.java" | tee -a "$out"
+          if [ "$RUNNER_OS" = macOS ]; then
+            echo "== taskpolicy -l 0 -t 0" | tee -a "$out"
+            taskpolicy -l 0 -t 0 java "$RUNNER_TEMP/TimerProbe.java" | tee -a "$out" || true
+            echo "== sysctl kern.timer.coalescing_enabled: $(sysctl -n kern.timer.coalescing_enabled 2>&1)" | tee -a "$out"
+            sudo sysctl -w kern.timer.coalescing_enabled=0 2>&1 | tee -a "$out" || true
+            echo "== after sysctl" | tee -a "$out"
+            java "$RUNNER_TEMP/TimerProbe.java" | tee -a "$out"
+            echo "== after sysctl, taskpolicy" | tee -a "$out"
+            taskpolicy -l 0 -t 0 java "$RUNNER_TEMP/TimerProbe.java" | tee -a "$out" || true
+          fi
+      - name: Time the slowest UI tests (experiment)
         if: matrix.name == 'macos' || matrix.name == 'linux'
         shell: bash
-        env:
-          JAVA_TOOL_OPTIONS: -XX:StartFlightRecording=filename=${{ runner.temp }}/jfr/%p.jfr,settings=profile
         run: |
           start=$(date +%s)
           ./mvnw -B -q test -Djacoco.skip=true -Dcheckstyle.skip -Dspotbugs.skip=true \
             -Dtest='ViewDialogThemeTest,LogsViewTest,DialogStageThemeTest,ControlSizingTest' \
             || true
           echo "ui subset took $(( $(date +%s) - start )) s" | tee -a "$RUNNER_TEMP/jfr/timer-probe.txt"
+          if [ "$RUNNER_OS" = macOS ]; then
+            start=$(date +%s)
+            taskpolicy -l 0 -t 0 ./mvnw -B -q test -Djacoco.skip=true -Dcheckstyle.skip \
+              -Dspotbugs.skip=true \
+              -Dtest='ViewDialogThemeTest,LogsViewTest,DialogStageThemeTest,ControlSizingTest' \
+              || true
+            echo "ui subset under taskpolicy took $(( $(date +%s) - start )) s" \
+              | tee -a "$RUNNER_TEMP/jfr/timer-probe.txt"
+          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always() && (matrix.name == 'macos' || matrix.name == 'linux')
         with:
