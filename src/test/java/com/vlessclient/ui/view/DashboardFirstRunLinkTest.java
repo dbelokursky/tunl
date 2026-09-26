@@ -7,6 +7,7 @@ import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.testing.TestServers;
 import com.vlessclient.testing.UiTest;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
@@ -95,12 +96,12 @@ public class DashboardFirstRunLinkTest extends ApplicationTest {
     }
 
     private static ServerConfig firstServer() {
-        ServerConfig server = new ServerConfig();
-        server.setName("First");
-        server.setProtocol(Protocol.VLESS);
-        server.setAddress("203.0.113.9");
-        server.setPort(443);
-        server.setUuid("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
-        return server;
+        return TestServers.server()
+                .name("First")
+                .protocol(Protocol.VLESS)
+                .address("203.0.113.9")
+                .port(443)
+                .uuid("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+                .build();
     }
 }

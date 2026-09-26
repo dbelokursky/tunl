@@ -15,6 +15,7 @@ import com.vlessclient.service.ProxyGroupMonitor;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.service.outbound.OutboundTags;
+import com.vlessclient.testing.TestServers;
 import com.vlessclient.testing.UiTest;
 import java.nio.file.Path;
 import java.util.List;
@@ -132,13 +133,13 @@ public class DashboardAutoSelectionLabelTest extends ApplicationTest {
     }
 
     private static ServerConfig server(String name, String address) {
-        ServerConfig server = new ServerConfig();
-        server.setName(name);
-        server.setProtocol(Protocol.VLESS);
-        server.setAddress(address);
-        server.setPort(443);
-        server.setUuid("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
-        return server;
+        return TestServers.server()
+                .name(name)
+                .protocol(Protocol.VLESS)
+                .address(address)
+                .port(443)
+                .uuid("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+                .build();
     }
 
     private static <T> T tryGet(Class<T> type) {

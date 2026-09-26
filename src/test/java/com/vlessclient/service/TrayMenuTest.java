@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.vlessclient.app.I18n;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.outbound.OutboundTags;
+import com.vlessclient.testing.TestServers;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.IntStream;
@@ -129,11 +130,11 @@ class TrayMenuTest {
     }
 
     private static ServerConfig server(String id, String name, boolean active) {
-        ServerConfig server = new ServerConfig();
-        server.setId(id);
-        server.setName(name);
-        server.setAddress(name.toLowerCase(java.util.Locale.ROOT).replace(' ', '-') + ".example");
-        server.setActive(active);
-        return server;
+        return TestServers.server()
+                .id(id)
+                .name(name)
+                .address(name.toLowerCase(java.util.Locale.ROOT).replace(' ', '-') + ".example")
+                .active(active)
+                .build();
     }
 }

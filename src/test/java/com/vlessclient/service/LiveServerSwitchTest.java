@@ -7,6 +7,7 @@ import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.ServerSelection;
 import com.vlessclient.service.outbound.OutboundTags;
+import com.vlessclient.testing.TestServers;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -135,13 +136,13 @@ class LiveServerSwitchTest {
     }
 
     private static ServerConfig server(String id) {
-        ServerConfig result = new ServerConfig();
-        result.setId(id);
-        result.setProtocol(com.vlessclient.model.Protocol.VLESS);
-        result.setAddress("127.0.0.1");
-        result.setUuid("11111111-1111-1111-1111-111111111111");
-        result.setPort(443);
-        return result;
+        return TestServers.server()
+                .id(id)
+                .protocol(com.vlessclient.model.Protocol.VLESS)
+                .address("127.0.0.1")
+                .uuid("11111111-1111-1111-1111-111111111111")
+                .port(443)
+                .build();
     }
 
     private static class RecordingEngine extends SingBoxEngine {

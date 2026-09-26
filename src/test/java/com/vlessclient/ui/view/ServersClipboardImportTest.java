@@ -13,6 +13,7 @@ import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ServerBackupService;
 import com.vlessclient.service.ShareLinkParser;
 import com.vlessclient.service.TestConfigStores;
+import com.vlessclient.testing.TestServers;
 import com.vlessclient.testing.UiTest;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -384,12 +385,12 @@ public class ServersClipboardImportTest extends ApplicationTest {
     }
 
     private static ServerConfig server(String name) {
-        ServerConfig config = new ServerConfig();
-        config.setName(name);
-        config.setProtocol(Protocol.VLESS);
-        config.setAddress("203.0.113.10");
-        config.setPort(443);
-        config.setUuid("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
-        return config;
+        return TestServers.server()
+                .name(name)
+                .protocol(Protocol.VLESS)
+                .address("203.0.113.10")
+                .port(443)
+                .uuid("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+                .build();
     }
 }

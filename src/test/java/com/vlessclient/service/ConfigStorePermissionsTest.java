@@ -1,6 +1,7 @@
 package com.vlessclient.service;
 
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.testing.TestServers;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -26,12 +27,12 @@ class ConfigStorePermissionsTest {
     Path tempDir;
 
     private static ServerConfig server() {
-        ServerConfig s = new ServerConfig();
-        s.setName("s1");
-        s.setAddress("192.0.2.1");
-        s.setPort(443);
-        s.setUuid("secret-uuid");
-        return s;
+        return TestServers.server()
+                .name("s1")
+                .address("192.0.2.1")
+                .port(443)
+                .uuid("secret-uuid")
+                .build();
     }
 
     @Test

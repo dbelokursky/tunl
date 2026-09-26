@@ -9,6 +9,7 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.ServerSelection;
 import com.vlessclient.testing.Await;
 import com.vlessclient.testing.FxToolkitExtension;
+import com.vlessclient.testing.TestServers;
 import javafx.application.Platform;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -55,14 +56,14 @@ class ConnectionServiceTest {
     }
 
     private ServerConfig server(String id, String name) {
-        ServerConfig s = new ServerConfig();
-        s.setId(id);
-        s.setName(name);
-        s.setProtocol(Protocol.VLESS);
-        s.setAddress(name.toLowerCase(java.util.Locale.ROOT) + ".example.com");
-        s.setPort(443);
-        s.setUuid("11111111-1111-1111-1111-111111111111");
-        return s;
+        return TestServers.server()
+                .id(id)
+                .name(name)
+                .protocol(Protocol.VLESS)
+                .address(name.toLowerCase(java.util.Locale.ROOT) + ".example.com")
+                .port(443)
+                .uuid("11111111-1111-1111-1111-111111111111")
+                .build();
     }
 
     /**

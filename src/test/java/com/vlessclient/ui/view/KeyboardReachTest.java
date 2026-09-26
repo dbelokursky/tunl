@@ -11,6 +11,7 @@ import com.vlessclient.service.ServerBackupService;
 import com.vlessclient.service.ShareLinkParser;
 import com.vlessclient.service.TestConfigStores;
 import com.vlessclient.testing.Await;
+import com.vlessclient.testing.TestServers;
 import com.vlessclient.testing.UiTest;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -205,13 +206,13 @@ public class KeyboardReachTest extends ApplicationTest {
     }
 
     private static ServerConfig server(String name, String address) {
-        ServerConfig server = new ServerConfig();
-        server.setName(name);
-        server.setAddress(address);
-        server.setPort(443);
-        server.setProtocol(Protocol.VLESS);
-        server.setUuid(UUID.randomUUID().toString());
-        return server;
+        return TestServers.server()
+                .name(name)
+                .address(address)
+                .port(443)
+                .protocol(Protocol.VLESS)
+                .uuid(UUID.randomUUID().toString())
+                .build();
     }
 
     private ContextMenu showingContextMenu() {

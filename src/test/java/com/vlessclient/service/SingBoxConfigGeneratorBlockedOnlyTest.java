@@ -11,6 +11,7 @@ import com.vlessclient.model.RoutingRule;
 import com.vlessclient.model.RoutingRule.RuleAction;
 import com.vlessclient.model.RoutingRule.RuleType;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.testing.TestServers;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -36,14 +37,14 @@ class SingBoxConfigGeneratorBlockedOnlyTest {
     private final ObjectMapper mapper = JsonMapper.builder().build();
 
     private static ServerConfig server() {
-        ServerConfig server = new ServerConfig();
-        server.setId("s1");
-        server.setName("Server");
-        server.setProtocol(Protocol.VLESS);
-        server.setAddress("server.example");
-        server.setPort(443);
-        server.setUuid("11111111-2222-3333-4444-555555555555");
-        return server;
+        return TestServers.server()
+                .id("s1")
+                .name("Server")
+                .protocol(Protocol.VLESS)
+                .address("server.example")
+                .port(443)
+                .uuid("11111111-2222-3333-4444-555555555555")
+                .build();
     }
 
     private static RoutingConfig blockedOnly() {

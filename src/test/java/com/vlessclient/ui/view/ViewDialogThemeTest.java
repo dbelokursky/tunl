@@ -21,6 +21,7 @@ import com.vlessclient.service.TestSubscriptionServices;
 import com.vlessclient.service.TrafficHistoryStore;
 import com.vlessclient.testing.Await;
 import com.vlessclient.testing.Contrast;
+import com.vlessclient.testing.TestServers;
 import com.vlessclient.testing.UiTest;
 import com.vlessclient.ui.view.settings.TrafficHistorySettingsSection;
 import java.io.IOException;
@@ -678,13 +679,13 @@ public class ViewDialogThemeTest extends ApplicationTest {
     }
 
     private static ServerConfig server(String name) {
-        ServerConfig config = new ServerConfig();
-        config.setName(name);
-        config.setProtocol(Protocol.VLESS);
-        config.setAddress("203.0.113.10");
-        config.setPort(443);
-        config.setUuid("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
-        return config;
+        return TestServers.server()
+                .name(name)
+                .protocol(Protocol.VLESS)
+                .address("203.0.113.10")
+                .port(443)
+                .uuid("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+                .build();
     }
 
     /** Fails a start the way a sing-box that will not launch does. */

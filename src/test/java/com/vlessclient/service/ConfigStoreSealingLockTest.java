@@ -7,6 +7,7 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.platform.InMemorySecretSealer;
 import com.vlessclient.platform.SecretSealer;
 import com.vlessclient.testing.FxToolkitExtension;
+import com.vlessclient.testing.TestServers;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -90,14 +91,14 @@ class ConfigStoreSealingLockTest {
     }
 
     private static ServerConfig server(String id, String uuid) {
-        ServerConfig server = new ServerConfig();
-        server.setId(id);
-        server.setName(id);
-        server.setProtocol(Protocol.VLESS);
-        server.setAddress(id + ".example");
-        server.setPort(443);
-        server.setUuid(uuid);
-        return server;
+        return TestServers.server()
+                .id(id)
+                .name(id)
+                .protocol(Protocol.VLESS)
+                .address(id + ".example")
+                .port(443)
+                .uuid(uuid)
+                .build();
     }
 
     /**

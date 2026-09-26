@@ -8,6 +8,7 @@ import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ProxyGroupMonitor;
 import com.vlessclient.service.TestConfigStores;
 import com.vlessclient.service.outbound.OutboundTags;
+import com.vlessclient.testing.TestServers;
 import com.vlessclient.testing.UiTest;
 import java.nio.file.Path;
 import java.util.List;
@@ -112,11 +113,11 @@ public class ServerListNowBadgeTest extends ApplicationTest {
     }
 
     private static ServerConfig server(String name, String address) {
-        ServerConfig config = new ServerConfig();
-        config.setName(name);
-        config.setAddress(address);
-        config.setPort(443);
-        config.setProtocol(Protocol.VLESS);
-        return config;
+        return TestServers.server()
+                .name(name)
+                .address(address)
+                .port(443)
+                .protocol(Protocol.VLESS)
+                .build();
     }
 }

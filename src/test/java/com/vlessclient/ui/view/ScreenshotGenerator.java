@@ -18,6 +18,7 @@ import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.SubscriptionService;
 import com.vlessclient.service.TrafficHistoryStore;
 import com.vlessclient.service.TrafficMonitor;
+import com.vlessclient.testing.TestServers;
 import com.vlessclient.testing.UiTest;
 import java.io.File;
 import java.nio.file.Files;
@@ -398,12 +399,12 @@ public class ScreenshotGenerator extends ApplicationTest {
     }
 
     private static ServerConfig server(String name, String address, int port, Protocol proto) {
-        ServerConfig config = new ServerConfig();
-        config.setName(name);
-        config.setAddress(address);
-        config.setPort(port);
-        config.setProtocol(proto);
-        return config;
+        return TestServers.server()
+                .name(name)
+                .address(address)
+                .port(port)
+                .protocol(proto)
+                .build();
     }
 
     @Test

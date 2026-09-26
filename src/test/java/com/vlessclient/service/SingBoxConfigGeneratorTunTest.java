@@ -6,9 +6,9 @@ import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.RoutingRule;
 import com.vlessclient.model.ServerConfig;
-import com.vlessclient.model.TransportType;
 import com.vlessclient.platform.Ipv6Uplink;
 import com.vlessclient.platform.SystemProxySupport;
+import com.vlessclient.testing.TestServers;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,15 +42,13 @@ class SingBoxConfigGeneratorTunTest {
     }
 
     private ServerConfig createVlessServer() {
-        ServerConfig server = new ServerConfig();
-        server.setName("Test Server");
-        server.setProtocol(Protocol.VLESS);
-        server.setAddress("1.2.3.4");
-        server.setPort(443);
-        server.setUuid("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
-        server.getTls().setEnabled(false);
-        server.getTransport().setType(TransportType.TCP);
-        return server;
+        return TestServers.server()
+                .name("Test Server")
+                .protocol(Protocol.VLESS)
+                .address("1.2.3.4")
+                .port(443)
+                .uuid("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+                .build();
     }
 
     private AppSettings tunSettings() {

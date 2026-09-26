@@ -5,6 +5,7 @@ import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.ServerSelection;
 import com.vlessclient.service.outbound.OutboundTags;
+import com.vlessclient.testing.TestServers;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -187,12 +188,12 @@ class SingBoxConfigGeneratorSelectionTest {
     }
 
     private ServerConfig server(String name) {
-        ServerConfig server = new ServerConfig();
-        server.setName(name);
-        server.setProtocol(Protocol.VLESS);
-        server.setAddress(name.toLowerCase() + ".example.com");
-        server.setPort(443);
-        server.setUuid("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
-        return server;
+        return TestServers.server()
+                .name(name)
+                .protocol(Protocol.VLESS)
+                .address(name.toLowerCase() + ".example.com")
+                .port(443)
+                .uuid("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+                .build();
     }
 }

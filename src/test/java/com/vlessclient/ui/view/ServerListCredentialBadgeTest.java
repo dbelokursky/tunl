@@ -7,6 +7,7 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.platform.SecretSealer;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.TestConfigStores;
+import com.vlessclient.testing.TestServers;
 import com.vlessclient.testing.UiTest;
 import java.nio.file.Path;
 import java.util.List;
@@ -67,12 +68,12 @@ public class ServerListCredentialBadgeTest extends ApplicationTest {
     }
 
     private static ServerConfig server(String name, String credential) {
-        ServerConfig config = new ServerConfig();
-        config.setName(name);
-        config.setAddress("185.107.56.12");
-        config.setPort(443);
-        config.setProtocol(Protocol.VLESS);
-        config.setUuid(credential);
-        return config;
+        return TestServers.server()
+                .name(name)
+                .address("185.107.56.12")
+                .port(443)
+                .protocol(Protocol.VLESS)
+                .uuid(credential)
+                .build();
     }
 }

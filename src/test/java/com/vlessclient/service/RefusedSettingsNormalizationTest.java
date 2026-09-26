@@ -8,6 +8,7 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportConfig;
 import com.vlessclient.model.TransportType;
 import com.vlessclient.service.outbound.OutboundTags;
+import com.vlessclient.testing.TestServers;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -112,19 +113,15 @@ class RefusedSettingsNormalizationTest {
     }
 
     private ServerConfig reality() {
-        ServerConfig server = new ServerConfig();
-        server.setId("reality");
-        server.setName("reality");
-        server.setProtocol(Protocol.VLESS);
-        server.setAddress("203.0.113.1");
-        server.setPort(443);
-        server.setUuid("b1c2d3e4-f5a6-7890-abcd-ef1234567890");
-        server.getTls().setEnabled(true);
-        server.getTls().setReality(true);
-        server.getTls().setServerName("www.microsoft.com");
-        server.getTls().setRealityPublicKey(REALITY_KEY);
-        server.getTls().setRealityShortId("0123abcd");
-        return server;
+        return TestServers.server()
+                .id("reality")
+                .name("reality")
+                .protocol(Protocol.VLESS)
+                .address("203.0.113.1")
+                .port(443)
+                .uuid("b1c2d3e4-f5a6-7890-abcd-ef1234567890")
+                .reality("www.microsoft.com", REALITY_KEY, "0123abcd")
+                .build();
     }
 
     private String interfaceAddress(String address) throws Exception {

@@ -3,6 +3,7 @@ package com.vlessclient.service;
 import com.sun.net.httpserver.HttpServer;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.testing.TestServers;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -43,15 +44,15 @@ class LatencyTesterProbeTest {
     }
 
     private static ServerConfig server() throws IOException {
-        ServerConfig server = new ServerConfig();
-        server.setName("Test");
-        server.setProtocol(Protocol.VLESS);
         // A loopback port nothing listens on, so the TCP fallback is refused at
         // once. A reserved address such as 192.0.2.1 left each fallback test
         // waiting out the tester's 5 s connect timeout on CI runners.
-        server.setAddress("127.0.0.1");
-        server.setPort(closedPort());
-        return server;
+        return TestServers.server()
+                .name("Test")
+                .protocol(Protocol.VLESS)
+                .address("127.0.0.1")
+                .port(closedPort())
+                .build();
     }
 
     /** A loopback port that was free a moment ago, so a connect to it is refused. */

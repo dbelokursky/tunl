@@ -6,6 +6,7 @@ import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
+import com.vlessclient.testing.TestServers;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
@@ -118,19 +119,16 @@ class TransportFieldsTest {
     }
 
     private ServerConfig serverWith(TransportType type) {
-        ServerConfig server = new ServerConfig();
-        server.setName("transport");
-        server.setProtocol(Protocol.VLESS);
-        server.setAddress("203.0.113.1");
-        server.setPort(443);
-        server.setUuid("b1c2d3e4-f5a6-7890-abcd-ef1234567890");
-        server.getTls().setEnabled(true);
-        server.getTls().setServerName("example.com");
-        server.getTransport().setType(type);
-        server.getTransport().setPath("/path");
-        server.getTransport().setHost("cdn.example.com");
-        server.getTransport().setServiceName("svc");
-        return server;
+        return TestServers.server()
+                .name("transport")
+                .protocol(Protocol.VLESS)
+                .address("203.0.113.1")
+                .port(443)
+                .uuid("b1c2d3e4-f5a6-7890-abcd-ef1234567890")
+                .tls("example.com")
+                .transport(type, "/path", "cdn.example.com")
+                .serviceName("svc")
+                .build();
     }
 
     private JsonNode transportOf(ServerConfig server) throws Exception {

@@ -1,6 +1,7 @@
 package com.vlessclient.service;
 
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.testing.TestServers;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -62,10 +63,10 @@ class TrafficHistoryStoreTest {
     }
 
     private static ServerConfig server(String id, String name) {
-        ServerConfig config = new ServerConfig();
-        config.setId(id);
-        config.setName(name);
-        return config;
+        return TestServers.server()
+                .id(id)
+                .name(name)
+                .build();
     }
 
     private static TestClock clockAt(String isoInstant) {

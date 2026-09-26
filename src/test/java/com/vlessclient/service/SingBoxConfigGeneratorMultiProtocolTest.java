@@ -4,6 +4,7 @@ import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
+import com.vlessclient.testing.TestServers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
@@ -92,12 +93,12 @@ class SingBoxConfigGeneratorMultiProtocolTest {
     }
 
     private ServerConfig vlessServer() {
-        ServerConfig server = new ServerConfig();
-        server.setProtocol(Protocol.VLESS);
-        server.setAddress("vless.example.com");
-        server.setPort(443);
-        server.setUuid("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
-        return server;
+        return TestServers.server()
+                .protocol(Protocol.VLESS)
+                .address("vless.example.com")
+                .port(443)
+                .uuid("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+                .build();
     }
 
     // -- VMess tests --

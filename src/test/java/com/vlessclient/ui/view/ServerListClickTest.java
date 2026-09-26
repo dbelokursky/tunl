@@ -5,10 +5,10 @@ import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.TestConfigStores;
+import com.vlessclient.testing.TestServers;
 import com.vlessclient.testing.UiTest;
 import java.nio.file.Path;
 import javafx.fxml.FXMLLoader;
-import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.ListCell;
@@ -105,11 +105,11 @@ public class ServerListClickTest extends ApplicationTest {
     }
 
     private static ServerConfig server(String name, String address) {
-        ServerConfig config = new ServerConfig();
-        config.setName(name);
-        config.setAddress(address);
-        config.setPort(443);
-        config.setProtocol(Protocol.VLESS);
-        return config;
+        return TestServers.server()
+                .name(name)
+                .address(address)
+                .port(443)
+                .protocol(Protocol.VLESS)
+                .build();
     }
 }

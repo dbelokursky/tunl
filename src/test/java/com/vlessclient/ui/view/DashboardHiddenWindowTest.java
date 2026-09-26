@@ -16,6 +16,7 @@ import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.testing.Await;
 import com.vlessclient.testing.FxPulses;
+import com.vlessclient.testing.TestServers;
 import com.vlessclient.testing.UiTest;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
@@ -358,9 +359,9 @@ public class DashboardHiddenWindowTest extends ApplicationTest {
     }
 
     private static ServerConfig server(String id, String name) {
-        ServerConfig config = new ServerConfig();
-        config.setId(id);
-        config.setName(name);
-        return config;
+        return TestServers.server()
+                .id(id)
+                .name(name)
+                .build();
     }
 }

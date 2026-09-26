@@ -9,6 +9,7 @@ import com.vlessclient.model.TunnelHealth;
 import com.vlessclient.service.CountryResolver;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.testing.FxToolkitExtension;
+import com.vlessclient.testing.TestServers;
 import java.nio.file.Path;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -114,10 +115,10 @@ class StatusPresenterTest {
     }
 
     private static ServerConfig server(String name, String address) {
-        ServerConfig server = new ServerConfig();
-        server.setName(name);
-        server.setAddress(address);
-        return server;
+        return TestServers.server()
+                .name(name)
+                .address(address)
+                .build();
     }
 
     @Test

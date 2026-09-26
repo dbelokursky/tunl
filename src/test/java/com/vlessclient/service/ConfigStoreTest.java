@@ -4,6 +4,7 @@ import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.testing.TestServers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -274,12 +275,12 @@ class ConfigStoreTest {
     }
 
     private ServerConfig createTestServer(String name) {
-        ServerConfig server = new ServerConfig();
-        server.setName(name);
-        server.setProtocol(Protocol.VLESS);
-        server.setAddress("127.0.0.1");
-        server.setPort(443);
-        return server;
+        return TestServers.server()
+                .name(name)
+                .protocol(Protocol.VLESS)
+                .address("127.0.0.1")
+                .port(443)
+                .build();
     }
 
     /**
