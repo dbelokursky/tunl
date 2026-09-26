@@ -92,6 +92,12 @@ refuses to install a cask from a bare file. See
 2. Then it's a regular install wizard. The app installs per-user — no admin
    rights needed.
 
+On Windows 11 with **Smart App Control** on, Windows blocks unsigned apps
+outright, with no "Run anyway", and Tunl is not signed yet. Smart App Control
+can be turned off in **Windows Security → App & browser control → Smart App
+Control settings**; on older Windows 11 builds that choice cannot be undone
+without reinstalling Windows.
+
 The only place Windows asks for elevation is the UAC prompt when connecting
 in TUN mode.
 

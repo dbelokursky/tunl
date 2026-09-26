@@ -15,9 +15,18 @@ exact secret names and how to produce each.
 - **macOS:** an [Apple Developer Program](https://developer.apple.com/programs/)
   membership (**$99/yr**) — required both for the Developer ID certificate and
   for notarization.
-- **Windows:** a code-signing certificate from a CA. An **OV** cert is cheaper
-  but SmartScreen keeps warning until the signature earns reputation; an **EV**
-  cert (hardware token / attestation) is trusted immediately but costs more.
+- **Windows:** a code-signing certificate. Two things changed since the
+  Windows steps below were written:
+  - Since June 2023 a code-signing key must be generated and kept in hardware
+    (a token or a cloud HSM), so a CA no longer issues a `.pfx` file. The
+    `.pfx` secrets below fit only a certificate issued before then; signing
+    in CI now goes through a signing service instead, such as Azure Artifact
+    Signing (for individuals, available in the US and Canada only), a CA's
+    cloud HSM, or SignPath Foundation, which signs open-source projects free
+    of charge.
+  - Since 2024 an **EV** certificate no longer skips SmartScreen: EV and OV
+    signatures both earn reputation from downloads, and SmartScreen warns
+    until they have.
 
 ## macOS — GitHub Actions secrets
 
@@ -79,9 +88,11 @@ signtool sign /f cert.pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD `
   /fd sha256 /tr http://timestamp.digicert.com /td sha256 dist\tunl_*.msi
 ```
 
-Note: an **OV** cert is valid but SmartScreen still shows "Windows protected
-your PC" until the publisher builds download reputation; an **EV** cert avoids
-the warning from the first signed build.
+Note: SmartScreen still shows "Windows protected your PC" for a newly signed
+build until the signature builds download reputation. That holds for **EV**
+certificates too since 2024. What a signature does change at once is Smart App
+Control on Windows 11, which runs a validly signed app and blocks an unsigned
+one.
 
 ## How to verify
 
