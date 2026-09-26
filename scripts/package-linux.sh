@@ -96,6 +96,12 @@ cp "${JAR_PATH}" staging/
 
 # Per-user data lives under XDG paths at runtime; the package itself installs
 # to /opt/tunl with a menu entry and launcher symlink.
+#
+# libsecret-tools is what seals the credentials: secret-tool talks to the
+# desktop's keyring. jpackage only lists the libraries the runtime links, and
+# without secret-tool the credentials went into the JSON files while Settings
+# said they were in the keychain. It is in Debian's main and Ubuntu's
+# universe, which a desktop install enables.
 jpackage \
     --type deb \
     --name tunl \
@@ -109,6 +115,7 @@ jpackage \
     --linux-menu-group Network \
     --linux-shortcut \
     --linux-deb-maintainer "dbelokursky@gmail.com" \
+    --linux-package-deps libsecret-tools \
     --vendor "Tunl" \
     --java-options "-Dapp.version=${VERSION}" \
     --java-options "-Djava.awt.headless=false" \

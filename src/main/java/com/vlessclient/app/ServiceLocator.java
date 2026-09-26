@@ -101,6 +101,8 @@ public class ServiceLocator {
         // a test never touches the OS keychain).
         SecretSealer sealer = mode == StartupMode.TEST
                 ? SecretSealers.disabled() : SecretSealers.forCurrentPlatform();
+        // Registered too, for Settings to say when the box is not in effect.
+        register(SecretSealer.class, sealer);
         ConfigStore configStore = new ConfigStore(PlatformPaths.current().dataDir(), sealer);
         register(ConfigStore.class, configStore);
 

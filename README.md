@@ -373,7 +373,7 @@ else saves on click.
 | | TUN Interface Name | `utun99` on macOS and Linux, `VlessClientTun` on Windows |
 | | TUN IPv4 Address | `172.19.0.1/30` |
 | | Route IPv6 through the tunnel | On by default, where the machine has an IPv6 address; off, IPv6 traffic bypasses the VPN on dual-stack networks |
-| | Store credentials in the system keychain | Seal server credentials and subscription URLs with Keychain / DPAPI / Secret Service instead of writing them into the JSON files |
+| | Store credentials in the system keychain | Seal server credentials and subscription URLs with Keychain / DPAPI / Secret Service instead of writing them into the JSON files; Settings says when the keychain is not available and the files hold them |
 | | Device ID | The identifier sent with subscription requests, with a button to make a new one; random, made once per install |
 | Agent Control (MCP) | Enable MCP server, Port, Allow configuration changes, Copy command, Regenerate token | See [Agent control](#agent-control-mcp) |
 | Traffic history | Recorded, Clear history… | How much the local traffic record holds and since which day. **Clear history…** deletes all of it after a confirmation in which Enter cancels; nothing in the record expires on its own, and the Dashboard's history panel only reads it |

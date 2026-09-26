@@ -155,6 +155,11 @@
 
         <CheckBox fx:id="storeSecretsCheck" text="Store credentials in the system keychain"
                   styleClass="form-checkbox"/>
+        <!-- Shown while the box is on and the keychain does not work, when the
+             credentials go into the files instead. -->
+        <Label fx:id="storeSecretsHint" styleClass="hint-label" wrapText="true" maxWidth="520"
+               visible="false" managed="false"
+               text="The system keychain is not available here, so credentials are saved in files only your account can read."/>
 
         <HBox spacing="10" alignment="CENTER_LEFT">
             <Label fx:id="deviceIdLabel" text="Device ID for subscriptions" styleClass="form-label"
