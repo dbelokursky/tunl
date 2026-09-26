@@ -55,7 +55,7 @@ public final class FxExecutor {
 
     /** {@link #get(Supplier)} with the wait bounded by {@code timeout}; a test seam. */
     static <T> T get(Supplier<T> supplier, Duration timeout) {
-        if (Platform.isFxApplicationThread()) {
+        if (isFxThread()) {
             return supplier.get();
         }
         CompletableFuture<T> future = new CompletableFuture<>();
@@ -113,7 +113,7 @@ public final class FxExecutor {
      * @param action what to run
      */
     public static void later(Runnable action) {
-        if (Platform.isFxApplicationThread()) {
+        if (isFxThread()) {
             action.run();
             return;
         }
@@ -121,6 +121,24 @@ public final class FxExecutor {
             Platform.runLater(action);
         } catch (IllegalStateException toolkitNotRunning) {
             action.run();
+        }
+    }
+
+    /**
+     * Whether this is the JavaFX Application Thread. False, not an exception,
+     * in a process where JavaFX has no toolkit to ask: there
+     * {@link Platform#isFxApplicationThread()} throws "No toolkit found", as
+     * in a shutdown hook of a JVM that never started JavaFX, and the save the
+     * hook had just written was logged as a failure. Queuing onto the FX
+     * thread then fails too, and the callers run the work inline.
+     *
+     * @return true on the JavaFX Application Thread
+     */
+    public static boolean isFxThread() {
+        try {
+            return Platform.isFxApplicationThread();
+        } catch (RuntimeException noToolkit) {
+            return false;
         }
     }
 

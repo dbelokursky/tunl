@@ -211,11 +211,12 @@ public final class PersistenceState {
     /**
      * Runs {@code update} where a JavaFX property may be set: on the FX thread
      * when there is one, inline when the toolkit is not running -- config is
-     * loaded before it starts, and during tests there is no toolkit at all.
+     * loaded before it starts, during tests there is no toolkit at all, and a
+     * shutdown hook may run in a JVM that never started one.
      */
     private static void onFxThread(Runnable update) {
         try {
-            if (Platform.isFxApplicationThread()) {
+            if (FxExecutor.isFxThread()) {
                 update.run();
             } else {
                 Platform.runLater(update);
