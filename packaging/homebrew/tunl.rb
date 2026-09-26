@@ -19,6 +19,10 @@ cask "tunl" do
     strategy :github_latest
   end
 
+  # The DMG is built on Apple Silicon and carries an arm64 runtime and core:
+  # on an Intel Mac, Homebrew would install an app that cannot start.
+  depends_on arch: :arm64
+
   app "Tunl.app"
 
   # Builds are not signed/notarized with an Apple Developer certificate yet, so
