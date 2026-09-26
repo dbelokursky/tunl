@@ -76,6 +76,17 @@ public class Subscription extends KeepsUnknownFields {
     @JsonProperty("announce")
     private String announce = "";
 
+    /**
+     * Links the provider's last list held that this client cannot run, and a
+     * refresh therefore left out: how many, and what they ask for. A mixed
+     * list used to lose them with only an INFO line in the log.
+     */
+    @JsonProperty("leftOutLinks")
+    private int leftOutLinks;
+
+    @JsonProperty("leftOutSummary")
+    private String leftOutSummary = "";
+
     public Subscription() {
         this.id = UUID.randomUUID().toString();
     }
@@ -235,6 +246,27 @@ public class Subscription extends KeepsUnknownFields {
 
     public void setAnnounce(String announce) {
         this.announce = announce == null ? "" : announce;
+    }
+
+    /** How many links the last list held that this client cannot run. */
+    public int getLeftOutLinks() {
+        return leftOutLinks;
+    }
+
+    /** What those links ask for, comma-separated; empty when none were left out. */
+    public String getLeftOutSummary() {
+        return leftOutSummary == null ? "" : leftOutSummary;
+    }
+
+    /**
+     * Records what the last list left out.
+     *
+     * @param links   how many links it held that this client cannot run
+     * @param summary what they ask for; ignored when {@code links} is 0
+     */
+    public void setLeftOut(int links, String summary) {
+        this.leftOutLinks = Math.max(0, links);
+        this.leftOutSummary = leftOutLinks == 0 || summary == null ? "" : summary;
     }
 
     @Override

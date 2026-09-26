@@ -352,6 +352,29 @@ public class SubscriptionsViewController implements ViewShownAware {
     }
 
     /**
+     * The line under a subscription's URL: its servers, what its last list
+     * held that this client cannot run, when it was refreshed, and the
+     * provider's quota when it sent one.
+     */
+    static String statusLine(Subscription sub) {
+        List<String> parts = new ArrayList<>();
+        parts.add(I18n.plural("subscriptions.servers", sub.getServerIds().size()));
+        if (sub.getLeftOutLinks() > 0) {
+            parts.add(I18n.plural("subscriptions.left.out", sub.getLeftOutLinks())
+                    + " (" + sub.getLeftOutSummary() + ")");
+        }
+        parts.add(sub.getLastRefreshedAt() > 0
+                ? I18n.get("subscriptions.refreshed", TIME_FORMAT.format(
+                        Instant.ofEpochMilli(sub.getLastRefreshedAt())))
+                : I18n.get("subscriptions.never.refreshed"));
+        String quota = quotaLine(sub);
+        if (quota != null) {
+            parts.add(quota);
+        }
+        return String.join(" · ", parts);
+    }
+
+    /**
      * The provider's quota when the response carried one: traffic used of
      * the plan's total, and the expiry. Null when the provider said nothing.
      */
@@ -392,15 +415,7 @@ public class SubscriptionsViewController implements ViewShownAware {
             Label urlLabel = new Label(sub.getUrl() == null ? "" : Redact.url(sub.getUrl()));
             urlLabel.getStyleClass().add("server-address");
 
-            int serverCount = sub.getServerIds().size();
-            String servers = I18n.plural("subscriptions.servers", serverCount);
-            String refresh = sub.getLastRefreshedAt() > 0
-                    ? I18n.get("subscriptions.refreshed", TIME_FORMAT.format(
-                            Instant.ofEpochMilli(sub.getLastRefreshedAt())))
-                    : I18n.get("subscriptions.never.refreshed");
-            String quota = quotaLine(sub);
-            Label statusLabel = new Label(quota == null
-                    ? servers + " · " + refresh : servers + " · " + refresh + " · " + quota);
+            Label statusLabel = new Label(statusLine(sub));
             statusLabel.getStyleClass().add("server-address");
 
             VBox info = new VBox(2);
