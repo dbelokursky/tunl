@@ -497,4 +497,31 @@ class DefaultAppControlServiceTest {
 
         assertThat(status.runningProxyMode()).isNull();
     }
+
+    /**
+     * A theme, language or DNS strategy outside what the app has was stored
+     * as it came. The theme and language fell back at the next start without
+     * a word, and the core refused a configuration with the strategy in it.
+     */
+    @Test
+    void setSetting_refusesAThemeLanguageOrDnsStrategyTheAppHasNot() {
+        assertThatThrownBy(() -> service.setSetting("theme", stringNode("neon")))
+                .isInstanceOf(McpToolException.class).hasMessageContaining("auto, light, dark");
+        assertThatThrownBy(() -> service.setSetting("language", stringNode("de")))
+                .isInstanceOf(McpToolException.class).hasMessageContaining("en, ru");
+        assertThatThrownBy(() -> service.setSetting("dns_strategy", stringNode("fastest")))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining("prefer_ipv4, prefer_ipv6, ipv4_only, ipv6_only");
+        assertThat(store.getSettings().getDnsStrategy()).isEqualTo("prefer_ipv4");
+    }
+
+    @Test
+    void setSetting_takesThemeLanguageAndDnsStrategyInAnyCase() throws Exception {
+        service.setSetting("theme", stringNode("Dark"));
+        service.setSetting("dns_strategy", stringNode(" IPv4_Only "));
+        SettingsInfo info = service.setSetting("theme", stringNode("system"));
+
+        assertThat(info.theme()).as("the legacy name, as startup reads it").isEqualTo("auto");
+        assertThat(store.getSettings().getDnsStrategy()).isEqualTo("ipv4_only");
+    }
 }

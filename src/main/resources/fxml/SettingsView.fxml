@@ -138,6 +138,12 @@
         </HBox>
 
         <HBox spacing="12" alignment="CENTER_LEFT">
+            <Label fx:id="dnsStrategyLabel" text="DNS Strategy" styleClass="form-label"
+                   prefWidth="210"/>
+            <ComboBox fx:id="dnsStrategyCombo" styleClass="form-field" prefWidth="300"/>
+        </HBox>
+
+        <HBox spacing="12" alignment="CENTER_LEFT">
             <Label fx:id="tunInterfaceNameLabel" text="TUN Interface Name"
                    styleClass="form-label" prefWidth="210"/>
             <TextField fx:id="tunInterfaceNameField" styleClass="form-field" prefWidth="300"

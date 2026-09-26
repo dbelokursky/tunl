@@ -9,6 +9,7 @@ import com.vlessclient.model.RoutingRule;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.ServerSelection;
 import com.vlessclient.platform.Ipv6Uplink;
+import com.vlessclient.service.outbound.CoreSettings;
 import com.vlessclient.service.outbound.DnsTags;
 import com.vlessclient.service.outbound.Hysteria2OutboundBuilder;
 import com.vlessclient.service.outbound.OutboundTags;
@@ -354,7 +355,8 @@ public class SingBoxConfigGenerator {
         // drops AAAA answers only for ipv4_only: any other strategy handed the
         // system IPv6 addresses, which it reached around the tunnel.
         boolean tunWithoutIpv6 = settings.getProxyMode() == ProxyMode.TUN && !tunIpv6;
-        dns.put("strategy", tunWithoutIpv6 ? "ipv4_only" : settings.getDnsStrategy());
+        dns.put("strategy", tunWithoutIpv6
+                ? "ipv4_only" : CoreSettings.dnsStrategy(settings.getDnsStrategy()));
 
         return dns;
     }
@@ -481,9 +483,7 @@ public class SingBoxConfigGenerator {
             // tunnel, so its name keeps the strategy the user chose.
             ObjectNode resolver = route.putObject("default_domain_resolver");
             resolver.put("server", DnsTags.LOCAL);
-            String strategy = settings.getDnsStrategy();
-            resolver.put("strategy",
-                    strategy == null || strategy.isBlank() ? "prefer_ipv4" : strategy);
+            resolver.put("strategy", CoreSettings.dnsStrategy(settings.getDnsStrategy()));
         }
         if (!route.has("auto_detect_interface")) {
             route.put("auto_detect_interface", true);

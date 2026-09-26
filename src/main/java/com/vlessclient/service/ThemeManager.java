@@ -127,6 +127,18 @@ public class ThemeManager {
     }
 
     /**
+     * Applies the current theme again to the scene it was last applied to,
+     * after {@link #setTheme} changed it from somewhere that has no scene of
+     * its own, such as an MCP agent. Nothing happens before the main window
+     * has been themed. Runs on the JavaFX thread.
+     */
+    public void reapply() {
+        if (scene != null) {
+            applyTheme(scene);
+        }
+    }
+
+    /**
      * Returns the current theme setting.
      */
     public String getCurrentTheme() {

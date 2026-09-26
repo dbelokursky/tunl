@@ -7,6 +7,7 @@ import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -34,9 +35,15 @@ final class McpSettings {
 
     private static final Map<String, Writer> WRITERS = new LinkedHashMap<>();
 
+    /** The themes, as the Settings screen offers them. */
+    private static final List<String> THEMES = List.of("auto", "light", "dark");
+
+    /** The languages the app has. */
+    private static final List<String> LANGUAGES = List.of("en", "ru");
+
     static {
-        WRITERS.put("theme", (s, v, k) -> s.setTheme(text(v, k)));
-        WRITERS.put("language", (s, v, k) -> s.setLanguage(text(v, k)));
+        WRITERS.put("theme", (s, v, k) -> s.setTheme(theme(v, k)));
+        WRITERS.put("language", (s, v, k) -> s.setLanguage(oneOf(v, k, LANGUAGES)));
         WRITERS.put("auto_connect", (s, v, k) -> s.setAutoConnect(flag(v, k)));
         WRITERS.put("socks_port", (s, v, k) -> s.setSocksPort(port(v, k)));
         WRITERS.put("http_port", (s, v, k) -> s.setHttpPort(port(v, k)));
@@ -44,7 +51,8 @@ final class McpSettings {
         WRITERS.put("server_selection", (s, v, k) -> s.setServerSelection(selection(v, k)));
         WRITERS.put("proxy_dns", (s, v, k) -> s.setProxyDns(text(v, k)));
         WRITERS.put("direct_dns", (s, v, k) -> s.setDirectDns(text(v, k)));
-        WRITERS.put("dns_strategy", (s, v, k) -> s.setDnsStrategy(text(v, k)));
+        WRITERS.put("dns_strategy",
+                (s, v, k) -> s.setDnsStrategy(oneOf(v, k, AppSettings.DNS_STRATEGIES)));
         WRITERS.put("system_proxy_auto_config",
                 (s, v, k) -> s.setSystemProxyAutoConfig(flag(v, k)));
         WRITERS.put("tun_interface_name", (s, v, k) -> s.setTunInterfaceName(text(v, k)));
@@ -111,6 +119,29 @@ final class McpSettings {
             }
         }
         throw new McpToolException("Setting '" + key + "' expects true or false.");
+    }
+
+    /**
+     * One of {@code allowed}, in any case. A theme, language or DNS strategy
+     * outside them was stored as it came: the theme and language fell back at
+     * the next start without a word, and the strategy stopped the core.
+     */
+    private static String oneOf(JsonNode value, String key, List<String> allowed)
+            throws McpToolException {
+        String raw = text(value, key).strip().toLowerCase(Locale.ROOT);
+        if (!allowed.contains(raw)) {
+            throw new McpToolException("Setting '" + key + "' expects one of: "
+                    + String.join(", ", allowed) + ".");
+        }
+        return raw;
+    }
+
+    /** A theme; the legacy {@code system} is {@code auto}, as it is at startup. */
+    private static String theme(JsonNode value, String key) throws McpToolException {
+        if (value.isString() && "system".equalsIgnoreCase(value.asString().strip())) {
+            return "auto";
+        }
+        return oneOf(value, key, THEMES);
     }
 
     private static int port(JsonNode value, String key) throws McpToolException {

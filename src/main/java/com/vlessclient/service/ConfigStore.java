@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -65,6 +66,7 @@ public class ConfigStore {
     private final Path dataDir;
     private final ObjectMapper objectMapper;
     private final ObservableList<ServerConfig> servers;
+    private final List<Consumer<AppSettings>> settingsListeners = new CopyOnWriteArrayList<>();
     private final SecretSealer sealer;
     private AppSettings settings;
     private final PersistenceState persistence = new PersistenceState();
@@ -520,11 +522,35 @@ public class ConfigStore {
     }
 
     /**
-     * Replaces the current settings and writes them to disk.
+     * Has {@code listener} told of every settings save, with the settings
+     * saved, on the thread that saved them and after the write, whether or
+     * not the write succeeded: the change is in effect either way.
+     *
+     * @param listener what to tell
+     */
+    public void addSettingsListener(Consumer<AppSettings> listener) {
+        settingsListeners.add(listener);
+    }
+
+    /**
+     * Replaces the current settings, writes them to disk, and tells the
+     * settings listeners.
+     *
+     * <p>The one place a settings change goes through. What a change does
+     * beyond the file, the language and the theme, hangs off the listeners:
+     * an agent that set the theme through MCP saved it, and the window went
+     * on in the old one until the app was started again.</p>
      *
      * @param settings the settings to store
      */
-    public synchronized void saveSettings(AppSettings settings) {
+    public void saveSettings(AppSettings settings) {
+        storeSettings(settings);
+        // Outside this object's monitor: a listener may wait for the FX
+        // thread, which may be waiting for this monitor.
+        settingsListeners.forEach(listener -> listener.accept(settings));
+    }
+
+    private synchronized void storeSettings(AppSettings settings) {
         // The clash_api secret is a runtime-only value (@JsonIgnore, minted at
         // startup and never persisted). Carry it across a settings swap so a
         // caller passing a fresh AppSettings can't silently drop the token and
