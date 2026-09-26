@@ -42,6 +42,25 @@ A build of the newest merge to `main` (possibly rough) lives in the
 [**dev-latest**](https://github.com/dbelokursky/tunl/releases/tag/dev-latest)
 prerelease.
 
+### Verify the download
+
+Each installer on a release is signed with the project's release key, and the
+app checks that signature itself before it installs an update. To check a
+download by hand, with the public key and the commands in
+[docs/SIGNING.md](docs/SIGNING.md#verifying-a-signature-by-hand):
+
+```bash
+openssl pkeyutl -verify -rawin -pubin -inkey tunl-release.pub.pem \
+  -in manifest -sigfile manifest.sig.bin
+```
+
+Releases built since build provenance was added can also be checked against
+the workflow run that built them, with the GitHub CLI:
+
+```bash
+gh attestation verify tunl_x.y.z.dmg --repo dbelokursky/tunl
+```
+
 ---
 
 ## Install

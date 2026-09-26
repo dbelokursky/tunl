@@ -184,12 +184,37 @@ through one update signed by the old key.
 
 ### Verifying a signature by hand
 
+The public key, the same bytes as `ReleaseSignature.PUBLIC_KEY`:
+
+```
+-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAvICg0uIqKv0NMWhmhSMDoAkcybN1k3ageF1itsRZSCQ=
+-----END PUBLIC KEY-----
+```
+
+Save it as `tunl-release.pub.pem`, then check the signature current builds
+require, over the version, the file name and the digest (`printf`, not
+`echo`: there is no trailing newline):
+
 ```bash
-openssl pkey -in tunl-release.key -pubout -out tunl-release.pub.pem
-printf 'sha256:%s' "$(shasum -a 256 tunl_1.6.0.dmg | awk '{print $1}')" > message
-base64 -d < tunl_1.6.0.dmg.sig > signature.bin
+V=1.23.0; F=tunl_${V}.dmg
+printf 'tunl-release-v1\n%s\n%s\nsha256:%s' "$V" "$F" \
+  "$(shasum -a 256 "$F" | awk '{print $1}')" > manifest
+base64 -d < "$F.manifest.sig" > manifest.sig.bin
 openssl pkeyutl -verify -rawin -pubin -inkey tunl-release.pub.pem \
-  -in message -sigfile signature.bin
+  -in manifest -sigfile manifest.sig.bin
+```
+
+`Signature Verified Successfully` means the file is the one the release
+workflow signed for that version. The older `.sig` is checked the same way
+over `sha256:<hex>` alone.
+
+Releases built since the upload job attests them can also be checked against
+their build provenance, which names the workflow run and commit that built
+the file (needs the GitHub CLI):
+
+```bash
+gh attestation verify tunl_1.23.0.dmg --repo dbelokursky/tunl
 ```
 
 ### What a release signature covers

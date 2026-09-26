@@ -32,8 +32,10 @@ jobs:
   #
   # create-draft then makes the tag's one draft release (or adopts it on a
   # re-run, writing the tag's title and notes onto it) and hands its id on.
-  # The platform jobs, sign-release and update-packaging only upload into that
-  # draft with gh; only publish-release makes it public, by id, after checking
+  # The platform jobs build with a read-only token and hand their installer on
+  # as an artifact; upload-installers, sign-release and update-packaging only
+  # upload into that draft with gh; only publish-release makes it public, by
+  # id, after checking
   # the draft is the only release object on the tag and holds exactly the
   # expected assets, and that the tag still names the tag object and commit
   # this run started from. One job creates because in v1.19.0 two jobs ran a
@@ -261,8 +263,11 @@ jobs:
     # update-packaging refuse an asset on the draft that does not match it.
     outputs:
       dmg_sha256: ${{ steps.checksum.outputs.sha256 }}
+    # Read-only: this job runs the build, its plugins, the downloaded core and
+    # the packaging tools, and a token that can write the release is not one
+    # they need. upload-installers holds that one.
     permissions:
-      contents: write
+      contents: read
     # The `secrets` context is not allowed in step `if:`, so the steps gate on
     # env — but only on these booleans. The secret values themselves stay out
     # of the job environment and are handed to the individual steps that use
@@ -386,15 +391,15 @@ jobs:
             exit 1
           fi
           echo "sha256=$(shasum -a 256 "${files[0]}" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-      - name: Upload the DMG into the draft release
-        # The step above guarantees exactly one DMG. --clobber lets a re-run
-        # replace the asset an earlier attempt left on the draft.
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          gh release upload "$GITHUB_REF_NAME" dist/*.dmg --clobber
+      - name: Hand the DMG to upload-installers
+        # The step above guarantees exactly one DMG.
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: installer-macos
+          path: dist/*.dmg
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
 
   # Windows twin of the job above: same gates (fat JAR, real-binary smoke),
   # same shared packaging script as the per-merge build, MSI instead of DMG.
@@ -407,8 +412,9 @@ jobs:
     # on the draft that does not match it.
     outputs:
       msi_sha256: ${{ steps.checksum.outputs.sha256 }}
+    # Read-only, as release-macos is.
     permissions:
-      contents: write
+      contents: read
     # Only the gate lives in job env — the `secrets` context can't be used in
     # step `if:`. The certificate and its password go to the individual steps
     # that need them, so no other step, the upload included, inherits them.
@@ -494,24 +500,15 @@ jobs:
           }
           $hash = (Get-FileHash -Algorithm SHA256 $msis[0].FullName).Hash.ToLowerInvariant()
           "sha256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
-      - name: Upload the MSI into the draft release
-        # pwsh does not expand dist/*.msi for a native command, so resolve the
-        # one file first. --clobber lets a re-run replace the asset an earlier
-        # attempt left on the draft.
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          $msis = @(Get-ChildItem dist -Filter '*.msi' -File)
-          if ($msis.Count -ne 1) {
-            throw "expected exactly one MSI in dist/, found $($msis.Count)"
-          }
-          $msi = $msis[0].FullName
-          gh release upload $env:GITHUB_REF_NAME $msi --clobber
-          if ($LASTEXITCODE -ne 0) {
-            throw "gh release upload failed with exit code $LASTEXITCODE"
-          }
+      - name: Hand the MSI to upload-installers
+        # The step above guarantees exactly one MSI.
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: installer-windows
+          path: dist/*.msi
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
 
   # Linux twin: same gates (fat JAR, real-binary smoke), same shared
   # packaging script as the per-merge build, DEB instead of DMG/MSI.
@@ -525,8 +522,9 @@ jobs:
     # update-packaging refuse an asset on the draft that does not match it.
     outputs:
       deb_sha256: ${{ steps.checksum.outputs.sha256 }}
+    # Read-only, as release-macos is.
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -573,15 +571,15 @@ jobs:
             exit 1
           fi
           echo "sha256=$(sha256sum "${files[0]}" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-      - name: Upload the DEB into the draft release
-        # The step above guarantees exactly one DEB. --clobber lets a re-run
-        # replace the asset an earlier attempt left on the draft.
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          gh release upload "$GITHUB_REF_NAME" dist/*.deb --clobber
+      - name: Hand the DEB to upload-installers
+        # The step above guarantees exactly one DEB.
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: installer-linux-amd64
+          path: dist/*.deb
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
 
   # arm64 twin of release-linux on GitHub's free arm runners: same gates
   # (fat JAR, real-binary smoke on the linux-arm64 core, DEB install and
@@ -595,8 +593,9 @@ jobs:
     # update-packaging refuse an asset on the draft that does not match it.
     outputs:
       deb_sha256: ${{ steps.checksum.outputs.sha256 }}
+    # Read-only, as release-macos is.
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -641,15 +640,95 @@ jobs:
             exit 1
           fi
           echo "sha256=$(sha256sum "${files[0]}" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-      - name: Upload the DEB into the draft release
-        # The step above guarantees exactly one DEB. --clobber lets a re-run
-        # replace the asset an earlier attempt left on the draft.
+      - name: Hand the DEB to upload-installers
+        # The step above guarantees exactly one DEB.
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: installer-linux-arm64
+          path: dist/*.deb
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+  # Uploads the four installers into the draft, and attests their provenance.
+  #
+  # The one job with a token that can write the release, apart from the ones
+  # after it, and it runs no build: only GitHub's own actions and gh. The
+  # platform jobs run Maven, its plugins, the downloaded core and the
+  # packaging tools, and with contents: write any of those could have read
+  # the token out of the runner's memory, as the tj-actions compromise did,
+  # and replaced any asset of any release.
+  #
+  # Each installer is checked against the digest its builder recorded before
+  # it is uploaded, so a changed artifact never reaches the draft. The
+  # attestation binds each digest to this workflow run and commit, for
+  # `gh attestation verify` (README, "Verify the download").
+  upload-installers:
+    needs: [release-macos, release-windows, release-linux, release-linux-arm64]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      # For the provenance attestation: a Sigstore certificate for this run,
+      # and the attestation stored on the repository.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: installer-*
+          path: installers
+          merge-multiple: true
+      - name: Check each installer against its builder's digest
+        env:
+          BUILT_DMG_SHA256: ${{ needs.release-macos.outputs.dmg_sha256 }}
+          BUILT_MSI_SHA256: ${{ needs.release-windows.outputs.msi_sha256 }}
+          BUILT_DEB_AMD64_SHA256: ${{ needs.release-linux.outputs.deb_sha256 }}
+          BUILT_DEB_ARM64_SHA256: ${{ needs.release-linux-arm64.outputs.deb_sha256 }}
+        run: |
+          set -euo pipefail
+          V="${GITHUB_REF_NAME#v}"
+          declare -A built=(
+            ["tunl_${V}.dmg"]="$BUILT_DMG_SHA256"
+            ["tunl_${V}.msi"]="$BUILT_MSI_SHA256"
+            ["tunl_${V}_amd64.deb"]="$BUILT_DEB_AMD64_SHA256"
+            ["tunl_${V}_arm64.deb"]="$BUILT_DEB_ARM64_SHA256"
+          )
+          count=$(find installers -maxdepth 1 -type f | wc -l)
+          if [ "$count" -ne "${#built[@]}" ]; then
+            echo "::error::expected ${#built[@]} installers, found ${count}:"
+            ls -l installers
+            exit 1
+          fi
+          for asset in "${!built[@]}"; do
+            expected="${built[$asset]}"
+            if ! [[ "$expected" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "::error::No builder digest for ${asset} (got '${expected}')."
+              exit 1
+            fi
+            if [ ! -f "installers/$asset" ]; then
+              echo "::error::installers/${asset} is missing."
+              exit 1
+            fi
+            actual=$(sha256sum "installers/$asset" | awk '{print $1}')
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::${asset} is not the file its builder made (built ${expected}, got ${actual})."
+              exit 1
+            fi
+            echo "verified $asset ($actual)"
+          done
+      - name: Attest the installers' provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: 'installers/*'
+      - name: Upload the installers into the draft release
+        # --clobber lets a re-run replace the assets an earlier attempt left.
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          gh release upload "$GITHUB_REF_NAME" dist/*.deb --clobber
+          gh release upload "$GITHUB_REF_NAME" installers/* --clobber
 
   # Sign every installer with the project release key, so the in-app updater
   # can tell a build we published from one that merely appeared on the release
@@ -668,7 +747,8 @@ jobs:
   # jobs' outputs above) before a single signature is made, so a file
   # swapped on the draft between upload and signing gets no signature.
   sign-release:
-    needs: [prepare-release, release-macos, release-windows, release-linux, release-linux-arm64]
+    needs: [prepare-release, release-macos, release-windows, release-linux, release-linux-arm64,
+            upload-installers]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -787,7 +867,8 @@ jobs:
   # release. A tap/AUR maintainer copies them into their package repo (see
   # docs/DISTRIBUTION.md); the repo keeps the templates unfilled.
   update-packaging:
-    needs: [prepare-release, release-macos, release-windows, release-linux, release-linux-arm64]
+    needs: [prepare-release, release-macos, release-windows, release-linux, release-linux-arm64,
+            upload-installers]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
