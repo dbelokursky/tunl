@@ -98,7 +98,7 @@ class StatusPresenterTest {
     private final AtomicBoolean routedByCore = new AtomicBoolean();
     private final AtomicReference<TunnelHealth> health =
             new AtomicReference<>(TunnelHealth.UNMONITORED);
-    private final AtomicReference<SingBoxEngine> engine = new AtomicReference<>();
+    private final FakeEngine core = new FakeEngine();
     private final AtomicInteger refreshes = new AtomicInteger();
     private final KnownCountries countries = new KnownCountries();
 
@@ -110,7 +110,7 @@ class StatusPresenterTest {
         presenter = new StatusPresenter(
                 new StatusPresenter.Controls(
                         circle, halo, flag, title, subtitle, serverName, connect),
-                active::get, routed::get, routedByCore::get, health::get, engine::get,
+                active::get, routed::get, routedByCore::get, health::get, core,
                 refreshes::incrementAndGet);
     }
 
@@ -290,8 +290,6 @@ class StatusPresenterTest {
 
     @Test
     void aLateCountryAnswerIsPaintedOnlyWhileStillConnectedToThatServer() throws Exception {
-        FakeEngine core = new FakeEngine();
-        engine.set(core);
         ServerConfig exit = server("Exit", "203.0.113.8");
         active.set(exit);
         routed.set(exit);

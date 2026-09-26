@@ -73,7 +73,7 @@ class DefaultAppControlServiceTest {
         private int disconnects;
 
         RecordingConnectionService(ServerConfig server) {
-            super(null, null, null, null);
+            super(null, null, null, SingBoxEngine.withoutCore());
             attempt = new ConnectAttempt(Outcome.STARTED, server);
         }
 
@@ -475,7 +475,8 @@ class DefaultAppControlServiceTest {
      */
     @Test
     void getStatus_saysTheModeTheRunningCoreUses() {
-        ConnectionService running = new ConnectionService(null, null, null, null) {
+        ConnectionService running = new ConnectionService(null, null, null,
+                SingBoxEngine.withoutCore()) {
             @Override
             public Optional<ProxyMode> runningMode() {
                 return Optional.of(ProxyMode.TUN);

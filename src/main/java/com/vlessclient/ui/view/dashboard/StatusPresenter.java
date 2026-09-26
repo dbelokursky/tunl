@@ -9,6 +9,7 @@ import com.vlessclient.model.TunnelStatus;
 import com.vlessclient.service.CountryResolver;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.ui.view.Flags;
+import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import javafx.application.Platform;
@@ -32,7 +33,7 @@ import javafx.scene.shape.Circle;
  * makes that distinction visible instead of leaving it spread through a
  * thousand-line controller.</p>
  */
-public class StatusPresenter {
+public final class StatusPresenter {
 
     /**
      * The FXML-injected controls this presenter paints. They stay owned (and
@@ -55,7 +56,7 @@ public class StatusPresenter {
     private final Supplier<ServerConfig> routedServer;
     private final BooleanSupplier routedByCore;
     private final Supplier<TunnelHealth> health;
-    private final Supplier<SingBoxEngine> engine;
+    private final SingBoxEngine engine;
     private final Runnable refreshConnectAvailability;
 
     /** The state last painted, so a language switch can paint it again. */
@@ -89,7 +90,7 @@ public class StatusPresenter {
      *                                   off, rather than the one the user
      *                                   selected
      * @param health                     the current reachability verdict
-     * @param engine                     the current engine, for the guard on a
+     * @param engine                     the run's engine, for the guard on a
      *                                   late-arriving country lookup
      * @param refreshConnectAvailability re-asks the controller whether the
      *                                   connect button should be enabled
@@ -99,7 +100,7 @@ public class StatusPresenter {
                            Supplier<ServerConfig> routedServer,
                            BooleanSupplier routedByCore,
                            Supplier<TunnelHealth> health,
-                           Supplier<SingBoxEngine> engine,
+                           SingBoxEngine engine,
                            Runnable refreshConnectAvailability) {
         this.statusCircle = controls.statusCircle();
         this.statusHalo = controls.statusHalo();
@@ -112,7 +113,7 @@ public class StatusPresenter {
         this.routedServer = routedServer;
         this.routedByCore = routedByCore;
         this.health = health;
-        this.engine = engine;
+        this.engine = Objects.requireNonNull(engine, "engine");
         this.refreshConnectAvailability = refreshConnectAvailability;
 
         // The card's texts are set, not bound, so switching the language left
@@ -123,9 +124,7 @@ public class StatusPresenter {
         // tunnel that came up before it landed gets its flag when it does.
         ServiceLocator.find(CountryResolver.class).ifPresent(resolver ->
                 resolver.onDatabaseReady(() -> Platform.runLater(() -> {
-                    SingBoxEngine current = engine.get();
-                    if (current != null && current.connectionStateProperty().get()
-                            == ConnectionState.CONNECTED) {
+                    if (engine.connectionStateProperty().get() == ConnectionState.CONNECTED) {
                         showStatusFlag(routed());
                     }
                 })));
@@ -371,10 +370,8 @@ public class StatusPresenter {
         resolver.countryOf(server).ifPresent(this::paintStatusFlag);
         resolver.resolveAsync(server, code -> Platform.runLater(() -> {
             // Only paint if this is still the server we are connected to.
-            SingBoxEngine current = engine.get();
             if (routed() == server
-                    && current != null
-                    && current.connectionStateProperty().get() == ConnectionState.CONNECTED) {
+                    && engine.connectionStateProperty().get() == ConnectionState.CONNECTED) {
                 paintStatusFlag(code);
             }
         }));

@@ -32,7 +32,8 @@ class TrayConnectFailureTest {
     private final List<List<String>> notices = new ArrayList<>();
 
     private TrayIconService trayOver(ConnectionService connections) {
-        TrayIconService tray = new TrayIconService(() -> null, null, connections, null, null, null);
+        TrayIconService tray = new TrayIconService(SingBoxEngine.withoutCore(), null,
+                connections, null, null, null);
         tray.setNotifier((title, body) -> notices.add(List.of(title, body)));
         return tray;
     }
@@ -58,7 +59,7 @@ class TrayConnectFailureTest {
         TrayIconService tray = trayOver(new StubConnections(tempDir) {
             @Override
             public ConnectAttempt connect() {
-                return new ConnectAttempt(Outcome.NO_ENGINE, null);
+                return new ConnectAttempt(Outcome.NO_CORE, null);
             }
         });
 
@@ -123,7 +124,8 @@ class TrayConnectFailureTest {
     private static class StubConnections extends ConnectionService {
 
         StubConnections(Path dir) {
-            super(new ConfigStore(dir), new SingBoxConfigGenerator(), null, null);
+            super(new ConfigStore(dir), new SingBoxConfigGenerator(), null,
+                    SingBoxEngine.withoutCore());
         }
 
         @Override

@@ -25,7 +25,7 @@ class TrayFailureNoticeTest {
     void aFailureStreakRaisesOneNotification() {
         ScriptedEngine engine = new ScriptedEngine();
         CountingTray tray = new CountingTray(engine);
-        tray.rebindEngineListener();
+        tray.followEngine();
 
         for (int start = 0; start < 3; start++) {
             engine.reach(ConnectionState.CONNECTING);
@@ -42,7 +42,7 @@ class TrayFailureNoticeTest {
     void aTunnelThatCameUpAndDroppedAgainIsNotifiedAgain() {
         ScriptedEngine engine = new ScriptedEngine();
         CountingTray tray = new CountingTray(engine);
-        tray.rebindEngineListener();
+        tray.followEngine();
 
         engine.reach(ConnectionState.CONNECTING);
         engine.reach(ConnectionState.ERROR);
@@ -79,7 +79,7 @@ class TrayFailureNoticeTest {
         final AtomicInteger notices = new AtomicInteger();
 
         CountingTray(SingBoxEngine engine) {
-            super(() -> engine, null, null, null, null, null);
+            super(engine, null, null, null, null, null);
         }
 
         @Override

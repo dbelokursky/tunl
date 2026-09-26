@@ -26,7 +26,8 @@ class TrayMenuTest {
 
     /** Headless: the constructor creates no AWT object, and install() is never called. */
     private static TrayIconService tray(List<Runnable> awtQueue) {
-        TrayIconService tray = new TrayIconService(() -> null, null, null, null, null, null);
+        TrayIconService tray = new TrayIconService(SingBoxEngine.withoutCore(), null, null,
+                null, null, null);
         tray.setAwtInvoker(awtQueue::add);
         return tray;
     }
@@ -119,7 +120,8 @@ class TrayMenuTest {
     void aNewPickByTheCoreReachesTheMenu() {
         SimpleStringProperty pick = new SimpleStringProperty();
         List<Runnable> awtQueue = new ArrayList<>();
-        TrayIconService tray = new TrayIconService(() -> null, null, null, null, pick, null);
+        TrayIconService tray = new TrayIconService(SingBoxEngine.withoutCore(), null, null,
+                null, pick, null);
         tray.setAwtInvoker(awtQueue::add);
         tray.followCorePick();
 

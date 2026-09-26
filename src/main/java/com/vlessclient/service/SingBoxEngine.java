@@ -16,6 +16,7 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyBooleanProperty;
@@ -49,7 +50,11 @@ public class SingBoxEngine {
     private static final int MAX_LOG_LINES = 1000;
     private static final int STOP_TIMEOUT_SECONDS = 5;
 
-    private final Path singBoxBinary;
+    /**
+     * The core's executable, or null until one is installed. Written under
+     * {@link #lifecycle}, so that one start reads one path throughout.
+     */
+    private volatile Path singBoxBinary;
 
     /** Where a direct core is written down for the next run to find; null writes nothing. */
     private final CoreRecord coreRecord;
@@ -143,7 +148,8 @@ public class SingBoxEngine {
     /**
      * Creates a new SingBoxEngine that writes its core down nowhere.
      *
-     * @param singBoxBinary path to the sing-box executable
+     * @param singBoxBinary path to the sing-box executable, or null for an
+     *                      engine with no core yet
      */
     public SingBoxEngine(Path singBoxBinary) {
         this(singBoxBinary, null);
@@ -152,7 +158,16 @@ public class SingBoxEngine {
     /**
      * Creates a new SingBoxEngine.
      *
-     * @param singBoxBinary path to the sing-box executable
+     * <p>One engine lasts the whole run. When no core is installed the app
+     * starts with an engine that has none, and the installer gives it the
+     * core it downloads ({@link #setBinary}). The tray, the dashboard, the
+     * log page and the MCP server keep following the same engine throughout.
+     * They used to be moved one by one to a new engine made after the
+     * install, and each one missed was a view stuck on an engine without a
+     * core.</p>
+     *
+     * @param singBoxBinary path to the sing-box executable, or null for an
+     *                      engine with no core yet
      * @param coreRecord    where each direct core is written down, so the next
      *                      run can end one this run leaves running; null for
      *                      nowhere
@@ -182,6 +197,39 @@ public class SingBoxEngine {
     }
 
     /**
+     * An engine with no core, which cannot start: what the app has until the
+     * installer gives it one, and a view's stand-in when no engine is
+     * registered.
+     *
+     * @return a new engine without a core
+     */
+    public static SingBoxEngine withoutCore() {
+        return new SingBoxEngine(null, null);
+    }
+
+    /**
+     * Whether the engine has a core to start.
+     *
+     * @return false until a core is installed
+     */
+    public boolean hasBinary() {
+        return singBoxBinary != null;
+    }
+
+    /**
+     * Gives the engine the core the installer downloaded, for every start from
+     * now on.
+     *
+     * @param binary path to the sing-box executable
+     */
+    public void setBinary(Path binary) {
+        Objects.requireNonNull(binary, "binary");
+        synchronized (lifecycle) {
+            singBoxBinary = binary;
+        }
+    }
+
+    /**
      * Starts sing-box with the given configuration JSON.
      *
      * <p>The configuration is written to a temporary file and sing-box is launched
@@ -204,7 +252,8 @@ public class SingBoxEngine {
      *                              interrupted before the launch
      *                              ({@link InterruptedIOException}), or the process cannot
      *                              start
-     * @throws IllegalStateException if sing-box is already running
+     * @throws IllegalStateException if sing-box is already running, or there is
+     *                               no core to start ({@link #hasBinary})
      */
     public void start(String configJson, ProxyMode proxyMode) throws IOException {
         // The whole check-and-launch runs under `lifecycle`: without it two of
@@ -233,6 +282,9 @@ public class SingBoxEngine {
     private void startLocked(String configJson, ProxyMode proxyMode) throws IOException {
         if (isRunning()) {
             throw new IllegalStateException("sing-box is already running");
+        }
+        if (singBoxBinary == null) {
+            throw new IllegalStateException("no sing-box core is installed");
         }
 
         // Retire the previous session's identity token FIRST. A crashed

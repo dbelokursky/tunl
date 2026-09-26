@@ -19,6 +19,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Executors;
@@ -88,8 +89,8 @@ public class ConnectionService {
         STARTED,
         /** The running core selected a different server without restarting. */
         SWITCHED,
-        /** No sing-box binary is available yet, so there is nothing to launch. */
-        NO_ENGINE,
+        /** No core is installed yet, so there is nothing to launch. */
+        NO_CORE,
         /** Nothing is selected to connect to. */
         NO_ACTIVE_SERVER,
         /** A core was already running, so this attempt was refused. */
@@ -141,12 +142,8 @@ public class ConnectionService {
     private final SingBoxConfigGenerator configGenerator;
     private final RoutingService routingService;
 
-    /**
-     * Null until the binary is installed: the app starts without one and the
-     * installer registers an engine afterwards, so this is replaced at runtime
-     * (see {@link #setEngine}) and read as a single volatile snapshot per call.
-     */
-    private volatile SingBoxEngine engine;
+    /** The run's one engine, which has no core until one is installed. */
+    private final SingBoxEngine engine;
     private final Object operations = new Object();
     private final TunnelRecoveryService recovery;
     private final ChangeListener<ConnectionState> stateListener;
@@ -214,7 +211,7 @@ public class ConnectionService {
      * @param configStore     source of the server list and the live settings
      * @param configGenerator builds the core configuration
      * @param routingService  supplies routing rules, or null for defaults
-     * @param engine          the engine to drive, or null until one exists
+     * @param engine          the engine to drive, with or without a core
      */
     public ConnectionService(ConfigStore configStore,
                              SingBoxConfigGenerator configGenerator,
@@ -223,6 +220,7 @@ public class ConnectionService {
         this.configStore = configStore;
         this.configGenerator = configGenerator;
         this.routingService = routingService;
+        this.engine = Objects.requireNonNull(engine, "engine");
         this.recovery = new TunnelRecoveryService(
                 () -> configStore != null ? configStore.getSettings() : new AppSettings(),
                 this::recover, this::restartNeedsTheUser);
@@ -236,9 +234,7 @@ public class ConnectionService {
             // A dismissed administrator prompt is the user cancelling the
             // connect, and the request for a tunnel goes with it: kept, it
             // held subscriptions back for a tunnel nobody wanted any more.
-            SingBoxEngine current = this.engine;
-            if (state == ConnectionState.DISCONNECTED && current != null
-                    && current.lastExitWasDeclined()) {
+            if (state == ConnectionState.DISCONNECTED && engine.lastExitWasDeclined()) {
                 recovery.cancel();
             }
             if (state == ConnectionState.CONNECTED) {
@@ -252,29 +248,7 @@ public class ConnectionService {
                 stopWatchingNetwork();
             }
         };
-        bindEngine(engine);
-    }
-
-    /**
-     * Points the service at a new engine — used when the sing-box binary is
-     * downloaded after startup and a fresh engine is registered.
-     *
-     * @param engine the engine to drive from now on
-     */
-    public void setEngine(SingBoxEngine engine) {
-        bindEngine(engine);
-    }
-
-    private void bindEngine(SingBoxEngine engine) {
-        FxExecutor.run(() -> {
-            if (this.engine != null) {
-                this.engine.connectionStateProperty().removeListener(stateListener);
-            }
-            this.engine = engine;
-            if (engine != null) {
-                engine.connectionStateProperty().addListener(stateListener);
-            }
-        });
+        FxExecutor.run(() -> engine.connectionStateProperty().addListener(stateListener));
     }
 
     /** The application-owned recovery loop, shared with health reporting and the UI. */
@@ -298,17 +272,16 @@ public class ConnectionService {
      * every launch raises again.
      */
     boolean restartNeedsTheUser() {
-        SingBoxEngine current = engine;
-        if (current == null || configStore == null) {
+        if (configStore == null) {
             return false;
         }
         // The mode recover() would restart in.
         ProxyMode mode = requestedMode != null
                 ? requestedMode : configStore.getSettings().getProxyMode();
-        return mode == ProxyMode.TUN && current.restartNeedsElevationPrompt();
+        return mode == ProxyMode.TUN && engine.restartNeedsElevationPrompt();
     }
 
-    /** The engine currently driven, or null when no binary is available. */
+    /** The engine this service drives, which may have no core yet. */
     public SingBoxEngine getEngine() {
         return engine;
     }
@@ -424,8 +397,7 @@ public class ConnectionService {
 
     /** Whether a core is running right now. Safe from any thread. */
     public boolean isRunning() {
-        SingBoxEngine current = engine;
-        return current != null && current.isRunning();
+        return engine.isRunning();
     }
 
     /**
@@ -488,9 +460,8 @@ public class ConnectionService {
 
     private ConnectAttempt connectInternal(ProxyMode modeOverride, BooleanSupplier allowed)
             throws IOException {
-        SingBoxEngine current = engine;
-        if (current == null) {
-            return new ConnectAttempt(Outcome.NO_ENGINE, null);
+        if (!engine.hasBinary()) {
+            return new ConnectAttempt(Outcome.NO_CORE, null);
         }
 
         // One marshalled read of the FX-owned list: the candidates and the
@@ -509,19 +480,19 @@ public class ConnectionService {
         AppSettings settings = configStore.getSettings();
         ProxyMode mode = modeOverride != null ? modeOverride : settings.getProxyMode();
 
-        if (current.isRunning() && !current.isStopping()) {
+        if (engine.isRunning() && !engine.isStopping()) {
             // Nothing is stopping this core, so waiting for it would only run
             // out STOP_WAIT under the lock a Disconnect needs, and the start
             // would be refused anyway.
             return new ConnectAttempt(Outcome.ALREADY_RUNNING, active);
         }
         log.info("Connecting to server: {} ({})", active.getName(), mode);
-        current.awaitStopped(STOP_WAIT);
+        engine.awaitStopped(STOP_WAIT);
         if (!allowed.getAsBoolean()) {
             return new ConnectAttempt(Outcome.CANCELLED, active);
         }
         List<MovedPort> moved = List.of();
-        if (!current.isRunning()) {
+        if (!engine.isRunning()) {
             // Only once the previous core is gone: while it still ran, its own
             // ports would read as taken. What it leaves behind in TIME_WAIT
             // does not (see isFree), so a restart keeps the ports it had.
@@ -550,7 +521,7 @@ public class ConnectionService {
                 Run previous = run;
                 run = new Run(prepared, mode, chosenPorts(settings), idsOf(skipped), host);
                 try {
-                    current.start(prepared.config(), mode);
+                    engine.start(prepared.config(), mode);
                     break;
                 } catch (ConfigRejectedException e) {
                     run = previous;
@@ -670,11 +641,8 @@ public class ConnectionService {
         run = null;
         // A stopped core put the system's proxy back itself.
         SessionPorts.forget(configStore.getDataDir());
-        SingBoxEngine current = engine;
-        if (current != null) {
-            log.info("Disconnecting");
-            current.stop();
-        }
+        log.info("Disconnecting");
+        engine.stop();
     }
 
     /**
@@ -784,10 +752,7 @@ public class ConnectionService {
                 recovery.keptUp(request);
                 appliedServerId = active.getId();
                 // Nor tell the engine that its log so far was another server's.
-                SingBoxEngine switched = engine;
-                if (switched != null) {
-                    switched.forgetRealityRefusal();
-                }
+                engine.forgetRealityRefusal();
                 return new ConnectAttempt(Outcome.SWITCHED, active);
             }
             if (!recovery.isWanted(request)) {

@@ -80,7 +80,7 @@ public class DashboardConnectFocusTest extends ApplicationTest {
         ServiceLocator.register(AppSettings.class, settings);
         ServiceLocator.register(SingBoxEngine.class, ENGINE);
         ServiceLocator.register(ConnectionService.class,
-                new ConnectionService(null, null, null, null) {
+                new ConnectionService(null, null, null, SingBoxEngine.withoutCore()) {
                     @Override
                     public ConnectAttempt connect(ProxyMode modeOverride) {
                         CONNECT_ASKED.countDown();

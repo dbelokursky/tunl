@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.service.ConnectionService;
+import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.testing.ThreadDump;
 import com.vlessclient.testing.UiTest;
 import java.util.concurrent.CountDownLatch;
@@ -41,7 +42,7 @@ public class DashboardTunnelDroppedBannerTest extends ApplicationTest {
     @BeforeAll
     static void registerTheService() {
         ServiceLocator.register(ConnectionService.class,
-                new ConnectionService(null, null, null, null) {
+                new ConnectionService(null, null, null, SingBoxEngine.withoutCore()) {
                     @Override
                     public ReadOnlyBooleanProperty reconnectNeededProperty() {
                         return NEEDED.getReadOnlyProperty();

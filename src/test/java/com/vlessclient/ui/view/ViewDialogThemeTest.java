@@ -692,7 +692,7 @@ public class ViewDialogThemeTest extends ApplicationTest {
     private static final class FailingConnectionService extends ConnectionService {
 
         FailingConnectionService() {
-            super(null, null, null, null);
+            super(null, null, null, SingBoxEngine.withoutCore());
         }
 
         @Override

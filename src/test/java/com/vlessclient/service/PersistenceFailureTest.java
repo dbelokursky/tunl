@@ -83,7 +83,7 @@ class PersistenceFailureTest {
     void mcpReportsTheFailedSaveAndRetriesWithoutAddingTheServerAgain() throws Exception {
         ConfigStore store = new ConfigStore(dir);
         DefaultAppControlService control = new DefaultAppControlService(store, null, null, null,
-                null, null, new ShareLinkParser(), null);
+                null, null, new ShareLinkParser(), SingBoxEngine.withoutCore());
         block("servers.json");
         assertThatThrownBy(() -> control.addServer("vless://test@example.com:443#One", null))
                 .isInstanceOf(McpToolException.class).hasMessageContaining("servers.json");
@@ -104,7 +104,7 @@ class PersistenceFailureTest {
         block("servers.json");
         ConfigStore store = new ConfigStore(dir);
         DefaultAppControlService control = new DefaultAppControlService(store, null, null, null,
-                null, null, new ShareLinkParser(), null);
+                null, null, new ShareLinkParser(), SingBoxEngine.withoutCore());
 
         assertThatThrownBy(() -> control.addServer("vless://test@example.com:443#One", null))
                 .isInstanceOf(McpToolException.class)
@@ -126,7 +126,7 @@ class PersistenceFailureTest {
         ConfigStore store = new ConfigStore(dir);
         store.getPersistenceState().failed(TrafficHistoryStore.HISTORY_FILE, () -> { });
         DefaultAppControlService control = new DefaultAppControlService(store, null, null, null,
-                null, null, new ShareLinkParser(), null);
+                null, null, new ShareLinkParser(), SingBoxEngine.withoutCore());
 
         control.addServer("vless://test@example.com:443#One", null);
 

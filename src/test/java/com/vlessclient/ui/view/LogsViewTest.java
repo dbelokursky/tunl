@@ -33,6 +33,7 @@ import javafx.scene.layout.StackPane;
 import javafx.stage.Stage;
 import javafx.stage.Window;
 import javafx.util.Callback;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
 import org.testfx.util.WaitForAsyncUtils;
@@ -48,10 +49,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class LogsViewTest extends ApplicationTest {
 
     private Stage stage;
+    /** The engine this test's view shows the log of. */
+    private SingBoxEngine engine;
+    private SingBoxEngine previousEngine;
 
     @Override
     public void start(Stage stage) throws Exception {
         this.stage = stage;
+        // An engine of each test's own, with an empty log, as a run that has
+        // installed no core has. The graph's engine is shared: every view an
+        // earlier test built stays subscribed to its log, and so does the MCP
+        // log bridge, where these tests were written against a log of their own.
+        previousEngine = ServiceLocator.find(SingBoxEngine.class).orElse(null);
+        engine = SingBoxEngine.withoutCore();
+        ServiceLocator.register(SingBoxEngine.class, engine);
         FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/LogsView.fxml"));
         Parent root = loader.load();
         stage.setScene(new Scene(root, 800, 600));
@@ -63,6 +74,14 @@ public class LogsViewTest extends ApplicationTest {
         // the explicit bounds, so this class inherits none and passes none on:
         // setting a size here instead broke the 500 px fit tests that follow.
         stage.sizeToScene();
+    }
+
+    @AfterEach
+    void restoreTheEngine() {
+        // The locator is process-wide: later classes find what this one found.
+        if (previousEngine != null) {
+            ServiceLocator.register(SingBoxEngine.class, previousEngine);
+        }
     }
 
     @Test
@@ -225,31 +244,26 @@ public class LogsViewTest extends ApplicationTest {
     }
 
     /**
-     * Installing the core from the dashboard registers a new engine after this
-     * view was built, and the view went on showing the log of the engine that
-     * had no binary: empty, for the rest of the run.
+     * Installing the core from the dashboard used to register a new engine
+     * after this view was built. The view showed the log of the engine that
+     * had no core, empty for the rest of the run, until it learned to switch
+     * when it came back on screen. The core now goes into the engine the view
+     * already shows.
      */
     @Test
-    void theLogOfAnEngineRegisteredLaterIsShownWhenTheViewComesBack() {
+    void theLogOfACoreInstalledLaterIsShown() {
         ListView<String> list = lookup("#logListView").query();
-        SingBoxEngine previous = ServiceLocator.find(SingBoxEngine.class).orElse(null);
-        SingBoxEngine installed = new SingBoxEngine(Path.of("target", "no-such-sing-box"));
-        try {
-            interact(() -> stage.hide());
-            ServiceLocator.register(SingBoxEngine.class, installed);
-            interact(() -> installed.getLogLines().add("INFO sing-box started (0.10s)"));
+        interact(() -> stage.hide());
 
-            interact(() -> stage.show());
-            WaitForAsyncUtils.waitForFxEvents();
+        ServiceLocator.installCore(Path.of("target", "no-such-sing-box"));
+        interact(() -> engine.getLogLines().add("INFO sing-box started (0.10s)"));
+        interact(() -> stage.show());
+        WaitForAsyncUtils.waitForFxEvents();
 
-            assertThat(list.getItems()).containsExactly("INFO sing-box started (0.10s)");
-            interact(() -> installed.getLogLines().add("INFO inbound/socks[socks-in]: ready"));
-            assertThat(list.getItems()).as("and it keeps following it").hasSize(2);
-        } finally {
-            if (previous != null) {
-                ServiceLocator.register(SingBoxEngine.class, previous);
-            }
-        }
+        assertThat(engine.hasBinary()).as("the core went into the view's engine").isTrue();
+        assertThat(list.getItems()).containsExactly("INFO sing-box started (0.10s)");
+        interact(() -> engine.getLogLines().add("INFO inbound/socks[socks-in]: ready"));
+        assertThat(list.getItems()).as("and it keeps following it").hasSize(2);
     }
 
     /** Closing the window to the tray hides the stage and leaves the scene on it. */

@@ -17,7 +17,7 @@ import java.util.function.Supplier;
  * which decides per request whether to go through sing-box's local HTTP
  * inbound. That decision cannot be made at construction time: these clients
  * are built while {@code ServiceLocator} assembles the service graph, long
- * before there is an engine, a port or a health verdict, and they outlive
+ * before there is a tunnel, a port or a health verdict, and they outlive
  * every connect and disconnect afterwards.</p>
  *
  * <p>Which clients belong here: the ones that talk to the internet
@@ -83,24 +83,22 @@ public final class AppHttpClients {
      *
      * <p>The policy of when a tunnel may carry these requests lives with the
      * selector rather than with the caller, so the answer cannot drift between
-     * here and {@link TunnelProxySelector}. Everything is read per request: an
-     * engine registered after the binary finishes downloading, a port changed
-     * in Settings, and every connect and disconnect are all picked up without
-     * rebuilding a client.</p>
+     * here and {@link TunnelProxySelector}. Everything is read per request: a
+     * port changed in Settings, and every connect and disconnect, are picked
+     * up without rebuilding a client.</p>
      *
-     * @param engine   the current engine, or null before one exists
+     * @param engine   the run's engine
      * @param settings the current settings, for the local HTTP inbound port
      * @param health   the reachability verdict for the running tunnel
      * @param wanted   whether the user wants a tunnel now
      */
-    public static void followTunnel(Supplier<SingBoxEngine> engine,
+    public static void followTunnel(SingBoxEngine engine,
                                     Supplier<AppSettings> settings,
                                     TunnelHealthState health,
                                     BooleanSupplier wanted) {
         routeThroughTunnel(() -> {
-            SingBoxEngine current = engine.get();
-            if (current == null || !TunnelProxySelector.carriesTraffic(
-                    current.connectionStateProperty().get(), health.get())) {
+            if (!TunnelProxySelector.carriesTraffic(
+                    engine.connectionStateProperty().get(), health.get())) {
                 return OptionalInt.empty();
             }
             return OptionalInt.of(settings.get().listenHttpPort());
@@ -109,9 +107,8 @@ public final class AppHttpClients {
             if (!wanted.getAsBoolean()) {
                 return false;
             }
-            SingBoxEngine current = engine.get();
-            return current == null || !TunnelProxySelector.carriesTraffic(
-                    current.connectionStateProperty().get(), health.get());
+            return !TunnelProxySelector.carriesTraffic(
+                    engine.connectionStateProperty().get(), health.get());
         });
     }
 

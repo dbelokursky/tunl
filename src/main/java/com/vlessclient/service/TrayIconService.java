@@ -29,7 +29,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 import java.util.stream.Stream;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyStringProperty;
@@ -68,16 +67,8 @@ public class TrayIconService {
      */
     private static final long UNINSTALL_TIMEOUT_MS = 1_000L;
 
-    /**
-     * Resolved on every use rather than captured once. The in-app sing-box
-     * install replaces the engine object, and a captured one would leave the
-     * icon and the connect label following an engine that never had a binary
-     * for the rest of the run. Same shape {@code HealthCheckCoordinator} uses.
-     */
-    private final Supplier<SingBoxEngine> engineSupplier;
-
-    /** The engine {@link #stateListener} is currently attached to, if any. */
-    private SingBoxEngine listeningTo;
+    /** The run's engine, which has no core until one is installed. */
+    private final SingBoxEngine engine;
 
     /**
      * The server list as AWT sees it.
@@ -133,7 +124,7 @@ public class TrayIconService {
     /**
      * Creates a tray icon service bound to the given engine, stores and stage.
      *
-     * @param engineSupplier    supplies the engine whose state drives the icon
+     * @param engine            the engine whose state drives the icon
      * @param configStore       store providing the selectable server list
      * @param connectionService owner of the connect/disconnect flow
      * @param healthState       reachability verdict refining a running tunnel,
@@ -144,13 +135,13 @@ public class TrayIconService {
      *                          submenu as the one in use now; may be null
      * @param stage             main window shown/hidden from the tray
      */
-    public TrayIconService(Supplier<SingBoxEngine> engineSupplier,
+    public TrayIconService(SingBoxEngine engine,
                            ConfigStore configStore,
                            ConnectionService connectionService,
                            TunnelHealthState healthState,
                            ReadOnlyStringProperty corePick,
                            Stage stage) {
-        this.engineSupplier = engineSupplier;
+        this.engine = Objects.requireNonNull(engine, "engine");
         this.configStore = configStore;
         this.connectionService = connectionService;
         this.healthState = healthState;
@@ -199,7 +190,7 @@ public class TrayIconService {
         });
 
         // Listen for state changes and forward to AWT thread.
-        attachEngineListener();
+        followEngine();
         followRecovery();
 
         // Listen for reachability verdicts: a tunnel that stops carrying
@@ -595,7 +586,7 @@ public class TrayIconService {
                     log.warn("Tray connect clicked but no active server selected");
                     showMainWindow();
                 }
-                case NO_ENGINE -> {
+                case NO_CORE -> {
                     log.warn("Tray connect clicked but SingBoxEngine is not available");
                     notifier.accept(I18n.get("error.singbox.not.found"),
                             I18n.get("dashboard.error.singbox.body"));
@@ -656,24 +647,16 @@ public class TrayIconService {
         return trayIcon != null;
     }
 
-    private SingBoxEngine engine() {
-        return engineSupplier == null ? null : engineSupplier.get();
-    }
-
     private ConnectionState currentState() {
-        SingBoxEngine engine = engine();
-        if (engine == null) {
-            return ConnectionState.DISCONNECTED;
-        }
         ConnectionState state = engine.connectionStateProperty().get();
         return state != null ? state : ConnectionState.DISCONNECTED;
     }
 
-    private void attachEngineListener() {
-        SingBoxEngine engine = engine();
-        if (engine == null) {
-            return;
-        }
+    /**
+     * Follows the engine's state: the icon, and a notice when the tunnel
+     * fails. Package-private for a test: install() needs a system tray.
+     */
+    void followEngine() {
         stateListener = (obs, oldVal, newVal) -> {
             refreshTrayState();
             // Once per failure streak: recovery restarting a core that fails at
@@ -683,7 +666,6 @@ public class TrayIconService {
             }
         };
         engine.connectionStateProperty().addListener(stateListener);
-        listeningTo = engine;
     }
 
     /**
@@ -716,8 +698,7 @@ public class TrayIconService {
      */
     void notifyTunnelFailed() {
         TrayIcon icon = trayIcon;
-        SingBoxEngine engine = engine();
-        if (icon == null || engine == null) {
+        if (icon == null) {
             return;
         }
         String detail = engine.errorMessageProperty().get();
@@ -744,33 +725,10 @@ public class TrayIconService {
     }
 
     private void detachEngineListener() {
-        if (listeningTo != null && stateListener != null) {
-            listeningTo.connectionStateProperty().removeListener(stateListener);
+        if (stateListener != null) {
+            engine.connectionStateProperty().removeListener(stateListener);
         }
         stateListener = null;
-        listeningTo = null;
-    }
-
-    /** Test seam: the engine the state listener is attached to, or null. */
-    SingBoxEngine listeningTo() {
-        return listeningTo;
-    }
-
-    /**
-     * Moves the state listener onto whatever engine the supplier now returns.
-     *
-     * <p>Called after the in-app install registers a fresh engine. A listener
-     * is bound to one property instance, so re-resolving the engine is not
-     * enough on its own — without this the icon stops following the tunnel
-     * from the moment the core is installed until the app is restarted.</p>
-     */
-    public void rebindEngineListener() {
-        if (engine() == listeningTo) {
-            return;
-        }
-        detachEngineListener();
-        attachEngineListener();
-        refreshTrayState();
     }
 
     private TunnelHealth currentHealth() {
