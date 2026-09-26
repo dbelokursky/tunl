@@ -21,6 +21,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -163,6 +166,36 @@ public class ConnectionService {
     private final ReadOnlyObjectWrapper<List<MovedPort>> movedPorts =
             new ReadOnlyObjectWrapper<>(List.of());
 
+    /** How often a TUN run with IPv6 on looks at the network's IPv6 again. */
+    static final Duration NETWORK_CHECK = Duration.ofSeconds(15);
+
+    /**
+     * How the host's IPv6 changed since the running core started. The TUN
+     * device takes IPv6 or not by the network it starts on, and a run keeps
+     * that fact (see {@link HostFacts}), so a laptop that changed networks
+     * sent its IPv6 around the tunnel, or drew apps to IPv6 that could not
+     * leave, until a reconnect nothing offered.
+     */
+    public enum NetworkChange {
+
+        /** As the run started. */
+        NONE,
+
+        /** The network gained IPv6, which goes around a device started without it. */
+        IPV6_GAINED,
+
+        /**
+         * The network lost IPv6, which a device started with it still draws
+         * apps to, so what the rules send direct does not open.
+         */
+        IPV6_LOST
+    }
+
+    private final ReadOnlyObjectWrapper<NetworkChange> networkChange =
+            new ReadOnlyObjectWrapper<>(NetworkChange.NONE);
+    /** Looks at the network while a TUN run with IPv6 on is up; null otherwise. */
+    private ScheduledExecutorService networkWatch;
+
     /**
      * What a core was started from: the configuration it loaded, the mode, the
      * ports the user chose, which its own may have moved off, and the ids of
@@ -210,6 +243,13 @@ public class ConnectionService {
             }
             if (state == ConnectionState.CONNECTED) {
                 followActiveServer();
+                // Every start is a new comparison: a reconnect after a
+                // change is what clears it.
+                publishNetworkChange(NetworkChange.NONE);
+                watchNetwork();
+            } else if (state == ConnectionState.DISCONNECTED
+                    || state == ConnectionState.ERROR) {
+                stopWatchingNetwork();
             }
         };
         bindEngine(engine);
@@ -305,6 +345,81 @@ public class ConnectionService {
      */
     public ReadOnlyObjectProperty<List<MovedPort>> movedPortsProperty() {
         return movedPorts.getReadOnlyProperty();
+    }
+
+    /**
+     * How the network changed under the running core, for the Dashboard to
+     * offer the reconnect that applies it. Set on the FX thread.
+     *
+     * @return the read-only change property
+     */
+    public ReadOnlyObjectProperty<NetworkChange> networkChangeProperty() {
+        return networkChange.getReadOnlyProperty();
+    }
+
+    /**
+     * Compares the network's IPv6 now with what the running TUN core started
+     * on, and publishes the difference. Off the FX thread: it walks the
+     * network interfaces. The watch calls it; package-private for a test.
+     */
+    void checkNetwork() {
+        Run current = run;
+        NetworkChange change = NetworkChange.NONE;
+        if (current != null && current.mode() == ProxyMode.TUN && isRunning()
+                && configStore != null && configStore.getSettings().isTunIpv6Enabled()) {
+            boolean startedWith = current.host().ipv6Uplink();
+            boolean now = configGenerator.hostFacts().ipv6Uplink();
+            if (now != startedWith) {
+                change = now ? NetworkChange.IPV6_GAINED : NetworkChange.IPV6_LOST;
+            }
+        }
+        publishNetworkChange(change);
+    }
+
+    /**
+     * Looks at the network every {@link #NETWORK_CHECK} while a TUN core with
+     * IPv6 on runs, the only configuration the network's IPv6 shapes.
+     */
+    private synchronized void watchNetwork() {
+        Run current = run;
+        boolean shaped = current != null && current.mode() == ProxyMode.TUN
+                && configStore != null && configStore.getSettings().isTunIpv6Enabled();
+        if (!shaped) {
+            stopWatchingNetwork();
+            return;
+        }
+        if (networkWatch == null) {
+            networkWatch = Executors.newSingleThreadScheduledExecutor(
+                    DaemonThreads.factory("network-watch"));
+            long period = NETWORK_CHECK.toMillis();
+            networkWatch.scheduleWithFixedDelay(this::checkNetworkQuietly,
+                    period, period, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    private synchronized void stopWatchingNetwork() {
+        if (networkWatch != null) {
+            networkWatch.shutdownNow();
+            networkWatch = null;
+        }
+        publishNetworkChange(NetworkChange.NONE);
+    }
+
+    private void checkNetworkQuietly() {
+        try {
+            checkNetwork();
+        } catch (RuntimeException e) {
+            // A failed look at the interfaces must not end the watch.
+            log.debug("Could not look at the network: {}", e.toString());
+        }
+    }
+
+    private void publishNetworkChange(NetworkChange change) {
+        try {
+            Platform.runLater(() -> networkChange.set(change));
+        } catch (IllegalStateException toolkitNotRunning) {
+            networkChange.set(change);
+        }
     }
 
     /** Whether a core is running right now. Safe from any thread. */

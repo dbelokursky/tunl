@@ -126,6 +126,12 @@ public class DashboardViewController implements ViewShownAware {
     @FXML private HBox pendingChangesBanner;
     @FXML private Label pendingChangesLabel;
     @FXML private Button pendingChangesButton;
+    /**
+     * Why the banner offers a reconnect: settings changed since the core
+     * started, or the network did. The key of the sentence it shows.
+     */
+    private final javafx.beans.property.StringProperty pendingReason =
+            new javafx.beans.property.SimpleStringProperty("dashboard.pending.changes");
 
     private final ObjectProperty<ConnectionState> connectionState =
             new SimpleObjectProperty<>(ConnectionState.DISCONNECTED);
@@ -217,7 +223,13 @@ public class DashboardViewController implements ViewShownAware {
         // for the user rather than raising the prompt unasked.
         tunnelDroppedLabel.textProperty().bind(I18n.binding("dashboard.tunnel.dropped"));
         ButtonLabels.bindStatic(tunnelDroppedButton, "dashboard.tunnel.reconnect");
-        pendingChangesLabel.textProperty().bind(I18n.binding("dashboard.pending.changes"));
+        pendingChangesLabel.textProperty().bind(javafx.beans.binding.Bindings.createStringBinding(
+                () -> I18n.get(pendingReason.get()), pendingReason, I18n.localeProperty()));
+        // The network changing under a TUN run is a reason to reconnect too;
+        // it is found off the FX thread, and the banner has to hear of it.
+        ServiceLocator.find(ConnectionService.class).ifPresent(service ->
+                service.networkChangeProperty().addListener(
+                        (obs, oldChange, newChange) -> refreshPendingChanges(currentState())));
         ButtonLabels.bindStatic(pendingChangesButton, "dashboard.tunnel.reconnect");
         ServiceLocator.find(ConnectionService.class).ifPresent(service -> {
             tunnelDroppedBanner.visibleProperty().bind(service.reconnectNeededProperty());
@@ -890,9 +902,17 @@ public class DashboardViewController implements ViewShownAware {
         // Asked on every state change: a missing service is logged where a
         // connect needs it, not here.
         ConnectionService service = ServiceLocator.find(ConnectionService.class).orElse(null);
-        boolean pending = service != null
-                && state == ConnectionState.CONNECTED
-                && !service.runsCurrentSettings();
+        boolean connected = service != null && state == ConnectionState.CONNECTED;
+        ConnectionService.NetworkChange network = connected
+                ? service.networkChangeProperty().get() : ConnectionService.NetworkChange.NONE;
+        pendingReason.set(switch (network) {
+            case IPV6_GAINED -> "dashboard.network.ipv6.gained";
+            case IPV6_LOST -> "dashboard.network.ipv6.lost";
+            case NONE -> "dashboard.pending.changes";
+        });
+        boolean pending = connected
+                && (network != ConnectionService.NetworkChange.NONE
+                        || !service.runsCurrentSettings());
         pendingChangesBanner.setVisible(pending);
         pendingChangesBanner.setManaged(pending);
     }
