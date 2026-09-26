@@ -385,32 +385,31 @@
                                 <rule>
                                     <!-- Floor, not target. Coverage differs by
                                          OS because platform-specific tests are
-                                         skipped. On 2026-09-19 main measured
-                                         80.2% of lines on macOS
-                                         (mvn clean verify -Psmoke, about 1,430
-                                         tests). Keep enough headroom for the
-                                         spread across the CI legs and raise
-                                         this floor as coverage grows. -->
+                                         skipped; every CI leg prints what it
+                                         measured ("Report coverage"). On
+                                         2026-09-26 the legs measured lines /
+                                         branches: Windows 79.9 / 68.2, Linux
+                                         81.1 / 69.2, Linux arm64 81.2 / 69.2,
+                                         macOS 81.9 / 70.0. The floors sit
+                                         about two points under the lowest
+                                         leg, so a change that drops coverage
+                                         fails the build; raise them as
+                                         coverage grows. -->
                                     <element>BUNDLE</element>
                                     <limits>
                                         <limit>
                                             <counter>LINE</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.73</minimum>
+                                            <minimum>0.78</minimum>
                                         </limit>
                                         <!-- Branches were ungated, so an error
                                              path could lose all its coverage
                                              without failing the build - the
-                                             lines around it stay covered. On
-                                             2026-09-19 main measured 66.9%
-                                             (3718/5556) on macOS; this floor
-                                             leaves about the headroom the LINE
-                                             floor above leaves for the spread
-                                             across the CI legs. -->
+                                             lines around it stay covered. -->
                                         <limit>
                                             <counter>BRANCH</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.60</minimum>
+                                            <minimum>0.66</minimum>
                                         </limit>
                                     </limits>
                                 </rule>

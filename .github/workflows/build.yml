@@ -98,6 +98,20 @@ jobs:
       # Windows, where the default shell is PowerShell and mvnw is a script.
       - run: ./mvnw -B clean verify -Psmoke
         shell: bash
+      # What this leg measured, against the floors in pom.xml: each OS skips
+      # the others' platform tests, so the legs differ, and a floor can only
+      # be raised knowing by how much. Also after a failed build, when the
+      # report exists: a floor that failed is shown with the number it missed.
+      - name: Report coverage
+        if: always() && hashFiles('target/site/jacoco/jacoco.csv') != ''
+        shell: bash
+        env:
+          LEG: ${{ matrix.name }}
+        run: |
+          awk -F, -v leg="$LEG" 'NR > 1 { bm += $6; bc += $7; lm += $8; lc += $9 }
+            END { printf "Coverage on %s: lines %.2f %%, branches %.2f %%\n", leg,
+                  100 * lc / (lc + lm), 100 * bc / (bc + bm) }' \
+            target/site/jacoco/jacoco.csv | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Lint the shell scripts
         # What the build, the packaging and the app's own launchers run in a
         # shell, some of it as root on a user's machine: a quoting slip fails
