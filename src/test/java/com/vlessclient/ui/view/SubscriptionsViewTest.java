@@ -25,6 +25,7 @@ import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.DialogPane;
 import javafx.scene.control.Label;
@@ -174,7 +175,10 @@ public class SubscriptionsViewTest extends ApplicationTest {
         pressRowButtonWithoutWaiting("button.delete");
         DialogPane confirm = awaitDialog("the delete confirmation", pane ->
                 I18n.get("subscriptions.delete.confirm", "Provider").equals(pane.getHeaderText()));
-        interact(() -> ((Button) confirm.lookupButton(ButtonType.OK)).fire());
+        ButtonType delete = confirm.getButtonTypes().stream()
+                .filter(type -> type.getButtonData() == ButtonBar.ButtonData.OK_DONE)
+                .findFirst().orElseThrow();
+        interact(() -> ((Button) confirm.lookupButton(delete)).fire());
 
         assertThat(removed.await(PATIENCE.toSeconds(), TimeUnit.SECONDS))
                 .withFailMessage(() -> "the subscription was not removed; registered: "

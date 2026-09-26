@@ -310,17 +310,15 @@ public class SubscriptionsViewController implements ViewShownAware {
     }
 
     private void deleteSubscription(Subscription sub) {
-        Alert confirm = Dialogs.alert(Alert.AlertType.CONFIRMATION);
-        confirm.setTitle(I18n.get("subscriptions.delete.title"));
-        confirm.setHeaderText(I18n.get("subscriptions.delete.confirm", shownName(sub)));
         int servers = sub.getServerIds().size();
-        // Nothing to add for a subscription without servers: "all 0 servers".
-        confirm.setContentText(servers == 0 ? null
-                : I18n.plural("subscriptions.delete.content", servers));
-        confirm.initOwner(ownerWindow());
-
-        Optional<ButtonType> result = confirm.showAndWait();
-        if (result.isPresent() && result.get() == ButtonType.OK) {
+        // Enter keeps the subscription: the stock confirmation's OK took it,
+        // with all its servers. Nothing to add for a subscription without
+        // servers: "all 0 servers".
+        if (Confirmations.confirmIrreversible(ownerWindow(),
+                I18n.get("subscriptions.delete.title"),
+                I18n.get("subscriptions.delete.confirm", shownName(sub)),
+                servers == 0 ? null : I18n.plural("subscriptions.delete.content", servers),
+                I18n.get("button.delete"))) {
             // Off the FX thread like add and edit: removing waits for the lock a
             // refresh holds while that refresh waits for the FX thread.
             runOffFxThread(() -> {
