@@ -27,6 +27,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import tools.jackson.databind.JsonNode;
@@ -43,7 +44,7 @@ import tools.jackson.databind.JsonNode;
  * traffic counters, server list) are marshalled onto the FX thread via
  * {@link FxExecutor} to avoid torn reads and concurrent modification.</p>
  */
-public class DefaultAppControlService implements AppControlService {
+public final class DefaultAppControlService implements AppControlService {
 
     private static final long LATENCY_TIMEOUT_SECONDS = 15;
 
@@ -54,7 +55,7 @@ public class DefaultAppControlService implements AppControlService {
     private final ConnectionService connectionService;
     private final com.vlessclient.service.LatencyTester latencyTester;
     private final ShareLinkParser shareLinkParser;
-    private volatile SingBoxEngine engine;
+    private final SingBoxEngine engine;
     private final TunnelHealthState healthState;
     private final ProxyGroupMonitor groupMonitor;
 
@@ -68,7 +69,7 @@ public class DefaultAppControlService implements AppControlService {
      * @param connectionService the owner of the connect/disconnect flow
      * @param latencyTester the latency tester
      * @param shareLinkParser the share-link parser
-     * @param engine the sing-box engine, or {@code null} if not yet available
+     * @param engine the sing-box engine, which may have no core yet
      */
     public DefaultAppControlService(ConfigStore configStore,
                                     TrafficMonitor trafficMonitor,
@@ -102,15 +103,7 @@ public class DefaultAppControlService implements AppControlService {
         this.connectionService = connectionService;
         this.latencyTester = latencyTester;
         this.shareLinkParser = shareLinkParser;
-        this.engine = engine;
-    }
-
-    /**
-     * Replaces the engine reference — used when the sing-box binary is
-     * downloaded after startup and a new engine instance is registered.
-     */
-    public void setEngine(SingBoxEngine engine) {
-        this.engine = engine;
+        this.engine = Objects.requireNonNull(engine, "engine");
     }
 
     @Override
@@ -153,14 +146,12 @@ public class DefaultAppControlService implements AppControlService {
         // come from different moments of a reconnect.
         return FxExecutor.get(() -> {
             AppSettings settings = configStore.getSettings();
-            SingBoxEngine current = engine;
-            ConnectionState state = current != null
-                    ? current.connectionStateProperty().get() : ConnectionState.DISCONNECTED;
+            ConnectionState state = engine.connectionStateProperty().get();
             // The core's own line: it says why exactly, and in the same words
             // on every machine; the window's sentence is in the UI's language.
-            String error = current != null ? current.errorDetailProperty().get() : "";
-            if ((error == null || error.isBlank()) && current != null) {
-                error = current.errorMessageProperty().get();
+            String error = engine.errorDetailProperty().get();
+            if (error == null || error.isBlank()) {
+                error = engine.errorMessageProperty().get();
             }
             ServerConfig active = configStore.getServers().stream()
                     .filter(ServerConfig::isActive).findFirst().orElse(null);
@@ -216,11 +207,7 @@ public class DefaultAppControlService implements AppControlService {
 
     @Override
     public List<String> getLogs(int limit, String filter) {
-        SingBoxEngine current = engine;
-        if (current == null) {
-            return List.of();
-        }
-        List<String> snapshot = FxExecutor.get(() -> new ArrayList<>(current.getLogLines()));
+        List<String> snapshot = FxExecutor.get(() -> new ArrayList<>(engine.getLogLines()));
         if (filter != null && !filter.isBlank()) {
             String needle = filter.toLowerCase();
             snapshot = snapshot.stream()
@@ -289,8 +276,7 @@ public class DefaultAppControlService implements AppControlService {
     @Override
     public StatusInfo connect(String serverId, String mode, boolean confirm)
             throws McpToolException {
-        SingBoxEngine current = engine;
-        if (current == null) {
+        if (!engine.hasBinary()) {
             throw new McpToolException("sing-box binary is not available; cannot connect.");
         }
 
@@ -334,7 +320,7 @@ public class DefaultAppControlService implements AppControlService {
             // future outcome this facade has not been taught to report, which
             // must not read as a silent "connected".
             String reason = switch (attempt.outcome()) {
-                case NO_ENGINE -> "sing-box binary is not available; cannot connect.";
+                case NO_CORE -> "sing-box binary is not available; cannot connect.";
                 case NO_ACTIVE_SERVER ->
                         "No active server. Pass serverId or select one with select_server.";
                 case ALREADY_RUNNING -> "sing-box is already running.";

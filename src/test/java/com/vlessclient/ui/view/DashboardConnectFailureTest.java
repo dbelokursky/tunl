@@ -93,7 +93,7 @@ public class DashboardConnectFailureTest extends ApplicationTest {
     private static final class ThrowingConnectionService extends ConnectionService {
 
         ThrowingConnectionService() {
-            super(null, null, null, null);
+            super(null, null, null, SingBoxEngine.withoutCore());
         }
 
         @Override

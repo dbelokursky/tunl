@@ -77,7 +77,7 @@ public final class UiTestServices {
         NoNetworkConnectionService connectionService = new NoNetworkConnectionService();
         ServiceLocator.register(ConnectionService.class, connectionService);
         RoutingService routingService = ServiceLocator.get(RoutingService.class);
-        SingBoxEngine engine = optionalEngine();
+        SingBoxEngine engine = ServiceLocator.get(SingBoxEngine.class);
         DefaultAppControlService control = new DefaultAppControlService(
                 configStore, trafficMonitor, subscriptionService, routingService,
                 connectionService, latencyTester, shareLinkParser, engine);
@@ -111,14 +111,6 @@ public final class UiTestServices {
      * that shutting it down, not collecting it, is what closes its clients.
      */
     static volatile Consumer<Object> keepReplaced;
-
-    private static SingBoxEngine optionalEngine() {
-        try {
-            return ServiceLocator.get(SingBoxEngine.class);
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
-    }
 
     private static final class NoNetworkGeoIpDatabase extends GeoIpDatabase {
 
@@ -266,12 +258,9 @@ public final class UiTestServices {
     private static final class NoNetworkConnectionService extends ConnectionService {
 
         private NoNetworkConnectionService() {
-            super(null, null, null, null);
-        }
-
-        @Override
-        public void setEngine(SingBoxEngine engine) {
-            // A binary registered by a UI test must never become executable here.
+            // An engine of its own, which nothing starts: a binary a UI test
+            // registers must never become executable here.
+            super(null, null, null, SingBoxEngine.withoutCore());
         }
 
         @Override
@@ -281,7 +270,7 @@ public final class UiTestServices {
 
         @Override
         public ConnectAttempt connect(com.vlessclient.model.ProxyMode modeOverride) {
-            return new ConnectAttempt(Outcome.NO_ENGINE, null);
+            return new ConnectAttempt(Outcome.NO_CORE, null);
         }
 
         @Override
@@ -291,12 +280,12 @@ public final class UiTestServices {
 
         @Override
         public ConnectAttempt reconnect(com.vlessclient.model.ProxyMode modeOverride) {
-            return new ConnectAttempt(Outcome.NO_ENGINE, null);
+            return new ConnectAttempt(Outcome.NO_CORE, null);
         }
 
         @Override
         public ConnectAttempt switchToActiveServer() {
-            return new ConnectAttempt(Outcome.NO_ENGINE, null);
+            return new ConnectAttempt(Outcome.NO_CORE, null);
         }
     }
 

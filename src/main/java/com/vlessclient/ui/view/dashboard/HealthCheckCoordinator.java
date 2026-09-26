@@ -20,6 +20,7 @@ import com.vlessclient.ui.view.OnScreen;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -86,7 +87,7 @@ public final class HealthCheckCoordinator {
 
     private final ServiceReachabilityChecker reachabilityChecker;
     private final TunnelHealthState healthState;
-    private final Supplier<SingBoxEngine> engineSupplier;
+    private final SingBoxEngine engine;
     private final TunnelRecoveryService recovery;
     private final Supplier<AppSettings> settingsSupplier;
     private final Consumer<AppSettings> settingsSaver;
@@ -115,19 +116,18 @@ public final class HealthCheckCoordinator {
     private final List<ServiceRow> rows = new ArrayList<>();
 
     /**
-     * Creates the coordinator over the given controls. The engine is read
-     * through {@code engineSupplier} on every use because the controller may
-     * swap in a new {@link SingBoxEngine} after an in-app install. Recovery
-     * and its countdown belong to the connection service. {@code healthState}
-     * may be null, in which case verdicts are rendered here and nowhere else.
+     * Creates the coordinator over the given controls and the run's engine.
+     * Recovery and its countdown belong to the connection service.
+     * {@code healthState} may be null, in which case verdicts are rendered
+     * here and nowhere else.
      */
     public HealthCheckCoordinator(
             Controls controls,
             ServiceReachabilityChecker reachabilityChecker,
             TunnelHealthState healthState,
-            Supplier<SingBoxEngine> engineSupplier,
+            SingBoxEngine engine,
             TunnelRecoveryService recovery) {
-        this(controls, reachabilityChecker, healthState, engineSupplier, recovery,
+        this(controls, reachabilityChecker, healthState, engine, recovery,
                 () -> ServiceLocator.find(AppSettings.class).orElse(null),
                 settings -> ServiceLocator.find(ConfigStore.class).ifPresentOrElse(
                         store -> store.saveSettings(settings),
@@ -147,7 +147,7 @@ public final class HealthCheckCoordinator {
             Controls controls,
             ServiceReachabilityChecker reachabilityChecker,
             TunnelHealthState healthState,
-            Supplier<SingBoxEngine> engineSupplier,
+            SingBoxEngine engine,
             TunnelRecoveryService recovery,
             Supplier<AppSettings> settingsSupplier,
             Consumer<AppSettings> settingsSaver) {
@@ -161,7 +161,7 @@ public final class HealthCheckCoordinator {
         bindBannerButton(controls.cancelReconnectButton(), recovery);
         this.reachabilityChecker = reachabilityChecker;
         this.healthState = healthState;
-        this.engineSupplier = engineSupplier;
+        this.engine = Objects.requireNonNull(engine, "engine");
         this.recovery = recovery;
         this.cardOnScreen = healthCard != null ? OnScreen.of(healthCard) : null;
         if (cardOnScreen != null) {
@@ -179,10 +179,6 @@ public final class HealthCheckCoordinator {
         } else {
             hideReconnectBanner();
         }
-    }
-
-    private SingBoxEngine engine() {
-        return engineSupplier.get();
     }
 
     /**
@@ -239,8 +235,7 @@ public final class HealthCheckCoordinator {
      * verdict cancels pending recovery; no-op while not connected.
      */
     public void recheck() {
-        if (engine() == null
-                || engine().connectionStateProperty().get() != ConnectionState.CONNECTED) {
+        if (engine.connectionStateProperty().get() != ConnectionState.CONNECTED) {
             return;
         }
         runReachabilityCheck();
@@ -267,7 +262,7 @@ public final class HealthCheckCoordinator {
         // A check is starting now, so drop any pending periodic re-check; a new
         // one is scheduled once this probe completes.
         cancelPeriodicCheck();
-        if (reachabilityChecker == null || engine() == null) {
+        if (reachabilityChecker == null) {
             setHealthCardVisible(false);
             publishHealth(TunnelHealth.UNMONITORED);
             return;
@@ -312,7 +307,7 @@ public final class HealthCheckCoordinator {
                         return;   // superseded by a newer check or cancelled
                     }
                     healthCheckInFlight.set(false);
-                    if (engine().connectionStateProperty().get()
+                    if (engine.connectionStateProperty().get()
                             != ConnectionState.CONNECTED) {
                         return;   // no longer connected
                     }
@@ -410,8 +405,7 @@ public final class HealthCheckCoordinator {
         if (!settings.isHealthCheckEnabled()) {
             return;
         }
-        if (engine() == null
-                || engine().connectionStateProperty().get() != ConnectionState.CONNECTED) {
+        if (engine.connectionStateProperty().get() != ConnectionState.CONNECTED) {
             return;
         }
         int seconds = Math.max(1, settings.getHealthCheckIntervalSeconds());
@@ -461,8 +455,7 @@ public final class HealthCheckCoordinator {
             showReconnectBanner(I18n.get("dashboard.reconnect.stopped", stopped));
         } else {
             hideReconnectBanner();
-            if (engine() != null
-                    && engine().connectionStateProperty().get() != ConnectionState.CONNECTED
+            if (engine.connectionStateProperty().get() != ConnectionState.CONNECTED
                     && !recovery.isRecovering()) {
                 setHealthCardVisible(false);
             }
@@ -687,8 +680,7 @@ public final class HealthCheckCoordinator {
 
     /** Re-probes with the edited list, superseding any in-flight check. */
     private void restartReachabilityCheck() {
-        if (engine() == null
-                || engine().connectionStateProperty().get() != ConnectionState.CONNECTED) {
+        if (engine.connectionStateProperty().get() != ConnectionState.CONNECTED) {
             return;
         }
         healthGeneration.incrementAndGet();

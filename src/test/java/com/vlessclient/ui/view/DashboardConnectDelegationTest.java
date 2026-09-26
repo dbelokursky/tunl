@@ -100,7 +100,7 @@ public class DashboardConnectDelegationTest extends ApplicationTest {
         final CountDownLatch called = new CountDownLatch(1);
 
         RecordingConnectionService() {
-            super(null, null, null, null);
+            super(null, null, null, SingBoxEngine.withoutCore());
         }
 
         @Override

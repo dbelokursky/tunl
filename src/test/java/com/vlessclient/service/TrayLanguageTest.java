@@ -29,7 +29,8 @@ class TrayLanguageTest {
     void aLanguageSwitchQueuesARefreshOfTheMenu() {
         List<Runnable> awtQueue = new ArrayList<>();
         // Headless: the constructor creates no AWT object, and install() is never called.
-        TrayIconService tray = new TrayIconService(() -> null, null, null, null, null, null);
+        TrayIconService tray = new TrayIconService(SingBoxEngine.withoutCore(), null, null,
+                null, null, null);
         tray.setAwtInvoker(awtQueue::add);
 
         I18n.setLocale(Locale.of("ru"));

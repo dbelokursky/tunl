@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.ConnectionService.SkippedServer;
+import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.testing.UiTest;
 import java.util.List;
 import javafx.beans.property.ReadOnlyObjectProperty;
@@ -33,7 +34,7 @@ public class DashboardSkippedServersBannerTest extends ApplicationTest {
     @BeforeAll
     static void registerTheService() {
         ServiceLocator.register(ConnectionService.class,
-                new ConnectionService(null, null, null, null) {
+                new ConnectionService(null, null, null, SingBoxEngine.withoutCore()) {
                     @Override
                     public ReadOnlyObjectProperty<List<SkippedServer>> skippedServersProperty() {
                         return SKIPPED.getReadOnlyProperty();

@@ -28,7 +28,6 @@ import com.vlessclient.service.SubscriptionService;
 import com.vlessclient.service.ThemeManager;
 import com.vlessclient.service.TrafficHistoryStore;
 import com.vlessclient.service.TrafficMonitor;
-import com.vlessclient.service.TrayIconService;
 import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.service.TunnelRecoveryService;
 import com.vlessclient.service.UpdateManager;
@@ -91,12 +90,15 @@ public class ServiceLocator {
         if (existing.isPresent()) {
             singBoxPath = existing.get().toString();
             log.info("sing-box binary path: {}", singBoxPath);
-            register(SingBoxEngine.class,
-                    new SingBoxEngine(existing.get(), CoreRecord.inDataDir()));
         } else {
             singBoxPath = null;
             log.info("sing-box binary not found on disk; will be downloaded on startup");
         }
+        // One engine for the whole run, with a core or without one: the
+        // installer gives it the core it downloads (installCore), and every
+        // service below keeps this engine.
+        register(SingBoxEngine.class,
+                new SingBoxEngine(existing.orElse(null), CoreRecord.inDataDir()));
 
         // The test graph seals nothing: a headless UI test that adds a server
         // used to write through the developer's login Keychain (CLAUDE.md:
@@ -185,7 +187,7 @@ public class ServiceLocator {
         // The one owner of the connect flow: the dashboard, the tray and the MCP
         // facade all drive the tunnel through it, so the three no longer carry
         // their own copies of resolve-generate-await-start.
-        SingBoxEngine engine = (SingBoxEngine) services.get(SingBoxEngine.class);
+        SingBoxEngine engine = get(SingBoxEngine.class);
         ConnectionService connectionService = new ConnectionService(
                 configStore, configGenerator, routingService, engine);
         register(ConnectionService.class, connectionService);
@@ -204,16 +206,14 @@ public class ServiceLocator {
         register(AppControlService.class, control);
         McpServerService mcpServerService = new McpServerService(configStore, control);
         register(McpServerService.class, mcpServerService);
-        if (engine != null) {
-            mcpServerService.attachLogSource(engine);
-        }
+        mcpServerService.attachLogSource(engine);
 
         runStartupTasks(mode,
-                () -> routeAppTrafficThroughTunnel(configStore),
+                () -> routeAppTrafficThroughTunnel(configStore, engine),
                 countryResolver::warmUp,
                 subscriptionService::startAutoRefresh,
                 updateManager::startPeriodicCheck,
-                () -> attachUpdateCheckListener(engine, updateManager),
+                () -> updateManager.checkWhenConnected(engine),
                 mcpServerService::apply);
 
         log.info("ServiceLocator initialized in {} mode", mode);
@@ -246,26 +246,17 @@ public class ServiceLocator {
      * TUN mode captured the JVM's traffic anyway, which is why the gap was
      * only ever visible in one of the two modes.</p>
      *
-     * <p>The port is read per request, so the engine registered later by the
-     * installer flow and a port changed in Settings are both picked up.</p>
+     * <p>The port is read per request, so a port changed in Settings is
+     * picked up.</p>
      */
-    private static void routeAppTrafficThroughTunnel(ConfigStore configStore) {
+    private static void routeAppTrafficThroughTunnel(ConfigStore configStore,
+                                                     SingBoxEngine engine) {
         AppHttpClients.followTunnel(
-                () -> services.get(SingBoxEngine.class) instanceof SingBoxEngine engine
-                        ? engine
-                        : null,
+                engine,
                 configStore::getSettings,
                 get(TunnelHealthState.class),
                 () -> services.get(ConnectionService.class) instanceof ConnectionService connection
                         && connection.isTunnelWanted());
-    }
-
-    private static void attachUpdateCheckListener(
-            SingBoxEngine engine, UpdateManager updateManager) {
-        if (engine == null) {
-            return;
-        }
-        updateManager.checkWhenConnected(engine);
     }
 
     /**
@@ -495,42 +486,20 @@ public class ServiceLocator {
     }
 
     /**
-     * Registers (or re-registers) the SingBoxEngine after the binary has been
-     * downloaded at startup. Called by the installer flow in VlessClientApp.
+     * Gives the run's engine the core the installer downloaded, when the app
+     * started without one. Called by the installer flow in VlessClientApp and
+     * by the dashboard's retry.
+     *
+     * <p>It used to register a new engine and move the connect flow, the MCP
+     * facade, the MCP log bridge, the tray and the update check onto it one
+     * by one; the log page followed only when it came back on screen. Every
+     * one of those has the same engine now, so there is nothing to move.</p>
+     *
+     * @param binaryPath the installed sing-box executable
      */
-    public static void registerSingBoxEngine(Path binaryPath) {
+    public static void installCore(Path binaryPath) {
         singBoxPath = binaryPath.toString();
-        SingBoxEngine engine = new SingBoxEngine(binaryPath, CoreRecord.inDataDir());
-        register(SingBoxEngine.class, engine);
-        // Point the connect flow, the MCP control facade and the log bridge at
-        // the fresh engine. Missing the first would leave every caller of
-        // ConnectionService driving the engine that never had a binary.
-        Object connection = services.get(ConnectionService.class);
-        if (connection instanceof ConnectionService connectionService) {
-            connectionService.setEngine(engine);
-        }
-        Object control = services.get(AppControlService.class);
-        if (control instanceof DefaultAppControlService defaultControl) {
-            defaultControl.setEngine(engine);
-        }
-        Object mcp = services.get(McpServerService.class);
-        if (mcp instanceof McpServerService mcpServerService) {
-            mcpServerService.attachLogSource(engine);
-        }
-        // The tray resolves the engine through a supplier, so its icon follows
-        // the new one already — but a property listener is bound to one
-        // instance, so it has to be moved across explicitly.
-        Object tray = services.get(TrayIconService.class);
-        if (tray instanceof TrayIconService trayIconService) {
-            trayIconService.rebindEngineListener();
-        }
-        // The check on connect followed the engine that existed at startup,
-        // which on a first run was none: once the core was installed from the
-        // dashboard, no connect checked for updates for the rest of the run.
-        Object updates = services.get(UpdateManager.class);
-        if (updates instanceof UpdateManager updateManager) {
-            updateManager.checkWhenConnected(engine);
-        }
-        log.info("SingBoxEngine registered with binary: {}", singBoxPath);
+        get(SingBoxEngine.class).setBinary(binaryPath);
+        log.info("sing-box core installed: {}", singBoxPath);
     }
 }

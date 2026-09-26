@@ -36,8 +36,6 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 import javafx.application.Platform;
-import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.SimpleObjectProperty;
 import javafx.fxml.FXML;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
@@ -134,9 +132,6 @@ public class DashboardViewController implements ViewShownAware {
     private final javafx.beans.property.StringProperty pendingReason =
             new javafx.beans.property.SimpleStringProperty("dashboard.pending.changes");
 
-    private final ObjectProperty<ConnectionState> connectionState =
-            new SimpleObjectProperty<>(ConnectionState.DISCONNECTED);
-
     /**
      * Set only while {@link #onViewShown()} copies persisted settings into the
      * combos. Both value listeners persist, and the server-selection one also
@@ -157,6 +152,7 @@ public class DashboardViewController implements ViewShownAware {
     private Boolean systemProxyCapable;
 
     private ServerConfig activeServer;
+    /** The run's engine, which has no core until one is installed. */
     private SingBoxEngine singBoxEngine;
     private ProxyGroupMonitor groupMonitor;
 
@@ -236,8 +232,8 @@ public class DashboardViewController implements ViewShownAware {
         // The network changing under a TUN run is a reason to reconnect too;
         // it is found off the FX thread, and the banner has to hear of it.
         ServiceLocator.find(ConnectionService.class).ifPresent(service ->
-                service.networkChangeProperty().addListener(
-                        (obs, oldChange, newChange) -> refreshPendingChanges(currentState())));
+                service.networkChangeProperty().addListener((obs, oldChange, newChange) ->
+                        refreshPendingChanges(currentConnectionState())));
         ButtonLabels.bindStatic(pendingChangesButton, "dashboard.tunnel.reconnect");
         ServiceLocator.find(ConnectionService.class).ifPresent(service -> {
             tunnelDroppedBanner.visibleProperty().bind(service.reconnectNeededProperty());
@@ -246,8 +242,12 @@ public class DashboardViewController implements ViewShownAware {
 
         // Every collaborator is optional: a missing one degrades the card
         // rather than failing the view, and the log says which.
-        singBoxEngine = optional(SingBoxEngine.class,
-                "SingBoxEngine not available; connect/disconnect will be disabled");
+        // With no engine registered the card gets one without a core, and
+        // offers the install as on a first start.
+        singBoxEngine = ServiceLocator.find(SingBoxEngine.class).orElseGet(() -> {
+            log.warn("SingBoxEngine not available; the card has one without a core");
+            return SingBoxEngine.withoutCore();
+        });
         TrafficMonitor trafficMonitor = optional(TrafficMonitor.class,
                 "TrafficMonitor not available");
         LatencyTester latencyTester = optional(LatencyTester.class,
@@ -273,7 +273,7 @@ public class DashboardViewController implements ViewShownAware {
             // While connected, measure through the proxy instead of TCP-pinging
             // its address; the supplier returns null when the core is down.
             latencyTester.setApiEndpointSupplier(() -> {
-                if (singBoxEngine == null || !singBoxEngine.isRunning()) {
+                if (!singBoxEngine.isRunning()) {
                     return null;
                 }
                 return ServiceLocator.find(AppSettings.class)
@@ -290,19 +290,17 @@ public class DashboardViewController implements ViewShownAware {
                 this::routedServer,
                 () -> serverTagged(corePickTag()) != null,
                 this::currentHealth,
-                () -> singBoxEngine,
+                singBoxEngine,
                 this::refreshConnectButtonAvailability);
 
         healthState = optional(TunnelHealthState.class,
                 "TunnelHealthState not available; the status card will report process state only");
 
-        // The engine is supplied lazily because onRetryInstallClicked can swap
-        // in a new SingBoxEngine after an in-app install.
         healthChecks = new HealthCheckCoordinator(
                 new HealthCheckCoordinator.Controls(healthCard, healthSummaryLabel,
                         serviceStatusList, reconnectBanner, reconnectBannerLabel,
                         cancelReconnectButton),
-                reachabilityChecker, healthState, () -> singBoxEngine,
+                reachabilityChecker, healthState, singBoxEngine,
                 connectionService() != null ? connectionService().getRecoveryService() : null);
 
         // A verdict arriving does not change the process state, so the hero
@@ -352,12 +350,7 @@ public class DashboardViewController implements ViewShownAware {
                     (obs, oldTag, newTag) -> updateUi(currentConnectionState()));
         }
 
-        if (singBoxEngine != null) {
-            bindEngine(singBoxEngine);
-        } else {
-            connectionState.addListener((obs, oldState, newState) -> updateUi(newState));
-            updateUi(ConnectionState.DISCONNECTED);
-        }
+        bindEngine(singBoxEngine);
         // Nothing above has necessarily told the readout what to show: without
         // an engine there is no state change to react to, and a core that is
         // not installed yet is exactly the case where last month's figure is
@@ -372,10 +365,9 @@ public class DashboardViewController implements ViewShownAware {
     }
 
     /**
-     * Wires an engine's signals into the card, the traffic readout, the health
-     * loop and the group monitor, and paints its current state. Called once
-     * at startup and again after an in-app core install swaps the engine; the
-     * two sites used to carry their own copies of the same listeners.
+     * Wires the engine's signals into the card, the traffic readout, the
+     * health loop and the group monitor, and paints its current state. Once:
+     * installing the core gives this same engine one.
      */
     private void bindEngine(SingBoxEngine engine) {
         realityRefusedBanner.visibleProperty().bind(engine.realityRefusedProperty());
@@ -470,7 +462,7 @@ public class DashboardViewController implements ViewShownAware {
         if (singBoxMissingBanner == null) {
             return;
         }
-        boolean missing = singBoxEngine == null;
+        boolean missing = !singBoxEngine.hasBinary();
         singBoxMissingBanner.setVisible(missing);
         singBoxMissingBanner.setManaged(missing);
     }
@@ -497,13 +489,7 @@ public class DashboardViewController implements ViewShownAware {
         com.vlessclient.ui.view.SingBoxInstallerDialog dialog =
                 new com.vlessclient.ui.view.SingBoxInstallerDialog(installer);
         dialog.showAndWait(ownerWindow()).ifPresent(path -> {
-            ServiceLocator.registerSingBoxEngine(path);
-            singBoxEngine = ServiceLocator.find(SingBoxEngine.class).orElse(null);
-            if (singBoxEngine != null) {
-                bindEngine(singBoxEngine);
-            } else {
-                log.warn("SingBoxEngine still unavailable after install");
-            }
+            ServiceLocator.installCore(path);
             refreshSingBoxMissingBanner();
             refreshConnectButtonAvailability();
         });
@@ -542,7 +528,7 @@ public class DashboardViewController implements ViewShownAware {
             }
             // Saved, not applied: a running core keeps its mode until the
             // next start, which the banner offers.
-            refreshPendingChanges(currentState());
+            refreshPendingChanges(currentConnectionState());
         });
     }
 
@@ -590,8 +576,7 @@ public class DashboardViewController implements ViewShownAware {
                 log.warn("Could not save server selection setting");
                 return;
             }
-            if (singBoxEngine != null
-                    && singBoxEngine.connectionStateProperty().get() == ConnectionState.CONNECTED) {
+            if (singBoxEngine.connectionStateProperty().get() == ConnectionState.CONNECTED) {
                 log.info("Server selection changed while connected; restarting tunnel");
                 // One restart on one thread, like reconnectIfActiveServerChanged:
                 // a separate disconnect() plus connect() spawned two virtual
@@ -719,7 +704,7 @@ public class DashboardViewController implements ViewShownAware {
         trafficDisplay.refreshIdleSummary();
         // Settings and Routing are other pages: back here is where their
         // changes to a running core are first seen.
-        refreshPendingChanges(currentState());
+        refreshPendingChanges(currentConnectionState());
 
         AppSettings settings = ServiceLocator.find(AppSettings.class).orElse(null);
         if (settings == null) {
@@ -770,14 +755,9 @@ public class DashboardViewController implements ViewShownAware {
         }
     }
 
-    /**
-     * The process state to render and act on: the engine's when there is one,
-     * otherwise the local property the no-engine path drives.
-     */
+    /** The core's state, to render and act on. */
     private ConnectionState currentConnectionState() {
-        return singBoxEngine != null
-                ? singBoxEngine.connectionStateProperty().get()
-                : connectionState.get();
+        return singBoxEngine.connectionStateProperty().get();
     }
 
     @FXML
@@ -789,7 +769,7 @@ public class DashboardViewController implements ViewShownAware {
             return;
         }
 
-        if (singBoxEngine == null) {
+        if (!singBoxEngine.hasBinary()) {
             showError(I18n.get("error.singbox.not.found"),
                     I18n.get("dashboard.error.singbox.body"));
             return;
@@ -830,7 +810,7 @@ public class DashboardViewController implements ViewShownAware {
         if (settings == null || !settings.isAutoConnect()) {
             return;
         }
-        if (singBoxEngine == null) {
+        if (!singBoxEngine.hasBinary()) {
             log.info("Auto-connect enabled but sing-box is unavailable; skipping");
             return;
         }
@@ -942,7 +922,7 @@ public class DashboardViewController implements ViewShownAware {
                     showError(I18n.get("dashboard.error.no.active.title"),
                             I18n.get("dashboard.error.no.active.body"));
                 });
-                case NO_ENGINE -> Platform.runLater(() ->
+                case NO_CORE -> Platform.runLater(() ->
                         showError(I18n.get("error.singbox.not.found"),
                                 I18n.get("dashboard.error.singbox.body")));
                 case ALREADY_RUNNING -> log.warn("sing-box already running");
@@ -974,8 +954,7 @@ public class DashboardViewController implements ViewShownAware {
 
     private void disconnect() {
         ConnectionService service = connectionService();
-        if (service == null || singBoxEngine == null) {
-            connectionState.set(ConnectionState.DISCONNECTED);
+        if (service == null) {
             return;
         }
         // A stop waits out a SIGTERM grace period and can force-kill after it,
@@ -1013,8 +992,7 @@ public class DashboardViewController implements ViewShownAware {
      * only the selected member changed, and restarts for configuration changes.</p>
      */
     private void reconnectIfActiveServerChanged() {
-        if (singBoxEngine == null
-                || singBoxEngine.connectionStateProperty().get() != ConnectionState.CONNECTED) {
+        if (singBoxEngine.connectionStateProperty().get() != ConnectionState.CONNECTED) {
             return;
         }
         ServerConfig nowActive = findActiveServer();
@@ -1172,12 +1150,6 @@ public class DashboardViewController implements ViewShownAware {
                 connectButton.requestFocus();
             }
         }
-    }
-
-    /** The core's state, or this view's own when there is no engine. */
-    private ConnectionState currentState() {
-        return singBoxEngine != null
-                ? singBoxEngine.connectionStateProperty().get() : connectionState.get();
     }
 
     /** Keeps the server the core was started with, for the card and switch detection. */

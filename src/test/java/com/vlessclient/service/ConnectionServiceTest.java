@@ -171,6 +171,11 @@ class ConnectionServiceTest {
         return new RecordingEngine(tempDir.resolve("sing-box"));
     }
 
+    /** The engine of a run that started before any core was installed. */
+    private static RecordingEngine engineWithoutCore() {
+        return new RecordingEngine(null);
+    }
+
     /**
      * A stopped root core leaves its closed connections in TIME_WAIT, and
      * macOS refused the app's own bind while they lasted, though the next core
@@ -1175,14 +1180,16 @@ class ConnectionServiceTest {
     // ===== outcomes callers map to their own UX =====
 
     @Test
-    void connectWithoutAnEngineReportsNoEngine() throws Exception {
+    void connectWithoutACoreReportsNoCore() throws Exception {
         store.addServer(server("srv-1", "Tokyo"));
+        RecordingEngine engine = engineWithoutCore();
 
-        ConnectionService.ConnectAttempt attempt = service(null).connect();
+        ConnectionService.ConnectAttempt attempt = service(engine).connect();
 
-        assertThat(attempt.outcome()).isEqualTo(ConnectionService.Outcome.NO_ENGINE);
+        assertThat(attempt.outcome()).isEqualTo(ConnectionService.Outcome.NO_CORE);
         assertThat(attempt.started()).isFalse();
         assertThat(attempt.server()).isNull();
+        assertThat(engine.calls).doesNotContain("start");
     }
 
     @Test
@@ -1279,40 +1286,40 @@ class ConnectionServiceTest {
     }
 
     @Test
-    void disconnectStopsTheEngineAndIsSafeWithoutOne() {
+    void disconnectStopsTheEngineAndIsSafeWithoutACore() {
         RecordingEngine engine = engine();
         engine.running = true;
 
         service(engine).disconnect();
         assertThat(engine.calls).containsExactly("stop");
 
-        service(null).disconnect();   // no engine yet: must not throw
+        service(engineWithoutCore()).disconnect();   // no core yet: must not throw
     }
 
-    // ===== the engine is replaced once the binary is installed =====
+    // ===== the core is installed after the app started =====
 
     /**
-     * The app can start with no sing-box binary and register an engine later.
-     * A connect after that must drive the new engine — missing this would leave
-     * every caller pointed at the engine that never had a binary.
+     * The app can start with no core and install one later, into the engine
+     * it already has. The same service then connects with it: nothing has to
+     * be pointed at a new engine, which is what used to be missed.
      */
     @Test
-    void setEngineRedirectsLaterConnects() throws Exception {
+    void aCoreInstalledLaterIsStartedByTheSameEngine() throws Exception {
         store.addServer(server("srv-1", "Tokyo"));
-        ConnectionService service = service(null);
+        RecordingEngine engine = engineWithoutCore();
+        ConnectionService service = service(engine);
         assertThat(service.connect().outcome())
-                .isEqualTo(ConnectionService.Outcome.NO_ENGINE);
+                .isEqualTo(ConnectionService.Outcome.NO_CORE);
 
-        RecordingEngine installed = engine();
-        service.setEngine(installed);
+        engine.setBinary(tempDir.resolve("sing-box"));
 
-        assertThat(service.getEngine()).isSameAs(installed);
+        assertThat(service.getEngine()).isSameAs(engine);
         assertThat(service.connect().started()).isTrue();
-        assertThat(installed.calls).contains("start");
+        assertThat(engine.calls).contains("start");
     }
 
     @Test
-    void isRunningFollowsTheEngineAndIsFalseWithoutOne() throws Exception {
+    void isRunningFollowsTheEngineAndIsFalseWithoutACore() throws Exception {
         RecordingEngine engine = engine();
         ConnectionService service = service(engine);
 
@@ -1321,7 +1328,7 @@ class ConnectionServiceTest {
         service.connect();
         assertThat(service.isRunning()).isTrue();
 
-        assertThat(service(null).isRunning()).isFalse();
+        assertThat(service(engineWithoutCore()).isRunning()).isFalse();
     }
 
     // ===== the threading contract =====

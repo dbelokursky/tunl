@@ -28,7 +28,6 @@ import java.net.URL;
 import java.nio.file.Path;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Supplier;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
@@ -140,12 +139,14 @@ public class VlessClientApp extends Application {
      */
     private void clearStaleSystemProxy() {
         AppSettings settings = ServiceLocator.find(AppSettings.class).orElse(null);
-        SingBoxEngine engine = ServiceLocator.find(SingBoxEngine.class).orElse(null);
         ConfigStore store = ServiceLocator.find(ConfigStore.class).orElse(null);
-        if (settings == null || engine == null || store == null) {
+        if (settings == null || store == null) {
             log.debug("Skipping stale-proxy cleanup; services unavailable");
             return;
         }
+        // Needs no core: it puts the system's proxy settings back. Without a
+        // core installed, there used to be no engine, and no cleanup either.
+        SingBoxEngine engine = ServiceLocator.get(SingBoxEngine.class);
         // Only where a run left a record: one that stopped its core had the
         // proxy put back, and the check costs a networksetup process per
         // network service and proxy type on a Mac, before the window shows.
@@ -285,18 +286,6 @@ public class VlessClientApp extends Application {
      */
     static boolean closeHidesToTray(TrayIconService tray) {
         return tray != null && tray.isShowing();
-    }
-
-    /**
-     * The engine the tray follows: the one registered now, or none before a
-     * core is installed. Resolved at every read, since installing the core
-     * from the app registers a new engine. Not {@link ServiceLocator#get},
-     * which throws for a missing engine: the tray was then never created.
-     *
-     * @return a supplier of the current engine, which supplies null without one
-     */
-    static Supplier<SingBoxEngine> trayEngine() {
-        return () -> ServiceLocator.find(SingBoxEngine.class).orElse(null);
     }
 
     @Override
@@ -547,11 +536,11 @@ public class VlessClientApp extends Application {
     /**
      * If sing-box is not available yet, shows a modal installer dialog that
      * downloads and caches the pinned release before the main window appears.
-     * On failure or user skip, the app continues without SingBoxEngine and the
-     * Dashboard will show a brew-install hint.
+     * On failure or user skip, the app continues with an engine that has no
+     * core, and the Dashboard shows a brew-install hint.
      */
     private void ensureSingBoxAvailable() {
-        if (ServiceLocator.find(SingBoxEngine.class).isPresent()) {
+        if (ServiceLocator.get(SingBoxEngine.class).hasBinary()) {
             return;
         }
         SingBoxInstaller installer = ServiceLocator.find(SingBoxInstaller.class).orElse(null);
@@ -564,7 +553,7 @@ public class VlessClientApp extends Application {
         // No owner: the main window does not exist yet.
         Optional<Path> installed = dialog.showAndWait(null);
         if (installed.isPresent()) {
-            ServiceLocator.registerSingBoxEngine(installed.get());
+            ServiceLocator.installCore(installed.get());
             log.info("sing-box ready at {}", installed.get());
         } else {
             log.warn("User continued without sing-box; Connect will be unavailable");
@@ -583,7 +572,7 @@ public class VlessClientApp extends Application {
             }
 
             trayIconService = new TrayIconService(
-                    trayEngine(),
+                    ServiceLocator.get(SingBoxEngine.class),
                     configStore, connectionService, healthState,
                     ServiceLocator.find(ProxyGroupMonitor.class)
                             .map(ProxyGroupMonitor::corePickTagProperty).orElse(null),

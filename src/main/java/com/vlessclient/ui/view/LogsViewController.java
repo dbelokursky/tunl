@@ -84,9 +84,7 @@ public class LogsViewController {
     private FilteredList<String> filteredLogLines;
     /** Whether the list is in a scene whose window is showing; see followLiveLog. */
     private ObservableValue<Boolean> listOnScreen;
-    /** The engine whose log the view shows; null when none was registered. */
-    private SingBoxEngine boundEngine;
-    /** Keeps the reader's place as lines arrive; moves with the list to a new engine's log. */
+    /** Keeps the reader's place as lines arrive. */
     private final ListChangeListener<String> followNewLines = this::onNewLines;
     /** Where a reader with auto-scroll off was when the list went off screen. */
     private ViewportAnchor parkedAnchor;
@@ -156,13 +154,14 @@ public class LogsViewController {
                 .bind(I18n.binding("logs.diagnostics.tooltip"));
         clearButton.accessibleTextProperty().bind(I18n.binding("logs.clear.tooltip"));
 
-        boundEngine = ServiceLocator.find(SingBoxEngine.class).orElse(null);
-        if (boundEngine != null) {
-            sourceLogLines = boundEngine.getLogLines();
-        } else {
-            log.warn("SingBoxEngine not available; logs view will be empty");
-            sourceLogLines = FXCollections.observableArrayList();
-        }
+        // The run's one engine: installing the core gives it one, so this
+        // stays the log to show for the whole run.
+        sourceLogLines = ServiceLocator.find(SingBoxEngine.class)
+                .map(SingBoxEngine::getLogLines)
+                .orElseGet(() -> {
+                    log.warn("SingBoxEngine not available; logs view will be empty");
+                    return FXCollections.observableArrayList();
+                });
 
         filteredLogLines = new FilteredList<>(sourceLogLines, p -> true);
         logListView.setItems(filteredLogLines);
@@ -272,30 +271,6 @@ public class LogsViewController {
     }
 
     /**
-     * Moves the view onto the log of the engine registered now.
-     *
-     * <p>The view is built once and cached. Installing the core from the
-     * dashboard registers a new engine after it, and the view went on showing
-     * the log of the one that had no binary: empty, for the rest of the run.
-     * Asked each time the list comes back on screen, which a swap happens
-     * away from.</p>
-     */
-    private void followCurrentEngine() {
-        SingBoxEngine engine = ServiceLocator.find(SingBoxEngine.class).orElse(null);
-        if (engine == null || engine == boundEngine) {
-            return;
-        }
-        boundEngine = engine;
-        sourceLogLines = engine.getLogLines();
-        filteredLogLines.removeListener(followNewLines);
-        filteredLogLines = new FilteredList<>(sourceLogLines, filteredLogLines.getPredicate());
-        filteredLogLines.addListener(followNewLines);
-        // What was parked belongs to the old log.
-        parkedAnchor = null;
-        parkedSelection = List.of();
-    }
-
-    /**
      * Keeps rows only while someone can see them.
      *
      * <p>The view is cached, so the list outlives navigating away, and closing
@@ -325,7 +300,6 @@ public class LogsViewController {
             }
             return;
         }
-        followCurrentEngine();
         if (logListView.getItems() == filteredLogLines) {
             return;
         }

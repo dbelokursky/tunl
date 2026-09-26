@@ -243,7 +243,7 @@ class HealthCheckCoordinatorTest {
                         healthCard, summaryLabel, statusList, banner, bannerLabel, bannerButton),
                 checker,
                 healthState,
-                () -> engine,
+                engine,
                 recovery);
     }
 

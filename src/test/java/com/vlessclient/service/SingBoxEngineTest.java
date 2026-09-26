@@ -266,6 +266,34 @@ class SingBoxEngineTest {
         awaitConnectionState(engine, ConnectionState.DISCONNECTED, AWAIT_STATE_TIMEOUT_MS);
     }
 
+    /**
+     * The app starts with an engine that has no core when none is installed,
+     * and the installer hands this same engine the core it downloads.
+     */
+    @Test
+    void anEngineWithoutACoreStartsTheOneItIsGiven(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        SingBoxEngine engine = SingBoxEngine.withoutCore();
+        assertThat(engine.hasBinary()).isFalse();
+        assertThatThrownBy(() -> engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("no sing-box core");
+        flushFxEvents();
+        assertThat(engine.connectionStateProperty().get())
+                .as("a refused start is no connect")
+                .isEqualTo(ConnectionState.DISCONNECTED);
+
+        engine.setBinary(createFakeSingBox(tmp, "sing-box", 30));
+
+        assertThat(engine.hasBinary()).isTrue();
+        engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+        try {
+            assertThat(engine.isRunning()).isTrue();
+        } finally {
+            engine.stop();
+        }
+    }
+
     @Test
     void awaitStoppedReturnsImmediatelyWhenNotRunning() {
         SingBoxEngine engine = new SingBoxEngine(Path.of("/nonexistent/sing-box"));

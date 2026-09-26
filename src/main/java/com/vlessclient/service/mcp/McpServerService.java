@@ -61,12 +61,13 @@ public class McpServerService {
     }
 
     /**
-     * Bridges an engine's log output to connected SSE clients. Safe to call
-     * again after an engine hot-swap; a repeated call for the same engine is a
-     * no-op.
+     * Bridges the engine's log output to connected SSE clients. A repeated
+     * call for the same engine is a no-op.
+     *
+     * @param engine the run's engine
      */
     public synchronized void attachLogSource(SingBoxEngine engine) {
-        if (engine == null || engine == loggedEngine) {
+        if (engine == loggedEngine) {
             return;
         }
         loggedEngine = engine;

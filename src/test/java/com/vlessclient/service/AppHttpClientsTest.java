@@ -52,7 +52,8 @@ class AppHttpClientsTest {
 
     @Test
     void followTunnelStaysDirectUntilAnEngineIsRegistered() {
-        AppHttpClients.followTunnel(() -> null, com.vlessclient.model.AppSettings::new,
+        AppHttpClients.followTunnel(SingBoxEngine.withoutCore(),
+                com.vlessclient.model.AppSettings::new,
                 new TunnelHealthState(), () -> false);
 
         assertThat(AppHttpClients.selector().select(PUBLIC)).containsExactly(Proxy.NO_PROXY);
@@ -67,7 +68,8 @@ class AppHttpClientsTest {
     void aTunnelWantedWithNoCoreUpCarriesNothing() {
         java.util.concurrent.atomic.AtomicBoolean wanted =
                 new java.util.concurrent.atomic.AtomicBoolean(true);
-        AppHttpClients.followTunnel(() -> null, com.vlessclient.model.AppSettings::new,
+        AppHttpClients.followTunnel(SingBoxEngine.withoutCore(),
+                com.vlessclient.model.AppSettings::new,
                 new TunnelHealthState(), wanted::get);
         try {
             assertThat(AppHttpClients.isTunnelWantedButNotCarrying())
