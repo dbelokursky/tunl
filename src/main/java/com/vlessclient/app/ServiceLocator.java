@@ -140,7 +140,8 @@ public class ServiceLocator {
         // dashboard that attaches it to the monitor, because only the
         // dashboard can say which server is carrying traffic in an automatic
         // mode.
-        register(TrafficHistoryStore.class, new TrafficHistoryStore());
+        register(TrafficHistoryStore.class,
+                new TrafficHistoryStore(configStore.getPersistenceState()));
 
         // Which member of the proxy group carries the traffic right now — the
         // only way the dashboard can name the server an automatic mode picked.

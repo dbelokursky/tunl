@@ -90,6 +90,18 @@ public final class PersistenceState {
     }
 
     /**
+     * Lets saves write {@code file} again: the file the hold protected is
+     * gone, because the user cleared it.
+     *
+     * @param file the file's name
+     */
+    public synchronized void released(String file) {
+        if (held.remove(file) != null) {
+            publishFileNotices();
+        }
+    }
+
+    /**
      * Whether saves of {@code file} are held, because it could not be opened.
      *
      * @param file the file's name

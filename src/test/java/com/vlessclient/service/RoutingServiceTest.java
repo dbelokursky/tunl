@@ -365,4 +365,36 @@ class RoutingServiceTest {
         assertThat(held).as("the list a reader iterates").hasSize(before);
         assertThat(routingService.getConfig().getRules()).hasSize(before + 1);
     }
+
+    /**
+     * routing.json had no version, so a later incompatible change could not
+     * tell the files to migrate. Saving stamps the format this build writes,
+     * as for the other files.
+     */
+    @Test
+    void savingStampsTheFormatVersion() throws Exception {
+        routingService.saveConfig(routingService.getConfig());
+
+        var saved = tools.jackson.databind.json.JsonMapper.builder().build()
+                .readTree(tempDir.resolve("routing.json").toFile());
+        assertThat(saved.path("config_version").asInt())
+                .isEqualTo(RoutingConfig.CURRENT_CONFIG_VERSION);
+    }
+
+    @Test
+    void aNewerFormatIsReadBestEffortAndWhatItAddedIsKept() throws Exception {
+        java.nio.file.Files.writeString(tempDir.resolve("routing.json"), """
+                {"config_version": 2, "bypass_list": ["example.com"], "profiles": ["work"]}
+                """);
+        RoutingService newer = new RoutingService(tempDir);
+
+        assertThat(newer.getConfig().getBypassList()).containsExactly("example.com");
+        newer.saveConfig(newer.getConfig());
+
+        var saved = tools.jackson.databind.json.JsonMapper.builder().build()
+                .readTree(tempDir.resolve("routing.json").toFile());
+        assertThat(saved.path("config_version").asInt())
+                .isEqualTo(RoutingConfig.CURRENT_CONFIG_VERSION);
+        assertThat(saved.path("profiles").get(0).asString()).isEqualTo("work");
+    }
 }

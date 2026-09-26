@@ -18,6 +18,17 @@ import java.util.List;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class RoutingConfig extends KeepsUnknownFields {
 
+    /** The routing.json format this build writes. */
+    public static final int CURRENT_CONFIG_VERSION = 1;
+
+    /**
+     * The format the file is in, so a later incompatible change can tell the
+     * files to migrate from the ones already migrated. A file written before
+     * the field existed has the format of version 1, and reads as that.
+     */
+    @JsonProperty("config_version")
+    private int configVersion = CURRENT_CONFIG_VERSION;
+
     /**
      * The retired preset from pre-composition routing.json files, captured
      * for migration only: never applied at runtime, never written back.
@@ -159,6 +170,14 @@ public class RoutingConfig extends KeepsUnknownFields {
 
     public RouteMode getMode() {
         return mode == null ? RouteMode.ALL : mode;
+    }
+
+    public int getConfigVersion() {
+        return configVersion;
+    }
+
+    public void setConfigVersion(int configVersion) {
+        this.configVersion = configVersion;
     }
 
     public void setMode(RouteMode mode) {
