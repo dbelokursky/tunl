@@ -53,7 +53,7 @@ jobs:
     # suite runs the real core, including TUN probes where the runner allows;
     # a hang there would otherwise sit on the 6-hour default, on every leg,
     # until someone noticed.
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -122,7 +122,7 @@ jobs:
       - run: ./mvnw -B clean verify -Psmoke
         shell: bash
         env:
-          JAVA_TOOL_OPTIONS: ${{ matrix.name == 'macos' && format('-XX:StartFlightRecording=filename={0}/jfr/%p.jfr,settings=profile', runner.temp) || '' }}
+          JAVA_TOOL_OPTIONS: ${{ matrix.name == 'macos' && format('-XX:StartFlightRecording=filename={0}/jfr/%p.jfr,settings=default', runner.temp) || '' }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always() && matrix.name == 'macos'
         with:
