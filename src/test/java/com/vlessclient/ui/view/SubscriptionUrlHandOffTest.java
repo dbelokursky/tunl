@@ -10,6 +10,8 @@ import com.vlessclient.service.ShareLinkParser;
 import com.vlessclient.service.TestConfigStores;
 import com.vlessclient.testing.Await;
 import com.vlessclient.testing.UiTest;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -127,6 +129,58 @@ public class SubscriptionUrlHandOffTest extends ApplicationTest {
         assertThat(onFx(() -> fieldTexts(form)))
                 .as("the URL as it was pasted, its token included")
                 .contains(URL);
+    }
+
+    /**
+     * Another client's one-tap link wraps the URL. It was reported as a
+     * server link that did not parse; the report now offers the URL inside,
+     * and the form holds that URL rather than the wrapper.
+     */
+    @Test
+    void anotherClientsLinkHandsOnTheUrlItWraps() {
+        DialogPane report = pasteOnTheServersPage("happ://add/" + URL + "\n");
+        assertThat(report.getContentText())
+                .isEqualTo(I18n.get("servers.import.clipboard.subscription"));
+        Button add = onFx(() -> button(report, I18n.get("button.add.subscription")));
+        assertThat(add).as("the report's button that adds the wrapped URL").isNotNull();
+
+        DialogPane form = open(add::fire);
+
+        assertThat(onFx(() -> fieldTexts(form))).as("the URL the link wraps")
+                .contains(URL)
+                .noneMatch(text -> text.startsWith("happ://"));
+    }
+
+    /** Typed or pasted into the form itself, a wrapped link becomes the URL it holds. */
+    @Test
+    void theFormShowsTheUrlAWrappedLinkHolds() {
+        interact(() -> lookup("#btnSubscriptions").queryButton().fire());
+        DialogPane form = open(lookup("#addSubscriptionButton").queryButton()::fire);
+        interact(() -> {
+            for (Node node : form.lookupAll(".text-field")) {
+                TextField field = (TextField) node;
+                if (field.getPromptText().startsWith("https://")) {
+                    field.setText("sing-box://import-remote-profile?url="
+                            + URLEncoder.encode(URL, StandardCharsets.UTF_8)
+                            + "#Provider");
+                }
+            }
+        });
+
+        assertThat(onFx(() -> fieldTexts(form))).as("the URL field")
+                .contains(URL)
+                .noneMatch(text -> text.startsWith("sing-box://"));
+    }
+
+    /** A link Happ encrypted for itself holds no URL: the report says to ask for it. */
+    @Test
+    void aLinkEncryptedForHappIsExplained() {
+        DialogPane report = pasteOnTheServersPage("happ://crypt3/aBcDeFgHiJkLmNoP\n");
+
+        assertThat(report.getContentText())
+                .isEqualTo(I18n.get("subscriptions.link.happ.encrypted"));
+        assertThat(onFx(() -> button(report, I18n.get("button.add.subscription"))))
+                .isNull();
     }
 
     /** The link dialog reads its text the way the clipboard import does. */
