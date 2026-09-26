@@ -69,6 +69,13 @@ public final class CoreSettings {
     /** The modes of v2ray-plugin the core runs; quic only with tls. */
     private static final Set<String> V2RAY_PLUGIN_MODES = Set.of("websocket", "quic");
 
+    /** The VMess ciphers the core takes, the legacy aes-128-ctr included. */
+    private static final Set<String> VMESS_CIPHERS = Set.of(
+            "auto", "none", "zero", "aes-128-gcm", "chacha20-poly1305", "aes-128-ctr");
+
+    /** The VMess ciphers that leave the payload as it is. */
+    private static final Set<String> VMESS_CLEAR = Set.of("none", "zero");
+
     private CoreSettings() {
     }
 
@@ -118,6 +125,31 @@ public final class CoreSettings {
         boolean overQuic = server.getProtocol() == Protocol.HYSTERIA2
                 || transport != null && transport.getType() == TransportType.QUIC;
         return overQuic ? null : fingerprint(server.getTls());
+    }
+
+    /**
+     * The VMess cipher to ask the core for: the server's own, as a link's
+     * {@code scy} or the form sets it, or {@code auto} for one the core does
+     * not know.
+     *
+     * <p>The two that leave the payload as it is, {@code none} and
+     * {@code zero}, are asked for only inside TLS: without it, nothing else
+     * encrypts the traffic. The core was given {@code auto} whatever the
+     * server said, and a server made in the form was stored with
+     * {@code none}, the form's default, so honouring it bare would have sent
+     * those servers' traffic in the clear.</p>
+     *
+     * @param server the VMess server
+     * @return the value of the outbound's {@code security}
+     */
+    public static String vmessSecurity(ServerConfig server) {
+        String cipher = server.getEncryption() == null ? ""
+                : server.getEncryption().strip().toLowerCase(Locale.ROOT);
+        if (!VMESS_CIPHERS.contains(cipher)) {
+            return "auto";
+        }
+        boolean tls = server.getTls() != null && server.getTls().isEnabled();
+        return VMESS_CLEAR.contains(cipher) && !tls ? "auto" : cipher;
     }
 
     /**

@@ -550,4 +550,12 @@ class SingBoxConfigGeneratorMultiProtocolTest {
 
         assertThat(endpoint.has("tls")).isFalse();
     }
+
+    @Test
+    void vmess_asksForTheServersCipher() throws Exception {
+        ServerConfig server = TestServers.vless("vmess").protocol(Protocol.VMESS)
+                .encryption("aes-128-gcm").build();
+
+        assertThat(proxyOutbound(server).get("security").asString()).isEqualTo("aes-128-gcm");
+    }
 }

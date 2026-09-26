@@ -6,7 +6,8 @@ import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Builds the sing-box VMess proxy outbound: UUID auth with {@code alter_id} 0
- * and {@code auto} security, plus the shared TLS and transport blocks.
+ * and the server's cipher ({@link CoreSettings#vmessSecurity}), plus the
+ * shared TLS and transport blocks.
  */
 public final class VmessOutboundBuilder extends OutboundBuilder {
 
@@ -23,7 +24,7 @@ public final class VmessOutboundBuilder extends OutboundBuilder {
         outbound.put("server_port", server.getPort());
         outbound.put("uuid", server.getUuid());
         outbound.put("alter_id", 0);
-        outbound.put("security", "auto");
+        outbound.put("security", CoreSettings.vmessSecurity(server));
 
         addTlsIfEnabled(outbound, server);
         addTransportIfNeeded(outbound, server.getTransport());
