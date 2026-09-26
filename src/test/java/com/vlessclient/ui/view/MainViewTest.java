@@ -234,15 +234,18 @@ public class MainViewTest extends ApplicationTest {
             interact(() -> {
                 banner.getScene().getRoot().applyCss();
                 banner.getScene().getRoot().layout();
+                assertThat(banner.isVisible()).isTrue();
+                assertThat(banner.isManaged()).isTrue();
+                assertThat(message.getText()).contains("servers.json").contains(where);
+                assertThat(dismiss.isVisible()).isTrue();
+                assertThat(message.getBoundsInParent().getMaxX())
+                        .isLessThanOrEqualTo(dismiss.getBoundsInParent().getMinX());
+                assertThat(dismiss.getBoundsInParent().getMaxX())
+                        .isLessThanOrEqualTo(banner.getWidth());
+                // Fired, as Retry is: a click through the pointer missed the
+                // button on the Linux runner and the banner stayed.
+                dismiss.fire();
             });
-
-            assertThat(banner.isVisible()).isTrue();
-            assertThat(banner.isManaged()).isTrue();
-            assertThat(message.getText()).contains("servers.json").contains(where);
-            assertThat(dismiss.isVisible()).isTrue();
-
-            clickOn(dismiss);
-            WaitForAsyncUtils.waitForFxEvents();
 
             assertThat(banner.isVisible()).isFalse();
             assertThat(banner.isManaged()).isFalse();
