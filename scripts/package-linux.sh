@@ -129,9 +129,18 @@ jpackage \
 # zstd on the Ubuntu runners. xz packs the same files smaller, and every dpkg
 # that can install Tunl reads it. The rebuild keeps the files, their modes
 # and the maintainer scripts, all owned by root as jpackage had them.
+#
+# The rebuild also widens Depends. jpackage names the libraries the runtime
+# links by the build host's packages, and Ubuntu 24.04 renamed some of them
+# for the 64-bit time_t transition (libasound2 became libasound2t64). Debian
+# 12 and Ubuntu 22.04 have only the old names, so each renamed package also
+# accepts its old one: "libasound2t64 | libasound2".
 DEB="$(ls dist/*.deb)"
 REPACK="$(mktemp -d)"
 dpkg-deb --raw-extract "${DEB}" "${REPACK}/tree"
+sed -i -E '/^Depends:/ s/([a-z0-9][a-z0-9.+-]*)t64(,|[[:space:]]*$)/\1t64 | \1\2/g' \
+    "${REPACK}/tree/DEBIAN/control"
+echo "[package-linux] $(grep '^Depends:' "${REPACK}/tree/DEBIAN/control")"
 dpkg-deb --root-owner-group -Zxz --build "${REPACK}/tree" "${DEB}"
 rm -rf "${REPACK}"
 
