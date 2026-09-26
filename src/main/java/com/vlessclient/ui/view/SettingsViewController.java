@@ -147,30 +147,15 @@ public class SettingsViewController implements ViewShownAware {
      */
     @FXML
     public void initialize() {
-        try {
-            configStore = ServiceLocator.get(ConfigStore.class);
-        } catch (IllegalArgumentException e) {
+        configStore = ServiceLocator.find(ConfigStore.class).orElse(null);
+        if (configStore == null) {
             log.warn("ConfigStore not available");
             return;
         }
-
-        try {
-            themeManager = ServiceLocator.get(ThemeManager.class);
-        } catch (IllegalArgumentException e) {
-            log.warn("ThemeManager not available");
-        }
-
-        try {
-            autostart = ServiceLocator.get(Autostart.class);
-        } catch (IllegalArgumentException e) {
-            log.warn("Autostart not available");
-        }
-
-        try {
-            mcpServerService = ServiceLocator.get(McpServerService.class);
-        } catch (IllegalArgumentException e) {
-            log.warn("McpServerService not available");
-        }
+        // The sections below are shown without these, disabled or hidden.
+        themeManager = ServiceLocator.find(ThemeManager.class).orElse(null);
+        autostart = ServiceLocator.find(Autostart.class).orElse(null);
+        mcpServerService = ServiceLocator.find(McpServerService.class).orElse(null);
 
         AppSettings settings = configStore.getSettings();
 

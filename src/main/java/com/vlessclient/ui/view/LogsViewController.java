@@ -627,10 +627,8 @@ public class LogsViewController {
      */
     @FXML
     private void onSaveDiagnosticsClicked() {
-        DiagnosticsBundle bundle;
-        try {
-            bundle = ServiceLocator.get(DiagnosticsBundle.class);
-        } catch (IllegalArgumentException e) {
+        DiagnosticsBundle bundle = ServiceLocator.find(DiagnosticsBundle.class).orElse(null);
+        if (bundle == null) {
             log.warn("DiagnosticsBundle not available; cannot save diagnostics");
             return;
         }

@@ -111,10 +111,8 @@ public class UpdateBannerSection {
      * in Settings.
      */
     public void init() {
-        try {
-            updateManager = ServiceLocator.get(UpdateManager.class);
-        } catch (IllegalArgumentException e) {
-            updateManager = null;
+        updateManager = ServiceLocator.find(UpdateManager.class).orElse(null);
+        if (updateManager == null) {
             refresh();
             return;
         }

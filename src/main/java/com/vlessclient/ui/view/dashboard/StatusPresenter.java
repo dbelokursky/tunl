@@ -364,10 +364,8 @@ public class StatusPresenter {
         if (server == null) {
             return;
         }
-        CountryResolver resolver;
-        try {
-            resolver = ServiceLocator.get(CountryResolver.class);
-        } catch (IllegalArgumentException e) {
+        CountryResolver resolver = ServiceLocator.find(CountryResolver.class).orElse(null);
+        if (resolver == null) {
             return;
         }
         resolver.countryOf(server).ifPresent(this::paintStatusFlag);

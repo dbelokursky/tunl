@@ -108,10 +108,8 @@ public final class UpdatesSection {
     // ----- app version row -----
 
     private void initAppVersionRow() {
-        try {
-            updateManager = ServiceLocator.get(UpdateManager.class);
-        } catch (IllegalArgumentException e) {
-            updateManager = null;
+        updateManager = ServiceLocator.find(UpdateManager.class).orElse(null);
+        if (updateManager == null) {
             appVersionValue.setText(AppVersion.VERSION);
             hideRestartButton();
             return;
@@ -380,14 +378,12 @@ public final class UpdatesSection {
         if (singBoxPath == null) {
             return I18n.get("settings.version.unknown");
         }
-        String version;
-        try {
-            version = ServiceLocator.get(SingBoxInstaller.class)
-                    .detectVersion(java.nio.file.Path.of(singBoxPath));
-        } catch (IllegalArgumentException e) {
+        SingBoxInstaller installer = ServiceLocator.find(SingBoxInstaller.class).orElse(null);
+        if (installer == null) {
             log.debug("SingBoxInstaller not available");
             return I18n.get("settings.version.unknown");
         }
+        String version = installer.detectVersion(java.nio.file.Path.of(singBoxPath));
         // Bare "1.13.14", matching the app version row above it — the label
         // already says "sing-box version", so repeating it in the value read
         // as stutter.
