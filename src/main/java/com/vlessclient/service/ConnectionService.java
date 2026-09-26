@@ -71,6 +71,13 @@ public class ConnectionService {
      */
     private static final Duration STOP_WAIT = Duration.ofSeconds(15);
 
+    /**
+     * How long a connect waits for a tunnel an earlier run's core left to
+     * close (SingBoxEngine#awaitEarlierTunnel). One such core took about half
+     * a minute after an update.
+     */
+    private static final Duration EARLIER_TUNNEL_WAIT = Duration.ofSeconds(45);
+
     /** A loopback connect answers at once either way; this only bounds a firewall's silence. */
     private static final int PORT_PROBE_TIMEOUT_MS = 250;
 
@@ -489,6 +496,15 @@ public class ConnectionService {
         log.info("Connecting to server: {} ({})", active.getName(), mode);
         engine.awaitStopped(STOP_WAIT);
         if (!allowed.getAsBoolean()) {
+            return new ConnectAttempt(Outcome.CANCELLED, active);
+        }
+        // A tunnel an earlier run's core left may be closing still, after an
+        // update or a quick restart: started beside it, the new one fought it
+        // for the routes and the ports until it was gone. Waited for first,
+        // so that its ports are free again, not moved aside.
+        if (!engine.isRunning()
+                && !engine.awaitEarlierTunnel(EARLIER_TUNNEL_WAIT, allowed)
+                && !allowed.getAsBoolean()) {
             return new ConnectAttempt(Outcome.CANCELLED, active);
         }
         List<MovedPort> moved = List.of();

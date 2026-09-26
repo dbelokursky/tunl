@@ -29,6 +29,11 @@ import org.slf4j.LoggerFactory;
  * on "address already in use", and recovery kept retrying. The TUN wrappers
  * watch the app's pid for this; a direct core has no wrapper.</p>
  *
+ * <p>A TUN core is recorded too, in a file of its own ({@link #forTunnel()}):
+ * the process its launcher hands back, whose life mirrors the core's. The app
+ * cannot end that core, which runs with the administrator's rights, but the
+ * next run can wait for it to close before starting another beside it.</p>
+ *
  * <p>Only the recorded process is ended: the same pid, started at the same
  * moment and, where the system reports it, from the same executable. A pid
  * the system has given to another program since is left alone.</p>
@@ -37,6 +42,9 @@ public final class CoreRecord {
 
     /** The record's name in the data directory. */
     public static final String FILE_NAME = "core.pid";
+
+    /** The TUN core's record, beside the direct core's. */
+    public static final String TUNNEL_FILE_NAME = "tun-core.pid";
 
     private static final Logger log = LoggerFactory.getLogger(CoreRecord.class);
 
@@ -61,6 +69,14 @@ public final class CoreRecord {
     private static final String DELETED = " (deleted)";
 
     private final Path file;
+
+    /**
+     * Whether an entry names the executable too. A TUN core's record does not
+     * ({@link #forTunnel()}): the launcher's process can replace its program
+     * as it runs, as pkexec does with the program it starts, and was then
+     * taken for another process. Its pid and start time name it well enough.
+     */
+    private final boolean recordsCommand;
 
     /** Guards the file. Private, because {@link #inDataDir()} hands instances out. */
     private final Object lock = new Object();
@@ -109,7 +125,12 @@ public final class CoreRecord {
      * @param file where the record is written
      */
     public CoreRecord(Path file) {
+        this(file, true);
+    }
+
+    private CoreRecord(Path file, boolean recordsCommand) {
         this.file = file;
+        this.recordsCommand = recordsCommand;
     }
 
     /**
@@ -119,6 +140,41 @@ public final class CoreRecord {
      */
     public static CoreRecord inDataDir() {
         return new CoreRecord(PlatformPaths.current().dataDir().resolve(FILE_NAME));
+    }
+
+    /**
+     * The record kept beside this one for a TUN core: the process its
+     * launcher hands back, whose life mirrors the core's.
+     *
+     * @return the TUN core's record
+     */
+    public CoreRecord forTunnel() {
+        return new CoreRecord(file.resolveSibling(TUNNEL_FILE_NAME), false);
+    }
+
+    /**
+     * The recorded core, while it is still running. A record whose core has
+     * exited, or whose pid the system has given to another process, is
+     * removed, and so is one that cannot be read.
+     *
+     * @return the running core; empty when there is none
+     */
+    public Optional<ProcessHandle> runningCore() {
+        synchronized (lock) {
+            Optional<Entry> recorded = read();
+            Optional<ProcessHandle> process = recorded
+                    .flatMap(entry -> ProcessHandle.of(entry.pid()))
+                    .filter(ProcessHandle::isAlive)
+                    .filter(handle -> recorded.get().names(handle));
+            if (process.isEmpty()) {
+                if (recorded.isPresent()) {
+                    clear(recorded.get());
+                } else {
+                    delete();
+                }
+            }
+            return process;
+        }
     }
 
     /**
@@ -154,7 +210,8 @@ public final class CoreRecord {
                     + "if the app dies, the next run cannot end it", core.pid());
             return null;
         }
-        Entry entry = new Entry(core.pid(), start.get(), info.command().orElse(""));
+        Entry entry = new Entry(core.pid(), start.get(),
+                recordsCommand ? info.command().orElse("") : "");
         synchronized (lock) {
             return store(entry) ? entry : null;
         }

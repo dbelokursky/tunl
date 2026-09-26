@@ -144,6 +144,42 @@ class CoreRecordTest {
         return dir.resolve(CoreRecord.FILE_NAME);
     }
 
+    /**
+     * A TUN core's launcher is recorded beside the direct core, and a run
+     * learns from the record whether it is still up, for as long as it is.
+     */
+    @Test
+    void theTunnelsRecordNamesItsRunningCoreUntilItExits() throws Exception {
+        Process core = standIn();
+        CoreRecord tunnel = record().forTunnel();
+        assertThat(tunnel.write(core.toHandle())).isNotNull();
+
+        assertThat(dir.resolve(CoreRecord.TUNNEL_FILE_NAME)).exists();
+        assertThat(dir.resolve(CoreRecord.FILE_NAME)).as("the direct core's record").doesNotExist();
+        assertThat(tunnel.read()).map(CoreRecord.Entry::command)
+                .as("no executable: a launcher can replace its program as it runs")
+                .contains("");
+        assertThat(tunnel.runningCore()).map(ProcessHandle::pid).contains(core.pid());
+
+        core.destroy();
+        assertThat(core.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        assertThat(tunnel.runningCore()).isEmpty();
+        assertThat(dir.resolve(CoreRecord.TUNNEL_FILE_NAME))
+                .as("the record of a core that has exited").doesNotExist();
+    }
+
+    @Test
+    void aProcessThatWasGivenTheRecordedPidIsNoRunningCore() throws Exception {
+        Process other = standIn();
+        CoreRecord tunnel = record().forTunnel();
+        tunnel.write(new CoreRecord.Entry(other.pid(),
+                java.time.Instant.now().minus(Duration.ofHours(1)), ""));
+
+        assertThat(tunnel.runningCore()).isEmpty();
+        assertThat(other.isAlive()).as("left alone").isTrue();
+        assertThat(dir.resolve(CoreRecord.TUNNEL_FILE_NAME)).doesNotExist();
+    }
+
     /** A process to record: a JVM that sleeps for half a minute unless ended sooner. */
     private Process standIn() throws Exception {
         Process process = new ProcessBuilder(

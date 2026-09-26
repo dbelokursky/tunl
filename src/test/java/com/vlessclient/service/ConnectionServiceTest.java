@@ -94,8 +94,25 @@ class ConnectionServiceTest {
          */
         volatile Runnable onStarted;
 
+        /** How many times a connect waited for an earlier run's tunnel. */
+        final java.util.concurrent.atomic.AtomicInteger earlierTunnelWaits =
+                new java.util.concurrent.atomic.AtomicInteger();
+        /** Whether a core had been started when a connect waited for that tunnel. */
+        volatile boolean startedBeforeTheWait;
+        /** What the wait answers, given the connect's "still wanted". */
+        volatile java.util.function.Predicate<java.util.function.BooleanSupplier> earlierTunnel =
+                stillWanted -> true;
+
         RecordingEngine(Path binary) {
             super(binary);
+        }
+
+        @Override
+        public boolean awaitEarlierTunnel(Duration timeout,
+                                          java.util.function.BooleanSupplier stillWanted) {
+            earlierTunnelWaits.incrementAndGet();
+            startedBeforeTheWait |= calls.contains("start");
+            return earlierTunnel.test(stillWanted);
         }
 
         @Override
@@ -1294,6 +1311,47 @@ class ConnectionServiceTest {
         assertThat(engine.calls).containsExactly("stop");
 
         service(engineWithoutCore()).disconnect();   // no core yet: must not throw
+    }
+
+    // ===== a tunnel an earlier run left =====
+
+    @Test
+    void aConnectWaitsForAnEarlierRunsTunnelBeforeStarting() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        RecordingEngine engine = engine();
+
+        assertThat(service(engine).connect().started()).isTrue();
+
+        assertThat(engine.earlierTunnelWaits).hasValue(1);
+        assertThat(engine.startedBeforeTheWait).isFalse();
+    }
+
+    /** Disconnect withdraws the request first, which ends the wait at once. */
+    @Test
+    void aDisconnectDuringTheWaitCallsTheConnectOff() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        engine.earlierTunnel = stillWanted -> {
+            service.getRecoveryService().cancel();
+            return stillWanted.getAsBoolean();
+        };
+
+        ConnectionService.ConnectAttempt attempt = service.connect();
+
+        assertThat(attempt.outcome()).isEqualTo(ConnectionService.Outcome.CANCELLED);
+        assertThat(engine.calls).doesNotContain("start");
+    }
+
+    /** A tunnel still up when the wait runs out does not keep the connect from starting. */
+    @Test
+    void anEarlierTunnelStillUpAfterTheWaitStillLetsTheConnectStart() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        RecordingEngine engine = engine();
+        engine.earlierTunnel = stillWanted -> false;
+
+        assertThat(service(engine).connect().started()).isTrue();
+        assertThat(engine.calls).contains("start");
     }
 
     // ===== the core is installed after the app started =====
