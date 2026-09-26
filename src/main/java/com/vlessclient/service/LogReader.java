@@ -4,6 +4,7 @@ import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -68,6 +69,26 @@ public class LogReader {
         readerThread = new Thread(this::readLoop, "singbox-log-reader");
         readerThread.setDaemon(true);
         readerThread.start();
+    }
+
+    /**
+     * Waits for the reader to reach the end of the stream, which comes once
+     * the process has exited and everything it wrote is read. Every line is
+     * then on its way to the list, in an FX task queued ahead of any task
+     * queued after this returns.
+     *
+     * @param timeout how long to wait at most: a child that inherited the
+     *                stream can keep it open after the process has gone
+     * @return true when the stream ended in time
+     * @throws InterruptedException when interrupted while waiting
+     */
+    public boolean awaitEnd(Duration timeout) throws InterruptedException {
+        Thread t = readerThread;
+        if (t == null) {
+            return true;
+        }
+        t.join(timeout);
+        return !t.isAlive();
     }
 
     /**
