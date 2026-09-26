@@ -21,10 +21,15 @@
 }
 
 /* ===== Sidebar ===== */
+/* 212, not 200: a nav button gets the width less the sidebar's 8+8 of
+   padding, and "Маршрутизация" needs 190 of it. At 200 the longest item in
+   the column was the only one rendering as "Маршрутиза…". Here rather than in
+   MainView.fxml, so that it grows with the OS's text size (TextScale). */
 .sidebar {
     -fx-background-color: -c-surface-sunken;
     -fx-border-color: -c-border;
     -fx-border-width: 0 1 0 0;
+    -fx-pref-width: 212;
 }
 
 .sidebar-separator {
