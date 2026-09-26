@@ -429,6 +429,17 @@ public class ConnectionService {
     }
 
     /**
+     * The proxy mode the running core was started with. The settings may name
+     * another: a mode changed there applies at the next start.
+     *
+     * @return the running core's mode, or empty when no core runs
+     */
+    public Optional<ProxyMode> runningMode() {
+        Run current = run;
+        return isRunning() && current != null ? Optional.of(current.mode()) : Optional.empty();
+    }
+
+    /**
      * Connects using the proxy mode from the current settings.
      *
      * @return what happened, and the server the core was pointed at

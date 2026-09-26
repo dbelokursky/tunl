@@ -28,7 +28,9 @@ public class GetStatusTool implements McpTool {
     @Override
     public String description() {
         return "Get the current VPN connection status: state, active server, "
-                + "proxy mode and local proxy ports.";
+                + "proxy mode and local proxy ports. 'proxyMode' is the configured mode; "
+                + "'runningProxyMode' is the one the running core was started with, "
+                + "and differs until a reconnect applies a changed mode.";
     }
 
     @Override

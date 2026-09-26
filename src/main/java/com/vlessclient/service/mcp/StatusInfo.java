@@ -19,6 +19,9 @@ package com.vlessclient.service.mcp;
  * @param tunnelStatus   combined status shared with the dashboard and tray
  * @param currentServerId core-reported routed server id, null when unknown or disconnected
  * @param currentServer  core-reported routed server name, null when unknown or disconnected
+ * @param runningProxyMode the mode the running core was started with, which
+ *                       {@code proxyMode} may no longer name until a reconnect;
+ *                       null when no core runs
  */
 public record StatusInfo(
         String state,
@@ -33,13 +36,15 @@ public record StatusInfo(
         String health,
         String tunnelStatus,
         String currentServerId,
-        String currentServer) {
+        String currentServer,
+        String runningProxyMode) {
 
     /** Creates a legacy snapshot with no measured health or core-reported server. */
     public StatusInfo(String state, boolean connected, String activeServerId, String activeServer,
                       String proxyMode, int socksPort, int httpPort, int clashApiPort,
                       String error) {
         this(state, connected, activeServerId, activeServer, proxyMode, socksPort, httpPort,
-                clashApiPort, error, "UNMONITORED", state, null, null);
+                clashApiPort, error, "UNMONITORED", state, null, null,
+                connected ? proxyMode : null);
     }
 }

@@ -29,7 +29,9 @@ public class RefreshSubscriptionTool implements McpTool {
 
     @Override
     public String description() {
-        return "Refresh a subscription's server list. Requires 'subscriptionId'.";
+        return "Refresh a subscription's server list. Requires 'subscriptionId'. "
+                + "A fetch the provider refused or that failed is a tool error "
+                + "that says why.";
     }
 
     @Override
