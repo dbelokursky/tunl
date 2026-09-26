@@ -99,6 +99,33 @@ class ProxyGroupMonitorTest {
         assertThat(monitor.currentMemberTagProperty().get()).isNull();
     }
 
+    @Test
+    void aGroupThatPicksForItselfPublishesItsPickAsTheCoresOwn() throws Exception {
+        int port = serve(200, "{\"type\":\"URLTest\",\"now\":\"srv-abc\"}");
+
+        monitor.start(port, "");
+        Await.untilValue("the core's own pick",
+                () -> monitor.corePickTagProperty().get(),
+                current -> Objects.equals("srv-abc", current),
+                Duration.ofSeconds(10));
+
+        monitor.stop();
+        awaitTag(null);
+        assertThat(monitor.corePickTagProperty().get()).isNull();
+    }
+
+    @Test
+    void theUsersOwnSelectorIsNotACorePick() throws Exception {
+        int port = serve(200, "{\"type\":\"Selector\",\"now\":\"srv-abc\"}");
+
+        monitor.start(port, "");
+        awaitTag("srv-abc");
+
+        assertThat(monitor.corePickTagProperty().get())
+                .as("a selector routes where the user pointed it")
+                .isNull();
+    }
+
     /** The property lands on the FX thread when a toolkit is up, so wait for it. */
     private void awaitTag(String expected) {
         Await.untilValue("member tag " + expected,

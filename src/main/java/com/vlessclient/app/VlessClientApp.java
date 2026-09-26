@@ -7,6 +7,7 @@ import com.vlessclient.platform.CoreRecord;
 import com.vlessclient.platform.PrivilegeHelper;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
+import com.vlessclient.service.ProxyGroupMonitor;
 import com.vlessclient.service.SessionPorts;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.SingBoxInstaller;
@@ -591,7 +592,10 @@ public class VlessClientApp extends Application {
             // after an in-app core install.
             trayIconService = new TrayIconService(
                     () -> ServiceLocator.get(SingBoxEngine.class),
-                    configStore, connectionService, healthState, stage);
+                    configStore, connectionService, healthState,
+                    ServiceLocator.find(ProxyGroupMonitor.class)
+                            .map(ProxyGroupMonitor::corePickTagProperty).orElse(null),
+                    stage);
             ServiceLocator.register(TrayIconService.class, trayIconService);
             trayIconService.install();
         } catch (Throwable e) {

@@ -11,6 +11,7 @@ import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.testing.FxToolkitExtension;
 import java.nio.file.Path;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -93,6 +94,7 @@ class StatusPresenterTest {
 
     private final AtomicReference<ServerConfig> active = new AtomicReference<>();
     private final AtomicReference<ServerConfig> routed = new AtomicReference<>();
+    private final AtomicBoolean routedByCore = new AtomicBoolean();
     private final AtomicReference<TunnelHealth> health =
             new AtomicReference<>(TunnelHealth.UNMONITORED);
     private final AtomicReference<SingBoxEngine> engine = new AtomicReference<>();
@@ -107,7 +109,7 @@ class StatusPresenterTest {
         presenter = new StatusPresenter(
                 new StatusPresenter.Controls(
                         circle, halo, flag, title, subtitle, serverName, connect),
-                active::get, routed::get, health::get, engine::get,
+                active::get, routed::get, routedByCore::get, health::get, engine::get,
                 refreshes::incrementAndGet);
     }
 
@@ -116,6 +118,20 @@ class StatusPresenterTest {
         server.setName(name);
         server.setAddress(address);
         return server;
+    }
+
+    @Test
+    void aServerTheCorePickedItselfIsNamedAsTheOneInUseNow() {
+        active.set(server("Pinned", "203.0.113.1"));
+        routed.set(server("Winner", "203.0.113.2"));
+        routedByCore.set(true);
+        health.set(TunnelHealth.HEALTHY);
+
+        presenter.update(ConnectionState.CONNECTED);
+
+        assertThat(subtitle.getText())
+                .as("the Fastest mode moves traffic on its own, so the card says 'now'")
+                .isEqualTo(I18n.get("dashboard.status.routing.now", "Winner"));
     }
 
     @Test

@@ -480,6 +480,18 @@
     -fx-padding: 3 8;
 }
 
+/* The server the core routes through now in the Fastest mode, beside the
+   one the user selected: the same accent, filled, since it is the live one.
+   The info colour would read as another protocol badge. */
+.now-badge {
+    -fx-background-color: -c-accent;
+    -fx-text-fill: -c-on-accent;
+    -fx-font-size: 10px;
+    -fx-font-weight: bold;
+    -fx-background-radius: 4;
+    -fx-padding: 3 8;
+}
+
 /* A server whose TLS certificate is never checked: amber, because a link
    that says allowInsecure=1 is one a network attacker could have written. */
 .insecure-badge {

@@ -28,6 +28,12 @@ import tools.jackson.databind.json.JsonMapper;
  * API's {@code GET /proxies/{tag}} answer ({@code "now"}), so this polls it
  * while the tunnel is up and publishes the member's tag as an FX property. The
  * answer also follows manual API switches without a process restart.</p>
+ *
+ * <p>The same answer says whether the group picks its member itself (the
+ * Fastest mode's urltest group) or routes where the user pointed a selector.
+ * A member the core picked is published once more on its own, for the
+ * dashboard, the tray and the server list to name as the server in use now,
+ * apart from the one the user selected.</p>
  */
 public class ProxyGroupMonitor {
 
@@ -43,7 +49,11 @@ public class ProxyGroupMonitor {
 
     private final HttpClient httpClient;
     private final ObjectMapper mapper = JsonMapper.builder().build();
+    /** How the core's Clash API types a group that picks its member itself. */
+    private static final String AUTOMATIC_GROUP_TYPE = "URLTest";
+
     private final ReadOnlyStringWrapper currentMemberTag = new ReadOnlyStringWrapper();
+    private final ReadOnlyStringWrapper corePickTag = new ReadOnlyStringWrapper();
     private final Object lifecycleLock = new Object();
     private Thread poller;
 
@@ -66,6 +76,28 @@ public class ProxyGroupMonitor {
      */
     public ReadOnlyStringProperty currentMemberTagProperty() {
         return currentMemberTag.getReadOnlyProperty();
+    }
+
+    /**
+     * The tag of the member the core picked itself, in a group that picks
+     * for itself (the Fastest mode), or null: the user's own selector is in
+     * force, or the pick is unknown. Set on the FX thread, together with
+     * {@link #currentMemberTagProperty()} and before it.
+     *
+     * @return the read-only tag property
+     */
+    public ReadOnlyStringProperty corePickTagProperty() {
+        return corePickTag.getReadOnlyProperty();
+    }
+
+    /**
+     * A group's member in use, and whether the group picked it itself.
+     *
+     * @param memberTag the member's outbound tag
+     * @param automatic whether the core picks the member (urltest) rather than
+     *                  routing where a selector points
+     */
+    record Pick(String memberTag, boolean automatic) {
     }
 
     /**
@@ -115,7 +147,7 @@ public class ProxyGroupMonitor {
                 // Only a definite answer is published: a failed read (the API
                 // still coming up, a transient error) keeps the last pick
                 // rather than flickering the card back to "unknown".
-                currentMember(port, secret, groupTag).ifPresent(this::publish);
+                currentPick(port, secret, groupTag).ifPresent(this::publish);
                 Thread.sleep(POLL_INTERVAL);
             }
         } catch (InterruptedException e) {
@@ -133,6 +165,20 @@ public class ProxyGroupMonitor {
      *         not know the group, or answered without a pick
      */
     public Optional<String> currentMember(int port, String secret, String groupTag) {
+        return currentPick(port, secret, groupTag).map(Pick::memberTag);
+    }
+
+    /**
+     * Asks the core once which member a group uses, and whether the group
+     * picked it itself.
+     *
+     * @param port     the Clash API port
+     * @param secret   the API token, blank when the config has none
+     * @param groupTag the group's sing-box tag
+     * @return the pick, or empty when the core is not running, does not know
+     *         the group, or answered without a pick
+     */
+    Optional<Pick> currentPick(int port, String secret, String groupTag) {
         if (groupTag == null || groupTag.isBlank() || port < 1) {
             return Optional.empty();
         }
@@ -151,11 +197,13 @@ public class ProxyGroupMonitor {
                 log.debug("Group query for {} returned HTTP {}", groupTag, response.statusCode());
                 return Optional.empty();
             }
-            JsonNode now = mapper.readTree(response.body()).path("now");
+            JsonNode group = mapper.readTree(response.body());
+            JsonNode now = group.path("now");
             if (!now.isString() || now.asString().isBlank()) {
                 return Optional.empty();
             }
-            return Optional.of(now.asString());
+            return Optional.of(new Pick(now.asString(),
+                    AUTOMATIC_GROUP_TYPE.equals(group.path("type").asString(""))));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return Optional.empty();
@@ -165,8 +213,12 @@ public class ProxyGroupMonitor {
         }
     }
 
-    private void publish(String tag) {
-        Runnable set = () -> currentMemberTag.set(tag);
+    private void publish(Pick pick) {
+        // The core's own pick first: a listener on the member tag reads it.
+        Runnable set = () -> {
+            corePickTag.set(pick != null && pick.automatic() ? pick.memberTag() : null);
+            currentMemberTag.set(pick != null ? pick.memberTag() : null);
+        };
         try {
             if (Platform.isFxApplicationThread()) {
                 set.run();

@@ -9,6 +9,7 @@ import com.vlessclient.model.TunnelStatus;
 import com.vlessclient.service.CountryResolver;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.ui.view.Flags;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import javafx.application.Platform;
 import javafx.scene.control.Button;
@@ -51,6 +52,7 @@ public class StatusPresenter {
 
     private final Supplier<ServerConfig> activeServer;
     private final Supplier<ServerConfig> routedServer;
+    private final BooleanSupplier routedByCore;
     private final Supplier<TunnelHealth> health;
     private final Supplier<SingBoxEngine> engine;
     private final Runnable refreshConnectAvailability;
@@ -80,6 +82,11 @@ public class StatusPresenter {
      *                                   differ, and the card used to name the
      *                                   pinned one while the tunnel used
      *                                   another
+     * @param routedByCore               whether the routed server is one the
+     *                                   core picked itself (the Fastest mode),
+     *                                   which the next probe can move traffic
+     *                                   off, rather than the one the user
+     *                                   selected
      * @param health                     the current reachability verdict
      * @param engine                     the current engine, for the guard on a
      *                                   late-arriving country lookup
@@ -89,6 +96,7 @@ public class StatusPresenter {
     public StatusPresenter(Controls controls,
                            Supplier<ServerConfig> activeServer,
                            Supplier<ServerConfig> routedServer,
+                           BooleanSupplier routedByCore,
                            Supplier<TunnelHealth> health,
                            Supplier<SingBoxEngine> engine,
                            Runnable refreshConnectAvailability) {
@@ -101,6 +109,7 @@ public class StatusPresenter {
         this.connectButton = controls.connectButton();
         this.activeServer = activeServer;
         this.routedServer = routedServer;
+        this.routedByCore = routedByCore;
         this.health = health;
         this.engine = engine;
         this.refreshConnectAvailability = refreshConnectAvailability;
@@ -266,9 +275,11 @@ public class StatusPresenter {
         ServerConfig server = activeServer.get();
         ServerConfig routed = routed();
         return switch (status) {
-            case CONNECTED -> routed != null
-                    ? I18n.get("dashboard.status.routing.through", routed.getName())
-                    : I18n.get("dashboard.status.routing");
+            case CONNECTED -> routed == null
+                    ? I18n.get("dashboard.status.routing")
+                    : I18n.get(routedByCore.getAsBoolean()
+                            ? "dashboard.status.routing.now"
+                            : "dashboard.status.routing.through", routed.getName());
             case CONNECTING -> I18n.get("dashboard.status.establishing");
             case VERIFYING -> I18n.get("dashboard.status.verifying");
             case DEGRADED -> I18n.get("dashboard.status.degraded");

@@ -28,7 +28,7 @@ class TrayConnectFailureTest {
     private final List<List<String>> notices = new ArrayList<>();
 
     private TrayIconService trayOver(ConnectionService connections) {
-        TrayIconService tray = new TrayIconService(() -> null, null, connections, null, null);
+        TrayIconService tray = new TrayIconService(() -> null, null, connections, null, null, null);
         tray.setNotifier((title, body) -> notices.add(List.of(title, body)));
         return tray;
     }

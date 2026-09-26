@@ -9,6 +9,7 @@ import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.RoutingRule;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.model.ServerSelection;
 import com.vlessclient.testing.BundledCore;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -809,6 +810,84 @@ class SingBoxRealBinarySmokeTest {
                 }
             } finally {
                 Files.deleteIfExists(cache);
+            }
+        }
+    }
+
+    /**
+     * The dashboard, the tray and the server list tell a server the core
+     * picked itself (the Fastest mode's urltest group) from the one the user
+     * pointed a selector at by the type the Clash API reports for the group,
+     * so this is the core that has to report it.
+     *
+     * <p>A urltest group names no member until a probe has answered, so its
+     * probe goes to the loopback stand-ins here rather than to the internet.</p>
+     */
+    @Test
+    void theClashApiTellsTheFastestGroupFromTheUsersSelector() throws Exception {
+        try (SocksResponder a = new SocksResponder("A");
+             SocksResponder b = new SocksResponder("B")) {
+            for (ServerSelection selection : ServerSelection.values()) {
+                AppSettings settings = new AppSettings();
+                settings.setProxyMode(ProxyMode.SYSTEM_PROXY);
+                settings.setSystemProxyAutoConfig(false);
+                settings.setHttpPort(freePort());
+                settings.setSocksPort(freePort());
+                settings.setClashApiPort(freePort());
+                settings.setClashApiSecret("group-type-smoke-secret");
+                settings.setServerSelection(selection);
+                ServerConfig first = serverFor(Protocol.VLESS);
+                first.setId("first");
+                ServerConfig second = serverFor(Protocol.VLESS);
+                second.setId("second");
+                var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+                var config = (tools.jackson.databind.node.ObjectNode) mapper.readTree(
+                        generator.generate(List.of(first, second), first, settings, null));
+                for (var outbound : config.path("outbounds")) {
+                    if ("vless".equals(outbound.path("type").asString())) {
+                        String tag = outbound.path("tag").asString();
+                        var object = (tools.jackson.databind.node.ObjectNode) outbound;
+                        object.removeAll();
+                        object.put("tag", tag).put("type", "socks").put("version", "5")
+                                .put("server", "127.0.0.1").put("server_port",
+                                        tag.equals("srv-first") ? a.port() : b.port());
+                    } else if ("urltest".equals(outbound.path("type").asString())) {
+                        ((tools.jackson.databind.node.ObjectNode) outbound)
+                                .put("url", "http://127.0.0.1:12345/");
+                    }
+                }
+                Path cache = Files.createTempFile("group-type-cache-", ".db");
+                Files.delete(cache);
+                ((tools.jackson.databind.node.ObjectNode) config.path("experimental")
+                        .path("cache_file")).put("path", cache.toString());
+                LiveSelector selector = new LiveSelector(mapper.writeValueAsString(config));
+                Path file = Files.createTempFile("group-type-", ".json");
+                Path logs = Files.createTempFile("group-type-", ".log");
+                Files.writeString(file, selector.config());
+                Process process = new ProcessBuilder(binary.toString(), "run", "-c",
+                        file.toString()).redirectErrorStream(true)
+                        .redirectOutput(logs.toFile()).start();
+                try {
+                    awaitPort(settings.getClashApiPort(), process, logs);
+                    ProxyGroupMonitor monitor = new ProxyGroupMonitor();
+                    var pick = com.vlessclient.testing.Await.untilValue(
+                            selection + ": the group's pick",
+                            () -> monitor.currentPick(settings.getClashApiPort(),
+                                    settings.getClashApiSecret(), selector.groupTag()),
+                            java.util.Optional::isPresent, Duration.ofSeconds(15));
+
+                    assertThat(pick.get().memberTag()).isIn("srv-first", "srv-second");
+                    assertThat(pick.get().automatic())
+                            .as("%s: whether the core picks the member itself", selection)
+                            .isEqualTo(selection.isAutomatic());
+                } catch (Throwable e) {
+                    throw new AssertionError(Files.readString(logs), e);
+                } finally {
+                    stopCore(process);
+                    Files.deleteIfExists(file);
+                    Files.deleteIfExists(logs);
+                    Files.deleteIfExists(cache);
+                }
             }
         }
     }

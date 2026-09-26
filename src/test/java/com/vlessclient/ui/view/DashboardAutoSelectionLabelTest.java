@@ -35,7 +35,8 @@ import org.testfx.framework.junit5.ApplicationTest;
 /**
  * In the automatic selection mode the hero card used to name the pinned
  * server while the urltest group routed through whichever member won the
- * last probe. The card now follows the core's own answer.
+ * last probe. The card now follows the core's own answer, and says "now" of a
+ * server the core picked itself, since the next probe can move traffic off it.
  */
 @UiTest
 public class DashboardAutoSelectionLabelTest extends ApplicationTest {
@@ -58,10 +59,28 @@ public class DashboardAutoSelectionLabelTest extends ApplicationTest {
     /** Monitor whose published pick the test sets by hand; never polls. */
     private static final class FakeGroupMonitor extends ProxyGroupMonitor {
         private final SimpleStringProperty tag = new SimpleStringProperty();
+        private final SimpleStringProperty corePick = new SimpleStringProperty();
 
         @Override
         public ReadOnlyStringProperty currentMemberTagProperty() {
             return tag;
+        }
+
+        @Override
+        public ReadOnlyStringProperty corePickTagProperty() {
+            return corePick;
+        }
+
+        /** What the real monitor publishes for a group that picks for itself. */
+        void pickedByCore(String memberTag) {
+            corePick.set(memberTag);
+            tag.set(memberTag);
+        }
+
+        /** What it publishes for the user's own selector. */
+        void pickedByUser(String memberTag) {
+            corePick.set(null);
+            tag.set(memberTag);
         }
 
         @Override
@@ -172,17 +191,22 @@ public class DashboardAutoSelectionLabelTest extends ApplicationTest {
         // so there is no name to claim.
         assertThat(subtitle()).isEqualTo(I18n.get("dashboard.status.routing"));
 
-        interact(() -> groupMonitor.tag.set(OutboundTags.server(winner)));
+        interact(() -> groupMonitor.pickedByCore(OutboundTags.server(winner)));
         assertThat(subtitle())
-                .isEqualTo(I18n.get("dashboard.status.routing.through", "Winner"));
+                .isEqualTo(I18n.get("dashboard.status.routing.now", "Winner"));
+
+        // The user's own selector routes where they pointed it: no "now".
+        interact(() -> groupMonitor.pickedByUser(OutboundTags.server(pinned)));
+        assertThat(subtitle())
+                .isEqualTo(I18n.get("dashboard.status.routing.through", "Pinned"));
 
         // A tag the store cannot resolve (a member since deleted) falls back
         // rather than naming nobody's server.
-        interact(() -> groupMonitor.tag.set("srv-no-such-server"));
+        interact(() -> groupMonitor.pickedByCore("srv-no-such-server"));
         assertThat(subtitle()).isEqualTo(I18n.get("dashboard.status.routing"));
 
         interact(() -> {
-            groupMonitor.tag.set(null);
+            groupMonitor.pickedByUser(null);
             engine.state.set(ConnectionState.DISCONNECTED);
         });
     }
