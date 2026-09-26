@@ -257,11 +257,13 @@ public class UpdateManager {
         if (pending == null) {
             return;
         }
-        if (!com.vlessclient.platform.UpdateApplier.current().selfUpdates()) {
+        com.vlessclient.platform.UpdateApplier applier =
+                com.vlessclient.platform.UpdateApplier.current();
+        if (!applier.selfUpdates()) {
             // Nothing here could install it — spending the bytes would only
             // leave an installer the user has to find and run themselves.
-            log.info("Update {} available; this installation updates through "
-                    + "its package manager", pending.version());
+            log.info("Update {} available; this installation does not install it "
+                    + "itself ({})", pending.version(), applier.hold());
             return;
         }
         setStaged(staging.pending().isPresent());

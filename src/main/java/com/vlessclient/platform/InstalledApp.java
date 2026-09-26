@@ -2,6 +2,7 @@ package com.vlessclient.platform;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.function.Predicate;
 
 /**
  * Locates the packaged application this JVM is running inside. The
@@ -28,6 +29,13 @@ final class InstalledApp {
      */
     private static final String TRANSLOCATION_DIR = "AppTranslocation";
 
+    /**
+     * The top-level directory macOS mounts disk images under, the downloaded
+     * Tunl.dmg among them. A name, compared element by element like
+     * {@link #TRANSLOCATION_DIR}, rather than a path.
+     */
+    private static final String VOLUMES = "Volumes";
+
     private InstalledApp() {
     }
 
@@ -44,6 +52,42 @@ final class InstalledApp {
         }
         Path launcher = Path.of(appPath);
         return Files.exists(launcher) ? launcher : null;
+    }
+
+    /**
+     * Whether the app bundle runs from where it was downloaded rather than
+     * from where it was installed: a translocated copy, or the disk image
+     * itself, which is mounted read-only under {@code /Volumes}. Neither can be
+     * updated in place, and moving Tunl to Applications fixes both. A drive the
+     * user keeps apps on can be written, and an Applications folder this
+     * account cannot write is no download.
+     *
+     * @param bundle   the {@code .app} bundle, or {@code null} when unknown
+     * @param writable whether a directory can be written
+     * @return true when the bundle runs from its download
+     */
+    static boolean runsFromDownload(Path bundle, Predicate<Path> writable) {
+        if (bundle == null) {
+            return false;
+        }
+        if (isTranslocated(bundle)) {
+            return true;
+        }
+        Path parent = bundle.getParent();
+        boolean underVolumes = bundle.getRoot() != null && bundle.getNameCount() > 1
+                && bundle.getName(0).toString().equals(VOLUMES);
+        return underVolumes && parent != null && !writable.test(parent);
+    }
+
+    /**
+     * {@link #runsFromDownload(Path, Predicate)} with the file system's answer
+     * to whether a directory can be written.
+     *
+     * @param bundle the {@code .app} bundle, or {@code null} when unknown
+     * @return true when the bundle runs from its download
+     */
+    static boolean runsFromDownload(Path bundle) {
+        return runsFromDownload(bundle, Files::isWritable);
     }
 
     /**

@@ -37,6 +37,22 @@ public interface UpdateApplier {
         FAILED
     }
 
+    /** What keeps an installation from installing updates itself, for the UI to say. */
+    enum Hold {
+
+        /** Nothing: it installs updates itself. */
+        NONE,
+
+        /** The system's package manager owns it, as on Linux. */
+        PACKAGE_MANAGER,
+
+        /**
+         * A macOS copy running from where it was downloaded: translocated, or
+         * the disk image itself. Moving Tunl to Applications is the fix.
+         */
+        MOVE_TO_APPLICATIONS
+    }
+
     /**
      * Starts the swap for an installer that has just been re-verified.
      *
@@ -57,6 +73,16 @@ public interface UpdateApplier {
      * @return true when an update downloaded here could be applied here
      */
     boolean selfUpdates();
+
+    /**
+     * What keeps this installation from updating itself, so the app can say
+     * what to do rather than promise an install that will not happen.
+     *
+     * @return {@link Hold#NONE} exactly when {@link #selfUpdates()} is true
+     */
+    default Hold hold() {
+        return selfUpdates() ? Hold.NONE : Hold.PACKAGE_MANAGER;
+    }
 
     /**
      * Returns the applier for the host platform.

@@ -52,7 +52,8 @@ Builds are **not signed** with an Apple Developer certificate yet, so
 Gatekeeper blocks the app on first launch. Unblocking is a one-time trip
 through System Settings:
 
-1. Open the DMG and drag **Tunl** into **Applications**.
+1. Open the DMG and drag **Tunl** into **Applications**. Run straight from
+   the DMG or from Downloads, Tunl cannot update itself, and says so.
 2. Launch the app. macOS will say it cannot verify the app is free of
    malware — click **Done** (*not* "Move to Trash").
 3. Open **System Settings → Privacy & Security**.

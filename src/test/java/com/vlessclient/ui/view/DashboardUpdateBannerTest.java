@@ -1,11 +1,15 @@
 package com.vlessclient.ui.view;
 
+import com.vlessclient.app.I18n;
+import com.vlessclient.platform.UpdateApplier.Hold;
 import com.vlessclient.ui.view.dashboard.UpdateBannerSection;
 import com.vlessclient.ui.view.dashboard.UpdateBannerSection.State;
 import com.vlessclient.testing.UiTest;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
+import javafx.scene.control.Button;
+import javafx.scene.control.Label;
 import javafx.scene.layout.HBox;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
@@ -42,20 +46,20 @@ public class DashboardUpdateBannerTest extends ApplicationTest {
 
     @Test
     void nothingIsAnnouncedWithoutANewerRelease() {
-        assertThat(UpdateBannerSection.stateFor(false, false, false, true))
+        assertThat(UpdateBannerSection.stateFor(false, false, false, Hold.NONE))
                 .isEqualTo(State.HIDDEN);
         // Staged but not newer cannot happen, and must still stay quiet.
-        assertThat(UpdateBannerSection.stateFor(false, true, false, true))
+        assertThat(UpdateBannerSection.stateFor(false, true, false, Hold.NONE))
                 .isEqualTo(State.HIDDEN);
     }
 
     @Test
     void aStagedUpdateIsTheOnlyStateWithSomethingToPress() {
-        assertThat(UpdateBannerSection.stateFor(true, true, false, true))
+        assertThat(UpdateBannerSection.stateFor(true, true, false, Hold.NONE))
                 .isEqualTo(State.READY);
         // Still downloading: the banner reports it, but there is no action —
         // the download runs on its own.
-        assertThat(UpdateBannerSection.stateFor(true, false, true, true))
+        assertThat(UpdateBannerSection.stateFor(true, false, true, Hold.NONE))
                 .isEqualTo(State.DOWNLOADING);
     }
 
@@ -70,8 +74,39 @@ public class DashboardUpdateBannerTest extends ApplicationTest {
      */
     @Test
     void aFetchThatIsNotRunningIsNotReportedAsDownloading() {
-        assertThat(UpdateBannerSection.stateFor(true, false, false, true))
+        assertThat(UpdateBannerSection.stateFor(true, false, false, Hold.NONE))
                 .isEqualTo(State.AVAILABLE);
+    }
+
+    /**
+     * A macOS copy running from where it was downloaded, translocated or on
+     * the disk image, cannot update in place: the banner promised "installs
+     * on next launch" at every launch, and the app fetched the installer
+     * again every week. It asks for the move that makes updates work instead.
+     */
+    @Test
+    void aCopyRunningFromTheDownloadIsAskedToMoveToApplications() {
+        for (boolean staged : new boolean[] {false, true}) {
+            for (boolean downloading : new boolean[] {false, true}) {
+                assertThat(UpdateBannerSection.stateFor(true, staged, downloading,
+                        Hold.MOVE_TO_APPLICATIONS))
+                        .as("staged=%s downloading=%s", staged, downloading)
+                        .isEqualTo(State.MOVE_TO_APPLICATIONS);
+            }
+        }
+
+        HBox banner = new HBox();
+        Label title = new Label();
+        Label hint = new Label();
+        Button button = new Button();
+        interact(() -> new UpdateBannerSection(
+                new UpdateBannerSection.Controls(banner, title, hint, button))
+                .render(State.MOVE_TO_APPLICATIONS, "1.23.0"));
+
+        assertThat(banner.isVisible()).isTrue();
+        assertThat(title.getText()).isEqualTo(I18n.get("dashboard.update.available", "1.23.0"));
+        assertThat(hint.getText()).isEqualTo(I18n.get("dashboard.update.hint.move"));
+        assertThat(button.isVisible()).as("a restart that installs nothing").isFalse();
     }
 
     @Test
@@ -81,7 +116,7 @@ public class DashboardUpdateBannerTest extends ApplicationTest {
         // earlier platform state claimed something was staged.
         for (boolean staged : new boolean[] {false, true}) {
             for (boolean downloading : new boolean[] {false, true}) {
-                assertThat(UpdateBannerSection.stateFor(true, staged, downloading, false))
+                assertThat(UpdateBannerSection.stateFor(true, staged, downloading, Hold.PACKAGE_MANAGER))
                         .as("staged=%s downloading=%s", staged, downloading)
                         .isEqualTo(State.PACKAGE_MANAGER);
             }
