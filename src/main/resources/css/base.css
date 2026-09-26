@@ -60,11 +60,13 @@
     -fx-background-color: -c-accent-tint;
 }
 
+/* The bar on the left edge. Its colour used to sit on the top side, whose
+   width is 0, and the left side was transparent, so the bar never showed. */
 .nav-button-active {
     -fx-background-color: -c-accent-tint;
     -fx-text-fill: -c-accent-strong-fg;
     -fx-font-weight: bold;
-    -fx-border-color: -c-accent-fg transparent transparent transparent;
+    -fx-border-color: transparent transparent transparent -c-accent-fg;
     -fx-border-width: 0 0 0 3;
 }
 
@@ -152,10 +154,6 @@
     -fx-pref-height: 30;
 }
 
-.stats-card {
-    -fx-min-height: 96;
-}
-
 /* ===== Dashboard Status =====
    Solid tint discs instead of radial gradients — the colour reads the same
    but stays flat against the card. */
@@ -198,21 +196,6 @@
 
 .status-subtitle-error {
     -fx-text-fill: -c-danger-text-soft;
-}
-
-.server-name-label {
-    -fx-font-size: 14px;
-    -fx-text-fill: -c-text-disabled;
-}
-
-/* Legacy status-label-* kept as no-op styles so any stray code setting
-   them doesn't crash; new code uses .status-title / .status-subtitle. */
-.status-label-disconnected,
-.status-label-connected,
-.status-label-connecting,
-.status-label-error {
-    -fx-font-size: 13px;
-    -fx-text-fill: -c-text-faint;
 }
 
 /* ===== Connect/Disconnect Button =====
@@ -352,19 +335,6 @@
     -fx-background-color: -c-surface-sunken;
 }
 
-.small-button {
-    -fx-background-color: -c-surface-sunken;
-    -fx-text-fill: -c-text-secondary;
-    -fx-font-size: 11px;
-    -fx-background-radius: 6;
-    -fx-padding: 4 12;
-    -fx-cursor: hand;
-}
-
-.small-button:hover {
-    -fx-background-color: -c-border;
-}
-
 /* Compact square button holding a single icon (toolbar actions). */
 .icon-button {
     -fx-background-color: -c-surface-sunken;
@@ -405,16 +375,6 @@
    instead of a fixed grey mark beside themed text. */
 .secondary-button .nav-icon-glyph {
     -fx-fill: -c-button-secondary-fg;
-}
-
-.danger-button {
-    -fx-background-color: -c-danger-tint;
-    -fx-text-fill: -c-danger-fg;
-    -fx-border-color: transparent;
-}
-
-.danger-button:hover {
-    -fx-background-color: -c-danger-tint-strong;
 }
 
 /* ===== Server List ===== */
@@ -577,12 +537,6 @@
     -fx-font-size: 14px;
     -fx-font-weight: bold;
     -fx-text-fill: -c-text-heading;
-}
-
-/* Inline label in an aligned label column. */
-.field-label {
-    -fx-font-size: 13px;
-    -fx-text-fill: -c-text-label;
 }
 
 /* Removable bypass-country chips on the Routing page. */
@@ -876,6 +830,68 @@
     -fx-background-color: -c-accent-tint;
 }
 
+/* The arrow. Modena draws it as a dark mark over a light highlight, a hollow
+   triangle on the dark fields, and puts an editable combo's arrow on a
+   button of its own painted from its light -fx-base: a #E5E5E5 block at the
+   end of the Routing page's country picker. One flat arrow in the secondary
+   text colour, on the field's own surface. */
+.combo-box-base:editable > .arrow-button {
+    -fx-background-color: transparent;
+}
+
+.combo-box-base > .arrow-button > .arrow {
+    -fx-background-color: -c-text-secondary;
+    -fx-background-insets: 0;
+}
+
+/* ===== Check boxes and radio buttons =====
+   Drawn from the field tokens, like the other inputs. Modena paints the box
+   and the ring from its light -fx-base, so in the dark theme they were light
+   grey squares and discs on the dark cards. A choice made fills with the
+   accent. Stated for every state: Modena's :focused layers would otherwise
+   bring the light fill back on a click. */
+.check-box > .box,
+.radio-button > .radio {
+    -fx-background-color: -c-field-border, -c-field-bg;
+    -fx-background-insets: 0, 1;
+}
+
+.check-box > .box {
+    -fx-background-radius: 4, 3;
+}
+
+.radio-button > .radio {
+    -fx-background-radius: 1em, 1em;
+}
+
+.check-box:selected > .box,
+.radio-button:selected > .radio {
+    -fx-background-color: -c-accent, -c-accent;
+}
+
+.check-box:selected > .box > .mark,
+.radio-button:selected > .radio > .dot {
+    -fx-background-color: -c-on-accent;
+    -fx-background-insets: 0;
+}
+
+/* The keyboard's ring, as on the buttons: outside the box, and only when Tab
+   brought focus there. */
+.check-box:focus-visible > .box,
+.radio-button:focus-visible > .radio {
+    -fx-border-color: -c-accent-fg;
+    -fx-border-width: 2;
+    -fx-border-insets: -3;
+}
+
+.check-box:focus-visible > .box {
+    -fx-border-radius: 6;
+}
+
+.radio-button:focus-visible > .radio {
+    -fx-border-radius: 1em;
+}
+
 /* ===== Separator =====
    Stated rather than left to modena: the bare colour override dark used to
    carry made a separator 2px high there against 3 in light, and the server
@@ -934,11 +950,6 @@
 
 .speed-value-idle {
     -fx-text-fill: -c-text-secondary;
-}
-
-/* ===== Stats Card Small ===== */
-.stats-card-small {
-    -fx-min-height: 70;
 }
 
 /* ===== Upload/Download Icons ===== */
@@ -1026,22 +1037,6 @@
 
 .log-list-view .list-cell:filled:selected {
     -fx-background-color: -c-log-selection;
-}
-
-.log-line-error {
-    -fx-text-fill: -c-danger-fg;
-}
-
-.log-line-warn {
-    -fx-text-fill: -c-warn-mid;
-}
-
-.log-line-info {
-    -fx-text-fill: -c-text-body;
-}
-
-.log-line-debug {
-    -fx-text-fill: -c-log-debug;
 }
 
 /* ===== Syntax-highlighted log segments (TextFlow) ===== */

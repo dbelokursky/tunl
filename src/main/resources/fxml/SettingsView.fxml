@@ -16,13 +16,16 @@
 <VBox xmlns="http://javafx.com/javafx"
       xmlns:fx="http://javafx.com/fxml"
       fx:controller="com.vlessclient.ui.view.SettingsViewController"
-      spacing="20" styleClass="form-content">
+      spacing="20">
     <!-- A plain box, not a ScrollPane: MainViewController mounts every page in
          ContentScrollPane, and a scroll pane of this view's own nested inside
          it drew a second vertical bar beside the wrapper's. No padding of its
          own either: MainView's content area already insets every page by 24,
          and the 16 this added on top made the Settings cards jump inward
-         against the Servers list and every other view. -->
+         against the Servers list and every other view. No background of its
+         own, for the same reason: it wore the server form's .form-content,
+         which painted the window colour over the page colour every other
+         page shows. -->
 
     <!-- Title -->
     <Label fx:id="titleLabel" text="Settings" styleClass="view-title"/>
