@@ -2,12 +2,14 @@ package com.vlessclient.ui.view;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.ConnectionService.ConnectAttempt;
+import com.vlessclient.service.ConnectionService.NetworkChange;
 import com.vlessclient.service.ConnectionService.Outcome;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.testing.UiTest;
@@ -23,6 +25,7 @@ import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.Label;
 import javafx.scene.layout.HBox;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.BeforeAll;
@@ -61,6 +64,9 @@ public class DashboardPendingChangesTest extends ApplicationTest {
     /** The mode each reconnect asked for, and whether it ran on the FX thread. */
     private static final List<String> RECONNECTS = new CopyOnWriteArrayList<>();
     private static final CountDownLatch RECONNECTED = new CountDownLatch(1);
+    /** How the network changed under the tunnel, as the stub service reports it. */
+    private static final SimpleObjectProperty<NetworkChange> NETWORK =
+            new SimpleObjectProperty<>(NetworkChange.NONE);
 
     private ViewShownAware controller;
 
@@ -75,6 +81,11 @@ public class DashboardPendingChangesTest extends ApplicationTest {
                     @Override
                     public boolean runsCurrentSettings() {
                         return runsCurrentSettings;
+                    }
+
+                    @Override
+                    public ReadOnlyObjectProperty<NetworkChange> networkChangeProperty() {
+                        return NETWORK;
                     }
 
                     @Override
@@ -130,6 +141,32 @@ public class DashboardPendingChangesTest extends ApplicationTest {
 
         assertThat(RECONNECTED.await(5, TimeUnit.SECONDS)).as("reconnected").isTrue();
         assertThat(RECONNECTS).containsExactly("null");
+        interact(() -> ENGINE.state.set(ConnectionState.DISCONNECTED));
+    }
+
+    /**
+     * The TUN device takes IPv6 or not by the network it starts on. A laptop
+     * that moved to a network with IPv6 sent its IPv6 around the tunnel, and
+     * one that moved off it drew apps to IPv6 that could not leave, until a
+     * reconnect nothing offered. The same banner offers it now, and says why.
+     */
+    @Test
+    void aNetworkThatChangedUnderTheTunnelIsOfferedTheReconnect() {
+        runsCurrentSettings = true;
+        interact(() -> ENGINE.state.set(ConnectionState.CONNECTED));
+        assertThat(bannerShown()).as("the network as it was").isFalse();
+
+        interact(() -> NETWORK.set(NetworkChange.IPV6_GAINED));
+        assertThat(bannerShown()).as("the network gained IPv6").isTrue();
+        assertThat(lookup("#pendingChangesLabel").queryAs(Label.class).getText())
+                .isEqualTo(I18n.get("dashboard.network.ipv6.gained"));
+
+        interact(() -> NETWORK.set(NetworkChange.IPV6_LOST));
+        assertThat(lookup("#pendingChangesLabel").queryAs(Label.class).getText())
+                .isEqualTo(I18n.get("dashboard.network.ipv6.lost"));
+
+        interact(() -> NETWORK.set(NetworkChange.NONE));
+        assertThat(bannerShown()).as("reconnected, or the network changed back").isFalse();
         interact(() -> ENGINE.state.set(ConnectionState.DISCONNECTED));
     }
 

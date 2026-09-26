@@ -965,6 +965,44 @@ class ConnectionServiceTest {
     }
 
     /**
+     * The TUN device takes IPv6 by the network it started on. A laptop that
+     * moved to a network with IPv6 sent its IPv6 around the tunnel, and one
+     * that moved off it drew apps to IPv6 that could not leave, until a
+     * reconnect. The run keeps its facts, so this is a signal of its own.
+     */
+    @Test
+    void aTunRunSaysWhenTheNetworkGainsOrLosesIpv6() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.getSettings().setProxyMode(ProxyMode.TUN);
+        store.getSettings().setTunIpv6Enabled(true);
+        AtomicBoolean ipv6 = new AtomicBoolean(false);
+        SingBoxConfigGenerator generator = new SingBoxConfigGenerator(() -> true, ipv6::get);
+        ConnectionService service =
+                new ConnectionService(store, generator, new RoutingService(), engine());
+        assertThat(service.connect().started()).isTrue();
+
+        ipv6.set(true);
+        service.checkNetwork();
+        assertThat(networkChange(service)).isEqualTo(ConnectionService.NetworkChange.IPV6_GAINED);
+
+        ipv6.set(false);
+        service.checkNetwork();
+        assertThat(networkChange(service)).isEqualTo(ConnectionService.NetworkChange.NONE);
+
+        store.getSettings().setTunIpv6Enabled(false);
+        ipv6.set(true);
+        service.checkNetwork();
+        assertThat(networkChange(service))
+                .as("IPv6 off in Settings goes around the tunnel by choice")
+                .isEqualTo(ConnectionService.NetworkChange.NONE);
+    }
+
+    /** The published change, once the FX thread has taken it. */
+    private static ConnectionService.NetworkChange networkChange(ConnectionService service) {
+        return FxExecutor.get(() -> service.networkChangeProperty().get());
+    }
+
+    /**
      * The core reports CONNECTED from its own thread, and the Dashboard asks
      * then, before {@code start} has returned here. The mode of a first start
      * was recorded only after it returned, and the servers it was started
