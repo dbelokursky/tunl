@@ -142,4 +142,48 @@ class SingleInstanceTest {
             Files.deleteIfExists(output);
         }
     }
+
+    /**
+     * A tunl:// link a second launch was started with goes to the running
+     * copy, which shows its window and opens it.
+     */
+    @Test
+    void aSecondLaunchWithALinkHandsItToTheRunningCopy() throws Exception {
+        SingleInstance running = SingleInstance.acquire(dir).orElseThrow();
+        CountDownLatch shown = new CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicReference<String> opened =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        CountDownLatch openedOne = new CountDownLatch(1);
+        running.onShowRequest(shown::countDown);
+        running.onOpenRequest(link -> {
+            opened.set(link);
+            openedOne.countDown();
+        });
+        String link = "tunl://install-config?url=https%3A%2F%2Fsub.example%2F%D1%84";
+
+        assertThat(SingleInstance.signalRunning(dir, link)).isTrue();
+
+        assertThat(openedOne.await(5, TimeUnit.SECONDS)).isTrue();
+        assertThat(opened.get()).isEqualTo(link);
+        assertThat(shown.await(1, TimeUnit.SECONDS)).as("and comes forward").isTrue();
+    }
+
+    @Test
+    void aLinkOutsideTunlsSchemeIsNotOpened() throws Exception {
+        SingleInstance running = SingleInstance.acquire(dir).orElseThrow();
+        CountDownLatch opened = new CountDownLatch(1);
+        running.onOpenRequest(link -> opened.countDown());
+        String token = Files.readString(dir.resolve(SingleInstance.PORT_FILE)).strip()
+                .split(" ")[1];
+        int port = Integer.parseInt(
+                Files.readString(dir.resolve(SingleInstance.PORT_FILE)).strip().split(" ")[0]);
+
+        try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), port);
+                OutputStream out = socket.getOutputStream()) {
+            out.write((token + " open https://sub.example/x\n")
+                    .getBytes(StandardCharsets.UTF_8));
+        }
+
+        assertThat(opened.await(1, TimeUnit.SECONDS)).isFalse();
+    }
 }

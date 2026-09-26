@@ -134,6 +134,18 @@ shopt -u nullglob
     || fail "expected one application jar in ${APP_ROOT}/lib/app, found ${#jars[@]}"
 [[ ${#desktop_entries[@]} -ge 1 ]] \
     || fail "no .desktop entry in ${APP_ROOT}/lib — the --linux-shortcut menu entry is missing"
+# tunl:// links: package-linux.sh names the scheme in the menu entry and has
+# the launcher take the link.
+grep -qE '^MimeType=(.*;)?x-scheme-handler/tunl;' "${desktop_entries[0]}" \
+    || fail "${desktop_entries[0]} does not register the tunl:// scheme: $(grep '^MimeType=' "${desktop_entries[0]}")"
+grep -qE '^Exec=.* %u$' "${desktop_entries[0]}" \
+    || fail "${desktop_entries[0]} does not pass the link to the launcher (%u)"
+if command -v update-desktop-database >/dev/null 2>&1 && command -v xdg-mime >/dev/null 2>&1; then
+    handler="$(xdg-mime query default x-scheme-handler/tunl 2>/dev/null || true)"
+    [[ "${handler}" == *tunl*.desktop ]] \
+        || fail "xdg-mime names '${handler}' as the tunl:// handler, not Tunl's entry"
+    echo "[linux-deb-smoke] tunl:// links go to ${handler}"
+fi
 
 grep -qF -- "-Dapp.version=${EXPECTED_VERSION}" "${LAUNCHER_CFG}" \
     || fail "${LAUNCHER_CFG} does not carry -Dapp.version=${EXPECTED_VERSION}"
@@ -189,6 +201,49 @@ echo "[linux-deb-smoke] startup line found in ${APP_LOG}"
 # Informational, as in linux-qa.sh: a startup ERROR is worth a look, but a
 # first run on a bare runner (no proxy schema, no tray) is allowed one.
 grep -E 'ERROR' "${APP_LOG}" | tail -n 3 || true
+
+# A tunl:// link reaches a running copy: a second launch with the link hands
+# it over (SingleInstance) and exits, and the running copy opens it in the
+# Subscriptions page's form. Through xdg-open when the desktop database names
+# Tunl's entry, as a browser would; straight through the launcher otherwise.
+echo "[linux-deb-smoke] handing a tunl:// link to a running copy"
+LINK='tunl://install-config?url=https%3A%2F%2Fsub.example%2Fsmoke'
+starts_before="$(grep -cF 'Tunl started' "${APP_LOG}" 2>/dev/null || true)"
+set +e
+# shellcheck disable=SC2016  # the inner script expands its own arguments
+JAVA_TOOL_OPTIONS='-Dprism.order=sw' \
+    xvfb-run -a -s '-screen 0 1280x800x24' \
+    timeout --kill-after=15 90 bash -c '
+        launcher=$1; link=$2; log=$3; before=$4; out=$5
+        "${launcher}" >> "${out}" 2>&1 &
+        app=$!
+        for _ in $(seq 1 60); do
+            starts=$(grep -cF "Tunl started" "${log}" 2>/dev/null)
+            [ "${starts:-0}" -gt "${before}" ] && break
+            sleep 1
+        done
+        if command -v xdg-open >/dev/null 2>&1 \
+                && [ -n "$(xdg-mime query default x-scheme-handler/tunl 2>/dev/null)" ]; then
+            xdg-open "${link}"
+        else
+            "${launcher}" "${link}"
+        fi
+        opened=1
+        for _ in $(seq 1 30); do
+            grep -qF "Opening a tunl link" "${log}" 2>/dev/null && { opened=0; break; }
+            sleep 1
+        done
+        kill "${app}" 2>/dev/null
+        wait "${app}" 2>/dev/null
+        exit "${opened}"
+    ' _ "${LAUNCHER}" "${LINK}" "${APP_LOG}" "${starts_before:-0}" "${STDOUT_LOG}"
+link_status=$?
+set -e
+if [[ ${link_status} -ne 0 ]]; then
+    dump_logs
+    fail "the running copy did not open the tunl:// link (status ${link_status})"
+fi
+echo "[linux-deb-smoke] the running copy opened the tunl:// link"
 
 installed=0
 remove_package

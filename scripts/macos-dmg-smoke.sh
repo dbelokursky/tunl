@@ -90,6 +90,16 @@ bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "${INFO_PL
 [[ "${bundle_version}" == "${EXPECTED_BUNDLE_VERSION}" ]] \
     || fail "CFBundleVersion is '${bundle_version}', expected '${EXPECTED_BUNDLE_VERSION}'"
 
+# tunl:// links: packaging/macos/Info.plist registers the scheme, and jpackage
+# fills in its placeholders as it does for its own template.
+url_scheme="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' \
+    "${INFO_PLIST}" 2>/dev/null || true)"
+[[ "${url_scheme}" == "tunl" ]] \
+    || fail "Info.plist does not register the tunl:// scheme (got '${url_scheme}')"
+if grep -q 'DEPLOY_' "${INFO_PLIST}"; then
+    fail "Info.plist still carries a jpackage placeholder: $(grep -o 'DEPLOY_[A-Z_]*' "${INFO_PLIST}" | head -1)"
+fi
+
 # The jar must carry the darwin core for this host's architecture — the one
 # scripts/bundle-singbox.sh chose from uname, and the only one a DMG built
 # on this host can run.

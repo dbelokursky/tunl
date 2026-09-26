@@ -66,6 +66,7 @@ public class SubscriptionUrlHandOffTest extends ApplicationTest {
     static Path tempDir;
 
     private Stage stage;
+    private MainViewController main;
     /** The window of every dialog the test opened, closed since or not. */
     private final List<Window> dialogs = new ArrayList<>();
 
@@ -80,6 +81,7 @@ public class SubscriptionUrlHandOffTest extends ApplicationTest {
                 new ServerBackupService(store, new ShareLinkParser()));
         FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/MainView.fxml"));
         stage.setScene(new Scene(loader.load(), 1024, 720));
+        main = loader.getController();
         stage.show();
     }
 
@@ -223,6 +225,30 @@ public class SubscriptionUrlHandOffTest extends ApplicationTest {
     }
 
     /** Puts {@code text} on the clipboard and imports it from the Servers page. */
+    /**
+     * A page's "Add to Tunl" button opens a tunl:// link, which opens the same
+     * form with the URL in it: the user adds it, since any page can open a
+     * link.
+     */
+    @Test
+    void aTunlLinkOpensTheSubscriptionsFormWithItsUrl() {
+        String link = "tunl://install-config?url="
+                + java.net.URLEncoder.encode(URL, java.nio.charset.StandardCharsets.UTF_8)
+                + "#Provider";
+
+        DialogPane form = open(() -> main.openLink(link));
+
+        assertThat(form.getHeaderText()).isEqualTo(I18n.get("subscriptions.add.header"));
+        assertThat(onFx(() -> fieldTexts(form))).contains(URL);
+    }
+
+    @Test
+    void aTunlLinkWithNoSubscriptionUrlSaysSo() {
+        DialogPane alert = open(() -> main.openLink("tunl://something-else"));
+
+        assertThat(alert.getHeaderText()).isEqualTo(I18n.get("links.unreadable.header"));
+    }
+
     private DialogPane pasteOnTheServersPage(String text) {
         interact(() -> {
             Clipboard.getSystemClipboard().setContent(Map.of(DataFormat.PLAIN_TEXT, text));
