@@ -224,12 +224,14 @@ public class SubscriptionService {
      * Adds a new subscription and immediately refreshes it.
      *
      * @param name the display name for the subscription
-     * @param url the URL to fetch subscription content from
+     * @param url the URL to fetch subscription content from, or another
+     *            client's link that wraps it ({@link SubscriptionLinks})
+     * @throws IllegalArgumentException for a link Happ encrypted for itself
      */
     public void addSubscription(String name, String url) {
         Subscription sub = new Subscription();
         sub.setName(name);
-        sub.setUrl(url);
+        sub.setUrl(fetchableUrl(url));
         // SubscriptionsViewController adds from a virtual thread, and the list
         // is bound to a TableView. Same rule as ConfigStore: mutate on the FX
         // thread, without holding this monitor while waiting for it.
@@ -739,14 +741,30 @@ public class SubscriptionService {
             log.warn("Subscription not found for update: {}", subscriptionId);
             return;
         }
+        String fetchable = fetchableUrl(url);
         FxExecutor.run(() -> {
             synchronized (this) {
                 sub.setName(name);
-                sub.setUrl(url);
+                sub.setUrl(fetchable);
             }
         });
         saveSubscriptions();
         refreshSubscription(subscriptionId);
+    }
+
+    /**
+     * The URL to store for what the user gave: the subscription URL another
+     * client's link wraps, or the text as it is. Saved as it was, a wrapped
+     * link failed every refresh on its scheme.
+     *
+     * @throws IllegalArgumentException for a link Happ encrypted for itself,
+     *                                  which holds no URL anyone else can read
+     */
+    private static String fetchableUrl(String url) {
+        if (SubscriptionLinks.encryptedForHapp(url)) {
+            throw new IllegalArgumentException(I18n.get("subscriptions.link.happ.encrypted"));
+        }
+        return SubscriptionLinks.subscriptionUrl(url).orElse(url);
     }
 
     /**

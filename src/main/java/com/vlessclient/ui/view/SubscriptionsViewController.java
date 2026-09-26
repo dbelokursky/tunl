@@ -4,6 +4,7 @@ import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.Subscription;
 import com.vlessclient.service.Redact;
+import com.vlessclient.service.SubscriptionLinks;
 import com.vlessclient.service.SubscriptionService;
 import java.net.URI;
 import java.time.Instant;
@@ -217,6 +218,13 @@ public class SubscriptionsViewController implements ViewShownAware {
         TextField urlField = new TextField();
         urlField.setPromptText("https://example.com/subscribe/...");
         urlField.setPrefWidth(350);
+        // Another client's one-tap link (happ://add/…, …://install-config?url=…)
+        // becomes the URL it wraps, in the field, so the user sees what will
+        // be fetched and the http warning below reads the URL itself.
+        urlField.textProperty().addListener((obs, oldVal, newVal) ->
+                SubscriptionLinks.subscriptionUrl(newVal)
+                        .filter(unwrapped -> !unwrapped.equals(newVal.strip()))
+                        .ifPresent(urlField::setText));
 
         // Non-blocking warning: a plaintext http subscription is
         // MITM-injectable, but some providers only offer http, so this shows

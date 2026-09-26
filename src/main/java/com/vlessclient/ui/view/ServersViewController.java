@@ -11,6 +11,7 @@ import com.vlessclient.service.ProxyGroupMonitor;
 import com.vlessclient.service.Redact;
 import com.vlessclient.service.ServerBackupService;
 import com.vlessclient.service.ShareLinkExporter;
+import com.vlessclient.service.SubscriptionLinks;
 import com.vlessclient.service.WireguardConfigParser;
 import com.vlessclient.service.outbound.CoreSettings;
 import com.vlessclient.service.outbound.OutboundTags;
@@ -765,10 +766,11 @@ public class ServersViewController {
         Alert report = Dialogs.alert(Alert.AlertType.INFORMATION);
         report.initOwner(ownerWindow());
         if (imported == 0) {
+            String link = soleLink(text);
             report.setTitle(I18n.get(titleKey));
             report.setHeaderText(I18n.get("servers.import.clipboard.nothing"));
-            report.setContentText(nothingImportedReason(result, noLinksKey));
-            offerAsSubscription(report, result, text);
+            report.setContentText(nothingImportedReason(result, noLinksKey, link));
+            offerAsSubscription(report, link);
         } else if (skipped == 0) {
             report.setTitle(I18n.get("servers.backup.import.done.title"));
             report.setHeaderText(I18n.get("servers.import.clipboard.done", imported));
@@ -780,38 +782,53 @@ public class ServersViewController {
         report.show();
     }
 
-    /** Why an import of links brought nothing in, in words the user can act on. */
+    /**
+     * Why an import of links brought nothing in, in words the user can act on.
+     *
+     * @param link the one link the text held, or null
+     */
     private static String nothingImportedReason(ServerBackupService.ImportResult result,
-                                                String noLinksKey) {
+                                                String noLinksKey, String link) {
         if (result.skipped().isEmpty()) {
             return I18n.get(noLinksKey);
         }
-        if (result.skipped().stream().allMatch(ServersViewController::isWebAddress)) {
+        if (SubscriptionLinks.encryptedForHapp(link)) {
+            return I18n.get("subscriptions.link.happ.encrypted");
+        }
+        if (result.skipped().stream().allMatch(ServersViewController::isWebAddress)
+                || SubscriptionLinks.subscriptionUrl(link).isPresent()) {
             return I18n.get("servers.import.clipboard.subscription");
         }
         return skippedList(result);
     }
 
     /**
-     * Offers to add the subscription URL that was all the text held, on the
-     * Subscriptions page's form, where its checks apply. The URL is taken
-     * from the text, since the report's entries are redacted; two URLs are
-     * not guessed between.
+     * The one link the text held, taken from the text itself since the
+     * report's entries are redacted; null when it held none or several,
+     * which are not guessed between.
      */
-    private void offerAsSubscription(Alert report, ServerBackupService.ImportResult result,
-                                     String text) {
-        if (onAddSubscription == null || text == null || result.skipped().size() != 1
-                || !isWebAddress(result.skipped().getFirst())) {
-            return;
+    private static String soleLink(String text) {
+        if (text == null) {
+            return null;
         }
         // The tokens ServerBackupService.importShareLinks reads as links.
         List<String> links = Arrays.stream(text.strip().split("\\s+"))
                 .filter(token -> token.contains("://"))
                 .toList();
-        if (links.size() != 1) {
+        return links.size() == 1 ? links.getFirst() : null;
+    }
+
+    /**
+     * Offers to add the subscription the text's one link means, on the
+     * Subscriptions page's form, where its checks apply: an http or https
+     * URL, or the URL another client's one-tap link wraps
+     * ({@code happ://add/…}, {@code …://install-config?url=…}).
+     */
+    private void offerAsSubscription(Alert report, String link) {
+        String url = SubscriptionLinks.subscriptionUrl(link).orElse(null);
+        if (onAddSubscription == null || url == null) {
             return;
         }
-        String url = links.getFirst();
         ButtonType add = new ButtonType(I18n.get("button.add.subscription"),
                 ButtonBar.ButtonData.OK_DONE);
         report.getButtonTypes().setAll(add, ButtonType.CANCEL);
