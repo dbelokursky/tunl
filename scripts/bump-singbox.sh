@@ -22,7 +22,7 @@
 # Needs curl, jq, and shasum or sha256sum — nothing a build host lacks.
 #
 # After a successful bump, verify before committing:
-#   mvn clean verify -Psmoke
+#   ./mvnw clean verify -Psmoke
 #
 set -euo pipefail
 
@@ -204,4 +204,4 @@ tmp_props="$(mktemp)"
 mv "${tmp_props}" "${PROPS_FILE}"
 
 echo "[bump-singbox] pinned sing-box ${VERSION}${RELEASE:+ as ${RELEASE}} in ${PROPS_FILE}"
-echo "[bump-singbox] next: mvn clean verify -Psmoke"
+echo "[bump-singbox] next: ./mvnw clean verify -Psmoke"

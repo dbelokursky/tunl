@@ -58,7 +58,7 @@ function Get-Prop([string]$Key) {
 $propsVersion = Get-Prop 'singbox.version'
 if ($propsVersion -ne $Version) {
     throw ("[bundle-singbox] version mismatch: Maven passed '$Version' but " +
-        "$propsFile says '$propsVersion'. Run 'mvn clean' -- the Maven property cache is stale.")
+        "$propsFile says '$propsVersion'. Run '.\mvnw.cmd clean' -- the Maven property cache is stale.")
 }
 
 # The build host decides which binary gets bundled, as in bundle-singbox.sh:

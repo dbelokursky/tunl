@@ -268,8 +268,9 @@ jobs:
       # a workflow setting itself off forever — but workflow_dispatch is the
       # documented exception ("workflow_dispatch and repository_dispatch
       # events always create workflow runs"). build.yml runs its four test-*
-      # jobs on any trigger and gates its packaging jobs on pushes to main, so
-      # this starts exactly the four checks that matter.
+      # legs on any trigger, packaging and smoke-testing the installers inside
+      # them, and keeps only dev-release to pushes to main, so this starts
+      # exactly the four checks that matter.
       #
       # Worth being exact about what this does and does not buy: the run is
       # green or red on the branch within minutes, with nobody touching
