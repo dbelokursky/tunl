@@ -249,6 +249,12 @@ shown under the row. Each request carries a device identifier, so a plan that
 limits devices serves Tunl instead of refusing; it is random, made once per
 install, and Settings shows it with a button to make a new one.
 
+A provider's page can offer an "Add to Tunl" button: the link
+`tunl://install-config?url=<subscription URL, percent-encoded>` opens Tunl (or
+the copy already running) on the Subscriptions tab with the URL in the add
+form, and the user adds it. The installers register the `tunl://` scheme; on
+Windows the app registers it for the current user at its first start.
+
 <p align="center">
   <img src="docs/screenshots/subscriptions.png" width="900" alt="Subscriptions tab: two providers with the quota each reports and its expiry date"/>
 </p>

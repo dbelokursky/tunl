@@ -4,17 +4,21 @@ import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.PersistenceState;
+import com.vlessclient.service.Redact;
+import com.vlessclient.service.SubscriptionLinks;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
 import javafx.scene.Scene;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
@@ -376,6 +380,30 @@ public class MainViewController {
             log.error("Failed to load FXML: {}", fxmlPath, e);
             return null;
         }
+    }
+
+    /**
+     * Opens a link in Tunl's scheme that a page or another app handed over.
+     * Its subscription URL goes to the Subscriptions page's form, where the
+     * user decides whether to add it: nothing is added unasked, since any
+     * page can open a link. A link with no URL is said to be one.
+     *
+     * @param link the {@code tunl:} link
+     */
+    public void openLink(String link) {
+        Optional<String> url = SubscriptionLinks.subscriptionUrl(link);
+        if (url.isPresent()) {
+            addSubscription(url.get());
+            return;
+        }
+        log.warn("A tunl link held no subscription URL: {}", Redact.urlsIn(link));
+        Alert alert = Dialogs.alert(Alert.AlertType.WARNING);
+        if (rootNode != null && rootNode.getScene() != null) {
+            alert.initOwner(rootNode.getScene().getWindow());
+        }
+        alert.setHeaderText(I18n.get("links.unreadable.header"));
+        alert.setContentText(I18n.get("links.unreadable.body"));
+        alert.show();
     }
 
     /**

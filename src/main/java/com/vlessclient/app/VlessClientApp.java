@@ -5,6 +5,7 @@ import com.vlessclient.model.ProxyMode;
 import com.vlessclient.platform.Autostart;
 import com.vlessclient.platform.CoreRecord;
 import com.vlessclient.platform.PrivilegeHelper;
+import com.vlessclient.platform.WindowsUrlScheme;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.ProxyGroupMonitor;
@@ -83,6 +84,9 @@ public class VlessClientApp extends Application {
         ServiceLocator.initialize();
         clearStaleSystemProxy();
         refreshLoginItem();
+        // Points tunl:// links at this launcher on Windows; off this thread,
+        // since it waits on reg, and nothing here waits for it.
+        Thread.startVirtualThread(WindowsUrlScheme::registerCurrent);
     }
 
     /**
@@ -351,16 +355,7 @@ public class VlessClientApp extends Application {
         // A second launch asks this copy to come forward instead of starting
         // another one (SingleInstance); the window may be hidden in the tray.
         SingleInstance.current().ifPresent(instance -> instance.onShowRequest(
-                () -> Platform.runLater(() -> {
-                    if (!primaryStage.isShowing()) {
-                        primaryStage.show();
-                    }
-                    if (primaryStage.isIconified()) {
-                        primaryStage.setIconified(false);
-                    }
-                    primaryStage.toFront();
-                    primaryStage.requestFocus();
-                })));
+                () -> Platform.runLater(() -> bringForward(primaryStage))));
 
         installTrayIcon(primaryStage);
 
@@ -372,9 +367,28 @@ public class VlessClientApp extends Application {
             // find the sidebar's owner here rather than holding a reference.
             ServiceLocator.register(MainViewController.class, mainController);
             mainController.triggerAutoConnect();
+            // tunl:// links, the one this copy was started with included, go
+            // to the Subscriptions page's form from here on.
+            DeepLinks.openWith(link -> Platform.runLater(() -> {
+                log.info("Opening a tunl link");
+                bringForward(primaryStage);
+                mainController.openLink(link);
+            }));
         }
 
         offerToReplaceLegacySudoersRule(primaryStage);
+    }
+
+    /** Shows the window over the others, from the tray or the Dock if need be. */
+    private static void bringForward(Stage stage) {
+        if (!stage.isShowing()) {
+            stage.show();
+        }
+        if (stage.isIconified()) {
+            stage.setIconified(false);
+        }
+        stage.toFront();
+        stage.requestFocus();
     }
 
     /**

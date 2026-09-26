@@ -141,6 +141,37 @@ dpkg-deb --raw-extract "${DEB}" "${REPACK}/tree"
 sed -i -E '/^Depends:/ s/([a-z0-9][a-z0-9.+-]*)t64(,|[[:space:]]*$)/\1t64 | \1\2/g' \
     "${REPACK}/tree/DEBIAN/control"
 echo "[package-linux] $(grep '^Depends:' "${REPACK}/tree/DEBIAN/control")"
+
+# tunl:// links (DeepLinks): the menu entry names Tunl's URL scheme and hands
+# the link to the launcher (%u); jpackage has no option for either. The
+# maintainer script then refreshes the desktop database, where the system has
+# the tool, so xdg-open finds the entry at once rather than after a login.
+shopt -s nullglob
+desktop_entries=("${REPACK}"/tree/opt/tunl/lib/*.desktop)
+shopt -u nullglob
+[[ ${#desktop_entries[@]} -eq 1 ]] \
+    || { echo "[package-linux] expected one .desktop entry, found ${#desktop_entries[@]}" >&2; exit 1; }
+sed -i -E '/^Exec=/ { / %[uU]$/! s/$/ %u/ }' "${desktop_entries[0]}"
+# jpackage writes "MimeType=", empty without file associations: one line with
+# whatever it names and the scheme replaces it.
+mime_types="$(sed -n 's/^MimeType=//p' "${desktop_entries[0]}" | tr -d '\n')"
+mime_types="${mime_types%;}"
+sed -i '/^MimeType=/d' "${desktop_entries[0]}"
+echo "MimeType=${mime_types:+${mime_types};}x-scheme-handler/tunl;" >> "${desktop_entries[0]}"
+POSTINST="${REPACK}/tree/DEBIAN/postinst"
+if [[ -f "${POSTINST}" ]]; then
+    # Before the script's closing "exit 0", or at its end when it has none.
+    awk -v line='command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q /usr/share/applications || true' '
+        { lines[NR] = $0 }
+        END {
+            at = 0
+            for (i = NR; i >= 1; i--) if (lines[i] == "exit 0") { at = i; break }
+            for (i = 1; i <= NR; i++) { if (i == at) print line; print lines[i] }
+            if (at == 0) print line
+        }' "${POSTINST}" > "${REPACK}/postinst"
+    cat "${REPACK}/postinst" > "${POSTINST}"
+fi
+echo "[package-linux] $(grep -E '^(Exec|MimeType)=' "${desktop_entries[0]}" | tr '\n' ' ')"
 dpkg-deb --root-owner-group -Zxz --build "${REPACK}/tree" "${DEB}"
 rm -rf "${REPACK}"
 

@@ -19,6 +19,7 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.HexFormat;
 import java.util.Optional;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,11 +53,15 @@ final class SingleInstance {
     static final String PORT_FILE = "instance.port";
 
     private static final String SHOW = "show";
+    private static final String OPEN = "open";
     private static final int CONNECT_TIMEOUT_MS = 2_000;
     private static final int READ_TIMEOUT_MS = 2_000;
 
-    /** A request is a 64-digit token, a space and a word; anything longer is not one. */
-    private static final int MAX_REQUEST_BYTES = 128;
+    /**
+     * A request is a 64-digit token, a space and {@code show}, or
+     * {@code open} and a link; anything longer is not one.
+     */
+    private static final int MAX_REQUEST_BYTES = 128 + DeepLinks.MAX_LENGTH * 4;
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
@@ -78,6 +83,7 @@ final class SingleInstance {
     private final String token;
     private final Path portFile;
     private volatile Runnable showAction;
+    private volatile Consumer<String> openAction;
 
     private SingleInstance(FileChannel channel, FileLock lock, ServerSocket server,
                            String token, Path portFile) {
@@ -176,6 +182,19 @@ final class SingleInstance {
      * @return whether the request was delivered
      */
     static boolean signalRunning(Path dataDir) {
+        return signalRunning(dataDir, null);
+    }
+
+    /**
+     * Asks the copy of the app that holds the data directory to show its
+     * window and, when {@code link} is given, to open it.
+     *
+     * @param dataDir the data directory the running copy holds
+     * @param link    a link in Tunl's scheme to open, or null
+     * @return whether the request was delivered
+     */
+    static boolean signalRunning(Path dataDir, String link) {
+        String request = DeepLinks.isLink(link) ? OPEN + " " + link : SHOW;
         try {
             String[] parts = Files.readString(dataDir.resolve(PORT_FILE), StandardCharsets.US_ASCII)
                     .strip().split(" ");
@@ -186,7 +205,7 @@ final class SingleInstance {
                 socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(),
                         Integer.parseInt(parts[0])), CONNECT_TIMEOUT_MS);
                 try (OutputStream out = socket.getOutputStream()) {
-                    out.write((parts[1] + " " + SHOW + "\n").getBytes(StandardCharsets.US_ASCII));
+                    out.write((parts[1] + " " + request + "\n").getBytes(StandardCharsets.UTF_8));
                 }
             }
             return true;
@@ -205,6 +224,16 @@ final class SingleInstance {
      */
     void onShowRequest(Runnable action) {
         this.showAction = action;
+    }
+
+    /**
+     * Sets what a second launch's request to open a link does. It runs on
+     * the listener thread, after the show request's action.
+     *
+     * @param action what to do with the link
+     */
+    void onOpenRequest(Consumer<String> action) {
+        this.openAction = action;
     }
 
     /** Lets go of the data directory. Safe to call more than once. */
@@ -229,10 +258,7 @@ final class SingleInstance {
             while (!server.isClosed()) {
                 try (Socket socket = server.accept()) {
                     socket.setSoTimeout(READ_TIMEOUT_MS);
-                    Runnable action = showAction;
-                    if (isShowRequest(socket.getInputStream()) && action != null) {
-                        action.run();
-                    }
+                    handle(request(socket.getInputStream()));
                 } catch (IOException e) {
                     if (!server.isClosed()) {
                         log.debug("Ignoring a request that did not arrive whole: {}",
@@ -243,11 +269,38 @@ final class SingleInstance {
         });
     }
 
-    private boolean isShowRequest(InputStream in) throws IOException {
-        byte[] request = new String(in.readNBytes(MAX_REQUEST_BYTES), StandardCharsets.US_ASCII)
-                .strip().getBytes(StandardCharsets.US_ASCII);
-        return MessageDigest.isEqual(request,
-                (token + " " + SHOW).getBytes(StandardCharsets.US_ASCII));
+    /**
+     * What a request asks for once its token checks out: {@code show}, or
+     * {@code open} and a link; null for anything else.
+     */
+    private String request(InputStream in) throws IOException {
+        String text = new String(in.readNBytes(MAX_REQUEST_BYTES), StandardCharsets.UTF_8).strip();
+        int space = text.indexOf(' ');
+        if (space < 0 || !MessageDigest.isEqual(
+                text.substring(0, space).getBytes(StandardCharsets.UTF_8),
+                token.getBytes(StandardCharsets.UTF_8))) {
+            return null;
+        }
+        return text.substring(space + 1);
+    }
+
+    private void handle(String request) {
+        if (request == null) {
+            return;
+        }
+        boolean open = request.startsWith(OPEN + " ");
+        if (!open && !request.equals(SHOW)) {
+            return;
+        }
+        Runnable show = showAction;
+        if (show != null) {
+            show.run();
+        }
+        String link = open ? request.substring(OPEN.length() + 1) : null;
+        Consumer<String> opener = openAction;
+        if (link != null && DeepLinks.isLink(link) && opener != null) {
+            opener.accept(link);
+        }
     }
 
     /** The lock, or null when another holder has it, in this process or another one. */

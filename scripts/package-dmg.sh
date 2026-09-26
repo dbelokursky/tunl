@@ -122,6 +122,7 @@ jpackage \
     --main-jar "${JAR_NAME}" \
     --main-class com.vlessclient.app.Launcher \
     --icon packaging/icons/app-icon.icns \
+    --resource-dir packaging/macos \
     --dest dist \
     --mac-package-name "Tunl" \
     --java-options "-Dapp.version=${VERSION}" \

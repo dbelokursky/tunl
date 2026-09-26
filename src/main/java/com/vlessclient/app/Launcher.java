@@ -2,6 +2,7 @@ package com.vlessclient.app;
 
 import com.vlessclient.platform.PlatformPaths;
 import java.nio.file.Path;
+import java.util.Optional;
 
 /**
  * Plain-class entry point. Kept separate from {@link VlessClientApp} so the
@@ -38,10 +39,17 @@ public final class Launcher {
         // memory, and could install a staged update underneath it. Instead it
         // asks the running copy to show its window, and leaves.
         Path dataDir = PlatformPaths.current().dataDir();
+        // A tunl:// link Windows or Linux started this copy with goes to the
+        // running copy, if there is one, or waits for this copy's window.
+        Optional<String> link = DeepLinks.fromArgs(args);
         if (SingleInstance.claim(dataDir) == SingleInstance.Claim.HELD_ELSEWHERE) {
-            SingleInstance.signalRunning(dataDir);
+            SingleInstance.signalRunning(dataDir, link.orElse(null));
             return;
         }
+        // Set here rather than with the window: a link a second launch sends
+        // while this copy is still starting waits for the window too.
+        SingleInstance.current().ifPresent(instance -> instance.onOpenRequest(DeepLinks::receive));
+        link.ifPresent(DeepLinks::receive);
 
         // An update downloaded during an earlier run installs here, before
         // anything else exists to tear down. A handoff means a helper is now
@@ -65,6 +73,10 @@ public final class Launcher {
         } catch (Throwable ignored) {
             // Headless or missing AWT — skip silently
         }
+        // On macOS a tunl:// link comes as an Apple event, to AWT's delegate:
+        // AWT started first, so the delegate is AWT's, and it keeps the link
+        // that started the app until this handler is set.
+        DeepLinks.listenForAppleEvents();
 
         VlessClientApp.main(args);
     }
