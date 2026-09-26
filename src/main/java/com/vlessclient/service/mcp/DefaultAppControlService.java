@@ -19,6 +19,7 @@ import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ShareLinkParser;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.SubscriptionService;
+import com.vlessclient.service.TrafficHistoryStore;
 import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.service.outbound.OutboundTags;
@@ -120,7 +121,7 @@ public class DefaultAppControlService implements AppControlService {
     }
 
     private void ensureSaved() throws McpToolException {
-        List<String> failed = configStore.getPersistenceState().failedFiles();
+        List<String> failed = toolFiles(configStore.getPersistenceState().failedFiles());
         if (!failed.isEmpty()) {
             throw new McpToolException(
                     I18n.get("persistence.mcp.failed", String.join(", ", failed)));
@@ -128,11 +129,22 @@ public class DefaultAppControlService implements AppControlService {
         // A file that could not be opened at startup is never saved over, so
         // a change to it lives only as long as this run: say so, as for a
         // failed save, rather than report it done.
-        var held = configStore.getPersistenceState().heldReasons().keySet();
+        List<String> held = toolFiles(configStore.getPersistenceState().heldReasons().keySet());
         if (!held.isEmpty()) {
             throw new McpToolException(
                     I18n.get("persistence.mcp.held", String.join(", ", held)));
         }
+    }
+
+    /**
+     * The files a tool's change can be in: all but the traffic history, which
+     * no tool writes. Its failures are the window's to show; blaming them on
+     * an added server told the agent a change that was saved had not been.
+     */
+    private static List<String> toolFiles(java.util.Collection<String> files) {
+        return files.stream()
+                .filter(file -> !TrafficHistoryStore.HISTORY_FILE.equals(file))
+                .toList();
     }
 
     @Override

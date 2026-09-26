@@ -122,6 +122,9 @@ public class RoutingService {
      * @param config the configuration to store
      */
     public synchronized void saveConfig(RoutingConfig config) {
+        // Saving stamps the format this build writes, as for the other files;
+        // fields a newer build wrote ride along (KeepsUnknownFields).
+        config.setConfigVersion(RoutingConfig.CURRENT_CONFIG_VERSION);
         this.config = config;
         if (persistence.isHeld(ROUTING_FILE)) {
             log.warn("Not saving {}: it could not be opened at startup", ROUTING_FILE);
@@ -223,6 +226,12 @@ public class RoutingService {
         }
         try {
             this.config = readKeepingKnownRules(parsed.root());
+            if (config.getConfigVersion() > RoutingConfig.CURRENT_CONFIG_VERSION) {
+                log.warn("routing.json has config_version {} (this build understands {}); "
+                        + "reading best-effort", config.getConfigVersion(),
+                        RoutingConfig.CURRENT_CONFIG_VERSION);
+            }
+            // Future incompatible versions dispatch their migrations here.
             log.info("Loaded routing config from {}", file);
             migrateLegacyPreset(file);
         } catch (JacksonException e) {

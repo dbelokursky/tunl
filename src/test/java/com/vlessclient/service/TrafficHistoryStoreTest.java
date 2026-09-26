@@ -16,6 +16,8 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
@@ -82,7 +84,11 @@ class TrafficHistoryStoreTest {
      * before it ran had JUnit deleting the temp dir while the write landed in it.
      */
     private TrafficHistoryStore open(Path directory, Clock clock) {
-        TrafficHistoryStore store = new TrafficHistoryStore(directory, clock);
+        return open(directory, clock, new PersistenceState());
+    }
+
+    private TrafficHistoryStore open(Path directory, Clock clock, PersistenceState persistence) {
+        TrafficHistoryStore store = new TrafficHistoryStore(directory, clock, persistence);
         opened.add(store);
         return store;
     }
@@ -361,5 +367,96 @@ class TrafficHistoryStoreTest {
         TrafficHistoryStore store = open(dir, clockAt("2026-09-05T10:00:00Z"));
 
         assertThat(store.firstRecordedDate()).contains(LocalDate.of(2026, 9, 1));
+    }
+
+    /**
+     * A write that failed was only logged: the history stopped growing on
+     * disk while the window said nothing. It is shown with the other unsaved
+     * files now, and their Retry writes it.
+     */
+    @Test
+    void aFailedWriteIsShownAndRetriedWithTheOtherSaves(@TempDir Path dir) throws IOException {
+        PersistenceState persistence = new PersistenceState();
+        TrafficHistoryStore store = open(dir, clockAt("2026-09-05T10:00:00Z"), persistence);
+        store.record(server("a", "Amsterdam 01"), 1_000, 1_000);
+        Path file = dir.resolve("traffic-history.json");
+        Files.createDirectory(file);
+        Files.writeString(file.resolve("blocker"), "not the history", StandardCharsets.UTF_8);
+
+        store.flush();
+
+        assertThat(persistence.failedFiles()).containsExactly("traffic-history.json");
+
+        Files.delete(file.resolve("blocker"));
+        Files.delete(file);
+        persistence.retry();
+
+        assertThat(persistence.failedFiles()).isEmpty();
+        assertThat(open(dir, clockAt("2026-09-05T10:00:00Z")).lastDays(1).get(0).total())
+                .isEqualTo(2_000);
+    }
+
+    /**
+     * A history that cannot be opened is named in the window, and clearing the
+     * record releases it: what the hold protected is gone.
+     */
+    @Test
+    void aFileThatCannotBeOpenedIsShownUntilTheRecordIsCleared(@TempDir Path dir)
+            throws IOException {
+        // Empty, so that clearing the record can remove it.
+        Files.createDirectory(dir.resolve("traffic-history.json"));
+        PersistenceState persistence = new PersistenceState();
+        TrafficHistoryStore store = open(dir, clockAt("2026-09-05T10:00:00Z"), persistence);
+
+        assertThat(persistence.heldReasons()).containsKey("traffic-history.json");
+
+        store.reset();
+        store.record(server("a", "Amsterdam 01"), 1_000, 1_000);
+        store.flush();
+
+        assertThat(persistence.heldReasons()).isEmpty();
+        assertThat(dir.resolve("traffic-history.json")).isRegularFile();
+    }
+
+    @Test
+    void aFileThatWillNotParseIsNamedWithWhereItWent(@TempDir Path dir) throws IOException {
+        Files.writeString(dir.resolve("traffic-history.json"), "{ not json",
+                StandardCharsets.UTF_8);
+        PersistenceState persistence = new PersistenceState();
+
+        open(dir, clockAt("2026-09-05T10:00:00Z"), persistence);
+
+        assertThat(persistence.setAsideLocations()).hasEntrySatisfying("traffic-history.json",
+                where -> assertThat(Path.of(where)).hasContent("{ not json"));
+    }
+
+    /**
+     * A newer build's history was read, its fields dropped, and the file
+     * written back claiming the newer version, so that build would take what
+     * was left for its own format. The fields ride along now, under the
+     * version this build writes.
+     */
+    @Test
+    void aHistoryFromANewerBuildKeepsWhatThisBuildDoesNotKnow(@TempDir Path dir)
+            throws IOException {
+        Path file = dir.resolve("traffic-history.json");
+        Files.writeString(file, """
+                {"version": 2, "retention": "forever", "days": [
+                  {"date": "2025-01-01", "weather": "fog",
+                   "servers": [{"serverId": "a", "upload": 5, "download": 5,
+                                "protocol": "vless"}]}
+                ]}""", StandardCharsets.UTF_8);
+        TrafficHistoryStore store = open(dir, clockAt("2026-09-05T10:00:00Z"));
+
+        store.record(server("a", "Amsterdam 01"), 1_000, 1_000);
+        store.flush();
+
+        JsonNode saved = JsonMapper.builder().build().readTree(file.toFile());
+        assertThat(saved.path("version").asInt()).as("the format this build wrote").isEqualTo(1);
+        assertThat(saved.path("retention").asString()).isEqualTo("forever");
+        JsonNode oldDay = saved.path("days").get(0);
+        assertThat(oldDay.path("weather").asString()).isEqualTo("fog");
+        assertThat(oldDay.path("servers").get(0).path("protocol").asString()).isEqualTo("vless");
+        assertThat(store.totalRecorded()).as("and the old day still counts").isEqualTo(2_010);
     }
 }

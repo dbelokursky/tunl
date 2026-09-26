@@ -55,7 +55,8 @@ public class TrafficHistoryStore {
 
     private static final Logger log = LoggerFactory.getLogger(TrafficHistoryStore.class);
 
-    private static final String HISTORY_FILE = "traffic-history.json";
+    /** The file's name, as the persistence notices name it. */
+    public static final String HISTORY_FILE = "traffic-history.json";
 
     /**
      * How long a change may sit in memory before it reaches the disk. A minute
@@ -70,6 +71,8 @@ public class TrafficHistoryStore {
     private final Path dataDir;
     private final Clock clock;
     private final ObjectMapper objectMapper;
+    /** Where a write that failed, or a file that could not be opened, is shown. */
+    private final PersistenceState persistence;
 
     /**
      * Buckets keyed by ISO date. A TreeMap because ISO-8601 sorts
@@ -78,7 +81,12 @@ public class TrafficHistoryStore {
      */
     private final Map<String, TrafficHistory.Day> byDate = new TreeMap<>();
 
-    private int version = 1;
+    /**
+     * The file's top level as it was read, so that the fields a newer build
+     * wrote there are written back with the days.
+     */
+    private TrafficHistory header = new TrafficHistory();
+
     private boolean dirty;
 
     /** Keeps writes of the file in order; taken before this object's monitor. */
@@ -126,8 +134,13 @@ public class TrafficHistoryStore {
         }
     }
 
-    public TrafficHistoryStore() {
-        this(PlatformPaths.current().dataDir(), Clock.systemDefaultZone());
+    /**
+     * Creates the app's store, over the data directory and the wall clock.
+     *
+     * @param persistence where its failed writes and unopenable file are shown
+     */
+    public TrafficHistoryStore(PersistenceState persistence) {
+        this(PlatformPaths.current().dataDir(), Clock.systemDefaultZone(), persistence);
     }
 
     /**
@@ -138,8 +151,20 @@ public class TrafficHistoryStore {
      *     a test can cross midnight without waiting for it
      */
     public TrafficHistoryStore(Path dataDir, Clock clock) {
+        this(dataDir, clock, new PersistenceState());
+    }
+
+    /**
+     * Creates a store over an explicit directory, clock and persistence state.
+     *
+     * @param dataDir the directory holding {@code traffic-history.json}
+     * @param clock the clock deciding which day a sample lands in
+     * @param persistence where its failed writes and unopenable file are shown
+     */
+    public TrafficHistoryStore(Path dataDir, Clock clock, PersistenceState persistence) {
         this.dataDir = dataDir;
         this.clock = clock;
+        this.persistence = persistence;
         this.objectMapper = JsonMapper.builder()
                 .enable(SerializationFeature.INDENT_OUTPUT)
                 .build();
@@ -240,10 +265,11 @@ public class TrafficHistoryStore {
                 if (!dirty || keepExistingFile) {
                     return;
                 }
-                TrafficHistory history = new TrafficHistory();
-                history.setVersion(version);
-                history.setDays(new ArrayList<>(byDate.values()));
-                bytes = objectMapper.writeValueAsBytes(history);
+                // The format this build writes, as every file is saved; what a
+                // newer build added rides along in the models' unknown fields.
+                header.setVersion(TrafficHistory.CURRENT_VERSION);
+                header.setDays(new ArrayList<>(byDate.values()));
+                bytes = objectMapper.writeValueAsBytes(header);
                 dirty = false;
             }
             Path file = dataDir.resolve(HISTORY_FILE);
@@ -252,11 +278,15 @@ public class TrafficHistoryStore {
                 // Owner-only and atomic, like every other file in the data dir:
                 // this one says when the user ran a tunnel and through which exit.
                 SecureFiles.writePrivately(file, bytes);
+                persistence.saved(HISTORY_FILE);
             } catch (IOException e) {
                 log.error("Failed to save traffic history to {}", file, e);
                 synchronized (this) {
                     dirty = true;
                 }
+                // Shown with the other unsaved files: the history stopped
+                // growing on disk, and only the log said so.
+                persistence.failed(HISTORY_FILE, this::flush);
             }
         }
     }
@@ -271,6 +301,7 @@ public class TrafficHistoryStore {
         synchronized (writeOrder) {
             synchronized (this) {
                 byDate.clear();
+                header = new TrafficHistory();
                 dirty = false;
                 Path file = dataDir.resolve(HISTORY_FILE);
                 try {
@@ -278,6 +309,8 @@ public class TrafficHistoryStore {
                     // The file this session could not load is gone, so the
                     // record can start again.
                     keepExistingFile = false;
+                    persistence.released(HISTORY_FILE);
+                    persistence.saved(HISTORY_FILE);
                 } catch (IOException e) {
                     log.error("Failed to delete traffic history at {}", file, e);
                 }
@@ -464,35 +497,38 @@ public class TrafficHistoryStore {
 
     private synchronized void load() {
         Path file = dataDir.resolve(HISTORY_FILE);
-        if (!Files.exists(file)) {
-            return;
-        }
-        byte[] bytes;
-        try {
-            bytes = Files.readAllBytes(file);
-        } catch (IOException e) {
-            // There but unreadable, which says nothing about what it holds: an
-            // antivirus or a backup tool can have the file open at startup.
-            log.error("Could not read traffic history at {}; leaving it untouched "
-                    + "until the app restarts", file, e);
-            keepExistingFile = true;
-            return;
-        }
-        try {
-            TrafficHistory history = objectMapper.readValue(bytes, TrafficHistory.class);
-            version = history.getVersion();
-            for (TrafficHistory.Day day : history.getDays()) {
-                if (day.getDate() != null && !day.getDate().isBlank()) {
-                    byDate.put(day.getDate(), day);
-                }
+        StoredJson.Read read = StoredJson.read(objectMapper, file);
+        if (read instanceof StoredJson.Parsed parsed) {
+            try {
+                adopt(objectMapper.treeToValue(parsed.root(), TrafficHistory.class));
+                return;
+            } catch (JacksonException e) {
+                log.error("Could not read traffic history at {}; starting empty", file, e);
+                ConfigStore.setAsideDamaged(file, HISTORY_FILE, persistence);
             }
-        } catch (JacksonException e) {
-            // Not worth blocking startup over, but nothing in the record is
-            // ever pruned: move the file aside before a flush can replace it.
-            log.error("Could not parse traffic history at {}; starting empty", file, e);
-            byDate.clear();
-            ConfigStore.quarantineCorrupt(file);
-            keepExistingFile = Files.exists(file);
+        } else {
+            // One that cannot be opened says nothing about what it holds: an
+            // antivirus or a backup tool can have it open at startup. One that
+            // is damaged is not worth blocking startup over, but nothing in the
+            // record is ever pruned, so it goes aside before a flush.
+            ConfigStore.startWithout(read, file, HISTORY_FILE, persistence);
+        }
+        byDate.clear();
+        // Still there: it could not be opened, or, damaged, could not be moved.
+        keepExistingFile = Files.exists(file);
+    }
+
+    private void adopt(TrafficHistory history) {
+        header = history;
+        if (history.getVersion() > TrafficHistory.CURRENT_VERSION) {
+            log.warn("traffic-history.json has version {} (this build understands {}); "
+                    + "reading best-effort", history.getVersion(), TrafficHistory.CURRENT_VERSION);
+        }
+        // Future incompatible versions dispatch their migrations here.
+        for (TrafficHistory.Day day : history.getDays()) {
+            if (day.getDate() != null && !day.getDate().isBlank()) {
+                byDate.put(day.getDate(), day);
+            }
         }
     }
 }

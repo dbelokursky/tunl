@@ -116,4 +116,20 @@ class PersistenceFailureTest {
         assertThat(dir.resolve("servers.json").resolve("blocker"))
                 .as("and the file is left as it was").exists();
     }
+
+    /**
+     * The traffic history is not a change a tool makes: a failed write of it
+     * told the agent that a server it added, and that was saved, was not.
+     */
+    @Test
+    void mcpDoesNotBlameAToolForTheTrafficHistory() throws Exception {
+        ConfigStore store = new ConfigStore(dir);
+        store.getPersistenceState().failed(TrafficHistoryStore.HISTORY_FILE, () -> { });
+        DefaultAppControlService control = new DefaultAppControlService(store, null, null, null,
+                null, null, new ShareLinkParser(), null);
+
+        control.addServer("vless://test@example.com:443#One", null);
+
+        assertThat(new ConfigStore(dir).getServers()).hasSize(1);
+    }
 }

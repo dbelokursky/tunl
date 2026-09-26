@@ -22,14 +22,17 @@ import java.util.List;
  * ledger, and must never be presented as the provider's own quota figure.</p>
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class TrafficHistory {
+public class TrafficHistory extends KeepsUnknownFields {
+
+    /** The format this build writes. Bump it together with a migration in the store. */
+    public static final int CURRENT_VERSION = 1;
 
     /**
      * Schema version, so a later incompatible change can be migrated rather
-     * than silently misread. Bump it together with a migration in the store.
+     * than silently misread.
      */
     @JsonProperty("version")
-    private int version = 1;
+    private int version = CURRENT_VERSION;
 
     @JsonProperty("days")
     private List<Day> days = new ArrayList<>();
@@ -52,7 +55,7 @@ public class TrafficHistory {
 
     /** One calendar day's traffic, split by server. */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class Day {
+    public static class Day extends KeepsUnknownFields {
 
         /** The local date this bucket covers, ISO-8601 ({@code 2026-09-05}). */
         @JsonProperty("date")
@@ -80,7 +83,7 @@ public class TrafficHistory {
 
     /** One server's share of a day. */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class ServerUsage {
+    public static class ServerUsage extends KeepsUnknownFields {
 
         @JsonProperty("serverId")
         private String serverId;
