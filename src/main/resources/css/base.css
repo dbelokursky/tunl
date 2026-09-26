@@ -528,12 +528,15 @@
 .text-field,
 .text-area {
     -fx-text-fill: -c-text;
-    -fx-prompt-text-fill: -c-text-muted;
+    /* The placeholder token, which reaches 4.5:1; muted is for edges. */
+    -fx-prompt-text-fill: -c-field-prompt;
     -fx-highlight-fill: -c-accent-tint;
     -fx-highlight-text-fill: -c-accent-strong-fg;
     -fx-background-color: -c-surface-sunken;
     -fx-background-radius: 6;
-    -fx-border-color: -c-border;
+    /* A field's edge, which reaches 3:1; -c-border is a card's hairline and
+       left the dialogs' fields at 1.2:1. */
+    -fx-border-color: -c-field-border;
     -fx-border-radius: 6;
 }
 
@@ -825,7 +828,7 @@
 /* ===== ComboBox Styling ===== */
 .combo-box {
     -fx-background-color: -c-surface-sunken;
-    -fx-border-color: -c-border;
+    -fx-border-color: -c-field-border;
     -fx-border-radius: 6;
     -fx-background-radius: 6;
     /* Modena's internal button cell resolves this before our list-cell rule
