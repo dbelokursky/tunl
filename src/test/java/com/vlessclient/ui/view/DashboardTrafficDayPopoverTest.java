@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import javafx.css.PseudoClass;
 import javafx.fxml.FXMLLoader;
@@ -21,12 +22,14 @@ import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Label;
+import javafx.scene.control.TextField;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -203,6 +206,57 @@ public class DashboardTrafficDayPopoverTest extends ApplicationTest {
                 .as("a card that floats over the chart has to be dismissable "
                         + "without hunting for the bar that opened it")
                 .isFalse();
+    }
+
+    /**
+     * An open day's arrow keys are filters on the whole scene. A page switch
+     * left them there: on the next page an arrow meant for a text field
+     * never reached it, and moved the day instead.
+     */
+    @Test
+    void anArrowOnAnotherPageIsNotTakenByAnOpenDay() {
+        clickColumn(BUSY_DAY);
+        Scene scene = lookup("#trafficHistoryPanel").query().getScene();
+        StackPane elsewhere = new StackPane();
+        AtomicInteger arrived = new AtomicInteger();
+        elsewhere.addEventHandler(KeyEvent.KEY_PRESSED, event -> arrived.incrementAndGet());
+        // What a page switch does to the dashboard: it leaves the scene.
+        interact(() -> scene.setRoot(elsewhere));
+        interact(() -> elsewhere.fireEvent(keyPressed(KeyCode.RIGHT)));
+
+        assertThat(arrived)
+                .as("arrows that reached the page an open day was left behind on")
+                .hasValue(1);
+    }
+
+    /**
+     * The filters were removed through the panel's scene, which a page switch
+     * had already taken away, so a click on the next page left them in place.
+     * A day opened again added a second pair, and an arrow stepped two days.
+     */
+    @Test
+    void aDayOpenedAgainAfterAPageSwitchStepsOneDayAtATime() {
+        clickColumn(BUSY_DAY);
+        Scene scene = lookup("#trafficHistoryPanel").query().getScene();
+        Parent dashboard = scene.getRoot();
+        TextField elsewhere = new TextField();
+        interact(() -> scene.setRoot(new StackPane(elsewhere)));
+        interact(() -> elsewhere.fireEvent(mousePressed()));
+        interact(() -> scene.setRoot(dashboard));
+        WaitForAsyncUtils.waitForFxEvents();
+
+        clickColumn(BUSY_DAY);
+        interact(() -> dashboard.fireEvent(keyPressed(KeyCode.RIGHT)));
+        WaitForAsyncUtils.waitForFxEvents();
+
+        assertThat(column(BUSY_DAY + 1).getPseudoClassStates()).contains(SELECTED);
+        assertThat(column(BUSY_DAY + 2).getPseudoClassStates())
+                .as("a second pair of filters stepping the day again")
+                .doesNotContain(SELECTED);
+    }
+
+    private static KeyEvent keyPressed(KeyCode code) {
+        return new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, false, false, false, false);
     }
 
     @Test

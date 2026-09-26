@@ -105,6 +105,12 @@ public final class TrafficHistorySection {
     private int selectedIndex = -1;
     private EventHandler<MouseEvent> dismissOnOutsideClick;
     private EventHandler<KeyEvent> dayKeys;
+    /**
+     * The scene the day's filters went on, where they have to come off. It was
+     * looked up through the panel, which a page switch has already taken out
+     * of the scene, so the filters stayed.
+     */
+    private Scene listeningScene;
 
     /**
      * Creates the section over its controls.
@@ -334,6 +340,7 @@ public final class TrafficHistorySection {
         };
         scene.addEventFilter(MouseEvent.MOUSE_PRESSED, dismissOnOutsideClick);
         scene.addEventFilter(KeyEvent.KEY_PRESSED, dayKeys);
+        listeningScene = scene;
     }
 
     private void step(int index, KeyEvent event) {
@@ -344,11 +351,11 @@ public final class TrafficHistorySection {
     }
 
     private void stopListeningForDismissal() {
-        Scene scene = controls.panel().getScene();
-        if (scene != null && dismissOnOutsideClick != null) {
-            scene.removeEventFilter(MouseEvent.MOUSE_PRESSED, dismissOnOutsideClick);
-            scene.removeEventFilter(KeyEvent.KEY_PRESSED, dayKeys);
+        if (listeningScene != null && dismissOnOutsideClick != null) {
+            listeningScene.removeEventFilter(MouseEvent.MOUSE_PRESSED, dismissOnOutsideClick);
+            listeningScene.removeEventFilter(KeyEvent.KEY_PRESSED, dayKeys);
         }
+        listeningScene = null;
         dismissOnOutsideClick = null;
         dayKeys = null;
     }
@@ -394,6 +401,11 @@ public final class TrafficHistorySection {
      */
     private void followScreen() {
         stopTimer();
+        if (!isOnScreen() && selectedIndex >= 0) {
+            // An open day's filters are on the whole scene: off screen they
+            // took the arrows of whatever page replaced the dashboard.
+            closeDay();
+        }
         if (!controls.panel().isVisible() || !isOnScreen()) {
             return;
         }
