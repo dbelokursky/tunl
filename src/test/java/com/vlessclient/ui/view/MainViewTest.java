@@ -214,6 +214,62 @@ public class MainViewTest extends ApplicationTest {
         }
     }
 
+    /**
+     * A damaged file set aside at startup looks like lost data unless the
+     * window says where it went; once read, the notice can be put away.
+     */
+    @Test
+    void aFileSetAsideIsNamedWithWhereItWentUntilDismissed() {
+        var persistence = com.vlessclient.app.ServiceLocator
+                .get(com.vlessclient.service.ConfigStore.class).getPersistenceState();
+        String where = "/data/servers.json.corrupt-1727000000000";
+        try {
+            interact(() -> persistence.setAside("servers.json", where));
+
+            javafx.scene.layout.HBox banner = lookup("#fileNoticeBanner").queryAs(
+                    javafx.scene.layout.HBox.class);
+            javafx.scene.control.Label message = lookup("#fileNoticeMessage").queryAs(
+                    javafx.scene.control.Label.class);
+            Button dismiss = lookup("#dismissFileNoticeButton").queryButton();
+            interact(() -> {
+                banner.getScene().getRoot().applyCss();
+                banner.getScene().getRoot().layout();
+                assertThat(banner.isVisible()).isTrue();
+                assertThat(banner.isManaged()).isTrue();
+                assertThat(message.getText()).contains("servers.json").contains(where);
+                assertThat(dismiss.isVisible()).isTrue();
+                assertThat(message.getBoundsInParent().getMaxX())
+                        .isLessThanOrEqualTo(dismiss.getBoundsInParent().getMinX());
+                assertThat(dismiss.getBoundsInParent().getMaxX())
+                        .isLessThanOrEqualTo(banner.getWidth());
+                // Fired, as Retry is: a click through the pointer missed the
+                // button on the Linux runner and the banner stayed.
+                dismiss.fire();
+            });
+
+            assertThat(banner.isVisible()).isFalse();
+            assertThat(banner.isManaged()).isFalse();
+        } finally {
+            interact(persistence::dismissSetAside);
+        }
+    }
+
+    /**
+     * A held file is news for the whole run: every save of it is skipped, so
+     * the banner names it and tells the user what would let it be saved.
+     */
+    @Test
+    void aHeldFileIsNamedWithWhatWouldLetItBeSaved() {
+        String notice = MainViewController.fileNotice(
+                java.util.Map.of("servers.json", "AccessDeniedException"),
+                java.util.Map.of("routing.json", "/data/routing.json.corrupt-1"));
+
+        assertThat(notice.split("\n")).containsExactly(
+                com.vlessclient.app.I18n.get("persistence.held", "servers.json"),
+                com.vlessclient.app.I18n.get("persistence.set.aside", "routing.json",
+                        "/data/routing.json.corrupt-1"));
+    }
+
     @Test
     void failedSaveShowsAFittingBannerAndRetryClearsIt() {
         var persistence = com.vlessclient.app.ServiceLocator

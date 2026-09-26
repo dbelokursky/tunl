@@ -3,6 +3,7 @@ package com.vlessclient.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.mcp.DefaultAppControlService;
 import com.vlessclient.service.mcp.McpToolException;
@@ -91,5 +92,28 @@ class PersistenceFailureTest {
         unblock("servers.json");
         control.retrySaving();
         assertThat(new ConfigStore(dir).getServers()).hasSize(1);
+    }
+
+    /**
+     * A file that could not be opened at startup is held: no save writes over
+     * it, and a change to it lasts only as long as this run. An agent has to
+     * hear that as it hears of a failed save, not be told the change is done.
+     */
+    @Test
+    void mcpReportsThatAHeldFileIsNotSaved() throws Exception {
+        block("servers.json");
+        ConfigStore store = new ConfigStore(dir);
+        DefaultAppControlService control = new DefaultAppControlService(store, null, null, null,
+                null, null, new ShareLinkParser(), null);
+
+        assertThatThrownBy(() -> control.addServer("vless://test@example.com:443#One", null))
+                .isInstanceOf(McpToolException.class)
+                .hasMessage(I18n.get("persistence.mcp.held", "servers.json"));
+        assertThat(store.getServers()).as("kept for this run").hasSize(1);
+        assertThat(store.getPersistenceState().failedFiles())
+                .as("not a failed save: retrying cannot help").isEmpty();
+        assertThatThrownBy(control::retrySaving).isInstanceOf(McpToolException.class);
+        assertThat(dir.resolve("servers.json").resolve("blocker"))
+                .as("and the file is left as it was").exists();
     }
 }

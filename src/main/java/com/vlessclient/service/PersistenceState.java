@@ -1,11 +1,14 @@
 package com.vlessclient.service;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyBooleanProperty;
 import javafx.beans.property.ReadOnlyBooleanWrapper;
+import javafx.beans.property.ReadOnlyObjectProperty;
+import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.beans.property.ReadOnlyStringProperty;
 import javafx.beans.property.ReadOnlyStringWrapper;
 
@@ -17,6 +20,14 @@ public final class PersistenceState {
     private final ReadOnlyBooleanWrapper unsaved = new ReadOnlyBooleanWrapper();
     private final ReadOnlyBooleanWrapper hasUnreadable = new ReadOnlyBooleanWrapper();
     private final ReadOnlyStringWrapper unreadableFiles = new ReadOnlyStringWrapper("");
+    /** Files that could not be opened at startup, and why; they are never written. */
+    private final Map<String, String> held = new LinkedHashMap<>();
+    /** Damaged files moved aside at startup, and where each is now. */
+    private final Map<String, String> setAside = new LinkedHashMap<>();
+    private final ReadOnlyObjectWrapper<Map<String, String>> heldFiles =
+            new ReadOnlyObjectWrapper<>(Map.of());
+    private final ReadOnlyObjectWrapper<Map<String, String>> setAsideFiles =
+            new ReadOnlyObjectWrapper<>(Map.of());
     private long publication;
 
     /** Records a failed write. Retry must save current state, not an old serialized payload. */
@@ -64,6 +75,69 @@ public final class PersistenceState {
         publishUnreadable();
     }
 
+    /**
+     * Records a file that is there and could not be opened. It is left as it
+     * is, and no save writes over it until the app is started again: over it,
+     * a save would replace data the app never saw with what it started
+     * without.
+     *
+     * @param file   the file's name
+     * @param reason why it could not be opened
+     */
+    public synchronized void couldNotOpen(String file, String reason) {
+        held.put(file, reason);
+        publishFileNotices();
+    }
+
+    /**
+     * Whether saves of {@code file} are held, because it could not be opened.
+     *
+     * @param file the file's name
+     * @return true when no save may write it
+     */
+    public synchronized boolean isHeld(String file) {
+        return held.containsKey(file);
+    }
+
+    /**
+     * Records a damaged file moved aside, so the user hears of it: the app
+     * started without it, which looks like data loss unless it says where the
+     * file went.
+     *
+     * @param file  the file's name
+     * @param where the path it has now
+     */
+    public synchronized void setAside(String file, String where) {
+        setAside.put(file, where);
+        publishFileNotices();
+    }
+
+    /** Clears the notices of files set aside, once the user has read them. */
+    public synchronized void dismissSetAside() {
+        setAside.clear();
+        publishFileNotices();
+    }
+
+    /** The files that could not be opened at startup, each with why, in that order. */
+    public synchronized Map<String, String> heldReasons() {
+        return snapshot(held);
+    }
+
+    /** The damaged files set aside and not yet dismissed, each with where it is now. */
+    public synchronized Map<String, String> setAsideLocations() {
+        return snapshot(setAside);
+    }
+
+    /** {@link #heldReasons()} for the banner, set on the FX thread. */
+    public ReadOnlyObjectProperty<Map<String, String>> heldFilesProperty() {
+        return heldFiles.getReadOnlyProperty();
+    }
+
+    /** {@link #setAsideLocations()} for the banner, set on the FX thread. */
+    public ReadOnlyObjectProperty<Map<String, String>> setAsideFilesProperty() {
+        return setAsideFiles.getReadOnlyProperty();
+    }
+
     /** How many entries of each file this build could not read. */
     public synchronized Map<String, Integer> unreadableEntries() {
         return Map.copyOf(unreadable);
@@ -86,6 +160,19 @@ public final class PersistenceState {
             writes = List.copyOf(pending.values());
         }
         writes.forEach(Runnable::run);
+    }
+
+    private void publishFileNotices() {
+        Map<String, String> heldNow = snapshot(held);
+        Map<String, String> setAsideNow = snapshot(setAside);
+        onFxThread(() -> {
+            heldFiles.set(heldNow);
+            setAsideFiles.set(setAsideNow);
+        });
+    }
+
+    private static Map<String, String> snapshot(Map<String, String> files) {
+        return Collections.unmodifiableMap(new LinkedHashMap<>(files));
     }
 
     private void publishUnreadable() {

@@ -330,6 +330,19 @@ class ConfigStoreTest {
             assertThat(new ConfigStore(fresh.resolve("existing")).getSettings().getLanguage())
                     .as("an install that saved settings before")
                     .isEqualTo("en");
+
+            java.nio.file.Files.createDirectories(
+                    fresh.resolve("unopenable").resolve("settings.json"));
+            assertThat(new ConfigStore(fresh.resolve("unopenable")).getSettings().getLanguage())
+                    .as("an install whose settings could not be opened starts as a new one")
+                    .isEqualTo("ru");
+
+            java.nio.file.Files.createDirectories(fresh.resolve("damaged"));
+            java.nio.file.Files.writeString(fresh.resolve("damaged").resolve("settings.json"),
+                    "{\"theme\":");
+            assertThat(new ConfigStore(fresh.resolve("damaged")).getSettings().getLanguage())
+                    .as("and so does one whose settings were damaged")
+                    .isEqualTo("ru");
         } finally {
             java.util.Locale.setDefault(before);
         }

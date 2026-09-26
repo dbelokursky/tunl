@@ -534,6 +534,10 @@ public class ConfigStore {
             settings.setClashApiSecret(this.settings.getClashApiSecret());
         }
         this.settings = settings;
+        if (persistence.isHeld(SETTINGS_FILE)) {
+            log.warn("Not saving {}: it could not be opened at startup", SETTINGS_FILE);
+            return;
+        }
         Path file = dataDir.resolve(SETTINGS_FILE);
         try {
             SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(settings));
@@ -611,6 +615,10 @@ public class ConfigStore {
      * when secure storage is on.
      */
     private void writeServers() {
+        if (persistence.isHeld(SERVERS_FILE)) {
+            log.warn("Not saving {}: it could not be opened at startup", SERVERS_FILE);
+            return;
+        }
         ArrayNode snapshot;
         boolean secureStorage;
         synchronized (this) {
@@ -716,13 +724,16 @@ public class ConfigStore {
 
     private void loadServers() {
         Path file = dataDir.resolve(SERVERS_FILE);
-        if (!Files.exists(file)) {
-            log.info("No servers file found at {}, starting with empty list", file);
+        if (Files.exists(file)) {
+            SecureFiles.restrictExisting(file);   // tighten a 0644 file from an older build
+        }
+        StoredJson.Read read = StoredJson.read(objectMapper, file);
+        if (!(read instanceof StoredJson.Parsed parsed)) {
+            startWithout(read, file, SERVERS_FILE, persistence);
             return;
         }
-        SecureFiles.restrictExisting(file);   // tighten a 0644 file from an older build
+        JsonNode root = parsed.root();
         try {
-            JsonNode root = objectMapper.readTree(file.toFile());
             JsonNode items;
             if (root.isArray()) {
                 // v0: the pre-envelope bare array. Keep a one-time backup so
@@ -770,7 +781,49 @@ public class ConfigStore {
             log.info("Loaded {} servers from {}", servers.size(), file);
         } catch (JacksonException e) {
             log.error("Failed to load servers from {}", file, e);
-            quarantineCorrupt(file);
+            setAsideDamaged(file, SERVERS_FILE, persistence);
+        }
+    }
+
+    /**
+     * Starts without a data file that gave no JSON: none there (a first
+     * start), one that could not be opened, or a damaged one.
+     *
+     * <p>Package-private: the other stores treat their files the same way.</p>
+     */
+    static void startWithout(StoredJson.Read read, Path file, String name,
+                             PersistenceState persistence) {
+        if (read instanceof StoredJson.Unopenable unopenable) {
+            holdUnopenable(file, name, unopenable.cause(), persistence);
+        } else if (read instanceof StoredJson.Damaged damaged) {
+            log.error("Failed to load {}", file, damaged.cause());
+            setAsideDamaged(file, name, persistence);
+        } else {
+            log.info("No {} at {}; starting without it", name, file);
+        }
+    }
+
+    /**
+     * Leaves a file that is there and could not be opened as it is, and holds
+     * its saves: it may be locked or left unreadable by a restore, and moving
+     * it aside, or writing over it, lost data the app never saw.
+     */
+    static void holdUnopenable(Path file, String name, IOException cause,
+                               PersistenceState persistence) {
+        String reason = StoredJson.reason(cause);
+        log.error("Could not open {} ({}); leaving it as it is and not saving over it",
+                file, reason);
+        persistence.couldNotOpen(name, reason);
+    }
+
+    /**
+     * Moves a damaged file aside and says so: the app starts without it,
+     * which looks like data loss unless the user hears where the file went.
+     */
+    static void setAsideDamaged(Path file, String name, PersistenceState persistence) {
+        Path aside = quarantineCorrupt(file);
+        if (aside != null) {
+            persistence.setAside(name, aside.toString());
         }
     }
 
@@ -787,15 +840,17 @@ public class ConfigStore {
      *
      * <p>Package-private: {@link RoutingService} quarantines the same way.</p>
      */
-    static void quarantineCorrupt(Path file) {
+    static Path quarantineCorrupt(Path file) {
         Path quarantined = file.resolveSibling(
                 file.getFileName() + ".corrupt-" + System.currentTimeMillis());
         try {
             Files.move(file, quarantined);
             log.error("Moved unreadable {} aside to {}; starting from defaults",
                     file, quarantined);
+            return quarantined;
         } catch (IOException e) {
             log.error("Could not move unreadable {} aside: {}", file, e.getMessage());
+            return null;
         }
     }
 
@@ -879,16 +934,17 @@ public class ConfigStore {
 
     private void loadSettings() {
         Path file = dataDir.resolve(SETTINGS_FILE);
-        if (!Files.exists(file)) {
-            log.info("No settings file found at {}, using defaults", file);
-            // A new install speaks the system's language when the app has it,
-            // as its theme already follows the system; it always spoke English.
-            settings.setLanguage(AppSettings.languageFor(java.util.Locale.getDefault()));
+        if (Files.exists(file)) {
+            SecureFiles.restrictExisting(file);
+        }
+        StoredJson.Read read = StoredJson.read(objectMapper, file);
+        if (!(read instanceof StoredJson.Parsed parsed)) {
+            startWithout(read, file, SETTINGS_FILE, persistence);
+            startFromDefaultSettings();
             return;
         }
-        SecureFiles.restrictExisting(file);
         try {
-            this.settings = objectMapper.readValue(file.toFile(), AppSettings.class);
+            this.settings = objectMapper.treeToValue(parsed.root(), AppSettings.class);
             if (settings.getConfigVersion() > AppSettings.CURRENT_CONFIG_VERSION) {
                 log.warn("settings.json has config_version {} (this build "
                         + "understands {}); reading best-effort",
@@ -906,7 +962,19 @@ public class ConfigStore {
             log.info("Loaded settings from {}", file);
         } catch (JacksonException e) {
             log.error("Failed to load settings from {}", file, e);
-            quarantineCorrupt(file);
+            setAsideDamaged(file, SETTINGS_FILE, persistence);
+            startFromDefaultSettings();
         }
+    }
+
+    /**
+     * The settings of a new install, for a start without any that could be
+     * read: they speak the system's language when the app has it, as the
+     * theme already follows the system. A settings file that could not be
+     * read used to leave the app in English whatever the system spoke.
+     */
+    private void startFromDefaultSettings() {
+        settings = new AppSettings();
+        settings.setLanguage(AppSettings.languageFor(java.util.Locale.getDefault()));
     }
 }

@@ -102,10 +102,12 @@ public final class SecureFiles {
     /**
      * Best-effort tightening of an already-existing file to 0600 on POSIX, so
      * a config written by an older build (0644) stops leaking on load without
-     * waiting for the next save. No-op off POSIX or when the file is absent.
+     * waiting for the next save. No-op off POSIX, or when no regular file is
+     * there: whatever else stands at a config file's path (a directory) is
+     * not the app's to change, and the store reports it as unopenable.
      */
     public static void restrictExisting(Path file) {
-        if (!POSIX || !Files.exists(file)) {
+        if (!POSIX || !Files.isRegularFile(file)) {
             return;
         }
         try {
