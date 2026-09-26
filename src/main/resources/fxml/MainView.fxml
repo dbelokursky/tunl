@@ -17,9 +17,11 @@
             styleClass="root-pane">
 
     <top>
-        <!-- Two banners, not one: a failed write is the user's to retry, while
-             entries this build could not read are a warning about what saving
-             would drop. Both can be true at once. -->
+        <!-- Separate banners: a failed write is the user's to retry, entries
+             this build could not read are a warning about what saving would
+             drop, and a file that could not be opened or was set aside at
+             startup is news about the data the app started without. Any of
+             them can be true at once. -->
         <VBox>
             <HBox fx:id="persistenceBanner" spacing="12" alignment="CENTER_LEFT"
                   visible="false" managed="false" styleClass="reconnect-banner">
@@ -34,6 +36,16 @@
                 <padding><Insets top="10" right="16" bottom="10" left="16"/></padding>
                 <Label fx:id="unreadableMessage" styleClass="reconnect-banner-label" wrapText="true" maxWidth="Infinity"
                        HBox.hgrow="ALWAYS"/>
+            </HBox>
+            <!-- A data file that could not be opened (left as it is, not
+                 saved over) or that was damaged (set aside for repair). -->
+            <HBox fx:id="fileNoticeBanner" spacing="12" alignment="CENTER_LEFT"
+                  visible="false" managed="false" styleClass="reconnect-banner">
+                <padding><Insets top="10" right="16" bottom="10" left="16"/></padding>
+                <Label fx:id="fileNoticeMessage" styleClass="reconnect-banner-label" wrapText="true" maxWidth="Infinity"
+                       HBox.hgrow="ALWAYS"/>
+                <Button fx:id="dismissFileNoticeButton" onAction="#onDismissFileNotice" minWidth="-Infinity"
+                        visible="false" managed="false" styleClass="secondary-button"/>
             </HBox>
         </VBox>
     </top>

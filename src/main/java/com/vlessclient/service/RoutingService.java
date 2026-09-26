@@ -123,6 +123,10 @@ public class RoutingService {
      */
     public synchronized void saveConfig(RoutingConfig config) {
         this.config = config;
+        if (persistence.isHeld(ROUTING_FILE)) {
+            log.warn("Not saving {}: it could not be opened at startup", ROUTING_FILE);
+            return;
+        }
         Path file = dataDir.resolve(ROUTING_FILE);
         try {
             // Owner-only and atomic, like the other config files: these rules
@@ -131,7 +135,7 @@ public class RoutingService {
             SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(config));
             persistence.saved(ROUTING_FILE);
             log.info("Saved routing config to {}", file);
-        } catch (IOException e) {
+        } catch (IOException | JacksonException e) {
             log.error("Failed to save routing config to {}", file, e);
             persistence.failed(ROUTING_FILE, this::retryConfig);
         }
@@ -208,20 +212,22 @@ public class RoutingService {
 
     private void loadConfig() {
         Path file = dataDir.resolve(ROUTING_FILE);
-        if (!Files.exists(file)) {
-            log.info("No routing config found at {}, using defaults", file);
-            this.config = new RoutingConfig();
+        this.config = new RoutingConfig();
+        StoredJson.Read read = StoredJson.read(objectMapper, file);
+        if (!(read instanceof StoredJson.Parsed parsed)) {
+            // The defaults for this run. A damaged file goes aside, not under
+            // the next rule edit, which would erase the only copy of a file a
+            // person could likely still repair.
+            ConfigStore.startWithout(read, file, ROUTING_FILE, persistence);
             return;
         }
         try {
-            this.config = readKeepingKnownRules(file);
+            this.config = readKeepingKnownRules(parsed.root());
             log.info("Loaded routing config from {}", file);
             migrateLegacyPreset(file);
         } catch (JacksonException e) {
             log.error("Failed to load routing config from {}", file, e);
-            // Aside, not overwritten: the next rule edit would otherwise erase
-            // the only copy of a file that a person could likely still repair.
-            ConfigStore.quarantineCorrupt(file);
+            ConfigStore.setAsideDamaged(file, ROUTING_FILE, persistence);
             this.config = new RoutingConfig();
         }
     }
@@ -236,8 +242,7 @@ public class RoutingService {
      * of guessed at -- defaulting its action would move traffic somewhere the
      * user never asked for -- and reported for the banner.</p>
      */
-    private RoutingConfig readKeepingKnownRules(Path file) {
-        JsonNode tree = objectMapper.readTree(file.toFile());
+    private RoutingConfig readKeepingKnownRules(JsonNode tree) {
         if (!(tree instanceof ObjectNode root)) {
             return objectMapper.treeToValue(tree, RoutingConfig.class);
         }

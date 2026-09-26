@@ -125,6 +125,14 @@ public class DefaultAppControlService implements AppControlService {
             throw new McpToolException(
                     I18n.get("persistence.mcp.failed", String.join(", ", failed)));
         }
+        // A file that could not be opened at startup is never saved over, so
+        // a change to it lives only as long as this run: say so, as for a
+        // failed save, rather than report it done.
+        var held = configStore.getPersistenceState().heldReasons().keySet();
+        if (!held.isEmpty()) {
+            throw new McpToolException(
+                    I18n.get("persistence.mcp.held", String.join(", ", held)));
+        }
     }
 
     @Override

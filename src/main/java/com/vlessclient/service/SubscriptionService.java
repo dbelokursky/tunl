@@ -37,7 +37,6 @@ import javax.net.ssl.SSLException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.SerializationFeature;
@@ -1226,6 +1225,10 @@ public class SubscriptionService {
     }
 
     synchronized void saveSubscriptions() {
+        if (configStore.getPersistenceState().isHeld(SUBSCRIPTIONS_FILE)) {
+            log.warn("Not saving {}: it could not be opened at startup", SUBSCRIPTIONS_FILE);
+            return;
+        }
         Path file = dataDir.resolve(SUBSCRIPTIONS_FILE);
         try {
             ObjectNode envelope = objectMapper.createObjectNode();
@@ -1235,7 +1238,9 @@ public class SubscriptionService {
             SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(envelope));
             configStore.getPersistenceState().saved(SUBSCRIPTIONS_FILE);
             ConfigStore.dropLegacyBackupOnceMigrated(file, objectMapper, "subscriptions");
-        } catch (IOException e) {
+        } catch (IOException | JacksonException e) {
+            // JacksonException is unchecked in Jackson 3: a serialization that
+            // failed escaped past the unsaved banner.
             log.error("Failed to save subscriptions to {}", file, e);
             configStore.getPersistenceState().failed(SUBSCRIPTIONS_FILE, this::saveSubscriptions);
         }
@@ -1292,13 +1297,19 @@ public class SubscriptionService {
 
     private void loadSubscriptions() {
         Path file = dataDir.resolve(SUBSCRIPTIONS_FILE);
-        if (!Files.exists(file)) {
-            log.info("No subscriptions file found at {}, starting with empty list", file);
+        if (Files.exists(file)) {
+            SecureFiles.restrictExisting(file);
+        }
+        PersistenceState persistence = configStore.getPersistenceState();
+        StoredJson.Read read = StoredJson.read(objectMapper, file);
+        if (!(read instanceof StoredJson.Parsed parsed)) {
+            // A damaged file goes aside, not under the next save: the sealed
+            // URLs in it are the keys the keychain entries are filed under.
+            ConfigStore.startWithout(read, file, SUBSCRIPTIONS_FILE, persistence);
             return;
         }
-        SecureFiles.restrictExisting(file);
+        JsonNode root = parsed.root();
         try {
-            JsonNode root = objectMapper.readTree(file.toFile());
             JsonNode items;
             if (root.isArray()) {
                 // v0: pre-envelope bare array — back up once, upgrade on save.
@@ -1321,18 +1332,29 @@ public class SubscriptionService {
                 log.error("subscriptions.json has no readable list; leaving it empty");
                 return;
             }
-            List<Subscription> loaded = objectMapper.convertValue(
-                    items, new TypeReference<List<Subscription>>() {});
+            // Per entry, as servers.json is read: one subscription this build
+            // cannot read used to fail the whole list and set every other
+            // subscription aside with it.
+            List<Subscription> loaded = new ArrayList<>();
+            int unreadable = 0;
+            for (JsonNode item : items) {
+                try {
+                    loaded.add(objectMapper.treeToValue(item, Subscription.class));
+                } catch (JacksonException e) {
+                    unreadable++;
+                    log.warn("Skipping a subscription entry this build cannot read: {}",
+                            e.getMessage());
+                }
+            }
             Unsealing.each(loaded, this::unsealInPlace);
             subscriptions.addAll(loaded);
+            if (unreadable > 0) {
+                persistence.couldNotRead(SUBSCRIPTIONS_FILE, unreadable);
+            }
             log.info("Loaded {} subscriptions from {}", subscriptions.size(), file);
         } catch (JacksonException e) {
             log.error("Failed to load subscriptions from {}", file, e);
-            // Same treatment as servers.json and settings.json: the next save
-            // would otherwise overwrite the only copy of a file that was very
-            // likely still recoverable by hand — and the sealed URLs in it
-            // are the keys the keychain entries are filed under.
-            ConfigStore.quarantineCorrupt(file);
+            ConfigStore.setAsideDamaged(file, SUBSCRIPTIONS_FILE, persistence);
         }
     }
 

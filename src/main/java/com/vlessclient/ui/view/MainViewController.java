@@ -5,7 +5,9 @@ import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.PersistenceState;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
@@ -42,6 +44,9 @@ public class MainViewController {
     @FXML private Button retrySavingButton;
     @FXML private HBox unreadableBanner;
     @FXML private Label unreadableMessage;
+    @FXML private HBox fileNoticeBanner;
+    @FXML private Label fileNoticeMessage;
+    @FXML private Button dismissFileNoticeButton;
     private PersistenceState persistence;
 
     @FXML private Button btnDashboard;
@@ -82,6 +87,7 @@ public class MainViewController {
     private void bindPersistenceBanner() {
         persistenceMessage.textProperty().bind(I18n.binding("persistence.unsaved"));
         retrySavingButton.textProperty().bind(I18n.binding("persistence.retry"));
+        dismissFileNoticeButton.textProperty().bind(I18n.binding("persistence.dismiss"));
         ServiceLocator.find(ConfigStore.class).ifPresent(store -> {
             persistence = store.getPersistenceState();
             persistenceBanner.visibleProperty().bind(persistence.unsavedProperty());
@@ -92,7 +98,44 @@ public class MainViewController {
                     I18n.localeProperty(), persistence.unreadableFilesProperty()));
             unreadableBanner.visibleProperty().bind(persistence.hasUnreadableProperty());
             unreadableBanner.managedProperty().bind(unreadableBanner.visibleProperty());
+            fileNoticeMessage.textProperty().bind(Bindings.createStringBinding(
+                    () -> fileNotice(persistence.heldFilesProperty().get(),
+                            persistence.setAsideFilesProperty().get()),
+                    I18n.localeProperty(), persistence.heldFilesProperty(),
+                    persistence.setAsideFilesProperty()));
+            fileNoticeBanner.visibleProperty().bind(Bindings.createBooleanBinding(
+                    () -> !persistence.heldFilesProperty().get().isEmpty()
+                            || !persistence.setAsideFilesProperty().get().isEmpty(),
+                    persistence.heldFilesProperty(), persistence.setAsideFilesProperty()));
+            fileNoticeBanner.managedProperty().bind(fileNoticeBanner.visibleProperty());
+            // Only the set-aside notices go away: a held file stays held, and
+            // unsaved, until the app is started again.
+            dismissFileNoticeButton.visibleProperty().bind(Bindings.createBooleanBinding(
+                    () -> !persistence.setAsideFilesProperty().get().isEmpty(),
+                    persistence.setAsideFilesProperty()));
+            dismissFileNoticeButton.managedProperty().bind(
+                    dismissFileNoticeButton.visibleProperty());
         });
+    }
+
+    /**
+     * What the file banner says: a sentence for each file left as it is
+     * because it could not be opened, then one for each damaged file set
+     * aside, with where it is now.
+     */
+    static String fileNotice(Map<String, String> held, Map<String, String> setAside) {
+        List<String> sentences = new ArrayList<>();
+        held.keySet().forEach(file -> sentences.add(I18n.get("persistence.held", file)));
+        setAside.forEach((file, where) ->
+                sentences.add(I18n.get("persistence.set.aside", file, where)));
+        return String.join("\n", sentences);
+    }
+
+    @FXML
+    private void onDismissFileNotice() {
+        if (persistence != null) {
+            persistence.dismissSetAside();
+        }
     }
 
     @FXML
