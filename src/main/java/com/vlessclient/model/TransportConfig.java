@@ -31,6 +31,7 @@ public class TransportConfig extends KeepsUnknownFields {
     }
 
     TransportConfig(TransportConfig source) {
+        super(source);
         this.type = source.type;
         this.path = source.path;
         this.host = source.host;
