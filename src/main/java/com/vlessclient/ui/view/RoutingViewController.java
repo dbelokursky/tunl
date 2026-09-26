@@ -97,6 +97,7 @@ public class RoutingViewController {
         if (bypassListArea != null) {
             bypassListArea.textProperty().addListener(
                     (obs, oldText, newText) -> updateBypassCount());
+            KeyboardReach.tabLeaves(bypassListArea);
         }
         updateBypassCount();
         updateEmptyState();

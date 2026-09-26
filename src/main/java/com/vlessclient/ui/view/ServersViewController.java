@@ -180,6 +180,7 @@ public class ServersViewController {
         serverListView.setCellFactory(list -> new ServerListCell());
         serverListView.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
         serverListView.setOnKeyPressed(this::onListKeyPressed);
+        KeyboardReach.openRowMenus(serverListView);
 
         setUpSearch();
         setUpSort();
@@ -594,6 +595,7 @@ public class ServersViewController {
         input.setPromptText(I18n.get("servers.import.prompt"));
         input.setPrefRowCount(8);
         input.setWrapText(true);
+        KeyboardReach.tabLeaves(input);
         dialog.getDialogPane().setContent(input);
         dialog.setResultConverter(button -> button == ButtonType.OK ? input.getText() : null);
 
