@@ -9,9 +9,9 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.testing.UiTest;
 import javafx.fxml.FXMLLoader;
+import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
-import javafx.scene.control.Button;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Tooltip;
 import javafx.stage.Stage;
@@ -63,29 +63,35 @@ public class DashboardFirstRunLinkTest extends ApplicationTest {
     }
 
     /**
-     * A disabled Connect says why in a tooltip. It is one tooltip that gets
-     * new text: the refresh runs on every server-list change, and a new
-     * Tooltip each time cost a popup control.
+     * A disabled Connect says why in a tooltip, on the holder around it: the
+     * disabled button gets no mouse events. It is one tooltip that gets new
+     * text: the refresh runs on every server-list change, and a new Tooltip
+     * each time cost a popup control.
      */
     @Test
     void aDisabledConnectKeepsOneTooltipAcrossServerListChanges() {
-        Button connect = lookup("#connectButton").query();
+        Node holder = lookup("#connectButtonHolder").query();
         ConfigStore store = ServiceLocator.get(ConfigStore.class);
         assertThat(store.getServers()).as("the test data dir starts empty").isEmpty();
-        Tooltip hint = connect.getTooltip();
+        Tooltip hint = installedTooltip(holder);
         assertThat(hint).as("the tooltip of a disabled Connect").isNotNull();
         assertThat(hint.getText()).isEqualTo(I18n.get("dashboard.no.servers"));
 
         added = firstServer();
         interact(() -> store.addServer(added));
-        assertThat(connect.getTooltip()).as("the tooltip once a server is active").isNull();
+        assertThat(installedTooltip(holder)).as("the tooltip once a server is active").isNull();
 
         interact(() -> store.removeServer(added.getId()));
         added = null;
-        assertThat(connect.getTooltip())
+        assertThat(installedTooltip(holder))
                 .as("the tooltip once the list is empty again")
                 .isSameAs(hint);
         assertThat(hint.getText()).isEqualTo(I18n.get("dashboard.no.servers"));
+    }
+
+    /** The tooltip {@link Tooltip#install} put on a node, which is not a control. */
+    private static Tooltip installedTooltip(Node node) {
+        return (Tooltip) node.getProperties().get("javafx.scene.control.Tooltip");
     }
 
     private static ServerConfig firstServer() {

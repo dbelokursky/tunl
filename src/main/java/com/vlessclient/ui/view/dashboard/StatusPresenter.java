@@ -12,6 +12,7 @@ import com.vlessclient.ui.view.Flags;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import javafx.application.Platform;
+import javafx.collections.ObservableList;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.layout.StackPane;
@@ -296,17 +297,25 @@ public class StatusPresenter {
         connectButton.setText(connectButtonText(state));
         connectButton.setDisable(false);
         switch (state) {
-            case CONNECTED -> {
-                connectButton.getStyleClass().removeAll("connect-button");
-                connectButton.getStyleClass().add("disconnect-button");
-            }
+            case CONNECTED -> paintConnectStyle("disconnect-button", "connect-button");
             case CONNECTING -> {
                 // Cancelling keeps whatever the previous state painted.
             }
-            default -> {
-                connectButton.getStyleClass().removeAll("disconnect-button");
-                connectButton.getStyleClass().add("connect-button");
-            }
+            default -> paintConnectStyle("connect-button", "disconnect-button");
+        }
+    }
+
+    /**
+     * Swaps the button's colour class, touching the list only when it
+     * changes: every repaint added the class again, so the list grew by one
+     * per state update, and each change made JavaFX match the button's
+     * styles afresh.
+     */
+    private void paintConnectStyle(String on, String off) {
+        ObservableList<String> classes = connectButton.getStyleClass();
+        classes.removeAll(off);
+        if (!classes.contains(on)) {
+            classes.add(on);
         }
     }
 
