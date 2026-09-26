@@ -20,6 +20,22 @@ public abstract class KeepsUnknownFields {
 
     private final Map<String, Object> unknownFields = new LinkedHashMap<>();
 
+    /** A model with nothing unknown yet. */
+    protected KeepsUnknownFields() {
+    }
+
+    /**
+     * A copy of {@code source}'s unknown fields, for a copy constructor.
+     * {@code ServerConfig} copies its TLS and transport blocks when they are
+     * set, the reader included, and a copy that left them out dropped every
+     * field a newer build wrote inside them on the way in.
+     *
+     * @param source the model being copied
+     */
+    protected KeepsUnknownFields(KeepsUnknownFields source) {
+        unknownFields.putAll(source.unknownFields);
+    }
+
     @JsonAnySetter
     void keepUnknownField(String name, Object value) {
         unknownFields.put(name, value);

@@ -38,6 +38,7 @@ public class TlsConfig extends KeepsUnknownFields {
     }
 
     TlsConfig(TlsConfig source) {
+        super(source);
         this.enabled = source.enabled;
         this.serverName = source.serverName;
         this.alpn = source.alpn;

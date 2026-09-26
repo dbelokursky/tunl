@@ -1,6 +1,7 @@
 package com.vlessclient.model;
 
 import java.util.stream.Stream;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import tools.jackson.databind.JsonNode;
@@ -48,5 +49,23 @@ class UnknownFieldsRoundTripTest {
         JsonNode written = mapper.readTree(mapper.writeValueAsString(fresh));
 
         assertThat(written.has("from_a_newer_build")).isFalse();
+    }
+
+    /**
+     * A server's TLS and transport blocks are copied as they are set, the
+     * reader included, and the copy left the unknown fields behind: the ones
+     * inside a server were gone the moment servers.json was read.
+     */
+    @Test
+    void aFieldFromANewerBuildInsideAServerIsWrittenBack() {
+        String newer = """
+                {"tls": {"enabled": true, "ech": {"enabled": true}},
+                 "transport": {"type": "ws", "early_data": 2048}}""";
+
+        ServerConfig read = mapper.readValue(newer, ServerConfig.class);
+        JsonNode written = mapper.readTree(mapper.writeValueAsString(read));
+
+        assertThat(written.path("tls").path("ech").path("enabled").asBoolean()).isTrue();
+        assertThat(written.path("transport").path("early_data").asInt()).isEqualTo(2048);
     }
 }

@@ -30,6 +30,9 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Controller for the add/edit server form. Adapts the visible fields and
@@ -40,6 +43,9 @@ import org.slf4j.LoggerFactory;
 public class ServerFormController {
 
     private static final Logger log = LoggerFactory.getLogger(ServerFormController.class);
+
+    /** Copies the server under edit into the draft a refusal is checked on. */
+    private static final ObjectMapper COPIER = JsonMapper.builder().build();
 
     /** Appended to a required field's label. Lives here so the two places
      *  that build one cannot drift apart. */
@@ -228,14 +234,20 @@ public class ServerFormController {
                 wsPathField.setText(transport.getPath() != null ? transport.getPath() : "");
                 wsHostField.setText(transport.getHost() != null ? transport.getHost() : "");
             } else if (transport.getType() == TransportType.GRPC) {
-                grpcServiceNameField.setText(
-                        transport.getServiceName() != null ? transport.getServiceName() : "");
+                // VMess links keep gRPC's service name in the path, and the
+                // core is given it from there; shown empty, it was saved empty.
+                String serviceName = present(transport.getServiceName())
+                        ? transport.getServiceName() : transport.getPath();
+                grpcServiceNameField.setText(serviceName != null ? serviceName : "");
             }
         }
 
         TlsConfig tls = server.getTls();
         if (tls != null) {
-            tlsEnabledCheck.setSelected(tls.isEnabled());
+            // Hysteria2's box is ticked and locked: it runs over QUIC, with TLS
+            // always on. A server stored with TLS off unticked it, locked, and
+            // a save then dropped its server name.
+            tlsEnabledCheck.setSelected(tls.isEnabled() || protocol == Protocol.HYSTERIA2);
             sniField.setText(tls.getServerName() != null ? tls.getServerName() : "");
             alpnField.setText(tls.getAlpn() != null ? tls.getAlpn() : "");
             fingerprintField.setText(tls.getFingerprint() != null ? tls.getFingerprint() : "");
@@ -272,7 +284,8 @@ public class ServerFormController {
         }
         // Checked on a draft: the server being edited is the one in the list,
         // and a refused edit must not change it on the way to being refused.
-        ServerConfig draft = new ServerConfig();
+        // A copy of it, so the draft holds what the form does not show too.
+        ServerConfig draft = editingServer != null ? copyOf(editingServer) : new ServerConfig();
         writeFormInto(draft);
         CoreSettings.Refusal refusal = CoreSettings.refusal(draft).orElse(null);
         if (refusal != null) {
@@ -296,6 +309,16 @@ public class ServerFormController {
      */
     private void writeFormInto(ServerConfig server) {
         Protocol protocol = protocolCombo.getValue();
+        // The transport and TLS blocks the server has, with what the form
+        // shows written over them. New ones lost everything the form does not
+        // show: request headers, WireGuard's reserved bytes (kept in the TLS
+        // server name), fields a newer build wrote. A server moved to another
+        // protocol starts both afresh: what they held belonged to the old one.
+        boolean sameProtocol = protocol == server.getProtocol();
+        final TransportConfig transport = sameProtocol && server.getTransport() != null
+                ? server.getTransport() : new TransportConfig();
+        final TlsConfig tls = sameProtocol && server.getTls() != null
+                ? server.getTls() : new TlsConfig();
         server.setName(nameField.getText().trim());
         server.setProtocol(protocol);
         server.setAddress(addressField.getText().trim());
@@ -304,43 +327,67 @@ public class ServerFormController {
         server.setEncryption(encryptionCombo.getValue());
         server.setFlow(flowCombo.getValue());
 
-        // Transport
-        TransportConfig transport = new TransportConfig();
-        if (isTransportVisible()) {
-            transport.setType(mapTransportType(transportTypeCombo.getValue()));
-            if (usesPathAndHost(transport.getType())) {
-                transport.setPath(wsPathField.getText().trim());
-                transport.setHost(wsHostField.getText().trim());
-            } else if (transport.getType() == TransportType.GRPC) {
-                transport.setServiceName(grpcServiceNameField.getText().trim());
-            }
-        }
+        writeTransport(transport);
         server.setTransport(transport);
-
-        // TLS
-        TlsConfig tls = new TlsConfig();
-        if (isTlsVisible()) {
-            tls.setEnabled(tlsEnabledCheck.isSelected());
-            if (tls.isEnabled()) {
-                tls.setServerName(sniField.getText().trim());
-                tls.setAlpn(alpnField.getText().trim());
-                tls.setFingerprint(fingerprintField.getText().trim());
-                tls.setAllowInsecure(allowInsecureCheck.isSelected());
-                tls.setReality(realityCheck.isSelected());
-                if (tls.isReality()) {
-                    tls.setRealityPublicKey(realityPublicKeyField.getText().trim());
-                    tls.setRealityShortId(realityShortIdField.getText().trim());
-                }
-            }
-        } else if (protocol == Protocol.HYSTERIA2) {
-            // Hysteria2 always has TLS on
-            tls.setEnabled(true);
-            tls.setServerName(sniField.getText().trim());
-            tls.setAlpn(alpnField.getText().trim());
-            tls.setFingerprint(fingerprintField.getText().trim());
-            tls.setAllowInsecure(allowInsecureCheck.isSelected());
-        }
+        writeTls(tls, protocol);
         server.setTls(tls);
+    }
+
+    /**
+     * Writes the transport the form shows. The fields its type has come from
+     * the form and the others are cleared: a WebSocket path left behind would
+     * become a gRPC service name, which the core is given from the path when
+     * the service name is empty. Headers stay, the form does not show them.
+     */
+    private void writeTransport(TransportConfig transport) {
+        // Shadowsocks, Hysteria2 and WireGuard have no transport to choose.
+        TransportType type = isTransportVisible()
+                ? mapTransportType(transportTypeCombo.getValue()) : TransportType.TCP;
+        transport.setType(type);
+        boolean pathAndHost = usesPathAndHost(type);
+        transport.setPath(pathAndHost ? wsPathField.getText().trim() : null);
+        transport.setHost(pathAndHost ? wsHostField.getText().trim() : null);
+        transport.setServiceName(type == TransportType.GRPC
+                ? grpcServiceNameField.getText().trim() : null);
+    }
+
+    /** Writes the TLS settings the form shows over {@code tls}. */
+    private void writeTls(TlsConfig tls, Protocol protocol) {
+        if (!isTlsVisible()) {
+            // Shadowsocks and WireGuard have no TLS. The rest of the block
+            // stays as it is: WireGuard keeps its reserved bytes there.
+            tls.setEnabled(false);
+            return;
+        }
+        tls.setEnabled(tlsEnabledCheck.isSelected() || protocol == Protocol.HYSTERIA2);
+        boolean enabled = tls.isEnabled();
+        tls.setServerName(enabled ? sniField.getText().trim() : null);
+        tls.setAlpn(enabled ? alpnField.getText().trim() : null);
+        tls.setFingerprint(enabled ? fingerprintField.getText().trim() : null);
+        tls.setAllowInsecure(enabled && allowInsecureCheck.isSelected());
+        // Only where the form offers REALITY: the box hidden for this protocol
+        // still held what it was ticked for the protocol picked before.
+        boolean reality = enabled && isRealityVisible() && realityCheck.isSelected();
+        tls.setReality(reality);
+        tls.setRealityPublicKey(reality ? realityPublicKeyField.getText().trim() : null);
+        tls.setRealityShortId(reality ? realityShortIdField.getText().trim() : null);
+    }
+
+    /**
+     * A copy of {@code server}, through its JSON like a duplicated server, so
+     * that fields the form does not know are copied too.
+     */
+    private static ServerConfig copyOf(ServerConfig server) {
+        try {
+            return COPIER.readValue(COPIER.writeValueAsBytes(server), ServerConfig.class);
+        } catch (JacksonException e) {
+            log.warn("Could not copy the server under edit; checking the form alone", e);
+            return new ServerConfig();
+        }
+    }
+
+    private static boolean present(String value) {
+        return value != null && !value.isBlank();
     }
 
     @FXML
@@ -399,11 +446,11 @@ public class ServerFormController {
                 setNodeVisible(realitySection, false);
             }
             case TROJAN -> {
-                // UUID label -> "Password", no Flow, no Reality
+                // UUID label -> "Password", no Flow. REALITY stays: a Trojan
+                // link can carry it, and the core takes it.
                 bindRequired(uuidLabel, "form.password");
                 uuidField.setPromptText(I18n.get("form.prompt.password"));
                 setNodeVisible(flowBox, false);
-                setNodeVisible(realitySection, false);
                 setNodeVisible(encryptionBox, false);
             }
             case SHADOWSOCKS -> {
@@ -694,5 +741,9 @@ public class ServerFormController {
 
     private boolean isTlsVisible() {
         return tlsSection.isVisible() && tlsSection.isManaged();
+    }
+
+    private boolean isRealityVisible() {
+        return realitySection.isVisible() && realitySection.isManaged();
     }
 }
