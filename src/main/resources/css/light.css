@@ -25,11 +25,10 @@
     -c-text-subheading: #555555;  /* .form-section-title */
     -c-text-strong:     #333333;  /* server name, combo editor */
     -c-text-body:       #333333;  /* checkbox + log body text */
-    -c-text-label:      #5b6570;  /* .field-label */
     -c-text-form-label: #666666;  /* .form-label */
     -c-text-meta:       #6d6d6d;  /* .server-address */
-    -c-text-faint:      #757575;  /* .hint-label, legacy .status-label-* */
-    -c-text-disabled:   #9e9e9e;  /* inert dot / timestamp / idle server name */
+    -c-text-faint:      #757575;  /* .hint-label */
+    -c-text-disabled:   #9e9e9e;  /* inert dot / log timestamp */
     -c-text-placeholder:#6d6d6d;  /* combo editor prompt */
 
     /* ----- Accent (green) ----- */
@@ -52,7 +51,6 @@
     -c-danger-chip-fg:  #c62828;  /* .latency-chip-fail text */
     -c-danger-tint:     #ffebee;
     -c-danger-tint-soft:#fdecea;  /* .latency-chip-fail background */
-    -c-danger-tint-strong: #ffcdd2;  /* .danger-button:hover */
 
     /* ----- Warn (orange) ----- */
     -c-warn:            #ef6c00;
@@ -94,7 +92,6 @@
     /* ----- Logs ----- */
     -c-log-bg:          #fafafa;
     -c-log-selection:   #e0e0e0;
-    -c-log-debug:       #9e9e9e;
     -c-log-level-debug: #78909c;
     -c-log-level-info:  #1976d2;
     -c-log-level-error: #c62828;
