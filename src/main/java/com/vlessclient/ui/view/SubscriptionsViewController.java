@@ -337,8 +337,11 @@ public class SubscriptionsViewController implements ViewShownAware {
     /**
      * The name a row shows: the subscription's, or its host's until the
      * first refresh names a subscription that was added without one.
+     *
+     * @param sub the subscription
+     * @return the name to show; empty when there is neither
      */
-    static String shownName(Subscription sub) {
+    public static String shownName(Subscription sub) {
         String name = sub.getName();
         if (name != null && !name.isBlank()) {
             return name;
