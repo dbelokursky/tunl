@@ -29,7 +29,14 @@ On a pushed `v*` tag:
 - **Per OS** — macOS (Apple Silicon), Windows x64, Linux amd64, Linux arm64:
   fat JAR, the real-binary smoke suite (`SingBoxRealBinarySmokeTest`) on the
   bundled core, the installer via the shared `scripts/package-*` script, and
-  a `gh release upload` into that draft.
+  the installer handed on as a workflow artifact. These jobs run with a
+  read-only token: they run Maven, its plugins, the downloaded core and the
+  packaging tools, none of which needs to write the release.
+- **Upload and provenance** (`upload-installers`): the one job that uploads
+  the installers, and it runs no build. It checks each installer against the
+  digest its builder recorded, attests its build provenance
+  (`actions/attest-build-provenance`, verified with `gh attestation verify`),
+  and uploads the four into the draft.
 - **Signing and notarization**, gated on secrets (`SIGNING.md`): macOS
   `codesign` + `notarytool` + `stapler`, Windows `signtool`. A partially
   configured set of secrets fails the job; no secrets means an unsigned
