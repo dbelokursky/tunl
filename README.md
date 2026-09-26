@@ -402,9 +402,11 @@ else saves on click.
 | | Check interval / Reconnect delay | Seconds between checks (`5`) and before the first retry (`10`) |
 | Advanced | Proxy DNS | Resolver for tunnelled names, queried through the tunnel (`https://1.1.1.1/dns-query`) |
 | | Direct DNS | Resolver for direct-routed names — the bypass list, Direct rules, bypassed countries (`system`: the resolver of the network you are on) |
+| | DNS strategy | Which addresses the core asks for when it resolves a name: Prefer IPv4 (default) / Prefer IPv6 / IPv4 only / IPv6 only; in TUN mode without IPv6 it is IPv4 only |
 | | TUN Interface Name | `utun99` on macOS and Linux, `VlessClientTun` on Windows |
 | | TUN IPv4 Address | `172.19.0.1/30` |
 | | Route IPv6 through the tunnel | On by default, where the machine has an IPv6 address; off, IPv6 traffic bypasses the VPN on dual-stack networks |
+| | Let other programs use the local proxy in TUN mode | Off by default: in TUN mode the local SOCKS and HTTP proxies ask for a password only this run of Tunl knows, since the tunnel already carries every program's traffic; on, any program on the machine can use them, as in System Proxy mode |
 | | Store credentials in the system keychain | Seal server credentials and subscription URLs with Keychain / DPAPI / Secret Service instead of writing them into the JSON files; Settings says when the keychain is not available and the files hold them |
 | | Device ID | The identifier sent with subscription requests, with a button to make a new one; random, made once per install |
 | Agent Control (MCP) | Enable MCP server, Port, Allow configuration changes, Copy command, Regenerate token | See [Agent control](#agent-control-mcp) |
