@@ -233,9 +233,13 @@
                 <ComboBox fx:id="serverSelectionCombo" prefWidth="190" minWidth="60" styleClass="mode-combo"/>
                 <Region HBox.hgrow="ALWAYS"/>
                 <!-- No width here: the controller pins it from the four labels
-                     this button can show, in whatever language is on. -->
-                <Button fx:id="connectButton" text="Connect" styleClass="connect-button"
-                        onAction="#onConnectClicked" prefHeight="44"/>
+                     this button can show, in whatever language is on. The
+                     holder carries the tooltip of a disabled Connect: the
+                     button then gets no mouse events and never showed it. -->
+                <StackPane fx:id="connectButtonHolder">
+                    <Button fx:id="connectButton" text="Connect" styleClass="connect-button"
+                            onAction="#onConnectClicked" prefHeight="44"/>
+                </StackPane>
             </HBox>
             <Label fx:id="proxyModeWarning" text="" styleClass="hint-label"
                    wrapText="true" maxWidth="Infinity" visible="false" managed="false"/>

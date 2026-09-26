@@ -73,6 +73,7 @@ public class DashboardViewController implements ViewShownAware {
     @FXML private Label statusLabel;
     @FXML private Label serverNameLabel;
     @FXML private Button connectButton;
+    @FXML private StackPane connectButtonHolder;
     @FXML private VBox trafficSummary;
     @FXML private Label uploadSpeedLabel;
     @FXML private Label downloadSpeedLabel;
@@ -174,6 +175,8 @@ public class DashboardViewController implements ViewShownAware {
      * and a new Tooltip each time cost a popup control.
      */
     private final Tooltip connectBlockedTooltip = new Tooltip();
+    /** Connect had focus when a start or a stop disabled it; see holdConnect. */
+    private boolean connectFocusHeld;
 
     /**
      * Wires up services, the connection-state listener, traffic/latency
@@ -863,7 +866,7 @@ public class DashboardViewController implements ViewShownAware {
         // Tracked for the UI (flag, server name, server-switch detection); the
         // service resolves the active server again as the real source of truth.
         activeServer = findActiveServer();
-        connectButton.setDisable(true);
+        holdConnect();
         Thread.startVirtualThread(() -> runConnect(service, false));
     }
 
@@ -877,7 +880,7 @@ public class DashboardViewController implements ViewShownAware {
             return;
         }
         activeServer = findActiveServer();
-        connectButton.setDisable(true);
+        holdConnect();
         Thread.startVirtualThread(() -> runConnect(service, true));
     }
 
@@ -977,7 +980,7 @@ public class DashboardViewController implements ViewShownAware {
         }
         // A stop waits out a SIGTERM grace period and can force-kill after it,
         // so it cannot run on the FX thread either.
-        connectButton.setDisable(true);
+        holdConnect();
         Thread.startVirtualThread(() -> {
             try {
                 service.disconnect();
@@ -1024,7 +1027,7 @@ public class DashboardViewController implements ViewShownAware {
         ConnectionService service = connectionService();
         if (service != null) {
             activeServer = nowActive;
-            connectButton.setDisable(true);
+            holdConnect();
             Thread.startVirtualThread(() -> runConnect(service, true, true));
         }
     }
@@ -1118,13 +1121,21 @@ public class DashboardViewController implements ViewShownAware {
             explainDisabledConnect("dashboard.no.server");
         } else {
             connectButton.setDisable(false);
-            connectButton.setTooltip(null);
+            Tooltip.uninstall(connectButtonHolder, connectBlockedTooltip);
+            connectButton.setAccessibleHelp(null);
         }
     }
 
+    /**
+     * Says why Connect is disabled: in a tooltip on its holder, since the
+     * disabled button itself gets no mouse events and never showed one, and
+     * to a screen reader, which reads a disabled button's help.
+     */
     private void explainDisabledConnect(String key) {
-        connectBlockedTooltip.setText(I18n.get(key));
-        connectButton.setTooltip(connectBlockedTooltip);
+        String reason = I18n.get(key);
+        connectBlockedTooltip.setText(reason);
+        Tooltip.install(connectButtonHolder, connectBlockedTooltip);
+        connectButton.setAccessibleHelp(reason);
     }
 
     private TunnelHealth currentHealth() {
@@ -1135,6 +1146,32 @@ public class DashboardViewController implements ViewShownAware {
     private void updateUi(ConnectionState state) {
         statusPresenter.update(state);
         refreshPendingChanges(state);
+        returnFocusToConnect();
+    }
+
+    /**
+     * Disables Connect while a start or a stop it began runs, keeping the
+     * keyboard where it was. Disabling the focused button moved focus on to
+     * the next control, the health card's "+", so a second Space opened "Add
+     * service". The holder takes focus meanwhile, and does nothing with a
+     * key; the button takes it back once it is enabled.
+     */
+    private void holdConnect() {
+        if (connectButton.isFocused()) {
+            connectButtonHolder.requestFocus();
+            connectFocusHeld = true;
+        }
+        connectButton.setDisable(true);
+    }
+
+    /** Hands focus back to Connect, if it held it and nothing has taken it since. */
+    private void returnFocusToConnect() {
+        if (connectFocusHeld && !connectButton.isDisabled()) {
+            connectFocusHeld = false;
+            if (connectButtonHolder.isFocused()) {
+                connectButton.requestFocus();
+            }
+        }
     }
 
     /** The core's state, or this view's own when there is no engine. */
