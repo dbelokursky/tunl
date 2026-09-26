@@ -62,13 +62,15 @@ public class ServersImportConfTest extends ApplicationTest {
     static Path tempDir;
 
     private ConfigStore store;
+    private Path storeDir;
     private ServersViewController controller;
     private Stage stage;
 
     @Override
     public void start(Stage stage) throws IOException {
         this.stage = stage;
-        store = TestConfigStores.at(tempDir.resolve(UUID.randomUUID().toString()));
+        storeDir = tempDir.resolve(UUID.randomUUID().toString());
+        store = TestConfigStores.at(storeDir);
         ServiceLocator.register(ConfigStore.class, store);
         ServiceLocator.register(ShareLinkParser.class, new ShareLinkParser());
         ServiceLocator.register(ServerBackupService.class,
@@ -101,6 +103,7 @@ public class ServersImportConfTest extends ApplicationTest {
         ServerConfig server = awaitServer(Protocol.WIREGUARD);
         assertThat(server.getAddress()).isEqualTo("wg.example");
         assertThat(server.getPort()).isEqualTo(51820);
+        awaitSaved("wg.example");
     }
 
     @Test
@@ -110,6 +113,7 @@ public class ServersImportConfTest extends ApplicationTest {
         interact(() -> controller.importFile(conf));
 
         assertThat(awaitServer(Protocol.WIREGUARD).getAddress()).isEqualTo("wg.example");
+        awaitSaved("wg.example");
     }
 
     @Test
@@ -123,6 +127,7 @@ public class ServersImportConfTest extends ApplicationTest {
         Await.until("both servers", () -> store.getServers().size() == 2, TIMEOUT);
         assertThat(store.getServers()).extracting(ServerConfig::getAddress)
                 .containsExactlyInAnyOrder("one.example", "two.example");
+        awaitSaved("two.example");
     }
 
     /** The empty list named neither subscriptions nor the paste shortcut. */
@@ -143,6 +148,24 @@ public class ServersImportConfTest extends ApplicationTest {
                 .filter(item -> id.equals(item.getId()))
                 .findFirst()
                 .orElseThrow();
+    }
+
+    /**
+     * Waits for the import's save to reach servers.json. The import saves on
+     * its own thread after the list shows the server, so the test could end
+     * with the write under way: the temp dir's cleanup then found a file
+     * appearing in the store's directory, and on Windows it failed the class
+     * with "directory not empty".
+     */
+    private void awaitSaved(String address) {
+        Path file = storeDir.resolve("servers.json");
+        Await.until("servers.json to hold " + address, () -> {
+            try {
+                return Files.exists(file) && Files.readString(file).contains(address);
+            } catch (IOException e) {
+                return false;
+            }
+        }, TIMEOUT);
     }
 
     private ServerConfig awaitServer(Protocol protocol) {
