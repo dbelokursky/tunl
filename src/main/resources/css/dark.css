@@ -27,10 +27,10 @@
     -c-text-body:       #cccccc;  /* checkbox + log body text */
     -c-text-label:      #9aa0a6;  /* .field-label */
     -c-text-form-label: #999999;  /* .form-label */
-    -c-text-meta:       #777777;  /* .server-address */
+    -c-text-meta:       #929292;  /* .server-address */
     -c-text-faint:      #9e9e9e;  /* .hint-label, legacy .status-label-* */
     -c-text-disabled:   #757575;  /* inert dot / timestamp / idle server name */
-    -c-text-placeholder:#666666;  /* combo editor prompt */
+    -c-text-placeholder:#929292;  /* combo editor prompt */
 
     /* ----- Accent (green) ----- */
     -c-accent:          #2e7d32;  /* button fill */
@@ -70,9 +70,9 @@
     -c-row-border:      #3a3a3a;
     -c-row-border-hover:#555555;
     -c-field-bg:        #2a2a2a;  /* .form-field */
-    -c-field-border:    #3a3a3a;
+    -c-field-border:    #747474;
     -c-field-text:      #e0e0e0;
-    -c-field-prompt:    #666666;
+    -c-field-prompt:    #929292;
     -c-input-focus-bg:  #2d2d2d;  /* focused text area / form field */
     -c-actions-bg:      #252525;  /* .form-actions strip */
     -c-code-bg:         #202022;  /* .code-area */
@@ -82,8 +82,8 @@
     -c-chip-muted:      #8b9099;
     -c-button-secondary-fg: #e8e8ea;
     -c-empty-icon:      #555555;
-    -c-empty-title:     #777777;
-    -c-empty-hint:      #666666;
+    -c-empty-title:     #a0a4aa;
+    -c-empty-hint:      #929292;
     -c-scroll-thumb:    #555555;
     -c-scroll-thumb-hover: #777777;
 
