@@ -1,7 +1,9 @@
 # jlink options for the packaged runtime, read by the three packaging scripts
 # (package-dmg.sh, package-linux.sh, package-windows.ps1) so macOS, Windows
-# and Linux can never link their runtimes differently. The module list is
-# the other half of that contract: scripts/runtime-modules.txt.
+# and Linux can never link their runtimes differently, and by
+# verify-runtime-modules.sh, whose probe runs on a runtime linked the same
+# way. The module list is the other half of that contract:
+# scripts/runtime-modules.txt.
 #
 # --jlink-options REPLACES jpackage's defaults rather than adding to them, so
 # the four it would have passed on its own are repeated here. Dropping one
@@ -20,3 +22,8 @@
 --strip-debug
 --no-man-pages
 --no-header-files
+# jdk.localedata is linked for Russian (runtime-modules.txt) and carries every
+# other locale's data too. The UI speaks English and Russian; a system locale
+# outside them formats numbers and dates by the root rules, as it would with
+# the module left out.
+--include-locales=en,ru

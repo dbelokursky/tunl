@@ -7,17 +7,28 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
 
+/**
+ * The app icon at every size it ships in. The PNGs the running app loads are
+ * resources; the 1024 px PNG, the ICNS and the ICO are read only by jpackage
+ * and live in packaging/icons, out of the jar.
+ */
 class AppIconAssetTest {
 
     private static final int[] PNG_SIZES = {16, 32, 64, 128, 256, 512, 1024};
+    private static final Path PACKAGING = Path.of("packaging/icons");
 
     @Test
     void pngAssetsKeepConsistentOpticalMargins() throws IOException {
         for (int size : PNG_SIZES) {
-            BufferedImage icon = readPng("/icons/app-icon-" + size + ".png");
+            BufferedImage icon = size == 1024
+                    ? readPng(PACKAGING.resolve("app-icon-1024.png"))
+                    : readPng("/icons/app-icon-" + size + ".png");
 
             assertThat(icon.getWidth()).isEqualTo(size);
             assertThat(icon.getHeight()).isEqualTo(size);
@@ -37,23 +48,23 @@ class AppIconAssetTest {
         }
     }
 
+    /**
+     * The jar, which every installer and every update carries, holds only the
+     * icons the app loads. It carried 3.2 MB more: the ICNS, the ICO, the
+     * 1024 px PNG and a copy of the 512 px one.
+     */
     @Test
-    void conveniencePngMatchesThe512PixelAsset() throws IOException {
-        BufferedImage convenience = readPng("/icons/app-icon.png");
-        BufferedImage canonical = readPng("/icons/app-icon-512.png");
-
-        assertThat(convenience.getWidth()).isEqualTo(512);
-        assertThat(convenience.getHeight()).isEqualTo(512);
-        for (int y = 0; y < 512; y++) {
-            for (int x = 0; x < 512; x++) {
-                assertThat(convenience.getRGB(x, y)).isEqualTo(canonical.getRGB(x, y));
-            }
+    void theJarCarriesOnlyTheIconsTheAppLoads() {
+        for (String packagingOnly : List.of("/icons/app-icon.icns", "/icons/app-icon.ico",
+                "/icons/app-icon-1024.png", "/icons/app-icon.png")) {
+            assertThat(AppIconAssetTest.class.getResource(packagingOnly))
+                    .as("%s among the app's resources", packagingOnly).isNull();
         }
     }
 
     @Test
     void icoContainsAllWindowsResolutions() throws IOException {
-        byte[] ico = readResource("/icons/app-icon.ico");
+        byte[] ico = Files.readAllBytes(PACKAGING.resolve("app-icon.ico"));
         ByteBuffer header = ByteBuffer.wrap(ico).order(ByteOrder.LITTLE_ENDIAN);
 
         assertThat(header.getShort()).isZero();
@@ -63,7 +74,7 @@ class AppIconAssetTest {
 
     @Test
     void icnsHasTheExpectedContainerHeader() throws IOException {
-        byte[] icns = readResource("/icons/app-icon.icns");
+        byte[] icns = Files.readAllBytes(PACKAGING.resolve("app-icon.icns"));
 
         assertThat(new String(icns, 0, 4, java.nio.charset.StandardCharsets.US_ASCII))
                 .isEqualTo("icns");
@@ -78,11 +89,10 @@ class AppIconAssetTest {
         }
     }
 
-    private static byte[] readResource(String resource) throws IOException {
-        try (InputStream stream = AppIconAssetTest.class.getResourceAsStream(resource)) {
-            assertThat(stream).as(resource).isNotNull();
-            return stream.readAllBytes();
-        }
+    private static BufferedImage readPng(Path file) throws IOException {
+        BufferedImage image = ImageIO.read(file.toFile());
+        assertThat(image).as(file.toString()).isNotNull();
+        return image;
     }
 
     private static int alphaAt(BufferedImage image, int x, int y) {

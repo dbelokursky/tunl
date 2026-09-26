@@ -260,9 +260,6 @@ public class VlessClientApp extends Application {
             }
             URL iconUrl = getClass().getResource("/icons/app-icon-512.png");
             if (iconUrl == null) {
-                iconUrl = getClass().getResource("/icons/app-icon.png");
-            }
-            if (iconUrl == null) {
                 log.debug("No app icon resource found for Dock");
                 return;
             }
@@ -622,25 +619,14 @@ public class VlessClientApp extends Application {
         // 1024 px one alone was 4 MB of heap no window manager asks for (the
         // macOS Dock icon is set on its own, in setDockIcon).
         int[] sizes = {16, 32, 64, 128, 256, 512};
-        int loaded = 0;
         for (int size : sizes) {
             String path = "/icons/app-icon-" + size + ".png";
             try (InputStream iconStream = getClass().getResourceAsStream(path)) {
                 if (iconStream != null) {
                     stage.getIcons().add(new Image(iconStream));
-                    loaded++;
                 }
             } catch (IOException | RuntimeException e) {
                 log.debug("Failed to load icon {}", path);
-            }
-        }
-        if (loaded == 0) {
-            try (InputStream fallback = getClass().getResourceAsStream("/icons/app-icon.png")) {
-                if (fallback != null) {
-                    stage.getIcons().add(new Image(fallback));
-                }
-            } catch (IOException | RuntimeException e) {
-                log.debug("No application icon found, using default");
             }
         }
     }
