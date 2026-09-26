@@ -1156,6 +1156,41 @@
     -fx-background-color: -c-accent-press;
 }
 
+/* Keyboard focus in the window. The button styles above replace the
+   background layers Modena draws focus into, so a Tab through the window
+   showed nothing: Connect, the navigation and every other button looked the
+   same focused or not. A ring outside the button, as the dialogs below have,
+   and only for focus the keyboard moved (focus-visible), so a click leaves
+   none behind. Stated after the hover rules, so a hovered button keeps it. */
+.nav-button:focus-visible,
+.connect-button:focus-visible,
+.disconnect-button:focus-visible,
+.primary-button:focus-visible,
+.icon-button:focus-visible {
+    -fx-border-color: -c-accent-fg;
+    -fx-border-width: 2;
+    -fx-border-insets: -3;
+    -fx-border-radius: 11;
+}
+
+/* The secondary style has a border of its own, kept as the first layer. */
+.secondary-button:focus-visible {
+    -fx-border-color: -c-border-strong, -c-accent-fg;
+    -fx-border-width: 1, 2;
+    -fx-border-insets: 0, -3;
+    -fx-border-radius: 8, 11;
+}
+
+/* The row Delete and Enter act on, in the server, subscription and rule
+   lists. The selection was transparent, so those keys acted on a row nobody
+   could see. The border is a pixel wider and the padding a pixel smaller,
+   so nothing inside the row moves. */
+.server-list .list-cell:filled:selected .server-list-item {
+    -fx-border-color: -c-accent-fg;
+    -fx-border-width: 2;
+    -fx-padding: 11 15;
+}
+
 /* Modena draws keyboard focus into the background layers the rules above
    replace, and a dialog is where the keyboard gets used: Enter, Escape, Tab.
    The ring is a second border outside the button, so the fill and hover rules
