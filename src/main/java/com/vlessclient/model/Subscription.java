@@ -87,6 +87,13 @@ public class Subscription extends KeepsUnknownFields {
     @JsonProperty("leftOutSummary")
     private String leftOutSummary = "";
 
+    /**
+     * How often the provider asks to be refreshed, in hours, from its
+     * {@code profile-update-interval} header; 0 when it names none.
+     */
+    @JsonProperty("updateIntervalHours")
+    private int updateIntervalHours;
+
     public Subscription() {
         this.id = UUID.randomUUID().toString();
     }
@@ -267,6 +274,15 @@ public class Subscription extends KeepsUnknownFields {
     public void setLeftOut(int links, String summary) {
         this.leftOutLinks = Math.max(0, links);
         this.leftOutSummary = leftOutLinks == 0 || summary == null ? "" : summary;
+    }
+
+    /** The provider's refresh interval in hours, or 0 when it names none. */
+    public int getUpdateIntervalHours() {
+        return updateIntervalHours;
+    }
+
+    public void setUpdateIntervalHours(int updateIntervalHours) {
+        this.updateIntervalHours = Math.max(0, updateIntervalHours);
     }
 
     @Override
