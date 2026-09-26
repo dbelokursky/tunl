@@ -293,18 +293,15 @@ public final class TrafficDisplayBinder {
             return;
         }
         if (state == ConnectionState.CONNECTED) {
-            int port;
-            String secret;
-            try {
-                // Read on the FX thread: AppSettings is the shared instance the
-                // UI mutates, and the queue below runs elsewhere.
-                AppSettings settings = ServiceLocator.get(AppSettings.class);
-                port = settings.listenClashApiPort();
-                secret = settings.getClashApiSecret();
-            } catch (IllegalArgumentException e) {
+            // Read on the FX thread: AppSettings is the shared instance the
+            // UI mutates, and the queue below runs elsewhere.
+            AppSettings settings = ServiceLocator.find(AppSettings.class).orElse(null);
+            if (settings == null) {
                 log.warn("Could not get AppSettings for TrafficMonitor");
                 return;
             }
+            int port = settings.listenClashApiPort();
+            String secret = settings.getClashApiSecret();
             lifecycle.execute(() -> trafficMonitor.start(port, secret));
             showConnected();
         } else if (state == ConnectionState.DISCONNECTED || state == ConnectionState.ERROR) {

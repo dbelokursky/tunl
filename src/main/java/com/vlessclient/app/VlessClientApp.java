@@ -136,25 +136,26 @@ public class VlessClientApp extends Application {
      * SYSTEM_PROXY mode, where no OS proxy is ever set.
      */
     private void clearStaleSystemProxy() {
-        try {
-            AppSettings settings = ServiceLocator.get(AppSettings.class);
-            if (settings.getProxyMode() != ProxyMode.SYSTEM_PROXY) {
-                return;
-            }
-            SingBoxEngine engine = ServiceLocator.get(SingBoxEngine.class);
-            engine.clearStaleSystemProxyOnStartup("127.0.0.1", settings.getHttpPort());
-            // A run that had moved off the chosen port, because another program
-            // held it, left its proxy on the port it moved to.
-            Path dataDir = ServiceLocator.get(ConfigStore.class).getDataDir();
-            SessionPorts.recorded(dataDir).ifPresent(port -> {
-                if (port != settings.getHttpPort()) {
-                    engine.clearStaleSystemProxyOnStartup("127.0.0.1", port);
-                }
-            });
-            SessionPorts.forget(dataDir);
-        } catch (IllegalArgumentException e) {
+        AppSettings settings = ServiceLocator.find(AppSettings.class).orElse(null);
+        SingBoxEngine engine = ServiceLocator.find(SingBoxEngine.class).orElse(null);
+        ConfigStore store = ServiceLocator.find(ConfigStore.class).orElse(null);
+        if (settings == null || engine == null || store == null) {
             log.debug("Skipping stale-proxy cleanup; services unavailable");
+            return;
         }
+        if (settings.getProxyMode() != ProxyMode.SYSTEM_PROXY) {
+            return;
+        }
+        engine.clearStaleSystemProxyOnStartup("127.0.0.1", settings.getHttpPort());
+        // A run that had moved off the chosen port, because another program
+        // held it, left its proxy on the port it moved to.
+        Path dataDir = store.getDataDir();
+        SessionPorts.recorded(dataDir).ifPresent(port -> {
+            if (port != settings.getHttpPort()) {
+                engine.clearStaleSystemProxyOnStartup("127.0.0.1", port);
+            }
+        });
+        SessionPorts.forget(dataDir);
     }
 
     /**
@@ -165,11 +166,8 @@ public class VlessClientApp extends Application {
      * also use the locator's dormant startup mode.
      */
     private void refreshLoginItem() {
-        try {
-            ServiceLocator.get(Autostart.class).refresh();
-        } catch (IllegalArgumentException e) {
-            log.debug("Autostart not available");
-        }
+        ServiceLocator.find(Autostart.class).ifPresentOrElse(Autostart::refresh,
+                () -> log.debug("Autostart not available"));
     }
 
     /**
@@ -432,13 +430,12 @@ public class VlessClientApp extends Application {
     }
 
     private void replaceLegacyRule() {
-        Path binary;
-        try {
-            binary = ServiceLocator.get(SingBoxInstaller.class).managedBinaryPath();
-        } catch (IllegalArgumentException e) {
+        SingBoxInstaller installer = ServiceLocator.find(SingBoxInstaller.class).orElse(null);
+        if (installer == null) {
             log.warn("SingBoxInstaller unavailable; cannot replace the legacy rule");
             return;
         }
+        Path binary = installer.managedBinaryPath();
         Thread.startVirtualThread(() -> {
             try {
                 PrivilegeHelper.configure(binary, I18n.get("security.legacy.rule.prompt"));
@@ -547,21 +544,11 @@ public class VlessClientApp extends Application {
      * Dashboard will show a brew-install hint.
      */
     private void ensureSingBoxAvailable() {
-        boolean alreadyAvailable;
-        try {
-            ServiceLocator.get(SingBoxEngine.class);
-            alreadyAvailable = true;
-        } catch (IllegalArgumentException e) {
-            alreadyAvailable = false;
-        }
-        if (alreadyAvailable) {
+        if (ServiceLocator.find(SingBoxEngine.class).isPresent()) {
             return;
         }
-
-        SingBoxInstaller installer;
-        try {
-            installer = ServiceLocator.get(SingBoxInstaller.class);
-        } catch (IllegalArgumentException e) {
+        SingBoxInstaller installer = ServiceLocator.find(SingBoxInstaller.class).orElse(null);
+        if (installer == null) {
             log.warn("SingBoxInstaller not available; skipping auto-install");
             return;
         }
@@ -581,10 +568,9 @@ public class VlessClientApp extends Application {
         try {
             ConfigStore configStore = ServiceLocator.get(ConfigStore.class);
             ConnectionService connectionService = ServiceLocator.get(ConnectionService.class);
-            TunnelHealthState healthState = null;
-            try {
-                healthState = ServiceLocator.get(TunnelHealthState.class);
-            } catch (IllegalArgumentException e) {
+            TunnelHealthState healthState =
+                    ServiceLocator.find(TunnelHealthState.class).orElse(null);
+            if (healthState == null) {
                 log.debug("TunnelHealthState not available; "
                         + "tray icon will report process state only");
             }
