@@ -83,6 +83,15 @@ jobs:
         with:
           path: ~/.cache/vless-client-build
           key: sing-box-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/main/resources/singbox.properties') }}
+      # The macOS runner coalesces timers: Thread.sleep(10) took 32 to 47 ms
+      # there against 10.1 on Linux, so every wait and every JavaFX pulse in
+      # the UI tests stretched with it, and the macOS leg took 13 minutes
+      # against 6. With coalescing off the same sleep takes 10.07 ms, and the
+      # four slowest UI test classes ran in 63 s instead of 175 (Linux: 56).
+      # The switch is the kernel's, for this throwaway runner only.
+      - name: Stop timer coalescing
+        if: runner.os == 'macOS'
+        run: sudo sysctl -w kern.timer.coalescing_enabled=0
       # ./mvnw, so every runner builds with the Maven this repository pins:
       # the arm64 image carries 3.9.12 and the others 3.9.16, and a plugin
       # version can come from the Maven rather than from the POM. bash also on
