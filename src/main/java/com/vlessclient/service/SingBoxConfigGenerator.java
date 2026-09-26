@@ -9,6 +9,7 @@ import com.vlessclient.model.RoutingRule;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.ServerSelection;
 import com.vlessclient.platform.Ipv6Uplink;
+import com.vlessclient.service.outbound.DnsTags;
 import com.vlessclient.service.outbound.Hysteria2OutboundBuilder;
 import com.vlessclient.service.outbound.OutboundTags;
 import com.vlessclient.service.outbound.ShadowsocksOutboundBuilder;
@@ -275,15 +276,15 @@ public class SingBoxConfigGenerator {
     private ObjectNode buildDns(AppSettings settings, RoutingConfig routingConfig,
                                 boolean tunIpv6) {
         ObjectNode proxyDns = mapper.createObjectNode();
-        proxyDns.put("tag", "proxy-dns");
+        proxyDns.put("tag", DnsTags.PROXY);
         populateDnsServerAddress(proxyDns, settings.getProxyDns());
-        proxyDns.put("detour", "proxy");
+        proxyDns.put("detour", OutboundTags.PROXY);
 
         ArrayNode servers = mapper.createArrayNode();
         servers.add(proxyDns);
 
         ObjectNode directDns = mapper.createObjectNode();
-        directDns.put("tag", "direct-dns");
+        directDns.put("tag", DnsTags.DIRECT);
         if (isSystemDns(settings.getDirectDns())) {
             // The OS resolver: the network's own, from the address the direct
             // connection leaves anyway.
@@ -303,7 +304,7 @@ public class SingBoxConfigGenerator {
             // TUN mode never started. Resolve the name through the OS, like the
             // other bootstrap lookups. Proxy DNS needs no resolver: it dials
             // through the proxy, which takes the name as it is.
-            directDns.put("domain_resolver", "local-dns");
+            directDns.put("domain_resolver", DnsTags.LOCAL);
         }
         servers.add(directDns);
 
@@ -311,7 +312,7 @@ public class SingBoxConfigGenerator {
         // those names resolve on the LAN instead of being sent to the remote
         // DoH server, which cannot answer link-local mDNS queries.
         ObjectNode localDns = mapper.createObjectNode();
-        localDns.put("tag", "local-dns");
+        localDns.put("tag", DnsTags.LOCAL);
         localDns.put("type", "local");
         servers.add(localDns);
 
@@ -327,7 +328,7 @@ public class SingBoxConfigGenerator {
         ArrayNode localSuffixes = mapper.createArrayNode();
         localSuffixes.add(".local");
         localRule.set("domain_suffix", localSuffixes);
-        localRule.put("server", "local-dns");
+        localRule.put("server", DnsTags.LOCAL);
         ArrayNode dnsRules = mapper.createArrayNode();
         dnsRules.add(localRule);
         directDnsRules(routingConfig).forEach(dnsRules::add);
@@ -338,7 +339,7 @@ public class SingBoxConfigGenerator {
             // provider's resolver, so it resolves through the tunnel.
             ObjectNode blockedNames = mapper.createObjectNode();
             blockedNames.putArray("rule_set").add(BLOCKED_IN_RUSSIA_LISTS.getFirst());
-            blockedNames.put("server", "proxy-dns");
+            blockedNames.put("server", DnsTags.PROXY);
             dnsRules.add(blockedNames);
         }
         dns.set("rules", dnsRules);
@@ -347,7 +348,7 @@ public class SingBoxConfigGenerator {
         // the string address shortcut were removed. Use dns.final to route
         // all queries through the proxy DNS by default, and directly when
         // only the blocked lists go through the tunnel.
-        dns.put("final", blockedOnly ? "direct-dns" : "proxy-dns");
+        dns.put("final", blockedOnly ? DnsTags.DIRECT : DnsTags.PROXY);
 
         // A TUN device without an IPv6 address routes IPv4 alone, and the core
         // drops AAAA answers only for ipv4_only: any other strategy handed the
@@ -390,7 +391,7 @@ public class SingBoxConfigGenerator {
         if (bypass != null) {
             ObjectNode rule = copyNameMatchers(bypass);
             if (!rule.isEmpty()) {
-                rule.put("server", "direct-dns");
+                rule.put("server", DnsTags.DIRECT);
                 out.add(rule);
             }
         }
@@ -407,7 +408,7 @@ public class SingBoxConfigGenerator {
                     rule.set("rule_set", routeRule.get("rule_set"));
                 }
                 if (!rule.isEmpty()) {
-                    rule.put("server", "direct-dns");
+                    rule.put("server", DnsTags.DIRECT);
                     out.add(rule);
                 }
             }
@@ -427,7 +428,7 @@ public class SingBoxConfigGenerator {
                 ArrayNode refs = mapper.createArrayNode();
                 geositeTags.forEach(refs::add);
                 rule.set("rule_set", refs);
-                rule.put("server", "direct-dns");
+                rule.put("server", DnsTags.DIRECT);
                 out.add(rule);
             }
         }
@@ -479,7 +480,7 @@ public class SingBoxConfigGenerator {
             // server is dialled on the physical network, not through the
             // tunnel, so its name keeps the strategy the user chose.
             ObjectNode resolver = route.putObject("default_domain_resolver");
-            resolver.put("server", "local-dns");
+            resolver.put("server", DnsTags.LOCAL);
             String strategy = settings.getDnsStrategy();
             resolver.put("strategy",
                     strategy == null || strategy.isBlank() ? "prefer_ipv4" : strategy);
@@ -545,7 +546,7 @@ public class SingBoxConfigGenerator {
             JsonNode privateFlag = rule.get("ip_is_private");
             JsonNode outbound = rule.get("outbound");
             if (privateFlag != null && privateFlag.asBoolean()
-                    && outbound != null && "direct".equals(outbound.asString())) {
+                    && outbound != null && OutboundTags.DIRECT.equals(outbound.asString())) {
                 return true;
             }
         }
@@ -556,7 +557,7 @@ public class SingBoxConfigGenerator {
         ObjectNode privateIp = mapper.createObjectNode();
         privateIp.put("ip_is_private", true);
         privateIp.put("action", "route");
-        privateIp.put("outbound", "direct");
+        privateIp.put("outbound", OutboundTags.DIRECT);
         return privateIp;
     }
 
@@ -598,14 +599,14 @@ public class SingBoxConfigGenerator {
         lanSuffixes.add(".internal");
         ObjectNode lanNames = mapper.createObjectNode();
         lanNames.set("domain_suffix", lanSuffixes);
-        lanNames.put("server", "local-dns");
+        lanNames.put("server", DnsTags.LOCAL);
         // No TUN device in this mode, so none with an IPv6 address either.
         ObjectNode dns = buildDns(settings, routingConfig, false);
         ((ArrayNode) dns.get("rules")).insert(1, lanNames);
         root.set("dns", dns);
         // The core demands one once a dns block exists, and the OS resolver
         // keeps the proxy server's own name off the proxy.
-        route.put("default_domain_resolver", "local-dns");
+        route.put("default_domain_resolver", DnsTags.LOCAL);
     }
 
     /**
@@ -653,7 +654,7 @@ public class SingBoxConfigGenerator {
         suffixes.add(".local");
         rule.set("domain_suffix", suffixes);
         rule.put("action", "route");
-        rule.put("outbound", "direct");
+        rule.put("outbound", OutboundTags.DIRECT);
         return rule;
     }
 
@@ -1076,7 +1077,7 @@ public class SingBoxConfigGenerator {
             }
             ObjectNode blockedRule = mapper.createObjectNode();
             blockedRule.set("rule_set", blocked);
-            blockedRule.put("outbound", "proxy");
+            blockedRule.put("outbound", OutboundTags.PROXY);
             rules.add(blockedRule);
         }
 
@@ -1104,13 +1105,13 @@ public class SingBoxConfigGenerator {
             if (!geositeRefs.isEmpty()) {
                 ObjectNode geositeRule = mapper.createObjectNode();
                 geositeRule.set("rule_set", geositeRefs);
-                geositeRule.put("outbound", "direct");
+                geositeRule.put("outbound", OutboundTags.DIRECT);
                 rules.add(geositeRule);
             }
 
             ObjectNode geoipRule = mapper.createObjectNode();
             geoipRule.set("rule_set", geoipRefs);
-            geoipRule.put("outbound", "direct");
+            geoipRule.put("outbound", OutboundTags.DIRECT);
             rules.add(geoipRule);
 
             // The dedicated ip_is_private rule lives in the universal
@@ -1140,7 +1141,7 @@ public class SingBoxConfigGenerator {
 
         ObjectNode route = mapper.createObjectNode();
         route.set("rules", rules);
-        route.put("final", blockedOnly ? "direct" : "proxy");
+        route.put("final", blockedOnly ? OutboundTags.DIRECT : OutboundTags.PROXY);
         route.put("auto_detect_interface", true);
 
         if (!ruleSetTags.isEmpty()) {
@@ -1203,7 +1204,7 @@ public class SingBoxConfigGenerator {
         // http_client: download_detour is deprecated, and a core one minor
         // release before its removal stops at rule-set start over it, which
         // `sing-box check` never reaches.
-        entry.putObject("http_client").put("detour", "proxy");
+        entry.putObject("http_client").put("detour", OutboundTags.PROXY);
         return entry;
     }
 
@@ -1219,7 +1220,7 @@ public class SingBoxConfigGenerator {
         entry.put("type", "remote");
         entry.put("format", "binary");
         entry.put("url", BLOCKED_LISTS_URL + "rule-set-" + kind + "/" + tag + ".srs");
-        entry.putObject("http_client").put("detour", "proxy");
+        entry.putObject("http_client").put("detour", OutboundTags.PROXY);
         entry.put("update_interval", "6h");
         return entry;
     }
@@ -1282,7 +1283,7 @@ public class SingBoxConfigGenerator {
             rule.set("ip_cidr", ipCidrs);
         }
         rule.put("action", "route");
-        rule.put("outbound", "direct");
+        rule.put("outbound", OutboundTags.DIRECT);
         return rule;
     }
 
@@ -1350,7 +1351,14 @@ public class SingBoxConfigGenerator {
             default -> throw new IllegalStateException("Unexpected: " + rule.getType());
         }
 
-        if (rule.getAction() == RoutingRule.RuleAction.BLOCK) {
+        // The action's own word was the outbound tag, so renaming either would
+        // have routed the rule to a tag nothing carries.
+        String outbound = switch (rule.getAction()) {
+            case PROXY -> OutboundTags.PROXY;
+            case DIRECT -> OutboundTags.DIRECT;
+            case BLOCK -> null;
+        };
+        if (outbound == null) {
             // A block rule used to say outbound: "block" — and no outbound of
             // that tag exists in the config (sing-box 1.11 retired the block
             // outbound type). The core started anyway and dropped matching
@@ -1361,7 +1369,7 @@ public class SingBoxConfigGenerator {
             ruleNode.put("action", "reject");
         } else {
             ruleNode.put("action", "route");
-            ruleNode.put("outbound", rule.getAction().getValue());
+            ruleNode.put("outbound", outbound);
         }
         return ruleNode;
     }
