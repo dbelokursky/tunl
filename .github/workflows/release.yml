@@ -517,7 +517,9 @@ jobs:
   # packaging script as the per-merge build, DEB instead of DMG/MSI.
   release-linux:
     needs: create-draft
-    runs-on: ubuntu-latest
+    # 24.04, not -latest: the DEB takes its Depends from the host that builds
+    # it, and build.yml tests the package built on 24.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     # The digest of the DEB this job uploaded; sign-release and
     # update-packaging refuse an asset on the draft that does not match it.

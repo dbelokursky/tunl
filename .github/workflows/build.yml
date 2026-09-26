@@ -43,7 +43,10 @@ jobs:
         include:
           - { name: macos, os: macos-latest }
           - { name: windows, os: windows-latest }
-          - { name: linux, os: ubuntu-latest }
+          # 24.04, not -latest: the amd64 DEB takes its Depends from the host
+          # that builds it, and release.yml builds on 24.04 as well. The
+          # arm64 leg below is pinned the same way.
+          - { name: linux, os: ubuntu-24.04 }
           # arm64 twin: GitHub's free arm runners for public repos. Exercises
           # the arch-aware bundling (linux-arm64 sing-box) with the same gates.
           - { name: linux-arm, os: ubuntu-24.04-arm }
@@ -196,6 +199,11 @@ jobs:
             xvfb xauth libgtk-3-0t64 libglib2.0-0t64 libxtst6 libxi6 libxrender1 libxrandr2 \
             libfreetype6 fontconfig libasound2t64 libgl1 libpango-1.0-0 libcairo2 fonts-dejavu-core
           scripts/linux-deb-smoke.sh dist/*.deb "1.0.0-dev-${GITHUB_SHA:0:7}"
+      - name: Install the DEB on Debian 12 and Ubuntu 22.04
+        if: matrix.name == 'linux'
+        # The oldest releases Tunl supports, in containers: the package
+        # installs from their archives and the runtime's libraries resolve.
+        run: scripts/linux-deb-older-releases.sh dist/*.deb
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: matrix.name == 'linux'
         with:
@@ -235,6 +243,9 @@ jobs:
             xvfb xauth libgtk-3-0t64 libglib2.0-0t64 libxtst6 libxi6 libxrender1 libxrandr2 \
             libfreetype6 fontconfig libasound2t64 libgl1 libpango-1.0-0 libcairo2 fonts-dejavu-core
           scripts/linux-deb-smoke.sh dist/*.deb "1.0.0-dev-${GITHUB_SHA:0:7}"
+      - name: Install the DEB on Debian 12 and Ubuntu 22.04 (arm64)
+        if: matrix.name == 'linux-arm'
+        run: scripts/linux-deb-older-releases.sh dist/*.deb
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: matrix.name == 'linux-arm'
         with:
