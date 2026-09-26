@@ -30,7 +30,9 @@ truth read by `pom.xml`, `scripts/bundle-singbox.*` and `SingBoxInstaller`.
   headlessly through a TestFX/Monocle test instead (see
   `src/test/java/com/vlessclient/ui/view/*Test.java` and `ScreenshotGenerator`).
 - Workflow edits: run `actionlint` on `.github/workflows/*.yml`; a schema error
-  fails the run at startup and `yaml.safe_load` does not catch it.
+  fails the run at startup and `yaml.safe_load` does not catch it. Only
+  GitHub-owned actions pinned by full commit SHA may run (a repository
+  setting; `docs/REPOSITORY-SETTINGS.md`).
 
 ## Conventions the build enforces
 
