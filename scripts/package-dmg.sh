@@ -15,7 +15,7 @@
 #                       for plain x.y.z labels — dev builds must pass this
 #                       explicitly.
 #
-# Expects `mvn package` to have produced the shaded JAR already.
+# Expects `./mvnw package` to have produced the shaded JAR already.
 #
 # --enable-native-access=ALL-UNNAMED (here and in the .deb/.msi scripts):
 # JavaFX loads its native libraries from the classpath's unnamed module, which
@@ -55,12 +55,12 @@ for jar in ${JAR_CANDIDATES[@]+"${JAR_CANDIDATES[@]}"}; do
     [[ "$(basename "${jar}")" == original-* ]] || JARS+=("${jar}")
 done
 if [[ ${#JARS[@]} -eq 0 ]]; then
-    echo "[package-dmg] no target/vless-client-*.jar — run 'mvn package' first" >&2
+    echo "[package-dmg] no target/vless-client-*.jar — run './mvnw package' first" >&2
     exit 1
 elif [[ ${#JARS[@]} -gt 1 ]]; then
     echo "[package-dmg] expected exactly one target/vless-client-*.jar, found ${#JARS[@]}:" >&2
     printf '  %s\n' "${JARS[@]}" >&2
-    echo "  Run 'mvn clean package' so only the current build's jar remains." >&2
+    echo "  Run './mvnw clean package' so only the current build's jar remains." >&2
     exit 1
 fi
 JAR_PATH="${JARS[0]}"

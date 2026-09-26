@@ -87,7 +87,7 @@ if ! ./mvnw -B -q clean package -DskipTests < /dev/null > "$OUT/build.log" 2>&1;
 fi
 JAR=$(ls target/vless-client-*.jar 2>/dev/null | head -1)
 if [ -z "$JAR" ]; then
-  echo "BUILD FAILED: mvn package succeeded but left no target/vless-client-*.jar" >&2
+  echo "BUILD FAILED: ./mvnw package succeeded but left no target/vless-client-*.jar" >&2
   exit 1
 fi
 echo "jar: $JAR"

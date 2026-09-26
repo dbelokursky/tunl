@@ -15,7 +15,7 @@
     builds must pass this explicitly.
 
 .NOTES
-    Expects 'mvn package' to have produced the shaded JAR already; the JAR
+    Expects '.\mvnw.cmd package' to have produced the shaded JAR already; the JAR
     built on a Windows host already carries the Windows JavaFX natives and
     the bundled sing-box.exe. Requires the WiX Toolset on PATH (preinstalled
     on the windows-latest GitHub runners).
@@ -52,11 +52,11 @@ Set-Location $repoRoot
 $jars = @(Get-ChildItem -Path target -Filter 'vless-client-*.jar' -File -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -notlike 'original-*' })
 if ($jars.Count -eq 0) {
-    throw "[package-windows] no target/vless-client-*.jar -- run 'mvn package' first"
+    throw "[package-windows] no target/vless-client-*.jar -- run '.\mvnw.cmd package' first"
 } elseif ($jars.Count -gt 1) {
     throw ("[package-windows] expected exactly one target/vless-client-*.jar, found $($jars.Count):`n" +
         (($jars | ForEach-Object { "  $($_.FullName)" }) -join "`n") +
-        "`n  Run 'mvn clean package' so only the current build's jar remains.")
+        "`n  Run '.\mvnw.cmd clean package' so only the current build's jar remains.")
 }
 $jarPath = $jars[0].FullName
 $jarName = $jars[0].Name

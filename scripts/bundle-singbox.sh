@@ -51,7 +51,7 @@ PROPS_VERSION="$(prop singbox.version)"
 if [[ "${PROPS_VERSION}" != "${VERSION}" ]]; then
     echo "[bundle-singbox] version mismatch: Maven passed '${VERSION}' but" >&2
     echo "  ${PROPS_FILE} says '${PROPS_VERSION}'." >&2
-    echo "  Run 'mvn clean' — the Maven property cache is stale." >&2
+    echo "  Run './mvnw clean' — the Maven property cache is stale." >&2
     exit 1
 fi
 

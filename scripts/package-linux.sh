@@ -14,7 +14,7 @@
 #                       which Debian's permissive version grammar accepts for
 #                       both release (x.y.z) and dev labels.
 #
-# Expects `mvn package` to have produced the shaded JAR already; a JAR built
+# Expects `./mvnw package` to have produced the shaded JAR already; a JAR built
 # on a Linux host carries the Linux JavaFX natives and the bundled linux
 # sing-box.
 #
@@ -45,12 +45,12 @@ for jar in ${JAR_CANDIDATES[@]+"${JAR_CANDIDATES[@]}"}; do
     [[ "$(basename "${jar}")" == original-* ]] || JARS+=("${jar}")
 done
 if [[ ${#JARS[@]} -eq 0 ]]; then
-    echo "[package-linux] no target/vless-client-*.jar — run 'mvn package' first" >&2
+    echo "[package-linux] no target/vless-client-*.jar — run './mvnw package' first" >&2
     exit 1
 elif [[ ${#JARS[@]} -gt 1 ]]; then
     echo "[package-linux] expected exactly one target/vless-client-*.jar, found ${#JARS[@]}:" >&2
     printf '  %s\n' "${JARS[@]}" >&2
-    echo "  Run 'mvn clean package' so only the current build's jar remains." >&2
+    echo "  Run './mvnw clean package' so only the current build's jar remains." >&2
     exit 1
 fi
 JAR_PATH="${JARS[0]}"
