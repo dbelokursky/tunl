@@ -699,6 +699,7 @@ public class SettingsViewController implements ViewShownAware {
             settings.setMcpAllowMutations(newVal);
             saveSettings(settings);
         });
+        KeyboardReach.tabLeaves(mcpCommandArea);
 
         if (mcpServerService == null) {
             mcpEnabledCheck.setDisable(true);

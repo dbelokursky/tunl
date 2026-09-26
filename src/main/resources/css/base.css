@@ -1068,12 +1068,15 @@
 
 /* ===== Tooltip =====
    Sized here, or the two themes render the same tooltip at different text
-   sizes and corner radii. */
+   sizes and corner radii. It stays while the pointer rests on its node: the
+   five seconds JavaFX gives it were too short to read the longer ones, such
+   as why a link's certificate check is off. */
 .tooltip {
     -fx-background-color: -c-tooltip-bg;
     -fx-text-fill: -c-tooltip-text;
     -fx-font-size: 12px;
     -fx-background-radius: 4;
+    -fx-show-duration: indefinite;
 }
 
 /* ===== Dialogs =====
