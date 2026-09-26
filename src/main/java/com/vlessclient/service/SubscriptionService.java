@@ -1287,7 +1287,7 @@ public class SubscriptionService {
             }
             List<Subscription> loaded = objectMapper.convertValue(
                     items, new TypeReference<List<Subscription>>() {});
-            loaded.forEach(this::unsealInPlace);
+            Unsealing.each(loaded, this::unsealInPlace);
             subscriptions.addAll(loaded);
             log.info("Loaded {} subscriptions from {}", subscriptions.size(), file);
         } catch (JacksonException e) {
