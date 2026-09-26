@@ -453,7 +453,7 @@ public class ServiceReachabilityChecker {
         if (cachedClient != null) {
             cachedClient.close();
         }
-        cachedClient = HttpClient.newBuilder()
+        cachedClient = new ProxyPasswordClient.Builder(HttpClient.newBuilder())
                 .connectTimeout(Duration.ofMillis(CONNECT_TIMEOUT_MS))
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .proxy(ProxySelector.of(new InetSocketAddress("127.0.0.1", httpProxyPort)))

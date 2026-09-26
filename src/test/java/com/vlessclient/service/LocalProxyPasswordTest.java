@@ -1,6 +1,8 @@
 package com.vlessclient.service;
 
+import com.sun.net.httpserver.HttpServer;
 import com.vlessclient.model.AppSettings;
+import com.vlessclient.model.HealthCheckTarget;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.testing.TestServers;
@@ -9,6 +11,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URI;
@@ -120,6 +123,86 @@ class LocalProxyPasswordTest {
                 checker.shutdown();
             }
         }
+    }
+
+    /**
+     * The app's own requests carry this run's password from their first
+     * attempt. Java's client sent it only after a proxy answered 407, and
+     * sing-box logs every such attempt as an ERROR ("authentication failed,
+     * no Proxy-Authorization header"): after each start in TUN mode the Logs
+     * page showed a few, and they were the app's own requests.
+     */
+    @Test
+    void theAppsOwnRequestsSendThePasswordAtOnce() throws Exception {
+        try (ChallengingProxy proxy = new ChallengingProxy()) {
+            AppHttpClients.routeThroughTunnel(() -> OptionalInt.of(proxy.port()));
+            HttpClient client = AppHttpClients.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(5)).build();
+
+            // Through a tunnel: the proxy lets it up and closes it, so TLS fails.
+            assertThatThrownBy(() -> client.send(
+                    HttpRequest.newBuilder(URI.create("https://updates.example/latest"))
+                            .timeout(Duration.ofSeconds(10)).build(),
+                    HttpResponse.BodyHandlers.discarding()))
+                    .isInstanceOf(IOException.class);
+            // Plain http: the proxy answers the request itself.
+            client.send(HttpRequest.newBuilder(URI.create("http://subscriptions.example/list"))
+                            .timeout(Duration.ofSeconds(10)).build(),
+                    HttpResponse.BodyHandlers.discarding());
+
+            assertThat(proxy.requests).as("every request the proxy saw")
+                    .hasSizeGreaterThanOrEqualTo(2)
+                    .allSatisfy(request -> assertThat(request).contains(
+                            "Proxy-Authorization: " + LocalProxyCredentials.basicHeader()));
+        }
+    }
+
+    @Test
+    void theHealthChecksSendThePasswordAtOnce() throws Exception {
+        try (ChallengingProxy proxy = new ChallengingProxy()) {
+            ServiceReachabilityChecker checker = new ServiceReachabilityChecker();
+            try {
+                checker.checkAll(List.of(new HealthCheckTarget("Site",
+                                "https://site.example/generate_204")), proxy.port())
+                        .get(30, TimeUnit.SECONDS);
+            } finally {
+                checker.shutdown();
+            }
+
+            assertThat(proxy.requests).as("every request the proxy saw")
+                    .isNotEmpty()
+                    .allSatisfy(request -> assertThat(request).contains(
+                            "Proxy-Authorization: " + LocalProxyCredentials.basicHeader()));
+        }
+    }
+
+    /**
+     * The password goes to a proxy alone: Java leaves Proxy-* headers out of
+     * a request it sends straight to a site, and out of the one inside a
+     * tunnel.
+     */
+    @Test
+    void thePasswordNeverReachesASite() throws Exception {
+        List<String> seen = new CopyOnWriteArrayList<>();
+        HttpServer site = HttpServer.create(
+                new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        site.createContext("/", exchange -> {
+            seen.add(String.valueOf(exchange.getRequestHeaders().getFirst("Proxy-Authorization")));
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        site.start();
+        try {
+            // No tunnel bound: the request goes straight to the site.
+            HttpClient client = AppHttpClients.newBuilder().build();
+            client.send(HttpRequest.newBuilder(URI.create(
+                            "http://127.0.0.1:" + site.getAddress().getPort() + "/list")).build(),
+                    HttpResponse.BodyHandlers.discarding());
+        } finally {
+            site.stop(0);
+        }
+
+        assertThat(seen).containsExactly("null");
     }
 
     private List<JsonNode> localInbounds(ProxyMode mode, boolean shared) {

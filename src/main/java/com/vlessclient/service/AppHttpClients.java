@@ -63,9 +63,10 @@ public final class AppHttpClients {
      *         policy as before
      */
     public static HttpClient.Builder newBuilder() {
-        // The local proxy asks for this run's password in TUN mode.
-        return HttpClient.newBuilder().proxy(SELECTOR)
-                .authenticator(LocalProxyCredentials.authenticator());
+        // The local proxy asks for this run's password in TUN mode: sent with
+        // every request, and still answered should one reach it without.
+        return new ProxyPasswordClient.Builder(HttpClient.newBuilder().proxy(SELECTOR)
+                .authenticator(LocalProxyCredentials.authenticator()));
     }
 
     /**
