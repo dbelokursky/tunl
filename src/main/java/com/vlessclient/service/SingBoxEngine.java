@@ -17,7 +17,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.BooleanSupplier;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyBooleanProperty;
 import javafx.beans.property.ReadOnlyBooleanWrapper;
@@ -50,6 +54,9 @@ public class SingBoxEngine {
     private static final int MAX_LOG_LINES = 1000;
     private static final int STOP_TIMEOUT_SECONDS = 5;
 
+    /** How often a wait for an earlier tunnel asks whether the connect is still wanted. */
+    private static final long EARLIER_TUNNEL_POLL_MS = 250;
+
     /**
      * The core's executable, or null until one is installed. Written under
      * {@link #lifecycle}, so that one start reads one path throughout.
@@ -58,6 +65,9 @@ public class SingBoxEngine {
 
     /** Where a direct core is written down for the next run to find; null writes nothing. */
     private final CoreRecord coreRecord;
+
+    /** Where a TUN core's launcher is written down, beside {@link #coreRecord}; or null. */
+    private final CoreRecord tunnelRecord;
 
     private final ObservableList<String> logLines;
     private final ReadOnlyObjectWrapper<ConnectionState> connectionState;
@@ -175,6 +185,7 @@ public class SingBoxEngine {
     public SingBoxEngine(Path singBoxBinary, CoreRecord coreRecord) {
         this.singBoxBinary = singBoxBinary;
         this.coreRecord = coreRecord;
+        this.tunnelRecord = coreRecord == null ? null : coreRecord.forTunnel();
         this.logLines = FXCollections.observableArrayList();
         this.connectionState = new ReadOnlyObjectWrapper<>(ConnectionState.DISCONNECTED);
         this.errorMessage = new ReadOnlyStringWrapper("");
@@ -528,6 +539,67 @@ public class SingBoxEngine {
         process = launched.process();
         stopSignalFile = launched.stopSignalFile();
         launchPrompts = launched.promptsEachLaunch();
+        // The core runs with the administrator's rights, and outlives this
+        // app by as long as its launcher takes to stop it: written down so the
+        // next run waits for it rather than starting a second tunnel beside it.
+        if (tunnelRecord != null) {
+            recordedCore = tunnelRecord.write(launched.process().toHandle());
+        }
+    }
+
+    /**
+     * Waits for a tunnel an earlier core left to close, before this engine
+     * starts another. Call it only while this engine runs no core.
+     *
+     * <p>A TUN core runs with the administrator's rights, so the app cannot
+     * end it: its launcher stops it once the app that started it is gone, and
+     * that takes as long as the core takes to close. After an update or a
+     * quick restart the new run started its own tunnel beside the old one.
+     * The two fought over the routes and the ports, no check got through,
+     * and recovery restarted the new tunnel, four times in one case, until
+     * the old one was gone. The connect shows as under way while it waits.</p>
+     *
+     * @param timeout     how long to wait at most
+     * @param stillWanted asked while waiting; false calls the connect off
+     * @return true when no earlier tunnel is up any more; false when the wait
+     *         ran out or was called off
+     */
+    public boolean awaitEarlierTunnel(Duration timeout, BooleanSupplier stillWanted) {
+        Optional<ProcessHandle> earlier =
+                tunnelRecord == null ? Optional.empty() : tunnelRecord.runningCore();
+        if (earlier.isEmpty()) {
+            return true;
+        }
+        log.info("Waiting up to {} s for the tunnel an earlier core left ({}) to close",
+                timeout.toSeconds(), earlier.get().pid());
+        Platform.runLater(() -> connectionState.set(ConnectionState.CONNECTING));
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (earlier.get().isAlive()) {
+            if (!stillWanted.getAsBoolean()) {
+                publishNotStarted();
+                return false;
+            }
+            if (System.nanoTime() >= deadline) {
+                log.warn("The earlier tunnel ({}) is still up after {} s; starting anyway",
+                        earlier.get().pid(), timeout.toSeconds());
+                return false;
+            }
+            try {
+                earlier.get().onExit().get(EARLIER_TUNNEL_POLL_MS, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException stillUp) {
+                // Asked again, with the deadline and the request.
+            } catch (ExecutionException e) {
+                break;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                publishNotStarted();
+                return false;
+            }
+        }
+        // Drops the record of the core that has now exited.
+        tunnelRecord.runningCore();
+        log.info("The earlier tunnel has closed");
+        return true;
     }
 
     /**
@@ -851,10 +923,11 @@ public class SingBoxEngine {
                         tunLauncher.cleanupSession();
                     }
                 }
-                // No successor guard here: the record is cleared only while
+                // No successor guard here: a record is cleared only while
                 // it still names this session's core.
                 if (coreRecord != null) {
                     coreRecord.clear(sessionRecord);
+                    tunnelRecord.clear(sessionRecord);
                 }
             }
         }, "singbox-process-monitor");
@@ -964,6 +1037,7 @@ public class SingBoxEngine {
     private void forgetRecordedCore() {
         if (coreRecord != null) {
             coreRecord.clear(recordedCore);
+            tunnelRecord.clear(recordedCore);
         }
         recordedCore = null;
     }

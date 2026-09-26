@@ -294,6 +294,123 @@ class SingBoxEngineTest {
         }
     }
 
+    /**
+     * The launcher of a TUN core is written down for the next run, and the
+     * record goes once the core has stopped.
+     */
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void aTunCoreIsRecordedUntilItStops(@TempDir(cleanup = CleanupMode.NEVER) Path tmp)
+            throws Exception {
+        Path stopFile = tmp.resolve("stop.signal");
+        Path wrapper = tmp.resolve("wrapper.sh");
+        Files.writeString(wrapper, "#!/bin/sh\n"
+                + "echo 'sing-box started'\n"
+                + "while [ ! -f '" + stopFile + "' ]; do sleep 0.2; done\n");
+        makeExecutable(wrapper);
+        Path recordFile = tmp.resolve(CoreRecord.FILE_NAME);
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30),
+                new CoreRecord(recordFile));
+        AtomicReference<Process> launched = new AtomicReference<>();
+        engine.setTunLauncher((binary, config, prompt) -> {
+            Process p = new ProcessBuilder(wrapper.toString()).redirectErrorStream(true).start();
+            launched.set(p);
+            return new com.vlessclient.platform.TunLauncher.Launched(p, stopFile);
+        });
+
+        engine.start(DUMMY_CONFIG, ProxyMode.TUN);
+        try {
+            assertThat(new CoreRecord(recordFile).forTunnel().runningCore())
+                    .map(ProcessHandle::pid).contains(launched.get().pid());
+        } finally {
+            engine.stop();
+        }
+
+        awaitConnectionState(engine, ConnectionState.DISCONNECTED, AWAIT_STATE_TIMEOUT_MS);
+        Await.until(() -> Files.notExists(tmp.resolve(CoreRecord.TUNNEL_FILE_NAME)),
+                Duration.ofSeconds(10));
+    }
+
+    /**
+     * After an update or a quick restart, the tunnel of the run before was
+     * still closing, and a second one started beside it fought it for the
+     * routes and the ports.
+     */
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void aStartWaitsForTheTunnelAnEarlierRunLeft(@TempDir(cleanup = CleanupMode.NEVER) Path tmp)
+            throws Exception {
+        Path recordFile = tmp.resolve(CoreRecord.FILE_NAME);
+        Process earlier = new ProcessBuilder(createFakeSingBox(tmp, "earlier", 30).toString())
+                .redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+        try {
+            new CoreRecord(recordFile).forTunnel().write(earlier.toHandle());
+            SingBoxEngine engine = new SingBoxEngine(tmp.resolve("sing-box"),
+                    new CoreRecord(recordFile));
+            Thread.startVirtualThread(() -> {
+                try {
+                    Thread.sleep(700);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                earlier.destroy();
+            });
+
+            long started = System.nanoTime();
+            boolean closed = engine.awaitEarlierTunnel(Duration.ofSeconds(20), () -> true);
+            long waitedMs = (System.nanoTime() - started) / 1_000_000;
+
+            assertThat(closed).isTrue();
+            assertThat(waitedMs).as("waited for the earlier tunnel").isGreaterThanOrEqualTo(500);
+            assertThat(tmp.resolve(CoreRecord.TUNNEL_FILE_NAME)).doesNotExist();
+            flushFxEvents();
+            assertThat(engine.connectionStateProperty().get())
+                    .as("shown as a connect under way").isEqualTo(ConnectionState.CONNECTING);
+        } finally {
+            earlier.destroyForcibly();
+        }
+    }
+
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void aConnectCalledOffStopsWaitingForTheEarlierTunnel(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        Path recordFile = tmp.resolve(CoreRecord.FILE_NAME);
+        Process earlier = new ProcessBuilder(createFakeSingBox(tmp, "earlier", 30).toString())
+                .redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+        try {
+            new CoreRecord(recordFile).forTunnel().write(earlier.toHandle());
+            SingBoxEngine engine = new SingBoxEngine(tmp.resolve("sing-box"),
+                    new CoreRecord(recordFile));
+            long calledOffAt = System.nanoTime() + Duration.ofMillis(400).toNanos();
+
+            long started = System.nanoTime();
+            boolean closed = engine.awaitEarlierTunnel(Duration.ofSeconds(20),
+                    () -> System.nanoTime() < calledOffAt);
+            long waitedMs = (System.nanoTime() - started) / 1_000_000;
+
+            assertThat(closed).isFalse();
+            assertThat(waitedMs).as("stopped soon after the connect was called off")
+                    .isLessThan(5_000);
+            assertThat(earlier.isAlive()).isTrue();
+            flushFxEvents();
+            assertThat(engine.connectionStateProperty().get())
+                    .isEqualTo(ConnectionState.DISCONNECTED);
+        } finally {
+            earlier.destroyForcibly();
+        }
+    }
+
+    @Test
+    void withNoEarlierTunnelAStartDoesNotWait(@TempDir Path tmp) {
+        SingBoxEngine engine = new SingBoxEngine(tmp.resolve("sing-box"),
+                new CoreRecord(tmp.resolve(CoreRecord.FILE_NAME)));
+
+        long started = System.nanoTime();
+        assertThat(engine.awaitEarlierTunnel(Duration.ofSeconds(20), () -> true)).isTrue();
+        assertThat((System.nanoTime() - started) / 1_000_000).isLessThan(2_000);
+    }
+
     @Test
     void awaitStoppedReturnsImmediatelyWhenNotRunning() {
         SingBoxEngine engine = new SingBoxEngine(Path.of("/nonexistent/sing-box"));
