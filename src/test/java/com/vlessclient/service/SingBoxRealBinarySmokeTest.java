@@ -336,6 +336,19 @@ class SingBoxRealBinarySmokeTest {
         return server;
     }
 
+    private static ServerConfig hysteria2Server(String name) {
+        ServerConfig server = new ServerConfig();
+        server.setId(name);
+        server.setName(name);
+        server.setProtocol(Protocol.HYSTERIA2);
+        server.setAddress("203.0.113.13");
+        server.setPort(443);
+        server.setUuid("smoke-password");
+        server.getTls().setEnabled(true);
+        server.getTls().setServerName("example.com");
+        return server;
+    }
+
     private static ServerConfig shadowsocksServer(String name, String method) {
         ServerConfig server = new ServerConfig();
         server.setId(name);
@@ -393,7 +406,19 @@ class SingBoxRealBinarySmokeTest {
                 withPlugin("v2ray-plugin-websocket-tls", "v2ray-plugin",
                         "mode=websocket;tls;host=example.com;path=/ws"),
                 quicServer("vless-quic-without-tls", false),
-                quicServer("vless-quic-tls", true));
+                quicServer("vless-quic-tls", true),
+                with(hysteria2Server("hysteria2-hopping"),
+                        server -> server.setServerPorts("443,20000-50000")),
+                with(hysteria2Server("hysteria2-hopping-out-of-range"),
+                        server -> server.setServerPorts("70000-80000")),
+                with(hysteria2Server("hysteria2-gecko"), server -> {
+                    server.setEncryption("gecko");
+                    server.setFlow("obfs-password");
+                }),
+                with(hysteria2Server("hysteria2-obfs-unknown"), server -> {
+                    server.setEncryption("foo");
+                    server.setFlow("obfs-password");
+                }));
 
         for (ServerConfig server : servers) {
             boolean coreAccepts = checkPasses(generator.generate(server, new AppSettings()));

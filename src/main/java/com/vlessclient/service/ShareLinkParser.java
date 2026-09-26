@@ -5,6 +5,7 @@ import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
 import com.vlessclient.service.outbound.CoreSettings;
+import com.vlessclient.service.outbound.HysteriaPorts;
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -644,10 +645,21 @@ public class ShareLinkParser {
             fragment = decodeName(uri.substring(fragmentIndex + 1));
         }
 
-        String httpUri = "http://" + uri.substring(schemeEnd + 3);
-        if (fragmentIndex >= 0) {
-            httpUri = "http://" + uri.substring(schemeEnd + 3, fragmentIndex);
+        String rest = fragmentIndex >= 0
+                ? uri.substring(schemeEnd + 3, fragmentIndex) : uri.substring(schemeEnd + 3);
+        // The official form of port hopping lists the ports in the authority,
+        // host:443,20000-50000. Java's URI reads that as no host at all, so
+        // the line was unreadable, and one such line kept a whole
+        // subscription "partial": it stopped removing withdrawn servers.
+        String hopping = hoppingPortsIn(rest);
+        if (hopping != null) {
+            // After the colon that ends the host: a host holds no colon but
+            // inside an IPv6 literal's brackets, which come before it.
+            int at = rest.indexOf(':' + hopping, rest.lastIndexOf('@') + 1) + 1;
+            rest = rest.substring(0, at) + HysteriaPorts.firstPort(hopping)
+                    + rest.substring(at + hopping.length());
         }
+        String httpUri = "http://" + rest;
 
         URI parsed;
         try {
@@ -704,7 +716,47 @@ public class ShareLinkParser {
             config.setEncryption(obfs);
         }
 
+        // 3x-ui writes hopping beside an ordinary port, as mport.
+        String mport = params.get("mport");
+        if (hopping == null && mport != null && !mport.isBlank()) {
+            if (!HysteriaPorts.isValid(mport)) {
+                throw new IllegalArgumentException("Malformed mport in Hysteria2 URI: " + mport);
+            }
+            hopping = mport.strip();
+        }
+        config.setServerPorts(hopping);
+
         return config;
+    }
+
+    /**
+     * The port list of a Hysteria2 authority when it hops: more than one port,
+     * or a range. Null for an ordinary {@code host:port} or no port at all.
+     *
+     * @param rest the link after its scheme, up to the fragment
+     * @return the list as written, or null
+     */
+    private static String hoppingPortsIn(String rest) {
+        int end = rest.length();
+        for (char stop : new char[] {'/', '?'}) {
+            int at = rest.indexOf(stop, rest.lastIndexOf('@') + 1);
+            if (at >= 0 && at < end) {
+                end = at;
+            }
+        }
+        String hostPort = rest.substring(rest.lastIndexOf('@') + 1, end);
+        int colon = hostPort.lastIndexOf(':');
+        if (colon < 0 || colon < hostPort.lastIndexOf(']')) {
+            return null;
+        }
+        String ports = hostPort.substring(colon + 1);
+        if (ports.indexOf(',') < 0 && ports.indexOf('-') < 0) {
+            return null;
+        }
+        if (!HysteriaPorts.isValid(ports)) {
+            throw new IllegalArgumentException("Malformed port list in Hysteria2 URI: " + ports);
+        }
+        return ports;
     }
 
     private void applyTransportParams(ServerConfig config, Map<String, String> params) {

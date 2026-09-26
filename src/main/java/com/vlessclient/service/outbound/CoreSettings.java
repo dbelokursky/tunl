@@ -280,6 +280,26 @@ public final class CoreSettings {
         if (server.getProtocol() == Protocol.SHADOWSOCKS) {
             return shadowsocksRefusal(server);
         }
+        if (server.getProtocol() == Protocol.HYSTERIA2) {
+            return hysteria2Refusal(server);
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<Refusal> hysteria2Refusal(ServerConfig server) {
+        String ports = server.getServerPorts();
+        if (ports != null && !HysteriaPorts.isValid(ports)) {
+            // "bad port range"
+            return refused("server ports " + ports, "refusal.hysteria2.ports", ports);
+        }
+        String obfs = server.getEncryption() == null ? ""
+                : server.getEncryption().strip().toLowerCase(java.util.Locale.ROOT);
+        boolean obfuscated = server.getFlow() != null && !server.getFlow().isBlank();
+        if (obfuscated && !obfs.isEmpty() && !"salamander".equals(obfs)
+                && !"gecko".equals(obfs) && !"none".equals(obfs)) {
+            // "unknown obfs type"
+            return refused("obfs " + obfs, "refusal.hysteria2.obfs", obfs);
+        }
         return Optional.empty();
     }
 

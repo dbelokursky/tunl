@@ -71,6 +71,14 @@ public class ServerConfig extends KeepsUnknownFields {
     private String subscriptionId;
 
     /**
+     * Hysteria2 port hopping: every port the server listens on, as links write
+     * them ({@code 443,20000-50000}); null for a server on {@link #port} alone.
+     */
+    @JsonProperty("server_ports")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String serverPorts;
+
+    /**
      * Creates a server with a fresh random id and default transport and TLS config.
      */
     public ServerConfig() {
@@ -189,6 +197,15 @@ public class ServerConfig extends KeepsUnknownFields {
 
     public void setSubscriptionId(String subscriptionId) {
         this.subscriptionId = subscriptionId;
+    }
+
+    /** Hysteria2's hopping ports as a link lists them, or null for none. */
+    public String getServerPorts() {
+        return serverPorts;
+    }
+
+    public void setServerPorts(String serverPorts) {
+        this.serverPorts = serverPorts;
     }
 
     @Override
