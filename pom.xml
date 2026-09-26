@@ -33,8 +33,7 @@
         <maven.compiler.release>27</maven.compiler.release>
         <!-- Must stay on a GA line. 28-ea was an early-access build in a
              product handed to users: EA artifacts are unsupported, can be
-             withdrawn from Central, and change under a fixed coordinate. 26.0.2
-             is the newest GA - the 27 line exists only as -ea. -->
+             withdrawn from Central, and change under a fixed coordinate. -->
         <javafx.version>27</javafx.version>
         <junit.version>6.1.3</junit.version>
         <jackson.version>3.2.2</jackson.version>

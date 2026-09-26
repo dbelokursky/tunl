@@ -20,7 +20,8 @@ advisory is published with credit to the reporter unless you prefer otherwise.
 
 Only the newest release on the
 [Releases](https://github.com/dbelokursky/tunl/releases) page receives fixes.
-Older releases are removed from the page as new ones are published.
+Older releases stay on the page, but a fix is only ever released as a new
+version, never backported to them.
 
 ## In scope
 
