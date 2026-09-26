@@ -51,6 +51,7 @@ public class ServerFormController {
     @FXML private Label formTitleLabel;
     @FXML private Label subscriptionNoticeLabel;
     @FXML private Label protocolLabel;
+    @FXML private Label alpnLabel;
     @FXML private Label nameLabel;
     @FXML private Label addressLabel;
     @FXML private Label portLabel;
@@ -632,6 +633,25 @@ public class ServerFormController {
     private void bindStaticLabels() {
         bindLabel(formTitleLabel, "form.title");
         bindLabel(protocolLabel, "form.protocol");
+        // A screen reader names a field by the label that says it is for it;
+        // drawn beside it, the label named nothing, and every field was read
+        // out as "edit" or "combo box".
+        protocolLabel.setLabelFor(protocolCombo);
+        nameLabel.setLabelFor(nameField);
+        addressLabel.setLabelFor(addressField);
+        portLabel.setLabelFor(portField);
+        uuidLabel.setLabelFor(uuidField);
+        encryptionLabel.setLabelFor(encryptionCombo);
+        flowLabel.setLabelFor(flowCombo);
+        transportTypeLabel.setLabelFor(transportTypeCombo);
+        wsPathLabel.setLabelFor(wsPathField);
+        wsHostLabel.setLabelFor(wsHostField);
+        grpcServiceNameLabel.setLabelFor(grpcServiceNameField);
+        sniLabel.setLabelFor(sniField);
+        alpnLabel.setLabelFor(alpnField);
+        fingerprintLabel.setLabelFor(fingerprintField);
+        realityPublicKeyLabel.setLabelFor(realityPublicKeyField);
+        realityShortIdLabel.setLabelFor(realityShortIdField);
         bindLabel(nameLabel, "form.name");
         bindRequired(addressLabel, "form.address");
         bindRequired(portLabel, "form.port");

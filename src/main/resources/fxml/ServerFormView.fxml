@@ -114,7 +114,7 @@
 
                     <!-- ALPN stays a literal: it is a protocol acronym, the same
                          in every language, so a key would only add a lookup. -->
-                    <Label text="ALPN" styleClass="form-label"/>
+                    <Label fx:id="alpnLabel" text="ALPN" styleClass="form-label"/>
                     <TextField fx:id="alpnField" promptText="h2,http/1.1" styleClass="form-field"/>
 
                     <Label fx:id="fingerprintLabel" text="Fingerprint" styleClass="form-label"/>

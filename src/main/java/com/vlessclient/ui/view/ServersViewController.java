@@ -331,6 +331,10 @@ public class ServersViewController {
 
     private void setUpSearch() {
         searchField.promptTextProperty().bind(I18n.binding("servers.search.prompt"));
+        // No label stands beside the search or the order, so each carries its
+        // own name for a screen reader.
+        searchField.accessibleTextProperty().bind(searchField.promptTextProperty());
+        sortCombo.accessibleTextProperty().bind(I18n.binding("servers.sort.label"));
         searchField.textProperty().addListener(
                 (obs, old, text) -> filtered.setPredicate(matching(text)));
         Label noMatches = new Label();

@@ -475,6 +475,11 @@ public class RoutingViewController {
         bypassCountriesTitle.textProperty().bind(I18n.binding("routing.bypass.countries.title"));
         bypassCountryHint.textProperty().bind(I18n.binding("routing.bypass.countries.hint"));
         bypassListTitle.textProperty().bind(I18n.binding("routing.bypass.list.title"));
+        // A screen reader names a field by the label that says it is for it;
+        // drawn beside it, the label named nothing, and every field was read
+        // out as "edit" or "combo box".
+        bypassListTitle.setLabelFor(bypassListArea);
+        bypassCountriesTitle.setLabelFor(bypassCountryCombo);
         bypassListHint.textProperty().bind(I18n.binding("routing.bypass.list.hint"));
         customRulesTitle.textProperty().bind(I18n.binding("routing.custom.rules.title"));
         rulesEmptyTitle.textProperty().bind(I18n.binding("routing.rules.empty.title"));
