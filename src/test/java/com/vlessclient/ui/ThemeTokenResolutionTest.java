@@ -8,10 +8,13 @@ import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.effect.DropShadow;
 import javafx.scene.effect.Effect;
+import javafx.scene.layout.Background;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
+import javafx.scene.shape.SVGPath;
 import javafx.stage.Stage;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
 
@@ -36,6 +39,8 @@ public class ThemeTokenResolutionTest extends ApplicationTest {
     private Region card;
     private Button iconButton;
     private Button destructiveIconButton;
+    private Button borderlessDelete;
+    private SVGPath borderlessGlyph;
     private Scene scene;
 
     @Override
@@ -49,7 +54,14 @@ public class ThemeTokenResolutionTest extends ApplicationTest {
         iconButton.getStyleClass().setAll("icon-button");
         destructiveIconButton = new Button("✕");
         destructiveIconButton.getStyleClass().setAll("icon-button", "destructive");
-        scene = new Scene(new VBox(card, iconButton, destructiveIconButton), 200, 160);
+        borderlessGlyph = new SVGPath();
+        borderlessGlyph.setContent("M0,0H12V12H0Z");
+        borderlessGlyph.getStyleClass().add("nav-icon-glyph");
+        borderlessDelete = new Button();
+        borderlessDelete.setGraphic(borderlessGlyph);
+        borderlessDelete.getStyleClass().setAll("icon-button", "ghost", "destructive");
+        scene = new Scene(new VBox(card, iconButton, destructiveIconButton, borderlessDelete),
+                200, 200);
         stage.setScene(scene);
         stage.show();
     }
@@ -82,6 +94,35 @@ public class ThemeTokenResolutionTest extends ApplicationTest {
     void destructiveIconButtonTurnsRedOnHoverInBothThemes() {
         assertDestructiveHoverFill("light", Color.web("#d32f2f"));
         assertDestructiveHoverFill("dark", Color.web("#ef5350"));
+    }
+
+    /**
+     * A borderless delete, the service rows' trash can: no square at rest, so
+     * a list of them stays calm, and under the pointer a red square and a red
+     * glyph, like any delete. The red has to out-specify both the plain
+     * hover of a borderless button and the grey glyph of a hovered one.
+     */
+    @Test
+    void aBorderlessDeleteIsBareAtRestAndRedUnderThePointer() {
+        for (String theme : List.of("light", "dark")) {
+            interact(() -> borderlessDelete.pseudoClassStateChanged(HOVER, false));
+            applyStylesheets(theme, borderlessDelete);
+            assertThat(backgroundOf(borderlessDelete)).as("%s, at rest", theme)
+                    .isEqualTo(Color.TRANSPARENT);
+
+            interact(() -> borderlessDelete.pseudoClassStateChanged(HOVER, true));
+            applyStylesheets(theme, borderlessDelete);
+            assertThat(backgroundOf(borderlessDelete)).as("%s, under the pointer", theme)
+                    .isEqualTo(Color.web(theme.equals("light") ? "#ffebee" : "#3e1a1a"));
+            assertThat(borderlessGlyph.getFill()).as("%s, its glyph under the pointer", theme)
+                    .isEqualTo(Color.web(theme.equals("light") ? "#d32f2f" : "#ef5350"));
+        }
+    }
+
+    private static Color backgroundOf(Region region) {
+        Background background = region.getBackground();
+        return background == null || background.getFills().isEmpty()
+                ? Color.TRANSPARENT : (Color) background.getFills().get(0).getFill();
     }
 
     private void assertCardBg(String theme, Color expected) {

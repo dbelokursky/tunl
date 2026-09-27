@@ -16,6 +16,7 @@ import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.service.TunnelRecoveryService;
 import com.vlessclient.service.outbound.OutboundTags;
 import com.vlessclient.ui.view.FxTimer;
+import com.vlessclient.ui.view.Icons;
 import com.vlessclient.ui.view.OnScreen;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -591,7 +592,7 @@ public final class HealthCheckCoordinator {
         private final Circle dot = new Circle(5);
         private final Label nameLabel = new Label();
         private final Label resultLabel = new Label();
-        private final Button remove = new Button("✕");
+        private final Button remove = new Button();
         private final Tooltip removeTooltip = new Tooltip();
 
         /** The service the row stands for now; a reused row moves on to another. */
@@ -602,7 +603,11 @@ public final class HealthCheckCoordinator {
             nameLabel.getStyleClass().setAll("service-name");
             Region spacer = new Region();
             HBox.setHgrow(spacer, Priority.ALWAYS);
-            remove.getStyleClass().setAll("icon-button", "destructive");
+            // An outline trash can with no square of its own until the pointer
+            // is over it: a list of them stays calm, and the square that shows
+            // under the pointer is red. A "✕" in a font sat off its middle.
+            remove.setGraphic(Icons.trash(18));
+            remove.getStyleClass().setAll("icon-button", "ghost", "destructive");
             remove.setTooltip(removeTooltip);
             remove.setOnAction(e -> removeHealthTarget(url));
             box.getChildren().addAll(dot, nameLabel, spacer, resultLabel, remove);
@@ -618,7 +623,7 @@ public final class HealthCheckCoordinator {
             remove.setVisible(removable);
             remove.setManaged(removable);
             removeTooltip.setText(I18n.get("health.target.remove"));
-            // "✕" is a symbol; a screen reader reads which service it removes.
+            // The can is a picture; a screen reader reads which service it removes.
             remove.setAccessibleText(I18n.get("health.target.remove.named", content.name()));
         }
     }
