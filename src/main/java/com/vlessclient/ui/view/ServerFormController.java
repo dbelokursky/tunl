@@ -73,6 +73,7 @@ public class ServerFormController {
     @FXML private Label tlsSectionLabel;
     @FXML private Label sniLabel;
     @FXML private Label fingerprintLabel;
+    @FXML private Label fingerprintNoteLabel;
     @FXML private Label realityPublicKeyLabel;
     @FXML private Label realityShortIdLabel;
 
@@ -169,12 +170,17 @@ public class ServerFormController {
         tlsEnabledCheck.selectedProperty().addListener((obs, oldVal, newVal) -> {
             tlsFields.setVisible(newVal);
             tlsFields.setManaged(newVal);
+            showFingerprintNote();
         });
 
         realityCheck.selectedProperty().addListener((obs, oldVal, newVal) -> {
             realityFields.setVisible(newVal);
             realityFields.setManaged(newVal);
+            showFingerprintNote();
         });
+
+        fingerprintField.textProperty().addListener((obs, oldVal, newVal) ->
+                showFingerprintNote());
 
         updateFieldsForProtocol(Protocol.VLESS);
     }
@@ -519,6 +525,21 @@ public class ServerFormController {
         if (protocol != Protocol.HYSTERIA2) {
             tlsEnabledCheck.setDisable(false);
         }
+        // Whether REALITY is on offer goes with the protocol.
+        showFingerprintNote();
+    }
+
+    /**
+     * Says so when the core is sent another fingerprint than the field holds:
+     * a REALITY server whose link asks for a random one is sent Chrome's
+     * ({@link CoreSettings#replacesRandomHello}). The field keeps the link's
+     * value, which is what the server stores, and which a subscription's next
+     * refresh would bring back anyway.
+     */
+    private void showFingerprintNote() {
+        TlsConfig shown = new TlsConfig();
+        writeTls(shown, protocolCombo.getValue());
+        setNodeVisible(fingerprintNoteLabel, CoreSettings.replacesRandomHello(shown));
     }
 
     /**
@@ -721,6 +742,7 @@ public class ServerFormController {
         bindLabel(tlsEnabledCheck, "form.tls.enable");
         bindLabel(sniLabel, "form.server.name");
         bindLabel(fingerprintLabel, "form.fingerprint");
+        bindLabel(fingerprintNoteLabel, "form.fingerprint.note");
         bindLabel(allowInsecureCheck, "form.allow.insecure");
         bindLabel(realityCheck, "form.reality");
         bindLabel(realityPublicKeyLabel, "form.public.key");
