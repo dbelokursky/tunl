@@ -1,22 +1,22 @@
 package com.vlessclient.service;
 
+import com.sun.net.httpserver.HttpsConfigurator;
+import com.sun.net.httpserver.HttpsServer;
 import com.vlessclient.model.HealthCheckTarget;
 import com.vlessclient.service.ServiceReachabilityChecker.HostPort;
 import com.vlessclient.service.ServiceReachabilityChecker.ProbeResult;
+import com.vlessclient.testing.SelfSignedTls;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
-import java.net.Socket;
-import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -171,73 +171,187 @@ class ServiceReachabilityCheckerTest {
         assertThat(ServiceReachabilityChecker.parseHostPort(null)).isNull();
     }
 
-    // ===== TCP-connect probe through a fake proxy =====
+    // ===== through the probe inbound's SOCKS5 side =====
 
+    /**
+     * A host:port target is reachable once the core says that the tunnel
+     * carried the connection. It used to be asked of the HTTP side with a
+     * CONNECT, which sing-box answers with 200 before it dials: the target
+     * read as reachable through a tunnel that carried nothing.
+     */
     @Test
-    void tcpProbe_proxyEstablishesConnection_marksReachable() throws Exception {
-        AtomicReference<String> seenConnect = new AtomicReference<>();
-        try (FakeProxy proxy = new FakeProxy("HTTP/1.1 200 Connection established", seenConnect)) {
+    void aTcpTargetIsReachableWhenTheTunnelCarriedTheConnection() throws Exception {
+        try (FakeProbeInbound inbound = new FakeProbeInbound(FakeProbeInbound.CARRIED, null)) {
             checker = new ServiceReachabilityChecker();
 
             List<ProbeResult> results = checker
-                    .checkAll(List.of(new HealthCheckTarget("DNS", "1.1.1.1:853")), proxy.port())
+                    .checkAll(List.of(new HealthCheckTarget("DNS", "1.1.1.1:853")), inbound.port())
                     .get(20, TimeUnit.SECONDS);
 
-            assertThat(results).hasSize(1);
-            assertThat(results.get(0).reachable()).isTrue();
-            assertThat(results.get(0).latencyMs()).isGreaterThanOrEqualTo(0);
-            assertThat(seenConnect.get()).isEqualTo("CONNECT 1.1.1.1:853 HTTP/1.1");
+            assertThat(results).singleElement().satisfies(result -> {
+                assertThat(result.reachable()).isTrue();
+                assertThat(result.latencyMs()).isNotNegative();
+                assertThat(result.detail()).isEqualTo("TCP 853");
+            });
+            assertThat(inbound.connects).containsExactly("1 1.1.1.1:853");
         }
     }
 
     @Test
-    void tcpProbe_proxyRefusesTarget_marksUnreachable() throws Exception {
-        try (FakeProxy proxy = new FakeProxy("HTTP/1.1 502 Bad Gateway", new AtomicReference<>())) {
+    void aTcpTargetTheTunnelDidNotCarryIsUnreachable() throws Exception {
+        try (FakeProbeInbound inbound = new FakeProbeInbound(FakeProbeInbound.REFUSED, null)) {
             checker = new ServiceReachabilityChecker();
 
             List<ProbeResult> results = checker
-                    .checkAll(List.of(new HealthCheckTarget("Host", "10.0.0.1")), proxy.port())
+                    .checkAll(List.of(new HealthCheckTarget("Host", "10.0.0.1")), inbound.port())
                     .get(20, TimeUnit.SECONDS);
 
             assertThat(results.get(0).reachable()).isFalse();
             assertThat(results.get(0).latencyMs()).isEqualTo(-1);
+            assertThat(inbound.connects).as("one per attempt")
+                    .containsExactly("1 10.0.0.1:443", "1 10.0.0.1:443");
         }
     }
 
-    /** Minimal HTTP-CONNECT proxy: reads the request line, replies once. */
-    private static final class FakeProxy implements AutoCloseable {
-        private final ServerSocket server;
-        private final Thread thread;
+    @Test
+    void anIpv6TargetGoesAsAnAddress() throws Exception {
+        try (FakeProbeInbound inbound = new FakeProbeInbound(FakeProbeInbound.CARRIED, null)) {
+            checker = new ServiceReachabilityChecker();
 
-        FakeProxy(String statusLine, AtomicReference<String> firstLineSink) throws IOException {
-            server = new ServerSocket(0, 2, InetAddress.getLoopbackAddress());
-            thread = new Thread(() -> {
-                while (!server.isClosed()) {
-                    try (Socket client = server.accept()) {
-                        BufferedReader in = new BufferedReader(new InputStreamReader(
-                                client.getInputStream(), StandardCharsets.US_ASCII));
-                        String requestLine = in.readLine();
-                        firstLineSink.compareAndSet(null, requestLine);
-                        OutputStream out = client.getOutputStream();
-                        out.write((statusLine + "\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
-                        out.flush();
-                    } catch (IOException e) {
-                        return;   // server closed
-                    }
-                }
-            }, "fake-proxy");
-            thread.setDaemon(true);
-            thread.start();
-        }
+            List<ProbeResult> results = checker
+                    .checkAll(List.of(new HealthCheckTarget("DNS", "[2606:4700:4700::1111]:53")),
+                            inbound.port())
+                    .get(20, TimeUnit.SECONDS);
 
-        int port() {
-            return server.getLocalPort();
+            assertThat(results.get(0).reachable()).isTrue();
+            assertThat(inbound.connects).containsExactly("4 2606:4700:4700:0:0:0:0:1111:53");
         }
+    }
 
-        @Override
-        public void close() throws IOException {
-            server.close();
+    /**
+     * A plain http target is asked over a connection the tunnel carried, and
+     * its name goes to the far end as a name. Through the HTTP side, a request
+     * the core could not dial came back as the core's own 502, which counted
+     * as the site's answer.
+     */
+    @Test
+    void aPlainHttpTargetAnswersOverTheTunnel() throws Exception {
+        try (FakeProbeInbound inbound = new FakeProbeInbound(
+                FakeProbeInbound.CARRIED, "HTTP/1.1 204 No Content")) {
+            checker = new ServiceReachabilityChecker();
+
+            List<ProbeResult> results = checker
+                    .checkAll(List.of(new HealthCheckTarget("Cloudflare",
+                            "http://cp.cloudflare.com/generate_204?from=tunl")), inbound.port())
+                    .get(20, TimeUnit.SECONDS);
+
+            assertThat(results.get(0).reachable()).isTrue();
+            assertThat(results.get(0).detail()).isEqualTo("HTTP 204");
+            assertThat(inbound.connects).containsExactly("3 cp.cloudflare.com:80");
+            assertThat(inbound.requests).singleElement().asString()
+                    .startsWith("HEAD /generate_204?from=tunl HTTP/1.1\n")
+                    .contains("Host: cp.cloudflare.com\n");
         }
+    }
+
+    @Test
+    void aPlainHttpTargetTheTunnelDidNotCarryIsUnreachable() throws Exception {
+        try (FakeProbeInbound inbound = new FakeProbeInbound(
+                FakeProbeInbound.REFUSED, "HTTP/1.1 204 No Content")) {
+            checker = new ServiceReachabilityChecker();
+
+            List<ProbeResult> results = checker
+                    .checkAll(List.of(new HealthCheckTarget("Site", "http://site.example:8080/")),
+                            inbound.port())
+                    .get(20, TimeUnit.SECONDS);
+
+            assertThat(results.get(0).reachable()).isFalse();
+            assertThat(inbound.requests).as("nothing to ask once the tunnel failed").isEmpty();
+        }
+    }
+
+    // ===== https: a connection of its own every time =====
+
+    /**
+     * Every round opens a connection of its own through the tunnel. The
+     * checks kept one HTTP/2 connection between rounds, and it went on
+     * answering while the tunnel could no longer open a new one: for ten
+     * minutes the services read reachable, and were not.
+     */
+    @Test
+    void everyRoundOpensAConnectionOfItsOwn(@TempDir Path dir) throws Exception {
+        SelfSignedTls tls = SelfSignedTls.in(dir);
+        HttpsServer site = siteOn(tls);
+        try (FakeProbeInbound inbound = FakeProbeInbound.relayingTo(site.getAddress().getPort())) {
+            checker = new ServiceReachabilityChecker(null, tls.client());
+            List<HealthCheckTarget> targets = List.of(new HealthCheckTarget("Site",
+                    "https://localhost:" + site.getAddress().getPort() + "/generate_204"));
+
+            for (int round = 1; round <= 3; round++) {
+                List<ProbeResult> results =
+                        checker.checkAll(targets, inbound.port()).get(20, TimeUnit.SECONDS);
+
+                assertThat(results.get(0).detail()).as("round %d", round).isEqualTo("HTTP 204");
+                assertThat(inbound.connects)
+                        .as("connections through the tunnel after round %d", round)
+                        .hasSize(round);
+            }
+        } finally {
+            site.stop(0);
+        }
+    }
+
+    /**
+     * The certificate has to name the host, as it has for a browser: a portal
+     * or a filter that answers in the site's place, with a certificate of its
+     * own, does not pass for the site.
+     */
+    @Test
+    void aSiteWhoseCertificateNamesAnotherHostIsUnreachable(@TempDir Path dir) throws Exception {
+        SelfSignedTls tls = SelfSignedTls.in(dir);
+        HttpsServer site = siteOn(tls);
+        try (FakeProbeInbound inbound = FakeProbeInbound.relayingTo(site.getAddress().getPort())) {
+            checker = new ServiceReachabilityChecker(null, tls.client());
+
+            List<ProbeResult> results = checker
+                    .checkAll(List.of(new HealthCheckTarget("Site",
+                            "https://site.example/generate_204")), inbound.port())
+                    .get(20, TimeUnit.SECONDS);
+
+            assertThat(results.get(0).reachable()).isFalse();
+            assertThat(inbound.connects).as("the tunnel carried it").isNotEmpty();
+        } finally {
+            site.stop(0);
+        }
+    }
+
+    /** An https site on the loopback, answering 204 at /generate_204. */
+    private static HttpsServer siteOn(SelfSignedTls tls) throws Exception {
+        HttpsServer site = HttpsServer.create(
+                new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        site.setHttpsConfigurator(new HttpsConfigurator(tls.server()));
+        site.createContext("/generate_204", exchange -> {
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        site.start();
+        return site;
+    }
+
+    /** A target of a scheme the checks do not speak fails alone, not the whole round. */
+    @Test
+    void aUrlOfAnotherSchemeIsUnreachableRatherThanAFailedRound() throws Exception {
+        checker = new ServiceReachabilityChecker();
+
+        List<ProbeResult> results = checker
+                .checkAll(List.of(new HealthCheckTarget("Files", "ftp://files.example/")),
+                        closedLoopbackPort())
+                .get(20, TimeUnit.SECONDS);
+
+        assertThat(results).singleElement().satisfies(result -> {
+            assertThat(result.reachable()).isFalse();
+            assertThat(result.detail()).isEqualTo("invalid url");
+        });
     }
 
     private static ProbeResult reachable(HealthCheckTarget t) {
@@ -250,39 +364,6 @@ class ServiceReachabilityCheckerTest {
     private static int closedLoopbackPort() throws IOException {
         try (ServerSocket socket = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
             return socket.getLocalPort();
-        }
-    }
-
-    /**
-     * Through a group, a URL target is fetched by the core through it; a
-     * host:port one, which is no URL the group can fetch, still goes through
-     * the inbound.
-     */
-    @Test
-    void throughAGroupOnlyUrlTargetsGoToTheGroup() throws Exception {
-        List<String> viaInbound = new java.util.concurrent.CopyOnWriteArrayList<>();
-        List<String> viaGroup = new java.util.concurrent.CopyOnWriteArrayList<>();
-        ServiceReachabilityChecker checker = new ServiceReachabilityChecker(
-                (target, port) -> {
-                    viaInbound.add(target.getUrl() + "@" + port);
-                    return new ProbeResult(target.getName(), target.getUrl(), true, 1, "tcp");
-                },
-                (target, route) -> {
-                    viaGroup.add(target.getUrl() + "@" + route.group());
-                    return new ProbeResult(target.getName(), target.getUrl(), true, 1, "group");
-                });
-        try {
-            List<ProbeResult> results = checker.checkAllThroughGroup(List.of(
-                            new HealthCheckTarget("Google", "https://www.google.com/generate_204"),
-                            new HealthCheckTarget("Box", "203.0.113.7:22")),
-                    new ServiceReachabilityChecker.GroupRoute(1082, 9099, "s", "proxy"))
-                    .get(5, TimeUnit.SECONDS);
-
-            assertThat(results).extracting(ProbeResult::detail).containsExactly("group", "tcp");
-            assertThat(viaGroup).containsExactly("https://www.google.com/generate_204@proxy");
-            assertThat(viaInbound).containsExactly("203.0.113.7:22@1082");
-        } finally {
-            checker.shutdown();
         }
     }
 }

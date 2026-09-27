@@ -94,7 +94,7 @@ public class DashboardHiddenWindowTest extends ApplicationTest {
 
         @Override
         public CompletableFuture<List<ProbeResult>> checkAll(
-                List<HealthCheckTarget> targets, int httpProxyPort) {
+                List<HealthCheckTarget> targets, int probePort) {
             calls.incrementAndGet();
             boolean answer = reachable;
             return CompletableFuture.completedFuture(targets.stream()

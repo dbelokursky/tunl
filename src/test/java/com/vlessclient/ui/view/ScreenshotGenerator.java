@@ -229,7 +229,7 @@ public class ScreenshotGenerator extends ApplicationTest {
 
     /** A reachable answer with a plausible latency, as a healthy tunnel gives. */
     private static ServiceReachabilityChecker.ProbeResult sampleProbe(
-            HealthCheckTarget target, int httpProxyPort) {
+            HealthCheckTarget target, int probePort) {
         long millis = "X".equals(target.getName()) ? 513 : 320;
         return new ServiceReachabilityChecker.ProbeResult(
                 target.getName(), target.getUrl(), true, millis, "HTTP 204");
