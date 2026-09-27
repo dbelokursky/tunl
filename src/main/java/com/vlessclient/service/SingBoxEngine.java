@@ -16,6 +16,7 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
@@ -837,8 +838,9 @@ public class SingBoxEngine {
 
     /**
      * Starts a daemon thread that monitors the sing-box process and detects
-     * unexpected exits (crashes). On unexpected exit, sets the connection state
-     * to ERROR with the last log line as the error message.
+     * unexpected exits (crashes). On unexpected exit, writes the core's last
+     * lines into the app log and sets the connection state to ERROR with the
+     * last log line as the error message.
      */
     private void startProcessMonitor() {
         // Capture THIS session's state up front. The fields are cleared by
@@ -876,6 +878,14 @@ public class SingBoxEngine {
                         // cancelling the connect, not the tunnel failing: it
                         // was an ERROR, with a "Tunnel stopped" notification.
                         boolean declined = CoreExitReason.declined(lastLine);
+                        // Logged before the state changes: its listeners
+                        // log the restart, which then reads after the why.
+                        if (declined) {
+                            log.info("Connect cancelled: the administrator prompt was "
+                                    + "dismissed ({})", Redact.urlsIn(lastLine));
+                        } else {
+                            logUnexpectedExit(exitCode, CoreExitReason.lastLines(logLines));
+                        }
                         // Message before state: state listeners fire
                         // synchronously inside set(), and they read the
                         // message the moment they see ERROR.
@@ -933,6 +943,27 @@ public class SingBoxEngine {
         }, "singbox-process-monitor");
         monitor.setDaemon(true);
         monitor.start();
+    }
+
+    /**
+     * Writes the lines that say why the core stopped into the app log. They
+     * were only in the Logs tab, which the next start clears, and recovery
+     * starts the core again within seconds, so a bug report carried "the core
+     * stopped" and no reason: a diagnostics bundle packs the app log, not the
+     * core's output. Each line is indented under the entry, with its URLs cut
+     * down as every URL on its way into the log is; the bundle takes the
+     * servers' names and public addresses out when it packs the log.
+     */
+    private static void logUnexpectedExit(int exitCode, List<String> lines) {
+        if (lines.isEmpty()) {
+            log.warn("The core exited unexpectedly with code {} and printed nothing", exitCode);
+            return;
+        }
+        StringBuilder quoted = new StringBuilder();
+        for (String line : lines) {
+            quoted.append(System.lineSeparator()).append("    ").append(Redact.urlsIn(line));
+        }
+        log.warn("The core exited unexpectedly with code {}:{}", exitCode, quoted);
     }
 
     /**

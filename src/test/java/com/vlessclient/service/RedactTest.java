@@ -112,4 +112,56 @@ class RedactTest {
             assertThat(Redact.urlsIn("")).isEmpty();
         }
     }
+
+    @Nested
+    @DisplayName("publicIpsIn()")
+    class PublicIpsIn {
+
+        @Test
+        @DisplayName("redacts the address the core dialed, IPv4 or IPv6, and keeps the port")
+        void redactsDialedAddresses() {
+            assertThat(Redact.publicIpsIn("dial tcp 203.0.113.7:443: i/o timeout"))
+                    .isEqualTo("dial tcp <redacted>:443: i/o timeout");
+            assertThat(Redact.publicIpsIn("dial tcp [2001:db8::7]:443: connect: refused"))
+                    .isEqualTo("dial tcp [<redacted>]:443: connect: refused");
+            assertThat(Redact.publicIpsIn("dial udp 198.51.100.7:53, then 203.0.113.8:53."))
+                    .isEqualTo("dial udp <redacted>:53, then <redacted>:53.");
+            assertThat(Redact.publicIpsIn("from ::ffff:203.0.113.7 and 2001:db8:0:0:0:0:0:7"))
+                    .isEqualTo("from ::ffff:<redacted> and <redacted>");
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {
+            "listen tcp 127.0.0.1:1081: bind: address already in use",
+            "inbound connection from [::1]:52345",
+            "tun address 172.19.0.1/30, router 192.168.1.1, lan 10.0.0.7",
+            "tun address fdfe:dcba:9876::1/126, link fe80::1%en0",
+            "listen 0.0.0.0:1080 and [::]:1080, link-local 169.254.1.1",
+            "mdns 224.0.0.251:5353",
+        })
+        @DisplayName("keeps the addresses that describe this machine and name no one")
+        void keepsLocalAddresses(String line) {
+            assertThat(Redact.publicIpsIn(line)).isEqualTo(line);
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {
+            "+0300 2026-09-27 12:00:00 INFO [3402963502 0ms] router: updated",
+            "2026-09-27 12:00:00.000 [main] INFO  c.v.service.SingBoxEngine - started",
+            "sing-box 1.14.2, build 1.2.3.4.5, windows 10.0.19045.3803",
+            "interface aa:bb:cc:dd:ee:ff, octet 999.1.1.1",
+            "goroutine 4211 [running]: route.go:123 +0x2c",
+        })
+        @DisplayName("leaves times, versions and MAC addresses alone")
+        void leavesLookalikesAlone(String line) {
+            assertThat(Redact.publicIpsIn(line)).isEqualTo(line);
+        }
+
+        @Test
+        @DisplayName("handles null and empty")
+        void handlesEmpty() {
+            assertThat(Redact.publicIpsIn(null)).isNull();
+            assertThat(Redact.publicIpsIn("")).isEmpty();
+        }
+    }
 }

@@ -263,6 +263,74 @@ class DiagnosticsBundleTest {
         assertThat(lines.get(lines.size() - 1)).startsWith("Refreshing ");
     }
 
+    /**
+     * An unexpected exit leaves the core's last lines in the log, and the core
+     * names the server there: the address it dialed, the name it looked up and
+     * what that name resolved to, which no configuration holds, and the SNI or
+     * host a certificate did not match. The tail redacted only URLs.
+     */
+    @Test
+    void theLogTailNamesNoServerTheCoreQuoted() throws IOException {
+        ServerConfig named = new ServerConfig();
+        named.setName("Frankfurt");
+        named.setProtocol(Protocol.VLESS);
+        named.setAddress("gateway.example");
+        named.setPort(443);
+        named.setUuid(SERVER_SECRET);
+        named.getTls().setEnabled(true);
+        named.getTls().setServerName("www.microsoft.com");
+        named.getTransport().setType(TransportType.HTTPUPGRADE);
+        named.getTransport().setHost("cdn.example");
+        store.addServer(named);
+        ServerConfig plugin = new ServerConfig();
+        plugin.setName("Tokyo");
+        plugin.setProtocol(Protocol.SHADOWSOCKS);
+        plugin.setAddress("203.0.113.47");
+        plugin.setPort(443);
+        plugin.setEncryption("aes-256-gcm");
+        plugin.setUuid(SERVER_SECRET);
+        plugin.setPlugin("v2ray-plugin");
+        plugin.setPluginOpts("tls;host=private-cdn.example;path=/private-path");
+        store.addServer(plugin);
+        Files.writeString(logsDir.resolve("tunl.log"), String.join("\n",
+                "2026-09-27 12:00:00.000 [JavaFX Application Thread] WARN  "
+                        + "c.vlessclient.service.SingBoxEngine - "
+                        + "The core exited unexpectedly with code 1:",
+                "    ERROR[0040] [11 5s] connection: open connection to www.example.com:443 "
+                        + "using outbound/vless[srv-a]: dial tcp 198.51.100.7:443: i/o timeout",
+                "    ERROR[0041] [12 0ms] outbound/vless[srv-b]: dial tcp: "
+                        + "lookup Gateway.Example.: no such host",
+                "    ERROR[0042] [13 1s] outbound/vless[srv-b]: "
+                        + "dial tcp 203.0.113.46:443: connect: connection refused",
+                "    ERROR[0043] [14 1s] outbound/vless[srv-b]: "
+                        + "dial tcp [2001:db8::46]:443: connect: network is unreachable",
+                "    ERROR[0044] [15 0ms] outbound/vless[srv-b]: tls: failed to verify "
+                        + "certificate: x509: certificate is valid for cdn.example, "
+                        + "not www.microsoft.com",
+                "    ERROR[0045] [16 0ms] outbound/shadowsocks[srv-c]: v2ray-plugin: "
+                        + "handshake with private-cdn.example failed",
+                "    FATAL[0046] start service: start inbound/http[http-in]: "
+                        + "listen tcp 127.0.0.1:1081: bind: address already in use") + "\n",
+                StandardCharsets.UTF_8);
+
+        String tail = unzip(write()).get("tunl.log");
+
+        assertThat(tail)
+                .doesNotContain("198.51.100.7")
+                .doesNotContainIgnoringCase("gateway.example")
+                .doesNotContain("203.0.113.46")
+                .doesNotContain("2001:db8::46")
+                .doesNotContain("www.microsoft.com")
+                .doesNotContain("cdn.example");
+        // What a report needs stays: the exit, what each line says, the local port.
+        assertThat(tail)
+                .contains("The core exited unexpectedly with code 1:")
+                .contains("dial tcp <redacted>:443: i/o timeout")
+                .contains("lookup <redacted>.: no such host")
+                .contains("dial tcp [<redacted>]:443: connect: network is unreachable")
+                .contains("listen tcp 127.0.0.1:1081: bind: address already in use");
+    }
+
     @Test
     void aMissingLogFileStillProducesABundle() throws IOException {
         Map<String, String> entries = unzip(write());
