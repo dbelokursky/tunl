@@ -66,10 +66,15 @@ class FxTimerTest {
     @Test
     void aCancelledWaitNeverRuns() throws Exception {
         AtomicInteger runs = new AtomicInteger();
-        FxTimer.Cancellable pending =
-                onFx(() -> FxTimer.after(Duration.ofMillis(50), runs::incrementAndGet));
-
-        runOnFx(pending::cancel);
+        // Armed and cancelled in one turn of the FX thread. In two turns, a
+        // loaded runner let the 50 ms pass between them, and the wait ran
+        // before the cancel came.
+        onFx(() -> {
+            FxTimer.Cancellable pending =
+                    FxTimer.after(Duration.ofMillis(50), runs::incrementAndGet);
+            pending.cancel();
+            return pending;
+        });
         Thread.sleep(250);
         flushFxEvents();
 
