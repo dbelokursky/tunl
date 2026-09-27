@@ -36,6 +36,12 @@ public final class CoreSettings {
     /** The uTLS fingerprint a server gets when its link names none. */
     private static final String DEFAULT_FINGERPRINT = "chrome";
 
+    /** The fingerprint that picks one browser's hello for the whole run. */
+    private static final String RANDOM_PICK = "random";
+
+    /** What a REALITY server is sent in place of {@link #RANDOM_PICK}. */
+    private static final String RANDOMIZED = "randomized";
+
     /** The uTLS fingerprints the core knows. */
     private static final Set<String> FINGERPRINTS = Set.of(
             "chrome", "firefox", "edge", "safari", "360", "qq", "ios", "android",
@@ -112,11 +118,12 @@ public final class CoreSettings {
     }
 
     /**
-     * The uTLS fingerprint to send for this server: {@link #fingerprint}, or
-     * none when its TLS runs inside QUIC, Hysteria2's or the QUIC transport's.
-     * The core passes {@code check} with uTLS there, then fails every
-     * connection with "unsupported usage for uTLS", for a fingerprint the
-     * link set as for the default.
+     * The uTLS fingerprint to send for this server: {@link #fingerprint},
+     * {@code randomized} where {@link #replacesRandomPick} says so, or none
+     * when its TLS runs inside QUIC, Hysteria2's or the QUIC transport's. The
+     * core passes {@code check} with uTLS there, then fails every connection
+     * with "unsupported usage for uTLS", for a fingerprint the link set as for
+     * the default.
      *
      * @param server the server to connect to
      * @return the fingerprint, or null when uTLS cannot be used
@@ -125,7 +132,35 @@ public final class CoreSettings {
         TransportConfig transport = server.getTransport();
         boolean overQuic = server.getProtocol() == Protocol.HYSTERIA2
                 || transport != null && transport.getType() == TransportType.QUIC;
-        return overQuic ? null : fingerprint(server.getTls());
+        if (overQuic) {
+            return null;
+        }
+        return replacesRandomPick(server.getTls()) ? RANDOMIZED : fingerprint(server.getTls());
+    }
+
+    /**
+     * Whether a REALITY server is sent {@code randomized} in place of the
+     * {@code random} its link asks for.
+     *
+     * <p>The core answers {@code random} with one browser's hello, picked
+     * once per process among Chrome, Firefox, Edge, Safari and iOS, and only
+     * Chrome's carries the X25519MLKEM768 key share that Xray 26.9.8 requires
+     * of a REALITY hello. Against such a server four core starts in five fail
+     * every connection, until a restart picks again. The bundled core puts
+     * that share into every randomized hello ({@code packaging/sing-box}), so
+     * the hello stays random, as the link asks. Chrome's, the one pick that
+     * works, is not sent instead: links ask for a random hello where TSPU is
+     * reported to single out the uTLS Chrome profile. The server keeps its
+     * link's value, which a subscription refresh would bring back anyway;
+     * plain TLS keeps {@code random}, since an ordinary TLS server takes any
+     * hello.</p>
+     *
+     * @param tls the server's TLS settings, or null when it has none
+     * @return true when {@code randomized} goes in place of the link's
+     */
+    public static boolean replacesRandomPick(TlsConfig tls) {
+        return tls != null && tls.isEnabled() && tls.isReality()
+                && RANDOM_PICK.equals(fingerprint(tls));
     }
 
     /**

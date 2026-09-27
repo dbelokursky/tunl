@@ -584,6 +584,7 @@ public class ConnectionService {
             log.info("TUN IPv6 is on, but no interface holds a global IPv6 address: "
                     + "the device stays IPv4-only so direct routes are not dialled over IPv6");
         }
+        logReplacedFingerprints(members);
         appliedServerId = active.getId();
         publishSkipped(skipped);
         publishMoved(moved);
@@ -624,6 +625,24 @@ public class ConnectionService {
             skipped.add(new SkippedServer(server.getId(), server.getName(), refusal.reason()));
         }
         return members;
+    }
+
+    /**
+     * Names the REALITY servers the core was given {@code randomized} for in
+     * place of the {@code random} their links ask for
+     * ({@link CoreSettings#replacesRandomPick}). Said once per start, like
+     * the IPv6 note: the generator writes the substitution into every
+     * configuration, and it writes one on every dashboard update to compare.
+     */
+    private static void logReplacedFingerprints(List<ServerConfig> members) {
+        String replaced = members.stream()
+                .filter(server -> CoreSettings.replacesRandomPick(server.getTls()))
+                .map(server -> "'" + server.getName() + "'")
+                .collect(Collectors.joining(", "));
+        if (!replaced.isEmpty()) {
+            log.info("REALITY servers get uTLS fingerprint randomized in place of random, "
+                    + "which picks one browser for the whole run: {}", replaced);
+        }
     }
 
     /**
