@@ -1026,6 +1026,69 @@ class ConnectionServiceTest {
     }
 
     /**
+     * A REALITY server takes any short ID and any server name on its lists,
+     * and 3x-ui and Marzban pick one of each at random whenever they hand the
+     * server out. So a subscription refreshed every hour changed them under
+     * the run, and the Dashboard asked for a restart that changed nothing the
+     * tunnel does.
+     */
+    @Test
+    void aRefreshThatPicksAnotherRealityShortIdAndNameAsksForNoRestart() throws Exception {
+        store.addServer(subscribed(REALITY_KEY, "a.example.com", "ab12"));
+        ConnectionService service = service(engine());
+        assertThat(service.connect().started()).isTrue();
+
+        store.applyServerBatch(List.of(subscribed(REALITY_KEY, "a.example.com", "ab12")),
+                List.of());
+        assertThat(service.runsCurrentSettings()).as("handed out as before").isTrue();
+
+        store.applyServerBatch(List.of(subscribed(REALITY_KEY, "b.example.com", "0123456789")),
+                List.of());
+        assertThat(service.runsCurrentSettings()).as("another short ID and name picked")
+                .isTrue();
+    }
+
+    /** Only those two: another key from the same refresh still waits for a restart. */
+    @Test
+    void aRefreshThatChangesARealityServersKeyStillAsksForARestart() throws Exception {
+        store.addServer(subscribed(REALITY_KEY, "a.example.com", "ab12"));
+        ConnectionService service = service(engine());
+        assertThat(service.connect().started()).isTrue();
+
+        store.applyServerBatch(List.of(subscribed(OTHER_REALITY_KEY, "a.example.com", "ab12")),
+                List.of());
+
+        assertThat(service.runsCurrentSettings()).isFalse();
+    }
+
+    /**
+     * Without REALITY the server name is the one the certificate is checked
+     * against, so another one still waits for a restart.
+     */
+    @Test
+    void anotherServerNameWithoutRealityStillAsksForARestart() throws Exception {
+        store.addServer(TestServers.vless("Tokyo").id("srv-1").subscriptionId("sub-1")
+                .active(true).tls("a.example.com").build());
+        ConnectionService service = service(engine());
+        assertThat(service.connect().started()).isTrue();
+
+        store.applyServerBatch(List.of(TestServers.vless("Tokyo").id("srv-1")
+                .subscriptionId("sub-1").active(true).tls("b.example.com").build()), List.of());
+
+        assertThat(service.runsCurrentSettings()).isFalse();
+    }
+
+    private static final String REALITY_KEY = "Z84J2IelR9ch3k8VtlVhhs5ycBUlXA7wHBWcBrjqnAw";
+    private static final String OTHER_REALITY_KEY = "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0";
+
+    /** The subscription's REALITY server as one refresh hands it out. */
+    private static ServerConfig subscribed(String publicKey, String serverName, String shortId) {
+        return TestServers.vless("Tokyo").id("srv-1").subscriptionId("sub-1").active(true)
+                .flow("xtls-rprx-vision").fingerprint("chrome")
+                .reality(serverName, publicKey, shortId).build();
+    }
+
+    /**
      * The TUN device takes IPv6 by the network it started on. A laptop that
      * moved to a network with IPv6 sent its IPv6 around the tunnel, and one
      * that moved off it drew apps to IPv6 that could not leave, until a

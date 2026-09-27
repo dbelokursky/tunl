@@ -787,10 +787,14 @@ public class ConnectionService {
      *
      * <p>Compared with what a reconnect from the Dashboard would start: the
      * saved mode, and the chosen ports as well as the configuration, since a
-     * port the run moved stands in for the chosen one until the run ends.</p>
+     * port the run moved stands in for the chosen one until the run ends.
+     * A REALITY server's short ID and server name do not count: its panel
+     * picks them anew each time a subscription is refreshed, and the ones the
+     * core runs with work as well. An hourly refresh put up the reconnect
+     * banner most hours, though nothing had changed.</p>
      *
-     * @return true when no core runs, or when a restart would load the same
-     *     configuration
+     * @return true when no core runs, or when a restart would run as the
+     *     core does
      */
     public boolean runsCurrentSettings() {
         Run current = run;
@@ -807,7 +811,7 @@ public class ConnectionService {
         AppSettings settings = configStore.getSettings();
         return current.mode() == settings.getProxyMode()
                 && current.chosenPorts().equals(chosenPorts(settings))
-                && current.selector().matches(generatedNow(
+                && current.selector().runsAs(generatedNow(
                         candidates, active, settings, current.leftOut(), current.host()));
     }
 
