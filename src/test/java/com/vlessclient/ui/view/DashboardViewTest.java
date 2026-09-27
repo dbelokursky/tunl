@@ -82,4 +82,13 @@ public class DashboardViewTest extends ApplicationTest {
                 .as("the name a screen reader reads for \"+\"")
                 .isEqualTo(I18n.get("health.target.add.title"));
     }
+
+    /** The plus is drawn, as the rows' trash cans are: a text "+" sat off centre. */
+    @Test
+    void theAddServiceButtonIsAnIcon() {
+        Button add = lookup("#addTargetButton").query();
+
+        assertThat(add.getText()).as("a text glyph").isNullOrEmpty();
+        assertThat(add.getGraphic()).as("an icon").isNotNull();
+    }
 }
