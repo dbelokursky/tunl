@@ -120,6 +120,30 @@ class LiveServerSwitchTest {
                 .isEqualTo(live.groupTag());
     }
 
+    /**
+     * A REALITY server's short ID and server name, which its panel picks anew
+     * for each refresh, leave the core running as a restart would. A switch
+     * to that server still restarts: the values the core loaded may be ones
+     * the panel has since dropped.
+     */
+    @Test
+    void realityPicksRunAsLoadedButAreNotSwitchedToLive() {
+        var generator = new SingBoxConfigGenerator();
+        var settings = new com.vlessclient.model.AppSettings();
+        var a = reality("a", "a.example.com", "ab12");
+        var b = reality("b", "a.example.com", "ab12");
+        var live = new LiveSelector(generator.generate(java.util.List.of(a, b), a, settings, null));
+        String switched = generator.generate(java.util.List.of(a, b), b, settings, null);
+        assertThat(live.accepts(switched)).as("the same servers, another picked").isTrue();
+
+        var repicked = reality("b", "b.example.com", "0123456789");
+        String refreshed = generator.generate(java.util.List.of(a, repicked), repicked,
+                settings, null);
+
+        assertThat(live.runsAs(refreshed)).as("runs as a restart would").isTrue();
+        assertThat(live.accepts(refreshed)).as("switched to without a restart").isFalse();
+    }
+
     @Test
     void remoteRuleSetsUseTheRuntimeGroupForTheirDownload() {
         var routing = new com.vlessclient.model.RoutingConfig();
@@ -142,6 +166,17 @@ class LiveServerSwitchTest {
                 .address("127.0.0.1")
                 .uuid("11111111-1111-1111-1111-111111111111")
                 .port(443)
+                .build();
+    }
+
+    private static ServerConfig reality(String id, String serverName, String shortId) {
+        return TestServers.server()
+                .id(id)
+                .protocol(com.vlessclient.model.Protocol.VLESS)
+                .address("127.0.0.1")
+                .uuid("11111111-1111-1111-1111-111111111111")
+                .port(443)
+                .reality(serverName, "Z84J2IelR9ch3k8VtlVhhs5ycBUlXA7wHBWcBrjqnAw", shortId)
                 .build();
     }
 

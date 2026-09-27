@@ -28,6 +28,8 @@ final class LiveSelector {
     private final boolean manual;
     /** The configuration as generated, but for the manual selector's pick. */
     private final JsonNode loaded;
+    /** {@link #loaded}, but for each REALITY server's short ID and server name. */
+    private final JsonNode loadedAsRun;
     private final String groupTag;
     private final String config;
     private final URI endpoint;
@@ -37,6 +39,7 @@ final class LiveSelector {
         ObjectNode root = (ObjectNode) MAPPER.readTree(generated);
         manual = manualSelector(root) != null;
         loaded = withoutPick(root);
+        loadedAsRun = withoutRealityPicks(loaded);
         // sing-box restores a cached selection before considering "default".
         // Give each process its own selector key so an older choice cannot
         // override the user's current selection. Rule-set caches remain shared.
@@ -78,6 +81,25 @@ final class LiveSelector {
         return loaded.equals(withoutPick(MAPPER.readTree(generated)));
     }
 
+    /**
+     * Whether a restart with a configuration generated now would run as this
+     * core does: {@link #matches}, but for each REALITY server's short ID and
+     * server name. A REALITY server takes any of those on its lists, and
+     * panels such as 3x-ui and Marzban pick one of each at random whenever
+     * they hand a server out. So each refresh of a subscription changed them,
+     * and asked for a restart that changed nothing the tunnel does.
+     *
+     * <p>{@link #accepts} still asks for the exact match. A server switched
+     * to live keeps the values this core loaded, and ones its panel has since
+     * dropped would carry nothing until recovery restarted the core.</p>
+     *
+     * @param generated a configuration generated from the current settings
+     * @return true when a restart would run as this core does
+     */
+    boolean runsAs(String generated) {
+        return loadedAsRun.equals(withoutRealityPicks(withoutPick(MAPPER.readTree(generated))));
+    }
+
     boolean select(String serverTag) {
         try (HttpClient client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(2)).build()) {
@@ -117,6 +139,23 @@ final class LiveSelector {
         ObjectNode selector = manualSelector(copy);
         if (selector != null) {
             selector.remove("default");
+        }
+        return copy;
+    }
+
+    /**
+     * A copy of {@code root} without the short ID and the server name of its
+     * REALITY outbounds, the two values their servers take from a list.
+     */
+    private static JsonNode withoutRealityPicks(JsonNode root) {
+        JsonNode copy = root.deepCopy();
+        for (JsonNode outbound : copy.path("outbounds")) {
+            JsonNode tls = outbound.path("tls");
+            JsonNode reality = tls.path("reality");
+            if (reality.path("enabled").asBoolean(false)) {
+                ((ObjectNode) tls).remove("server_name");
+                ((ObjectNode) reality).remove("short_id");
+            }
         }
         return copy;
     }
