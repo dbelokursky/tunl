@@ -105,6 +105,13 @@ public final class Icons {
     private static final String TRASH =
             "M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,"
                     + "19V7H6V19Z";
+    // mdi-trash-can-outline: an outline can, lighter than the filled one
+    // above, for a delete that sits in every row of a list.
+    private static final String TRASH_OUTLINE =
+            "M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19"
+                    + "H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z";
+    // mdi-plus.
+    private static final String PLUS = "M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z";
 
     private Icons() {
     }
@@ -139,6 +146,28 @@ public final class Icons {
 
     public static Node clear(double size) {
         return make(TRASH, size);
+    }
+
+    /**
+     * An outline trash can, for a delete that sits in every row of a list.
+     * Drawn rather than set as text: a "✕" or a "+" in a font sits on the
+     * font's baseline, off the middle of the button it is in.
+     *
+     * @param size the icon's edge length in points
+     * @return a fresh node carrying the glyph
+     */
+    public static Node trash(double size) {
+        return make(TRASH_OUTLINE, size);
+    }
+
+    /**
+     * A plus, for a button that adds an entry.
+     *
+     * @param size the icon's edge length in points
+     * @return a fresh node carrying the glyph
+     */
+    public static Node plus(double size) {
+        return make(PLUS, size);
     }
 
     /**

@@ -731,6 +731,24 @@ class HealthCheckCoordinatorTest {
     }
 
     /**
+     * A row's remove button is a trash can drawn as an icon, with no square
+     * of its own until the pointer is over it. The "✕" it was is text, which
+     * the font set on its own baseline, off the middle of its square.
+     */
+    @Test
+    void eachRowsRemoveButtonIsABorderlessTrashCan() throws Exception {
+        healthSettings(false, new HealthCheckTarget("a", "https://a"));
+        HealthCheckCoordinator coordinator = coordinatorWith(new EchoChecker());
+        connectAndCheck(coordinator);
+
+        assertThat(removeButtons()).singleElement().satisfies(button -> {
+            assertThat(button.getText()).as("a text glyph").isNullOrEmpty();
+            assertThat(button.getGraphic()).as("an icon").isNotNull();
+            assertThat(button.getStyleClass()).contains("icon-button", "ghost", "destructive");
+        });
+    }
+
+    /**
      * The dashboard is cached, so another page takes the card out of the scene
      * while the probes go on. Their verdicts still reach the rest of the app;
      * the card shows the latest of them once it is back.

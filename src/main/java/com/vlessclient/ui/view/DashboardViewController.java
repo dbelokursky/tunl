@@ -200,7 +200,9 @@ public class DashboardViewController implements ViewShownAware {
         serverSelectionLabel.setLabelFor(serverSelectionCombo);
         healthSectionTitle.textProperty().bind(I18n.binding("dashboard.health.title"));
         ButtonLabels.bindStatic(recheckButton, "dashboard.health.recheck");
-        // "+" is a symbol: a screen reader read out nothing for it.
+        // Drawn, as the rows' trash cans are: a "+" in a font sat off centre.
+        // A picture gives a screen reader nothing to read, hence the name.
+        addTargetButton.setGraphic(Icons.plus(16));
         addTargetButton.accessibleTextProperty().bind(I18n.binding("health.target.add.title"));
         addServerLink.textProperty().bind(I18n.binding("dashboard.cta.add.server"));
         bindInstallBannerLabels();

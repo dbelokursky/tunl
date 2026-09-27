@@ -298,7 +298,7 @@
             <Label fx:id="healthSectionTitle" text="Service availability" styleClass="section-header"/>
             <Region HBox.hgrow="ALWAYS"/>
             <Label fx:id="healthSummaryLabel" text="—" styleClass="latency-result"/>
-            <Button fx:id="addTargetButton" text="+" styleClass="secondary-button"
+            <Button fx:id="addTargetButton" styleClass="secondary-button"
                     minWidth="40" onAction="#onAddTargetClicked"/>
             <Button fx:id="recheckButton" text="Re-check" styleClass="secondary-button"
                     prefWidth="140" minWidth="-Infinity" onAction="#onRecheckClicked"/>
