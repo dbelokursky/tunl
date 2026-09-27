@@ -94,6 +94,33 @@ class CoreSettingsTest {
                         .isEqualTo("uTLS fingerprint randomizednoalpn"));
     }
 
+    /**
+     * {@code randomized} goes in place of {@code random} only for REALITY
+     * with TLS on; the server form asks with either unticked, and the connect
+     * log asks for every member, WireGuard's and Shadowsocks' included.
+     */
+    @Test
+    void onlyARealityServerIsSentRandomizedInPlaceOfRandom() {
+        assertThat(CoreSettings.replacesRandomPick(reality(server ->
+                server.getTls().setFingerprint("random")).getTls())).isTrue();
+        assertThat(CoreSettings.replacesRandomPick(reality(server ->
+                server.getTls().setFingerprint(" RANDOM ")).getTls())).isTrue();
+        assertThat(CoreSettings.replacesRandomPick(reality(server ->
+                server.getTls().setFingerprint("randomized")).getTls()))
+                .as("randomized, sent as it is").isFalse();
+        assertThat(CoreSettings.replacesRandomPick(reality(server -> { }).getTls()))
+                .as("chrome").isFalse();
+        assertThat(CoreSettings.replacesRandomPick(reality(server -> {
+            server.getTls().setFingerprint("random");
+            server.getTls().setReality(false);
+        }).getTls())).as("plain TLS").isFalse();
+        assertThat(CoreSettings.replacesRandomPick(reality(server -> {
+            server.getTls().setFingerprint("random");
+            server.getTls().setEnabled(false);
+        }).getTls())).as("TLS off").isFalse();
+        assertThat(CoreSettings.replacesRandomPick(null)).as("no TLS settings").isFalse();
+    }
+
     @Test
     void aRealityKeyThatIsNotThirtyTwoBytesIsRefused() {
         assertThat(CoreSettings.refusal(reality(server ->
