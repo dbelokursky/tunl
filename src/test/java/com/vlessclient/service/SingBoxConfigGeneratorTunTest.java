@@ -16,6 +16,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import static com.vlessclient.service.SingBoxConfigGeneratorProbeTest.belowTheChecks;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class SingBoxConfigGeneratorTunTest {
@@ -187,7 +188,8 @@ class SingBoxConfigGeneratorTunTest {
         String json = generator.generate(createVlessServer(), tunSettings());
         JsonNode inbounds = parse(json).get("inbounds");
 
-        assertThat(inbounds.size()).isEqualTo(3);
+        assertThat(inbounds.valueStream().map(inbound -> inbound.get("tag").asString()))
+                .containsExactly("tun-in", "socks-in", "http-in", "probe-in");
 
         boolean hasSocks = false;
         boolean hasHttp = false;
@@ -256,7 +258,8 @@ class SingBoxConfigGeneratorTunTest {
         String json = generator.generate(createVlessServer(), systemProxySettings());
         JsonNode inbounds = parse(json).get("inbounds");
 
-        assertThat(inbounds.size()).isEqualTo(2);
+        assertThat(inbounds.valueStream().map(inbound -> inbound.get("tag").asString()))
+                .containsExactly("socks-in", "http-in", "probe-in");
 
         for (JsonNode inbound : inbounds) {
             assertThat(inbound.get("type").asString()).isNotEqualTo("tun");
@@ -382,7 +385,7 @@ class SingBoxConfigGeneratorTunTest {
         // for local services to stay reachable through the TUN device. The
         // essentials block is the only thing that adds rules in this path.
         String json = generator.generate(createVlessServer(), tunSettings());
-        JsonNode rules = parse(json).get("route").get("rules");
+        List<JsonNode> rules = belowTheChecks(parse(json).get("route").get("rules"));
 
         // sniff, hijack-dns, local-domain, ip_is_private — in that exact order.
         assertThat(rules.size()).isEqualTo(4);
@@ -402,7 +405,7 @@ class SingBoxConfigGeneratorTunTest {
         RoutingConfig routingConfig = new RoutingConfig();
 
         String json = generator.generate(createVlessServer(), tunSettings(), routingConfig);
-        JsonNode rules = parse(json).get("route").get("rules");
+        List<JsonNode> rules = belowTheChecks(parse(json).get("route").get("rules"));
 
         int privateCount = 0;
         int localDomainCount = 0;

@@ -393,11 +393,11 @@ else saves on click.
 | | Language | English / Russian |
 | Connection | Auto-connect on startup | Connect to the selected server on launch |
 | | Launch at login | Start Tunl with the OS (see [Autostart](#autostart)) |
-| | SOCKS Port / HTTP Port | The local proxy listeners, `1080` and `1081` by default; both bind to `127.0.0.1` only |
+| | SOCKS Port / HTTP Port | The local proxy listeners, `1080` and `1081` by default; both bind to `127.0.0.1` only. A third listener there carries the health checks, on a port the system picks and behind a password only Tunl knows |
 | | Core log level | How much sing-box writes to the Logs tab: Debug / Info / Warning / Error; takes effect on the next connect |
 | | Proxy Mode | System Proxy / TUN — the same switch as **Mode** on the Dashboard |
 | | Set system proxy automatically | In System Proxy mode, point the OS at the local ports on connect and restore it on disconnect |
-| Health Check | Enable health check | After connecting, verify that traffic actually reaches a few services (on by default) |
+| Health Check | Enable health check | After connecting, verify that traffic actually reaches a few services through the tunnel, whatever the routing sends direct (on by default) |
 | | Auto-reconnect when unreachable | Recover after a core crash or when every check fails; retry delay doubles up to 5 minutes |
 | | Check interval / Reconnect delay | Seconds between checks (`5`) and before the first retry (`10`) |
 | Advanced | Proxy DNS | Resolver for tunnelled names, queried through the tunnel (`https://1.1.1.1/dns-query`) |

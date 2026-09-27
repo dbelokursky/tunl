@@ -77,6 +77,29 @@ class LocalProxyPasswordTest {
                 .allSatisfy(inbound -> assertThat(inbound.has("users")).isFalse());
     }
 
+    /**
+     * The health checks' inbound asks in every mode: nothing but the app has
+     * business there, and the system's proxy never points at it. Open, it
+     * would let any program on the machine send traffic into the tunnel past
+     * the user's routing.
+     */
+    @Test
+    void theHealthChecksInboundAsksForThePasswordInEveryMode() {
+        for (ProxyMode mode : ProxyMode.values()) {
+            for (boolean shared : List.of(false, true)) {
+                JsonNode probe = inbounds(mode, shared).stream()
+                        .filter(inbound -> "probe-in".equals(inbound.path("tag").asString()))
+                        .findFirst().orElseThrow();
+
+                assertThat(probe.path("users")).as("%s, shared %s", mode, shared).hasSize(1);
+                assertThat(probe.path("users").get(0).path("username").asString())
+                        .isEqualTo(LocalProxyCredentials.username());
+                assertThat(probe.path("users").get(0).path("password").asString())
+                        .isEqualTo(LocalProxyCredentials.password());
+            }
+        }
+    }
+
     @Test
     void thePasswordIsLongAndNewForEveryRun() {
         assertThat(LocalProxyCredentials.password()).hasSizeGreaterThanOrEqualTo(32);
@@ -109,19 +132,29 @@ class LocalProxyPasswordTest {
         }
     }
 
+    /**
+     * Every kind of check, https, plain http and host:port, logs in to the
+     * probe inbound with this run's password, in the SOCKS handshake itself:
+     * nothing reaches the core without it, and the core logs no failed login.
+     */
     @Test
     void theHealthChecksCarryThePasswordToo() throws Exception {
-        try (ChallengingProxy proxy = new ChallengingProxy()) {
+        try (FakeProbeInbound inbound = new FakeProbeInbound(FakeProbeInbound.REFUSED, null)) {
             ServiceReachabilityChecker checker = new ServiceReachabilityChecker();
             try {
-                List<ServiceReachabilityChecker.ProbeResult> results = checker.checkAll(
-                        List.of(new com.vlessclient.model.HealthCheckTarget("DNS", "1.1.1.1:853")),
-                        proxy.port()).get(20, TimeUnit.SECONDS);
-
-                assertThat(results.get(0).reachable()).isTrue();
+                checker.checkAll(List.of(
+                                new HealthCheckTarget("Site", "https://site.example/generate_204"),
+                                new HealthCheckTarget("Plain", "http://site.example/generate_204"),
+                                new HealthCheckTarget("DNS", "1.1.1.1:853")),
+                        inbound.port()).get(30, TimeUnit.SECONDS);
             } finally {
                 checker.shutdown();
             }
+
+            assertThat(inbound.connects).as("every kind reached the core")
+                    .contains("3 site.example:443", "3 site.example:80", "1 1.1.1.1:853");
+            assertThat(inbound.logins).as("every login").isNotEmpty().containsOnly(
+                    LocalProxyCredentials.username() + ":" + LocalProxyCredentials.password());
         }
     }
 
@@ -157,25 +190,6 @@ class LocalProxyPasswordTest {
         }
     }
 
-    @Test
-    void theHealthChecksSendThePasswordAtOnce() throws Exception {
-        try (ChallengingProxy proxy = new ChallengingProxy()) {
-            ServiceReachabilityChecker checker = new ServiceReachabilityChecker();
-            try {
-                checker.checkAll(List.of(new HealthCheckTarget("Site",
-                                "https://site.example/generate_204")), proxy.port())
-                        .get(30, TimeUnit.SECONDS);
-            } finally {
-                checker.shutdown();
-            }
-
-            assertThat(proxy.requests).as("every request the proxy saw")
-                    .isNotEmpty()
-                    .allSatisfy(request -> assertThat(request).contains(
-                            "Proxy-Authorization: " + LocalProxyCredentials.basicHeader()));
-        }
-    }
-
     /**
      * The password goes to a proxy alone: Java leaves Proxy-* headers out of
      * a request it sends straight to a site, and out of the one inside a
@@ -205,16 +219,21 @@ class LocalProxyPasswordTest {
         assertThat(seen).containsExactly("null");
     }
 
+    /** The local SOCKS and HTTP proxies, which programs other than the app may be given. */
     private List<JsonNode> localInbounds(ProxyMode mode, boolean shared) {
+        return inbounds(mode, shared).stream()
+                .filter(inbound -> List.of("socks-in", "http-in").contains(
+                        inbound.path("tag").asString()))
+                .toList();
+    }
+
+    private List<JsonNode> inbounds(ProxyMode mode, boolean shared) {
         AppSettings settings = new AppSettings();
         settings.setProxyMode(mode);
         settings.setShareLocalProxyInTun(shared);
         ServerConfig server = TestServers.vless("Tokyo").build();
-        JsonNode inbounds = mapper.readTree(generator.generate(server, settings)).get("inbounds");
-        return inbounds.valueStream()
-                .filter(inbound -> List.of("socks", "http").contains(
-                        inbound.path("type").asString()))
-                .toList();
+        return mapper.readTree(generator.generate(server, settings)).get("inbounds")
+                .valueStream().toList();
     }
 
     /**
