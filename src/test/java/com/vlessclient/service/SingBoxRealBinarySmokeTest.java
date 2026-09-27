@@ -1412,9 +1412,25 @@ class SingBoxRealBinarySmokeTest {
         throw (Exception) last;
     }
 
+    /** Every port {@link #freePort()} has handed out in this run. */
+    private static final java.util.Set<Integer> HANDED_OUT =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * A port nothing listens on, and one this run has not handed out before.
+     *
+     * <p>The socket closes before the number is used, and the next
+     * {@code ServerSocket(0)} may get the same number back: the tests that pick
+     * a SOCKS, an HTTP and a control port in a row once got one port twice,
+     * and the core refused to start with "address already in use".</p>
+     */
     private static int freePort() throws IOException {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
+        while (true) {
+            try (ServerSocket socket = new ServerSocket(0)) {
+                if (HANDED_OUT.add(socket.getLocalPort())) {
+                    return socket.getLocalPort();
+                }
+            }
         }
     }
 
