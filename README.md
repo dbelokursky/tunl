@@ -393,11 +393,11 @@ else saves on click.
 | | Language | English / Russian |
 | Connection | Auto-connect on startup | Connect to the selected server on launch |
 | | Launch at login | Start Tunl with the OS (see [Autostart](#autostart)) |
-| | SOCKS Port / HTTP Port | The local proxy listeners, `1080` and `1081` by default; both bind to `127.0.0.1` only |
+| | SOCKS Port / HTTP Port | The local proxy listeners, `1080` and `1081` by default; both bind to `127.0.0.1` only. A third listener there carries the health checks, on a port the system picks and behind a password only Tunl knows |
 | | Core log level | How much sing-box writes to the Logs tab: Debug / Info / Warning / Error; takes effect on the next connect |
 | | Proxy Mode | System Proxy / TUN — the same switch as **Mode** on the Dashboard |
 | | Set system proxy automatically | In System Proxy mode, point the OS at the local ports on connect and restore it on disconnect |
-| Health Check | Enable health check | After connecting, verify that traffic actually reaches a few services (on by default) |
+| Health Check | Enable health check | After connecting, verify that traffic actually reaches a few services through the tunnel, whatever the routing sends direct (on by default) |
 | | Auto-reconnect when unreachable | Recover after a core crash or when every check fails; retry delay doubles up to 5 minutes |
 | | Check interval / Reconnect delay | Seconds between checks (`5`) and before the first retry (`10`) |
 | Advanced | Proxy DNS | Resolver for tunnelled names, queried through the tunnel (`https://1.1.1.1/dns-query`) |
@@ -533,10 +533,32 @@ loses the change, not the whole file.
 No server selected — on the Servers tab click a server so it gets the
 **SELECTED** badge (on a fresh install the Dashboard card links straight there).
 
-**"Process exited unexpectedly (code N)"**
-sing-box crashed; the tray posts a "Tunnel stopped" notification. The reason
-is in the **Logs** tab. Common ones: wrong UUID, wrong transport, unreachable
-server.
+**"The VPN core exited unexpectedly (code N)"**
+The core stopped without Tunl asking it to, and its last line named no cause
+Tunl knows: those it knows, such as a port another program holds or a routing
+list that did not download, get sentences of their own. The tray posts this
+message under "Tunnel stopped", and with **Auto-reconnect when unreachable**
+on, Tunl starts the core again ("The VPN core stopped — reconnecting in …")
+unless that would ask for administrator rights again. The end of the **Logs**
+tab says why: a `FATAL` line is an error the core reported, a `panic:` line
+followed by a stack trace is a crash, and lines that run on as usual to the
+end mean something outside stopped the core, such as a task manager or `kill`.
+Each start clears the tab, reconnects included, so save the log with the
+download button while the lines are there, and add a **Save diagnostics** zip
+to a bug report. Wrong server settings do not end here: the core refuses some
+before it starts ("The VPN core rejected the settings of server …") and runs
+on with the rest (see **Connected, but nothing loads**).
+
+**Connected, but nothing loads**
+The core runs, and the problem is the server or the way to it: the server is
+down or blocked on your network, or no longer accepts the settings Tunl has
+for it (a changed UUID, transport or key). With the service checks on, the
+Dashboard reads "No traffic". Reconnecting, by hand or through
+**Auto-reconnect when unreachable** ("All services unreachable — reconnecting
+in …"), helps after a network change, not with outdated settings. The
+**Logs** tab may show no error at all: a server that does not know the UUID
+just closes the connection. Refresh the subscription, check the entry against
+your provider's current link, or pick another server.
 
 **TUN mode asks for a password every time**
 Creating a TUN interface requires root/admin. macOS asks once, to install a

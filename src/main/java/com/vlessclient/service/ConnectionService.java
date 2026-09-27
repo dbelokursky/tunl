@@ -514,7 +514,8 @@ public class ConnectionService {
             // does not (see isFree), so a restart keeps the ports it had.
             moved = moveTakenListenPortsAside(settings, lastCorePorts);
             lastCorePorts = Set.copyOf(List.of(settings.listenSocksPort(),
-                    settings.listenHttpPort(), settings.listenClashApiPort()));
+                    settings.listenHttpPort(), settings.listenClashApiPort(),
+                    settings.listenProbePort()));
             recordSessionHttpPort(settings);
         }
         // A control secret for this core alone. One secret lasted the whole
@@ -943,6 +944,11 @@ public class ConnectionService {
      * ({@link AppSettings#listenOn}): the chosen ones, which are what gets
      * saved, stay as they are, so the next start tries them again, and what
      * listens, connects or shows a port reads the run's.</p>
+     *
+     * <p>The health checks' inbound gets its port here too, one none of the
+     * others is about to take. Nobody chose it, so it is no move to report,
+     * and the system's proxy never points at it, so {@link SessionPorts} does
+     * not record it.</p>
      */
     private static List<MovedPort> moveTakenListenPortsAside(AppSettings settings,
                                                              Set<Integer> lastCores) {
@@ -966,7 +972,7 @@ public class ConnectionService {
                 listen[i] = freePortFrom(chosen[i], what[i], reserved, lastCores);
             }
         }
-        settings.listenOn(listen[0], listen[1], listen[2]);
+        settings.listenOn(listen[0], listen[1], listen[2], freeProbePort(reserved));
         List<MovedPort> moved = new ArrayList<>();
         for (int i = 0; i < chosen.length; i++) {
             if (listen[i] != chosen[i]) {
@@ -974,6 +980,34 @@ public class ConnectionService {
             }
         }
         return List.copyOf(moved);
+    }
+
+    /**
+     * A loopback port for the health checks' inbound: one the system has
+     * free, and none of {@code reserved}, which the other inbounds are about
+     * to take.
+     *
+     * <p>The system's pick rather than a walk up from a fixed port, as the
+     * chosen ports take: nothing dials this one but the app, and a walk can
+     * end in a range the system keeps for itself (Hyper-V's, on Windows),
+     * where a port nobody chose would stop the core from starting.</p>
+     *
+     * @param reserved the ports this run's other inbounds listen on
+     * @return the port, or 0 when the system gives none, which leaves the
+     *     pick to the core and the checks without a way in
+     */
+    static int freeProbePort(Set<Integer> reserved) {
+        for (int attempt = 0; attempt < 8; attempt++) {
+            try (ServerSocket probe = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+                if (!reserved.contains(probe.getLocalPort())) {
+                    return probe.getLocalPort();
+                }
+            } catch (IOException e) {
+                log.warn("No free loopback port for the health checks: {}", e.getMessage());
+                return 0;
+            }
+        }
+        return 0;
     }
 
     /**

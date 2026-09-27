@@ -74,7 +74,9 @@ class SingBoxConfigGeneratorTest {
 
         JsonNode inbounds = root.get("inbounds");
         assertThat(inbounds).isNotNull();
-        assertThat(inbounds.size()).isEqualTo(2);
+        // SOCKS and HTTP, then the health checks' own (SingBoxConfigGeneratorProbeTest).
+        assertThat(inbounds.size()).isEqualTo(3);
+        assertThat(inbounds.get(2).get("tag").asString()).isEqualTo("probe-in");
 
         JsonNode socks = inbounds.get(0);
         assertThat(socks.get("type").asString()).isEqualTo("socks");

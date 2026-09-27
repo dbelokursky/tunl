@@ -1,11 +1,17 @@
 // Command verify checks the REALITY ClientHello a patched core sends, the
-// way an Xray 26.9 server reads it: the hello carries an X25519MLKEM768 key
-// share, and its session id, opened with the server's private key, names
-// client version 26.3.27.
+// way an Xray 26.9 server reads it, and what a real server needs of it:
+//
+//   - an X25519MLKEM768 key share, once, ahead of the first X25519 one, which
+//     is the order XTLS/REALITY 8cdf7bf9 reads the shares in;
+//   - a session id that, opened with the server's private key, names client
+//     version 26.3.27;
+//   - every key share's group among the supported groups, and X25519MLKEM768
+//     offered only with its share (RFC 8446 4.2.8; XTLS/Xray-core#6714);
+//   - ALPN h2 and http/1.1, as a browser offers them.
 //
 // It stands in for the server: it accepts one connection, reads the
-// ClientHello, prints what it found, and exits 0 when both hold, 1 when
-// either does not, 2 when there was no hello to judge.
+// ClientHello, prints what it found, and exits 0 when all of it holds, 1 when
+// any of it does not, 2 when there was no hello to judge.
 //
 //	verify -listen 127.0.0.1:18443 -private-key <base64url, from sing-box generate reality-keypair>
 package main
@@ -24,17 +30,24 @@ import (
 	"io"
 	"net"
 	"os"
+	"slices"
+	"strings"
 	"time"
 )
 
 const (
-	groupX25519       = 0x001d
-	groupX25519MLKEM  = 0x11ec
-	mlkemKeySize      = 1184
-	extensionKeyShare = 0x0033
+	groupX25519              = 0x001d
+	groupX25519MLKEM         = 0x11ec
+	mlkemKeySize             = 1184
+	extensionSupportedGroups = 0x000a
+	extensionALPN            = 0x0010
+	extensionKeyShare        = 0x0033
 )
 
-var wantVersion = [3]byte{26, 3, 27}
+var (
+	wantVersion = [3]byte{26, 3, 27}
+	wantALPN    = []string{"h2", "http/1.1"}
+)
 
 func main() {
 	listen := flag.String("listen", "127.0.0.1:18443", "address to accept the core's connection on")
@@ -65,11 +78,21 @@ func main() {
 	if err != nil {
 		fail(2, "parse: %v", err)
 	}
-	fmt.Printf("key shares: %s\n", hello.groupNames())
+	fmt.Printf("key shares: %s\n", hello.shareNames())
+	fmt.Printf("supported groups: %s\n", groupList(hello.groups))
+	fmt.Printf("ALPN: %s\n", strings.Join(hello.alpn, ", "))
 
 	ok := true
-	if _, hybrid := hello.shares[groupX25519MLKEM]; !hybrid {
-		fmt.Println("FAIL: no X25519MLKEM768 key share; XTLS/REALITY 8cdf7bf9 rejects such a hello")
+	if err := realityAccepts(hello); err != nil {
+		fmt.Printf("FAIL: %v; XTLS/REALITY 8cdf7bf9 rejects such a hello\n", err)
+		ok = false
+	}
+	if err := groupsMatchShares(hello); err != nil {
+		fmt.Printf("FAIL: %v\n", err)
+		ok = false
+	}
+	if !slices.Equal(hello.alpn, wantALPN) {
+		fmt.Printf("FAIL: ALPN %q, want %q as a browser offers it\n", hello.alpn, wantALPN)
 		ok = false
 	}
 	version, err := openSessionID(key, hello)
@@ -89,30 +112,114 @@ func main() {
 	fmt.Println("OK")
 }
 
+type keyShare struct {
+	group uint16
+	data  []byte
+}
+
 type clientHello struct {
 	raw       []byte // the handshake message, header included, as REALITY hashes it
 	random    []byte
 	sessionID []byte
-	shares    map[uint16][]byte
-	order     []uint16
+	keyShares []keyShare // in the order the hello sends them
+	groups    []uint16   // supported_groups, in order
+	alpn      []string
 }
 
-func (h clientHello) groupNames() string {
-	names := ""
-	for i, group := range h.order {
-		if i > 0 {
-			names += ", "
-		}
-		switch group {
-		case groupX25519:
-			names += "X25519"
-		case groupX25519MLKEM:
-			names += fmt.Sprintf("X25519MLKEM768 (%d B)", len(h.shares[group]))
-		default:
-			names += fmt.Sprintf("0x%04x", group)
+// share returns the data of the first key share of group, or nil.
+func (h clientHello) share(group uint16) []byte {
+	for _, s := range h.keyShares {
+		if s.group == group {
+			return s.data
 		}
 	}
-	return names
+	return nil
+}
+
+func (h clientHello) shareNames() string {
+	names := make([]string, 0, len(h.keyShares))
+	for _, s := range h.keyShares {
+		if s.group == groupX25519MLKEM {
+			names = append(names, fmt.Sprintf("%s (%d B)", groupName(s.group), len(s.data)))
+		} else {
+			names = append(names, groupName(s.group))
+		}
+	}
+	return strings.Join(names, ", ")
+}
+
+func groupList(groups []uint16) string {
+	names := make([]string, 0, len(groups))
+	for _, group := range groups {
+		names = append(names, groupName(group))
+	}
+	return strings.Join(names, ", ")
+}
+
+func groupName(group uint16) string {
+	switch {
+	case group == groupX25519:
+		return "X25519"
+	case group == groupX25519MLKEM:
+		return "X25519MLKEM768"
+	case group == 0x0017:
+		return "P-256"
+	case group == 0x0018:
+		return "P-384"
+	case group == 0x0019:
+		return "P-521"
+	case isGREASE(group):
+		return "GREASE"
+	default:
+		return fmt.Sprintf("0x%04x", group)
+	}
+}
+
+// isGREASE tells a GREASE value (RFC 8701): 0x?A?A with both bytes the same.
+func isGREASE(value uint16) bool {
+	return value&0x0f0f == 0x0a0a && value>>8 == value&0xff
+}
+
+// realityAccepts reads the key shares as XTLS/REALITY 8cdf7bf9 does: it walks
+// them in order, takes an X25519MLKEM768 share once, and stops at the first
+// X25519 one. A hello whose hybrid share does not come before that is turned
+// away.
+func realityAccepts(hello clientHello) error {
+	hybrid := false
+	for _, s := range hello.keyShares {
+		if s.group == groupX25519MLKEM && len(s.data) == mlkemKeySize+32 {
+			if hybrid {
+				return errors.New("two X25519MLKEM768 key shares")
+			}
+			hybrid = true
+			continue
+		}
+		if s.group == groupX25519 && len(s.data) == 32 {
+			break
+		}
+	}
+	if !hybrid {
+		return errors.New("no X25519MLKEM768 key share ahead of X25519")
+	}
+	return nil
+}
+
+// groupsMatchShares checks what RFC 8446 4.2.8 asks, and what utls's
+// randomized hello did not always hold: every key share's group is among the
+// supported groups, and X25519MLKEM768 is offered only with its share.
+// Offered without it, a server asks for the share in a HelloRetryRequest,
+// and utls gives the handshake up (XTLS/Xray-core#6714).
+func groupsMatchShares(hello clientHello) error {
+	for _, s := range hello.keyShares {
+		if !isGREASE(s.group) && !slices.Contains(hello.groups, s.group) {
+			return fmt.Errorf("a %s key share whose group is not among the supported ones",
+				groupName(s.group))
+		}
+	}
+	if slices.Contains(hello.groups, groupX25519MLKEM) && hello.share(groupX25519MLKEM) == nil {
+		return errors.New("X25519MLKEM768 among the supported groups without its key share")
+	}
+	return nil
 }
 
 // readClientHello reads TLS records until one handshake message is whole.
@@ -141,7 +248,7 @@ func readClientHello(conn net.Conn) ([]byte, error) {
 }
 
 func parse(raw []byte) (clientHello, error) {
-	hello := clientHello{raw: raw, shares: map[uint16][]byte{}}
+	hello := clientHello{raw: raw}
 	if len(raw) < 4 || raw[0] != 0x01 {
 		return hello, errors.New("not a ClientHello")
 	}
@@ -198,22 +305,67 @@ func parse(raw []byte) (clientHello, error) {
 		}
 		data := extensions[4 : 4+length]
 		extensions = extensions[4+length:]
-		if kind != extensionKeyShare || len(data) < 2 {
-			continue
+		switch kind {
+		case extensionKeyShare:
+			err = hello.readKeyShares(data)
+		case extensionSupportedGroups:
+			err = hello.readGroups(data)
+		case extensionALPN:
+			err = hello.readALPN(data)
 		}
-		shares := data[2:]
-		for len(shares) >= 4 {
-			group := binary.BigEndian.Uint16(shares)
-			size := int(binary.BigEndian.Uint16(shares[2:]))
-			if len(shares) < 4+size {
-				return hello, errors.New("truncated key share")
-			}
-			hello.shares[group] = shares[4 : 4+size]
-			hello.order = append(hello.order, group)
-			shares = shares[4+size:]
+		if err != nil {
+			return hello, err
 		}
 	}
 	return hello, nil
+}
+
+// readKeyShares reads the key_share extension's shares, in order.
+func (h *clientHello) readKeyShares(data []byte) error {
+	if len(data) < 2 {
+		return errors.New("truncated key share list")
+	}
+	shares := data[2:]
+	for len(shares) >= 4 {
+		group := binary.BigEndian.Uint16(shares)
+		size := int(binary.BigEndian.Uint16(shares[2:]))
+		if len(shares) < 4+size {
+			return errors.New("truncated key share")
+		}
+		h.keyShares = append(h.keyShares, keyShare{group: group, data: shares[4 : 4+size]})
+		shares = shares[4+size:]
+	}
+	return nil
+}
+
+// readGroups reads the supported_groups extension, in order.
+func (h *clientHello) readGroups(data []byte) error {
+	if len(data) < 2 {
+		return errors.New("truncated supported groups")
+	}
+	list := data[2:]
+	for len(list) >= 2 {
+		h.groups = append(h.groups, binary.BigEndian.Uint16(list))
+		list = list[2:]
+	}
+	return nil
+}
+
+// readALPN reads the protocol names the ALPN extension offers.
+func (h *clientHello) readALPN(data []byte) error {
+	if len(data) < 2 {
+		return errors.New("truncated ALPN")
+	}
+	list := data[2:]
+	for len(list) > 0 {
+		size := int(list[0])
+		if len(list) < 1+size {
+			return errors.New("truncated ALPN protocol")
+		}
+		h.alpn = append(h.alpn, string(list[1:1+size]))
+		list = list[1+size:]
+	}
+	return nil
 }
 
 // openSessionID derives the auth key the way XTLS/REALITY 8cdf7bf9 does (the
@@ -221,9 +373,9 @@ func parse(raw []byte) (clientHello, error) {
 // the session id sealed with it; the first three bytes are the version.
 func openSessionID(privateKey []byte, hello clientHello) ([3]byte, error) {
 	var version [3]byte
-	peer := hello.shares[groupX25519]
+	peer := hello.share(groupX25519)
 	if peer == nil {
-		if hybrid := hello.shares[groupX25519MLKEM]; len(hybrid) == mlkemKeySize+32 {
+		if hybrid := hello.share(groupX25519MLKEM); len(hybrid) == mlkemKeySize+32 {
 			peer = hybrid[mlkemKeySize:]
 		}
 	}

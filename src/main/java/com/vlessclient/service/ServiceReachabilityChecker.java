@@ -1,36 +1,51 @@
 package com.vlessclient.service;
 
 import com.vlessclient.model.HealthCheckTarget;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.net.ProxySelector;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * Probes whether well-known services (e.g. google.com, x.com) are reachable
- * <em>through the running tunnel</em>, by issuing HTTP requests via the local
- * proxy inbound that sing-box always exposes on {@code 127.0.0.1:<httpPort>}
- * (present in both SYSTEM_PROXY and TUN modes).
+ * <em>through the running tunnel</em>, by way of the core's probe inbound on
+ * {@code 127.0.0.1:<probePort>}. The route sends that inbound into the tunnel
+ * ahead of every rule, so a probe tests the tunnel whatever the routing mode,
+ * the bypass list or a direct rule would do with its target.
+ *
+ * <p>Every attempt opens a connection of its own through the inbound, a SOCKS5
+ * one, where the core answers once the tunnel has carried the connection or
+ * failed to; an http(s) target is then asked a {@code HEAD} on it, over TLS
+ * for https. Two ways of asking passed through a dead tunnel. The core's HTTP
+ * inbound answers a {@code CONNECT} with 200 before it dials, and a plain
+ * request it could not dial with a 502 of its own. And a client kept between
+ * rounds kept its HTTP/2 connection, which went on answering while the tunnel
+ * could no longer open a new one: for ten minutes the services read reachable,
+ * and were not.</p>
  *
  * <p>Modeled on {@link LatencyTester}: a small daemon thread pool, async
  * {@link CompletableFuture} results, and silent failures (a probe that throws
- * simply counts as unreachable). The real HTTP work sits behind the
+ * simply counts as unreachable). The real work sits behind the
  * {@link ProbeExecutor} seam so tests can run deterministically without
  * touching the network.</p>
  */
@@ -47,6 +62,16 @@ public class ServiceReachabilityChecker {
     /** Port a bare IP / host target is probed on when none is given. */
     static final int DEFAULT_TCP_PORT = 443;
 
+    // RFC 1928 and RFC 1929, as much of them as a CONNECT needs.
+    private static final int SOCKS_VERSION = 5;
+    private static final int NO_AUTH = 0;
+    private static final int PASSWORD_AUTH = 2;
+    private static final int PASSWORD_AUTH_VERSION = 1;
+    private static final int CONNECT = 1;
+    private static final int IPV4 = 1;
+    private static final int DOMAIN = 3;
+    private static final int IPV6 = 4;
+
     // Matches a host:port or bare host/IP target (no scheme). IPv6 must be
     // bracketed to carry a port, e.g. [2606:4700:4700::1111]:53.
     private static final Pattern BRACKETED_IPV6 =
@@ -59,7 +84,7 @@ public class ServiceReachabilityChecker {
      *
      * @param name      display name of the service
      * @param url       URL that was probed
-     * @param reachable whether any HTTP response came back through the proxy
+     * @param reachable whether the target answered through the tunnel
      * @param latencyMs round-trip time in ms, or -1 when unreachable
      * @param detail    short human-readable status (e.g. "HTTP 204", "timeout")
      */
@@ -68,43 +93,24 @@ public class ServiceReachabilityChecker {
     }
 
     /**
-     * Seam over the act of probing one target through the proxy. The default
-     * implementation does real HTTP; tests inject a deterministic stub.
+     * Seam over the act of probing one target through the probe inbound. The
+     * default implementation goes through the core; tests inject a
+     * deterministic stub.
      */
     @FunctionalInterface
     public interface ProbeExecutor {
-        ProbeResult probe(HealthCheckTarget target, int httpProxyPort);
+        ProbeResult probe(HealthCheckTarget target, int probePort);
     }
 
-    /**
-     * Where probes go when the route rules would send them past the tunnel: a
-     * proxy group of the core, asked through its Clash API.
-     *
-     * @param httpPort    the local HTTP inbound, for a host:port target, which
-     *                    is no URL the group can fetch
-     * @param controlPort the core's Clash API port
-     * @param secret      the Clash API secret
-     * @param group       the group to measure through
-     */
-    public record GroupRoute(int httpPort, int controlPort, String secret, String group) {
-    }
-
-    /** Seam over probing one target through a proxy group; tests inject a stub. */
+    /** One try at a probe: says what answered, or throws when nothing did. */
     @FunctionalInterface
-    public interface GroupProbeExecutor {
-        ProbeResult probe(HealthCheckTarget target, GroupRoute route);
-
-        /** Releases what the probe holds; nothing unless it says otherwise. */
-        default void close() {
-        }
+    private interface Attempt {
+        String run() throws IOException;
     }
 
     private final ExecutorService executor;
     private final ProbeExecutor probeExecutor;
-    private final GroupProbeExecutor groupProbeExecutor;
-
-    private volatile HttpClient cachedClient;
-    private volatile int cachedPort = -1;
+    private final SSLSocketFactory tls;
 
     public ServiceReachabilityChecker() {
         this(null);
@@ -114,42 +120,45 @@ public class ServiceReachabilityChecker {
      * Creates a checker using the given probe implementation.
      *
      * @param probeExecutor custom probe implementation, or {@code null} to use
-     *                      the real HTTP-through-proxy probe
+     *                      the real probe through the core
      */
     public ServiceReachabilityChecker(ProbeExecutor probeExecutor) {
         this(probeExecutor, null);
     }
 
     /**
-     * Creates a checker using the given probe implementations.
+     * Test seam: the TLS an https probe speaks, so that a test can trust a
+     * site of its own.
      *
-     * @param probeExecutor      custom probe through the HTTP inbound, or
-     *                           {@code null} for the real one
-     * @param groupProbeExecutor custom probe through a proxy group, or
-     *                           {@code null} for the real Clash API one
+     * @param probeExecutor custom probe implementation, or {@code null}
+     * @param tls           the TLS to speak, or {@code null} for the JDK's
+     *                      default, which trusts the system's certificates
      */
-    public ServiceReachabilityChecker(ProbeExecutor probeExecutor,
-                                      GroupProbeExecutor groupProbeExecutor) {
+    ServiceReachabilityChecker(ProbeExecutor probeExecutor, SSLContext tls) {
         this.executor = Executors.newFixedThreadPool(POOL_SIZE,
                 DaemonThreads.factory("reachability-checker"));
         this.probeExecutor = probeExecutor != null ? probeExecutor : this::realProbe;
-        this.groupProbeExecutor = groupProbeExecutor != null
-                ? groupProbeExecutor : new ClashGroupProbe();
+        this.tls = tls != null
+                ? tls.getSocketFactory() : (SSLSocketFactory) SSLSocketFactory.getDefault();
     }
 
     /**
      * Probes every target concurrently and completes with one
      * {@link ProbeResult} per target, in the same order as the input list.
+     *
+     * @param targets   the targets
+     * @param probePort the core's probe inbound, {@code AppSettings#listenProbePort()}
+     * @return one result per target, in order
      */
     public CompletableFuture<List<ProbeResult>> checkAll(
-            List<HealthCheckTarget> targets, int httpProxyPort) {
+            List<HealthCheckTarget> targets, int probePort) {
         if (targets == null || targets.isEmpty()) {
             return CompletableFuture.completedFuture(List.of());
         }
 
         List<CompletableFuture<ProbeResult>> futures = targets.stream()
                 .map(target -> CompletableFuture.supplyAsync(
-                        () -> probeExecutor.probe(target, httpProxyPort), executor))
+                        () -> probeExecutor.probe(target, probePort), executor))
                 .toList();
 
         return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
@@ -160,65 +169,6 @@ public class ServiceReachabilityChecker {
                     }
                     return results;
                 });
-    }
-
-    /**
-     * Probes every target through a proxy group of the core instead of the
-     * local HTTP inbound, which the route rules apply to.
-     *
-     * <p>In the mode that sends only the blocked lists through the tunnel,
-     * those rules sent the probes direct: Google answered past a dead server,
-     * the verdict never read broken, and recovery never restarted a tunnel
-     * that carried nothing. A host:port target, which is no URL for the group
-     * to fetch, still goes through the inbound.</p>
-     *
-     * @param targets the targets
-     * @param route   the group and the core's Clash API
-     * @return one result per target, in order
-     */
-    public CompletableFuture<List<ProbeResult>> checkAllThroughGroup(
-            List<HealthCheckTarget> targets, GroupRoute route) {
-        if (targets == null || targets.isEmpty()) {
-            return CompletableFuture.completedFuture(List.of());
-        }
-        List<CompletableFuture<ProbeResult>> futures = targets.stream()
-                .map(target -> CompletableFuture.supplyAsync(
-                        () -> target.getUrl() != null && parseHostPort(target.getUrl()) != null
-                                ? probeExecutor.probe(target, route.httpPort())
-                                : groupProbeExecutor.probe(target, route), executor))
-                .toList();
-        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                .thenApply(v -> futures.stream().map(CompletableFuture::join).toList());
-    }
-
-    /** The real group probe: the core requests the target through the group. */
-    private static final class ClashGroupProbe implements GroupProbeExecutor {
-
-        private final ClashApiDelayProbe delays = new ClashApiDelayProbe();
-
-        @Override
-        public void close() {
-            delays.close();
-        }
-
-        @Override
-        public ProbeResult probe(HealthCheckTarget target, GroupRoute route) {
-            String name = target.getName() != null ? target.getName() : target.getUrl();
-            String url = target.getUrl();
-            if (url == null || url.isBlank()) {
-                return new ProbeResult(name, url, false, -1, "no url");
-            }
-            ClashApiDelayProbe.Answer answer =
-                    delays.measure(route.controlPort(), route.secret(), route.group(), url);
-            return switch (answer) {
-                case ClashApiDelayProbe.Answer.Delay delay ->
-                        new ProbeResult(name, url, true, delay.millis(), "via " + route.group());
-                case ClashApiDelayProbe.Answer.Failed failed ->
-                        new ProbeResult(name, url, false, -1, "the proxy did not carry it");
-                case ClashApiDelayProbe.Answer.NoAnswer none ->
-                        new ProbeResult(name, url, false, -1, "no answer from the core");
-            };
-        }
     }
 
     /**
@@ -284,7 +234,7 @@ public class ServiceReachabilityChecker {
         return new HostPort(host, port);
     }
 
-    private ProbeResult realProbe(HealthCheckTarget target, int httpProxyPort) {
+    private ProbeResult realProbe(HealthCheckTarget target, int probePort) {
         String name = target.getName() != null ? target.getName() : target.getUrl();
         String url = target.getUrl();
         if (url == null || url.isBlank()) {
@@ -292,12 +242,15 @@ public class ServiceReachabilityChecker {
             return new ProbeResult(name, url, false, -1, "no url");
         }
 
-        // A scheme-less IP/host[:port] is checked with a TCP-connect probe
-        // through the proxy — bare IPs usually aren't HTTP servers, so an
+        // A scheme-less IP/host[:port] is checked by opening a connection to
+        // it through the tunnel: bare IPs usually aren't HTTP servers, so an
         // HTTP request would mislabel a perfectly reachable host as down.
         HostPort hostPort = parseHostPort(url);
         if (hostPort != null) {
-            return tcpProbe(name, url, hostPort, httpProxyPort);
+            return attempt(name, url, () -> {
+                throughTunnel(hostPort.host(), hostPort.port(), probePort).close();
+                return "TCP " + hostPort.port();
+            });
         }
 
         URI uri;
@@ -307,86 +260,186 @@ public class ServiceReachabilityChecker {
             log.warn("Reachability probe skipped for '{}': invalid url '{}'", name, url);
             return new ProbeResult(name, url, false, -1, "invalid url");
         }
+        String scheme = uri.getScheme() != null ? uri.getScheme().toLowerCase(Locale.ROOT) : "";
+        if (uri.getHost() == null || !List.of("http", "https").contains(scheme)) {
+            log.warn("Reachability probe skipped for '{}': invalid url '{}'", name, url);
+            return new ProbeResult(name, url, false, -1, "invalid url");
+        }
+        return attempt(name, url, () -> headStatus(uri, scheme.equals("https"), probePort));
+    }
 
-        HttpClient client = clientFor(httpProxyPort);
+    /**
+     * Makes up to {@link #MAX_ATTEMPTS} attempts, so that a tunnel whose
+     * listeners are still warming up right after CONNECTED is not reported
+     * broken, and times the one that answered.
+     */
+    private ProbeResult attempt(String name, String url, Attempt attempt) {
         String lastDetail = "unreachable";
-
-        // Retry a couple of times so a freshly-established tunnel (the proxy /
-        // clash listeners may still be warming up right after CONNECTED) is
-        // not falsely reported as broken.
-        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-            HttpRequest request = HttpRequest.newBuilder(uri)
-                    .method("HEAD", HttpRequest.BodyPublishers.noBody())
-                    .timeout(Duration.ofMillis(REQUEST_TIMEOUT_MS))
-                    .build();
+        for (int i = 1; i <= MAX_ATTEMPTS; i++) {
             long start = System.nanoTime();
             try {
-                HttpResponse<Void> response =
-                        client.send(request, HttpResponse.BodyHandlers.discarding());
+                String detail = attempt.run();
                 long elapsed = (System.nanoTime() - start) / 1_000_000;
-                // Any HTTP status means we reached the service through the proxy.
-                log.debug("Reachable: {} -> HTTP {} in {} ms", url, response.statusCode(), elapsed);
-                return new ProbeResult(name, url, true, elapsed, "HTTP " + response.statusCode());
-            } catch (Exception e) {
+                log.debug("Reachable: {} ({}) in {} ms", url, detail, elapsed);
+                return new ProbeResult(name, url, true, elapsed, detail);
+            } catch (IOException e) {
                 lastDetail = describe(e);
                 log.debug("Probe attempt {}/{} failed for {} ({})",
-                        attempt, MAX_ATTEMPTS, url, lastDetail);
-                if (attempt < MAX_ATTEMPTS && sleepBeforeRetry()) {
-                    continue;
-                }
+                        i, MAX_ATTEMPTS, url, lastDetail);
+            }
+            if (i < MAX_ATTEMPTS && !sleepBeforeRetry()) {
+                break;
             }
         }
         return new ProbeResult(name, url, false, -1, lastDetail);
     }
 
     /**
-     * Probes a raw TCP endpoint through the tunnel by issuing an HTTP
-     * {@code CONNECT host:port} to the local proxy: a {@code 200} means the
-     * proxy established a connection to the target through sing-box.
-     * Latency is the CONNECT round-trip.
+     * Sends a {@code HEAD} to an http(s) target over a connection of its own
+     * through the tunnel, and gives the status its server answered with. Any
+     * status is an answer: the service was reached.
      */
-    private ProbeResult tcpProbe(
-            String name, String display, HostPort hostPort, int httpProxyPort) {
-        String target = hostPort.host() + ":" + hostPort.port();
-        // The password is sent whether the proxy asks or not: it asks in TUN
-        // mode, and an open proxy ignores the header.
-        String connect = "CONNECT " + target + " HTTP/1.1\r\n"
-                + "Host: " + target + "\r\n"
-                + "Proxy-Authorization: " + LocalProxyCredentials.basicHeader() + "\r\n"
-                + "Proxy-Connection: close\r\n\r\n";
-        String lastDetail = "unreachable";
-
-        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-            long start = System.nanoTime();
-            try (Socket socket = new Socket()) {
-                socket.connect(
-                        new InetSocketAddress("127.0.0.1", httpProxyPort), CONNECT_TIMEOUT_MS);
-                socket.setSoTimeout(REQUEST_TIMEOUT_MS);
-                OutputStream out = socket.getOutputStream();
-                out.write(connect.getBytes(StandardCharsets.US_ASCII));
-                out.flush();
-
-                String statusLine = readStatusLine(socket.getInputStream());
-                long elapsed = (System.nanoTime() - start) / 1_000_000;
-                int status = parseStatusCode(statusLine);
-                if (status == 200) {
-                    log.debug("Reachable (TCP): {} via proxy in {} ms", target, elapsed);
-                    return new ProbeResult(name, display, true, elapsed, "TCP " + hostPort.port());
-                }
-                // The proxy answered but couldn't reach the target (e.g. 502/504).
-                lastDetail = statusLine != null && !statusLine.isBlank()
-                        ? statusLine.strip() : "no proxy response";
-                log.debug("TCP probe {}/{} for {}: {}", attempt, MAX_ATTEMPTS, target, lastDetail);
-            } catch (IOException e) {
-                lastDetail = describe(e);
-                log.debug("TCP probe {}/{} failed for {} ({})",
-                        attempt, MAX_ATTEMPTS, target, lastDetail);
-            }
-            if (attempt < MAX_ATTEMPTS && !sleepBeforeRetry()) {
-                break;
-            }
+    private String headStatus(URI uri, boolean https, int probePort) throws IOException {
+        String host = uri.getHost();
+        String bareHost = host.startsWith("[") && host.endsWith("]")
+                ? host.substring(1, host.length() - 1) : host;
+        int port = uri.getPort() > 0 ? uri.getPort() : https ? 443 : 80;
+        String path = uri.getRawPath() == null || uri.getRawPath().isEmpty()
+                ? "/" : uri.getRawPath();
+        if (uri.getRawQuery() != null) {
+            path += "?" + uri.getRawQuery();
         }
-        return new ProbeResult(name, display, false, -1, lastDetail);
+        String head = "HEAD " + path + " HTTP/1.1\r\n"
+                + "Host: " + host + (uri.getPort() > 0 ? ":" + uri.getPort() : "") + "\r\n"
+                + "Connection: close\r\n\r\n";
+        Socket tunnelled = throughTunnel(bareHost, port, probePort);
+        try (Socket socket = https ? overTls(tunnelled, bareHost, port) : tunnelled) {
+            OutputStream out = socket.getOutputStream();
+            out.write(head.getBytes(StandardCharsets.US_ASCII));
+            out.flush();
+            int status = parseStatusCode(readStatusLine(socket.getInputStream()));
+            if (status < 0) {
+                throw new IOException("no HTTP answer");
+            }
+            return "HTTP " + status;
+        }
+    }
+
+    /**
+     * Speaks TLS to {@code host} over a connection the tunnel carried. The
+     * certificate has to be valid for the host, as for a browser: a portal or
+     * a filter that answers in the site's place does not pass for the site.
+     */
+    private Socket overTls(Socket tunnelled, String host, int port) throws IOException {
+        try {
+            SSLSocket socket = (SSLSocket) tls.createSocket(tunnelled, host, port, true);
+            SSLParameters parameters = socket.getSSLParameters();
+            parameters.setEndpointIdentificationAlgorithm("HTTPS");
+            socket.setSSLParameters(parameters);
+            socket.startHandshake();
+            return socket;
+        } catch (IOException | RuntimeException e) {
+            tunnelled.close();
+            throw e;
+        }
+    }
+
+    /**
+     * Opens a connection to {@code host:port} through the probe inbound, with
+     * this run's password, and returns it once the core has said that the
+     * tunnel carried it.
+     *
+     * @throws IOException when the core said the tunnel did not, or said
+     *     nothing in time
+     */
+    private static Socket throughTunnel(String host, int port, int probePort)
+            throws IOException {
+        Socket socket = new Socket();
+        try {
+            socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), probePort),
+                    CONNECT_TIMEOUT_MS);
+            socket.setSoTimeout(REQUEST_TIMEOUT_MS);
+            OutputStream out = socket.getOutputStream();
+            DataInputStream in = new DataInputStream(socket.getInputStream());
+
+            // Both methods are offered: the inbound asks for the password.
+            out.write(new byte[] {SOCKS_VERSION, 2, NO_AUTH, PASSWORD_AUTH});
+            out.flush();
+            if (in.readUnsignedByte() != SOCKS_VERSION) {
+                throw new IOException("the probe port is not a SOCKS5 proxy");
+            }
+            int method = in.readUnsignedByte();
+            if (method == PASSWORD_AUTH) {
+                out.write(passwordRequest());
+                out.flush();
+                in.readUnsignedByte();   // the version of the password exchange
+                if (in.readUnsignedByte() != 0) {
+                    throw new IOException("the probe port refused the password");
+                }
+            } else if (method != NO_AUTH) {
+                throw new IOException("the probe port accepts no method offered");
+            }
+
+            out.write(connectRequest(host, port));
+            out.flush();
+            in.readUnsignedByte();   // version
+            int reply = in.readUnsignedByte();
+            if (reply != 0) {
+                throw new IOException("the tunnel did not carry it (SOCKS reply " + reply + ")");
+            }
+            in.readUnsignedByte();   // reserved
+            int boundType = in.readUnsignedByte();
+            int boundLength = switch (boundType) {
+                case IPV4 -> 4;
+                case IPV6 -> 16;
+                case DOMAIN -> in.readUnsignedByte();
+                default -> throw new IOException("unknown SOCKS address type " + boundType);
+            };
+            in.readFully(new byte[boundLength + 2]);   // the bound address and port
+            return socket;
+        } catch (IOException | RuntimeException e) {
+            socket.close();
+            throw e;
+        }
+    }
+
+    private static byte[] passwordRequest() {
+        byte[] user = LocalProxyCredentials.username().getBytes(StandardCharsets.UTF_8);
+        byte[] password = LocalProxyCredentials.password().getBytes(StandardCharsets.UTF_8);
+        ByteArrayOutputStream request = new ByteArrayOutputStream();
+        request.write(PASSWORD_AUTH_VERSION);
+        request.write(user.length);
+        request.writeBytes(user);
+        request.write(password.length);
+        request.writeBytes(password);
+        return request.toByteArray();
+    }
+
+    /**
+     * A CONNECT to {@code host:port}. A name goes as a name: the tunnel's far
+     * end resolves it, as it does for the traffic the probe stands for.
+     */
+    private static byte[] connectRequest(String host, int port) throws IOException {
+        ByteArrayOutputStream request = new ByteArrayOutputStream();
+        request.write(SOCKS_VERSION);
+        request.write(CONNECT);
+        request.write(0);
+        byte[] address;
+        try {
+            address = InetAddress.ofLiteral(host).getAddress();
+            request.write(address.length == 4 ? IPV4 : IPV6);
+        } catch (IllegalArgumentException notAnIpLiteral) {
+            address = host.getBytes(StandardCharsets.UTF_8);
+            if (address.length > 255) {
+                throw new IOException("host name too long for SOCKS: " + host);
+            }
+            request.write(DOMAIN);
+            request.write(address.length);
+        }
+        request.writeBytes(address);
+        request.write(port >> 8);
+        request.write(port & 0xff);
+        return request.toByteArray();
     }
 
     /** Reads the first CRLF-terminated line (the HTTP status line). */
@@ -407,9 +460,9 @@ public class ServiceReachabilityChecker {
         return sb.length() == 0 ? null : sb.toString();
     }
 
-    /** Extracts the numeric status from "HTTP/1.1 200 Connection established". */
+    /** Extracts the numeric status from "HTTP/1.1 204 No Content". */
     private static int parseStatusCode(String statusLine) {
-        if (statusLine == null) {
+        if (statusLine == null || !statusLine.startsWith("HTTP/")) {
             return -1;
         }
         String[] parts = statusLine.strip().split("\\s+");
@@ -434,48 +487,15 @@ public class ServiceReachabilityChecker {
     }
 
     private static String describe(Exception e) {
-        if (e instanceof java.net.http.HttpTimeoutException) {
+        if (e instanceof SocketTimeoutException) {
             return "timeout";
         }
         String msg = e.getMessage();
         return msg != null && !msg.isBlank() ? msg : e.getClass().getSimpleName();
     }
 
-    /**
-     * Returns an {@link HttpClient} bound to the proxy at the given port,
-     * rebuilding only when the port changes (the common case is a stable port,
-     * so the client is reused across probes and reconnect cycles).
-     */
-    private synchronized HttpClient clientFor(int httpProxyPort) {
-        if (cachedClient != null && cachedPort == httpProxyPort) {
-            return cachedClient;
-        }
-        if (cachedClient != null) {
-            cachedClient.close();
-        }
-        cachedClient = new ProxyPasswordClient.Builder(HttpClient.newBuilder())
-                .connectTimeout(Duration.ofMillis(CONNECT_TIMEOUT_MS))
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .proxy(ProxySelector.of(new InetSocketAddress("127.0.0.1", httpProxyPort)))
-                .authenticator(LocalProxyCredentials.authenticator())
-                .build();
-        cachedPort = httpProxyPort;
-        return cachedClient;
-    }
-
-    /**
-     * Shuts down the probe thread pool and closes the HTTP clients: the
-     * cached one and the group probe's.
-     */
+    /** Shuts down the probe thread pool. */
     public void shutdown() {
         executor.shutdownNow();
-        groupProbeExecutor.close();
-        synchronized (this) {
-            if (cachedClient != null) {
-                cachedClient.close();
-                cachedClient = null;
-                cachedPort = -1;
-            }
-        }
     }
 }

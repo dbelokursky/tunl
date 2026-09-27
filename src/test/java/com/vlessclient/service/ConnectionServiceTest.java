@@ -15,6 +15,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -917,6 +919,39 @@ class ConnectionServiceTest {
         assertThat(service(engine()).connect().started()).isTrue();
 
         assertThat(SessionPorts.recorded(tempDir)).isEmpty();
+    }
+
+    /**
+     * The health checks' inbound gets a port of its own for the run, which
+     * none of the other inbounds is about to take. Nobody chose it, so it is
+     * no move to report, and the record of the system's proxy stays on the
+     * HTTP port, the one the system points at.
+     */
+    @Test
+    void theHealthChecksGetAPortOfTheirOwnForTheRun() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        int base = freeBlockOf(3);
+        store.getSettings().setSocksPort(base);
+        store.getSettings().setHttpPort(base + 1);
+        store.getSettings().setClashApiPort(base + 2);
+        store.getSettings().setProxyMode(ProxyMode.SYSTEM_PROXY);
+        store.getSettings().setSystemProxyAutoConfig(true);
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+
+        assertThat(service.connect().started()).isTrue();
+
+        int probe = store.getSettings().listenProbePort();
+        assertThat(probe).isPositive().isNotIn(base, base + 1, base + 2);
+        JsonNode inbounds = JsonMapper.builder().build()
+                .readTree(engine.configs.getLast()).path("inbounds");
+        assertThat(inbounds.valueStream()
+                .filter(inbound -> "probe-in".equals(inbound.path("tag").asString()))
+                .map(inbound -> inbound.path("listen_port").asInt()))
+                .as("where the core is told to listen for the checks")
+                .containsExactly(probe);
+        assertThat(movedAsTheUiSeesThem(service)).isEmpty();
+        assertThat(SessionPorts.recorded(tempDir)).hasValue(base + 1);
     }
 
     private static List<ConnectionService.MovedPort> movedAsTheUiSeesThem(

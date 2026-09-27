@@ -14,6 +14,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
 
+import static com.vlessclient.service.SingBoxConfigGeneratorProbeTest.belowTheChecks;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -64,15 +65,16 @@ class SingBoxConfigGeneratorRoutingTest {
     }
 
     /**
-     * The route rules without the lookup that system-proxy mode inserts ahead
-     * of the first IP rule: the resolve action and the LAN rule right after it.
-     * The preset and custom-rule tests are about the rules around it; the
-     * systemProxy_ tests below pin the lookup itself.
+     * The route rules below the health checks' own, without the lookup that
+     * system-proxy mode inserts ahead of the first IP rule: the resolve
+     * action and the LAN rule right after it. The preset and custom-rule tests
+     * are about the rules around it; the systemProxy_ tests below pin the
+     * lookup itself, and SingBoxConfigGeneratorProbeTest the checks' rule.
      */
     private static List<JsonNode> withoutLookup(JsonNode rules) {
         List<JsonNode> kept = new java.util.ArrayList<>();
         boolean afterLookup = false;
-        for (JsonNode rule : rules) {
+        for (JsonNode rule : belowTheChecks(rules)) {
             if ("resolve".equals(rule.path("action").asString())) {
                 afterLookup = true;
                 continue;
@@ -133,7 +135,7 @@ class SingBoxConfigGeneratorRoutingTest {
         ));
 
         String json = generator.generate(createVlessServer(), defaultSettings, routingConfig);
-        JsonNode rules = parse(json).get("route").get("rules");
+        List<JsonNode> rules = belowTheChecks(parse(json).get("route").get("rules"));
 
         assertThat(rules).isNotNull();
         // [ bypass-list, local-domain, private-ip ]
@@ -172,7 +174,7 @@ class SingBoxConfigGeneratorRoutingTest {
         // bypassList is empty by default
 
         String json = generator.generate(createVlessServer(), defaultSettings, routingConfig);
-        JsonNode rules = parse(json).get("route").get("rules");
+        List<JsonNode> rules = belowTheChecks(parse(json).get("route").get("rules"));
 
         // Only the two unconditional local-bypass rules; no user domain/cidr rule.
         assertThat(rules.size()).isEqualTo(2);
@@ -209,7 +211,7 @@ class SingBoxConfigGeneratorRoutingTest {
         RoutingConfig routingConfig = new RoutingConfig();
 
         String json = generator.generate(createVlessServer(), defaultSettings, routingConfig);
-        JsonNode rules = parse(json).get("route").get("rules");
+        List<JsonNode> rules = belowTheChecks(parse(json).get("route").get("rules"));
 
         JsonNode local = rules.get(0);
         assertThat(isLocalDomainRule(local)).isTrue();
@@ -280,7 +282,7 @@ class SingBoxConfigGeneratorRoutingTest {
         JsonNode route = parse(json).get("route");
 
         // rules[0]=local-domain, rules[1]=private-ip; preset rules start at 2.
-        assertThat(route.get("rules").get(2).get("rule_set").get(0).asString())
+        assertThat(belowTheChecks(route.get("rules")).get(2).get("rule_set").get(0).asString())
                 .isEqualTo("geosite-cn");
         assertThat(route.get("rule_set").get(0).get("url").asString())
                 .endsWith("/geosite-cn.srs");
@@ -545,7 +547,7 @@ class SingBoxConfigGeneratorRoutingTest {
         RoutingConfig routingConfig = new RoutingConfig();
 
         String json = generator.generate(createVlessServer(), defaultSettings, routingConfig);
-        JsonNode rules = parse(json).get("route").get("rules");
+        List<JsonNode> rules = belowTheChecks(parse(json).get("route").get("rules"));
 
         assertThat(rules.size()).isEqualTo(2);
         assertThat(isLocalDomainRule(rules.get(0))).isTrue();
@@ -585,7 +587,7 @@ class SingBoxConfigGeneratorRoutingTest {
         routingConfig.setBypassList(List.of("internal.example.com"));
 
         String json = generator.generate(createVlessServer(), defaultSettings, routingConfig);
-        JsonNode rules = parse(json).get("route").get("rules");
+        List<JsonNode> rules = belowTheChecks(parse(json).get("route").get("rules"));
 
         // [ user-bypass, local-domain, private-ip ]
         assertThat(rules.size()).isEqualTo(3);
@@ -652,7 +654,7 @@ class SingBoxConfigGeneratorRoutingTest {
                         RoutingRule.RuleAction.BLOCK)));
 
         String json = generator.generate(createVlessServer(), defaultSettings, routingConfig);
-        JsonNode rules = parse(json).get("route").get("rules");
+        List<JsonNode> rules = belowTheChecks(parse(json).get("route").get("rules"));
 
         // [ local-domain, private-ip, corp.example.com, resolve, private-ip, 203.0.113.0/24 ]
         assertThat(rules.size()).isEqualTo(6);

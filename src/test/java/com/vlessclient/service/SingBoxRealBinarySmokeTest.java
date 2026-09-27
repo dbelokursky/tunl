@@ -4,8 +4,10 @@ import com.sun.net.httpserver.HttpServer;
 import com.vlessclient.app.I18n;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.CoreLogLevel;
+import com.vlessclient.model.HealthCheckTarget;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ProxyMode;
+import com.vlessclient.model.RouteMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.RoutingRule;
 import com.vlessclient.model.ServerConfig;
@@ -734,6 +736,134 @@ class SingBoxRealBinarySmokeTest {
     }
 
     /**
+     * The health checks test the tunnel where the routing sends everything
+     * else direct: the blocked-only mode, with the checked address on the
+     * bypass list as well. A second core stands in for the server, a SOCKS
+     * server on the loopback that sends what it carries direct, so no
+     * external network is needed.
+     *
+     * <p>Through http-in, where the checks used to go, the request went direct
+     * and was answered with the server dead. Through the checks' own inbound a
+     * dead server fails a URL and a host:port alike, and a live one passes
+     * them; the core's HTTP side answers a CONNECT before it dials, and that
+     * answer read as reachable through a dead tunnel.</p>
+     */
+    @Test
+    void theHealthChecksTestTheTunnelWhereTheRoutingSendsEverythingElseDirect()
+            throws Exception {
+        HttpServer target = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        target.createContext("/generate_204", exchange -> {
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        target.start();
+        int targetPort = target.getAddress().getPort();
+        int serverPort = freePort();
+
+        AppSettings settings = new AppSettings();
+        settings.setProxyMode(ProxyMode.SYSTEM_PROXY);
+        settings.setSystemProxyAutoConfig(false);
+        RoutingConfig routing = new RoutingConfig();
+        routing.setMode(RouteMode.BLOCKED_IN_RUSSIA);
+        routing.setBypassList(List.of("127.0.0.1/32"));
+
+        CoreRun run = startOnFreshPorts(settings, s -> {
+            s.listenOn(s.getSocksPort(), s.getHttpPort(), s.getClashApiPort(), unusedPort());
+            return throughLoopbackServer(
+                    generator.generate(serverFor(Protocol.VLESS), s, routing), serverPort);
+        });
+        String url = "http://127.0.0.1:" + targetPort + "/generate_204";
+        List<HealthCheckTarget> checks = List.of(
+                new HealthCheckTarget("Site", url),
+                new HealthCheckTarget("Port", "127.0.0.1:" + targetPort));
+        ServiceReachabilityChecker checker = new ServiceReachabilityChecker();
+        Path serverConfig = Files.createTempFile("smoke-server-", ".json");
+        Path serverLog = Files.createTempFile("smoke-server-", ".log");
+        Process server = null;
+        try {
+            try (HttpClient viaHttpIn = HttpClient.newBuilder()
+                    .proxy(ProxySelector.of(
+                            new InetSocketAddress("127.0.0.1", settings.getHttpPort())))
+                    .build()) {
+                assertThat(viaHttpIn.send(HttpRequest.newBuilder(URI.create(url))
+                                .timeout(Duration.ofSeconds(10)).build(),
+                        HttpResponse.BodyHandlers.discarding()).statusCode())
+                        .as("through http-in, with the server dead")
+                        .isEqualTo(204);
+            }
+            assertThat(checker.checkAll(checks, settings.listenProbePort())
+                    .get(60, TimeUnit.SECONDS))
+                    .as("through the checks' inbound, with the server dead")
+                    .noneMatch(ServiceReachabilityChecker.ProbeResult::reachable);
+
+            server = startLoopbackServer(serverPort, serverConfig, serverLog);
+            assertThat(checker.checkAll(checks, settings.listenProbePort())
+                    .get(60, TimeUnit.SECONDS))
+                    .as("through the checks' inbound, with the server up")
+                    .extracting(ServiceReachabilityChecker.ProbeResult::detail)
+                    .containsExactly("HTTP 204", "TCP " + targetPort);
+        } catch (Throwable e) {
+            throw new AssertionError(outputTail(run.logFile()), e);
+        } finally {
+            checker.shutdown();
+            if (server != null) {
+                stopCore(server);
+            }
+            stopCore(run.process());
+            target.stop(0);
+            Files.deleteIfExists(run.configFile());
+            Files.deleteIfExists(run.logFile());
+            Files.deleteIfExists(serverConfig);
+            Files.deleteIfExists(serverLog);
+        }
+    }
+
+    /**
+     * A generated configuration whose server is a SOCKS server on the
+     * loopback, and whose remote rule sets are inline ones: without a cache
+     * the core downloads remote sets at start, through the server, and a dead
+     * server stopped it there.
+     */
+    private static String throughLoopbackServer(String generated, int serverPort) {
+        var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+        var config = (tools.jackson.databind.node.ObjectNode) mapper.readTree(generated);
+        for (var outbound : config.path("outbounds")) {
+            if ("vless".equals(outbound.path("type").asString())) {
+                String tag = outbound.path("tag").asString();
+                var object = (tools.jackson.databind.node.ObjectNode) outbound;
+                object.removeAll();
+                object.put("tag", tag).put("type", "socks").put("version", "5")
+                        .put("server", "127.0.0.1").put("server_port", serverPort);
+            }
+        }
+        for (var ruleSet : config.path("route").path("rule_set")) {
+            var object = (tools.jackson.databind.node.ObjectNode) ruleSet;
+            String tag = object.path("tag").asString();
+            object.removeAll();
+            object.put("tag", tag).put("type", "inline");
+            object.putArray("rules").addObject().putArray("domain_suffix").add("blocked.invalid");
+        }
+        return mapper.writeValueAsString(config);
+    }
+
+    /** A second core standing in for the server: SOCKS on the loopback, everything direct. */
+    private static Process startLoopbackServer(int port, Path config, Path log)
+            throws Exception {
+        Files.writeString(config, """
+                {"log": {"level": "warn"},
+                 "inbounds": [{"type": "socks", "tag": "server-in",
+                               "listen": "127.0.0.1", "listen_port": %d}],
+                 "outbounds": [{"type": "direct", "tag": "direct"}]}
+                """.formatted(port));
+        Process process = new ProcessBuilder(binary.toString(), "run", "-c", config.toString())
+                .redirectErrorStream(true)
+                .redirectOutput(log.toFile())
+                .start();
+        awaitPort(port, process, log);
+        return process;
+    }
+
+    /**
      * With a clash_api secret set, the real core rejects an unauthenticated
      * /traffic request (401) and accepts the exact Bearer request
      * TrafficMonitor builds (200) — proving another local process can't read
@@ -1282,9 +1412,34 @@ class SingBoxRealBinarySmokeTest {
         throw (Exception) last;
     }
 
+    /** Every port {@link #freePort()} has handed out in this run. */
+    private static final java.util.Set<Integer> HANDED_OUT =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * A port nothing listens on, and one this run has not handed out before.
+     *
+     * <p>The socket closes before the number is used, and the next
+     * {@code ServerSocket(0)} may get the same number back: the tests that pick
+     * a SOCKS, an HTTP and a control port in a row once got one port twice,
+     * and the core refused to start with "address already in use".</p>
+     */
     private static int freePort() throws IOException {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
+        while (true) {
+            try (ServerSocket socket = new ServerSocket(0)) {
+                if (HANDED_OUT.add(socket.getLocalPort())) {
+                    return socket.getLocalPort();
+                }
+            }
+        }
+    }
+
+    /** {@link #freePort()} for a lambda, which cannot throw it. */
+    private static int unusedPort() {
+        try {
+            return freePort();
+        } catch (IOException e) {
+            throw new java.io.UncheckedIOException(e);
         }
     }
 
