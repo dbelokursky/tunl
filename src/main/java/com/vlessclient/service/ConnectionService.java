@@ -584,7 +584,6 @@ public class ConnectionService {
             log.info("TUN IPv6 is on, but no interface holds a global IPv6 address: "
                     + "the device stays IPv4-only so direct routes are not dialled over IPv6");
         }
-        logReplacedFingerprints(members);
         appliedServerId = active.getId();
         publishSkipped(skipped);
         publishMoved(moved);
@@ -625,25 +624,6 @@ public class ConnectionService {
             skipped.add(new SkippedServer(server.getId(), server.getName(), refusal.reason()));
         }
         return members;
-    }
-
-    /**
-     * Names the REALITY servers the core was given Chrome's uTLS fingerprint
-     * for in place of the random hello their links ask for
-     * ({@link CoreSettings#replacesRandomHello}). Said once per start, like
-     * the IPv6 note: the generator writes the substitution into every
-     * configuration, and it writes one on every dashboard update to compare.
-     */
-    private static void logReplacedFingerprints(List<ServerConfig> members) {
-        String replaced = members.stream()
-                .filter(server -> CoreSettings.replacesRandomHello(server.getTls()))
-                .map(server -> "'" + server.getName() + "' ("
-                        + CoreSettings.fingerprint(server.getTls()) + ")")
-                .collect(Collectors.joining(", "));
-        if (!replaced.isEmpty()) {
-            log.info("REALITY servers get uTLS fingerprint chrome in place of a random hello, "
-                    + "which the core draws once per run: {}", replaced);
-        }
     }
 
     /**

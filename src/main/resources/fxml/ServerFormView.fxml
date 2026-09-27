@@ -119,10 +119,6 @@
 
                     <Label fx:id="fingerprintLabel" text="Fingerprint" styleClass="form-label"/>
                     <TextField fx:id="fingerprintField" promptText="chrome" styleClass="form-field"/>
-                    <!-- Shown when the core is sent another fingerprint than
-                         the field holds; the controller binds its text. -->
-                    <Label fx:id="fingerprintNoteLabel" styleClass="hint-label" wrapText="true"
-                           visible="false" managed="false"/>
 
                     <CheckBox fx:id="allowInsecureCheck" text="Allow Insecure" styleClass="form-checkbox"/>
 
