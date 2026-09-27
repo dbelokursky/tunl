@@ -3,7 +3,10 @@ package com.vlessclient.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vlessclient.app.I18n;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -139,6 +142,80 @@ class CoreExitReasonTest {
                 .doesNotContain("bind", "FATAL", "listen tcp");
         assertThat(CoreExitReason.describe(1, "sing-box crashing"))
                 .doesNotContain("sing-box crashing", "Process", "Процесс");
+    }
+
+    /** A FATAL line, and the lines leading up to it, end the output. */
+    @Test
+    void theAppLogGetsTheEndOfTheOutput() {
+        List<String> output = IntStream.rangeClosed(1, 30).mapToObj(i -> "line " + i).toList();
+
+        List<String> kept = CoreExitReason.lastLines(output);
+
+        assertThat(kept).hasSize(CoreExitReason.LAST_LINES);
+        assertThat(kept.getFirst()).isEqualTo("line 11");
+        assertThat(kept.getLast()).isEqualTo("line 30");
+        assertThat(CoreExitReason.lastLines(List.of("only line"))).containsExactly("only line");
+        assertThat(CoreExitReason.lastLines(List.of())).isEmpty();
+    }
+
+    /**
+     * A Go crash prints its reason first and the failing goroutine's stack
+     * after it, top frame first. Kept from the end, a long stack left only its
+     * bottom frames, and the "panic:" line that says what failed was gone.
+     */
+    @Test
+    void aCrashWithALongStackIsKeptFromItsFirstLine() {
+        List<String> output = crash("panic: runtime error: invalid memory address or nil "
+                + "pointer dereference", 30);
+
+        List<String> kept = CoreExitReason.lastLines(output);
+
+        assertThat(kept).hasSize(CoreExitReason.LAST_LINES);
+        assertThat(kept.getFirst()).startsWith("panic: runtime error");
+        assertThat(kept).contains("goroutine 4211 [running]:", "github.com/sagernet/sing-box/"
+                + "route.step0(...)");
+    }
+
+    /** The runtime's own fatal errors print a stack the same way. */
+    @Test
+    void aFatalErrorOfTheRuntimeIsACrashToo() {
+        List<String> kept = CoreExitReason.lastLines(crash("fatal error: concurrent map writes", 30));
+
+        assertThat(kept.getFirst()).isEqualTo("fatal error: concurrent map writes");
+    }
+
+    /** A crash that fits keeps the lines before it, which show what the core was doing. */
+    @Test
+    void aShortCrashKeepsWhatLedUpToIt() {
+        List<String> output = crash("panic: send on closed channel", 3);
+
+        List<String> kept = CoreExitReason.lastLines(output);
+
+        assertThat(kept).hasSize(CoreExitReason.LAST_LINES);
+        assertThat(kept.getLast()).isEqualTo(output.getLast());
+        assertThat(kept.getFirst()).startsWith("INFO[");
+        assertThat(kept).contains("panic: send on closed channel");
+    }
+
+    /**
+     * What sing-box prints when it crashes: ordinary lines, then the Go
+     * runtime's report and {@code frames} frames of the failing goroutine.
+     */
+    private static List<String> crash(String firstLine, int frames) {
+        List<String> output = new ArrayList<>();
+        for (int i = 0; i < 25; i++) {
+            output.add("INFO[0040] [" + (3000 + i) + " 0ms] inbound/mixed[mixed-in]: "
+                    + "inbound connection from 127.0.0.1:" + (52000 + i));
+        }
+        output.add(firstLine);
+        output.add("[signal SIGSEGV: segmentation violation code=0x1 addr=0x28 pc=0x1045c3a2c]");
+        output.add("");
+        output.add("goroutine 4211 [running]:");
+        for (int frame = 0; frame < frames; frame++) {
+            output.add("github.com/sagernet/sing-box/route.step" + frame + "(...)");
+            output.add("\tgithub.com/sagernet/sing-box/route/route.go:" + (100 + frame) + " +0x2c");
+        }
+        return output;
     }
 
     private static String describe(String lastLine) {

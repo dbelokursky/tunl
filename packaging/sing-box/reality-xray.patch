@@ -69,3 +69,24 @@
  		return nil, E.New("nil ecdheKey")
  	}
  	authKey, err := ecdheKey.ECDH(publicKey)
+--- a/common/tls/utls_client.go
++++ b/common/tls/utls_client.go
+@@ -363,7 +363,17 @@
+ 	weights := utls.DefaultWeights
+ 	weights.TLSVersMax_Set_VersionTLS13 = 1
+ 	weights.FirstKeyShare_Set_CurveP256 = 0
+-	randomizedFingerprint = utls.HelloRandomized
++	// Tunl: every randomized hello carries an X25519MLKEM768 key share
++	// ahead of X25519, with the group among the supported ones, and ALPN.
++	// XTLS/REALITY 8cdf7bf9 (Xray 26.9.8 and later) rejects a hello without
++	// that share first, and utls drew one without it for half the processes,
++	// so one core start in two failed every REALITY connection. The same
++	// coins also add a P-256 share behind X25519, and the MLKEM768 group was
++	// sometimes offered without its share or the other way round. Xray's
++	// own "randomized" always sends ALPN; utls's left it out now and then.
++	weights.KeyShare_Append_RandomGroups = 1
++	weights.CurveIDs_Append_X25519 = 1
++	randomizedFingerprint = utls.HelloRandomizedALPN
+ 	randomizedFingerprint.Seed, _ = utls.NewPRNGSeed()
+ 	randomizedFingerprint.Weights = &weights
+ }

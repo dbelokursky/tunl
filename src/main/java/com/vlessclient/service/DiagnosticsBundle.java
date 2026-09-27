@@ -12,12 +12,17 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import org.slf4j.Logger;
@@ -39,7 +44,8 @@ import tools.jackson.databind.node.ObjectNode;
  * the ones that did carry a config carried the credentials with it.</p>
  *
  * <p>The bundle holds {@code app-info.txt}, the tail of {@code tunl.log} with
- * every URL redacted, the sing-box configuration this build would generate
+ * every URL, every name a server goes by and every public IP address
+ * redacted, the sing-box configuration this build would generate
  * right now with every secret value replaced, and {@code settings.json} /
  * {@code routing.json} with their URLs redacted, when they exist. It
  * deliberately does <em>not</em> hold {@code servers.json},
@@ -91,6 +97,16 @@ public class DiagnosticsBundle {
     private static final Set<String> IDENTIFYING_FIELDS = Set.of(
             "server", "server_name", "host", "sni", "path", "service_name",
             "address", "public_key", "short_id", "reserved", "plugin_opts");
+
+    /**
+     * A host name or an IPv4 address in free text: labels joined by dots, in
+     * any script, so an internationalized server name is found too.
+     */
+    private static final Pattern HOST_IN_TEXT =
+            Pattern.compile("[\\w-]+(?:\\.[\\w-]+)+", Pattern.UNICODE_CHARACTER_CLASS);
+
+    /** The host a Shadowsocks plugin is told: v2ray-plugin's host, simple-obfs's obfs-host. */
+    private static final Pattern PLUGIN_HOST = Pattern.compile("(?:^|;)\\s*(?:obfs-)?host=([^;]+)");
 
     private final ConfigStore configStore;
     private final SingBoxConfigGenerator configGenerator;
@@ -206,7 +222,10 @@ public class DiagnosticsBundle {
      * The last {@value #LOG_TAIL_LINES} lines of {@code tunl.log}, with every
      * URL redacted. Subscription URLs and share links both carry their
      * credential in the URL itself, and the log is precisely the file people
-     * attach to bug reports.
+     * attach to bug reports. The names a server goes by and every public IP
+     * address are redacted too: an unexpected exit leaves the core's last
+     * lines in the log, and the core quotes the server it dialed, the address
+     * that name resolved to and the SNI a certificate did not match.
      */
     private String logTail() {
         Path file = logsDir.resolve(LOG_ENTRY);
@@ -220,12 +239,65 @@ public class DiagnosticsBundle {
                 if (tail.size() == LOG_TAIL_LINES) {
                     tail.removeFirst();
                 }
-                tail.addLast(Redact.urlsIn(line));
+                tail.addLast(line);
             }
         } catch (IOException e) {
             return "(could not read the log file: " + e.getMessage() + ")\n";
         }
-        return String.join("\n", tail) + "\n";
+        // Only the lines kept: the log runs to 10 MB, and this runs on the UI thread.
+        Set<String> names = serverNames();
+        return tail.stream()
+                .map(line -> Redact.publicIpsIn(serverNamesIn(Redact.urlsIn(line), names)))
+                .collect(Collectors.joining("\n", "", "\n"));
+    }
+
+    /**
+     * Every name a configured server goes by, in lower case: its address, the
+     * SNI of its TLS or REALITY hello, and the host its transport or its
+     * Shadowsocks plugin asks for. Only dotted names and IPv4 addresses are
+     * taken, as {@link Redact#publicIpsIn} covers IPv6; so WireGuard's
+     * reserved bytes, kept where the SNI would be, are not.
+     */
+    private Set<String> serverNames() {
+        List<String> values = new ArrayList<>();
+        for (ServerConfig server : FxExecutor.get(() -> List.copyOf(configStore.getServers()))) {
+            values.add(server.getAddress());
+            if (server.getTls() != null) {
+                values.add(server.getTls().getServerName());
+            }
+            if (server.getTransport() != null) {
+                values.add(server.getTransport().getHost());
+            }
+            if (server.getPluginOpts() != null) {
+                Matcher host = PLUGIN_HOST.matcher(server.getPluginOpts());
+                while (host.find()) {
+                    values.add(host.group(1));
+                }
+            }
+        }
+        Set<String> names = new HashSet<>();
+        for (String value : values) {
+            if (value != null) {
+                Matcher name = HOST_IN_TEXT.matcher(value);
+                while (name.find()) {
+                    names.add(name.group().toLowerCase(Locale.ROOT));
+                }
+            }
+        }
+        return names;
+    }
+
+    /**
+     * Replaces every host in {@code line} that is one of {@code names}. Each
+     * host in the line is looked up once, rather than each name searched for
+     * throughout: a subscription brings hundreds of servers.
+     */
+    private static String serverNamesIn(String line, Set<String> names) {
+        if (names.isEmpty()) {
+            return line;
+        }
+        return HOST_IN_TEXT.matcher(line).replaceAll(host -> Matcher.quoteReplacement(
+                names.contains(host.group().toLowerCase(Locale.ROOT)) ? REDACTED : host.group()));
     }
 
     /**

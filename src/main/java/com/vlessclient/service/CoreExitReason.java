@@ -2,11 +2,13 @@ package com.vlessclient.service;
 
 import com.vlessclient.app.I18n;
 import com.vlessclient.platform.WindowsTunLauncher;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Puts a core's unexpected exit into words, in the language of the UI.
+ * Puts a core's unexpected exit into words, in the language of the UI, and
+ * picks the lines of its output that say why for the app log.
  *
  * <p>The card and the notification showed the exit code and the last line of
  * the core's log as it came: English inside a Russian window, cut off where
@@ -16,6 +18,13 @@ import java.util.regex.Pattern;
  * {@link SingBoxEngine#errorDetailProperty()}.</p>
  */
 final class CoreExitReason {
+
+    /**
+     * How many lines of an exited core's output go into the app log: room for
+     * a FATAL line and what led up to it, or for a crash's first line and the
+     * frames that failed.
+     */
+    static final int LAST_LINES = 20;
 
     /**
      * A listening port the core could not open. Only the core's words up to
@@ -76,5 +85,28 @@ final class CoreExitReason {
             }
         }
         return I18n.get("engine.exited.unexpectedly", String.valueOf(exitCode));
+    }
+
+    /**
+     * The lines of an exited core's output that say why it stopped: the last
+     * {@value #LAST_LINES}, or, when a Go crash began further up, as many from
+     * its first line on. A crash prints "panic: …" (or "fatal error: …" from
+     * the runtime) and then the failing goroutine's stack, the frame that
+     * failed first. The stack runs past twenty lines more often than not, and
+     * its last lines are the bottom frames, which name nothing.
+     *
+     * @param output the core's output, oldest line first
+     * @return at most {@value #LAST_LINES} lines, oldest first
+     */
+    static List<String> lastLines(List<String> output) {
+        int from = Math.max(0, output.size() - LAST_LINES);
+        for (int i = output.size() - 1; i >= 0; i--) {
+            String line = output.get(i);
+            if (line.startsWith("panic: ") || line.startsWith("fatal error: ")) {
+                from = Math.min(from, i);
+                break;
+            }
+        }
+        return List.copyOf(output.subList(from, Math.min(output.size(), from + LAST_LINES)));
     }
 }
