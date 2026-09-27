@@ -28,7 +28,7 @@ browser sends, which a filter can single out. Upstream issue:
 
 ## What the patch changes
 
-All in `common/tls/reality_client.go`:
+In `common/tls/reality_client.go`:
 
 1. **The hello is left as the fingerprint builds it,** X25519MLKEM768
    included. Upstream's filter was a workaround for utls 1.7, whose hybrid
@@ -40,6 +40,25 @@ All in `common/tls/reality_client.go`:
 3. **The auth key falls back to the X25519 half of the hybrid share** when a
    fingerprint sends no plain X25519 share. This is the order the server
    reads them in.
+
+In `common/tls/utls_client.go`:
+
+4. **Every `randomized` hello is consistent and carries that share.** The
+   core draws that hello once per process, from utls's weights.
+   - A draw that listed X25519MLKEM768 without its share failed on any
+     Xray whose REALITY offers the group, which 25.12.2's does. The server
+     asks for the share in a HelloRetryRequest, and utls gives the
+     handshake up (XTLS/Xray-core#6714). That was about a third of core
+     starts; against Xray 26.9.8, which requires the share ahead of
+     X25519, it would be one in two.
+   - Links choose `randomized` on purpose where TSPU is reported to single
+     out the uTLS Chrome profile, so the random hello stays.
+   - Two weights now always add the share, ahead of X25519, and a P-256
+     share behind it, with the group among the supported ones. The draws
+     had also sent the share without its group.
+   - `utls.HelloRandomizedALPN`, which Xray also uses for `randomized`,
+     always offers ALPN; the plain randomized hello left it out now and
+     then.
 
 The approach matches the maintained fork Leadaxe/sing-box-lx, which also
 keeps a per-server "classical" hello for networks that drop the larger
@@ -56,9 +75,16 @@ hybrid one. Tunl has no such switch yet.
   openvpn and the like stay out. The extra tag `tunl` shows in
   `sing-box version`.
 - `verify.sh` then starts the linux-amd64 build against `verify/`, which
-  plays an Xray 26.9 server. It fails the run unless the hello carries the
-  X25519MLKEM768 share and its session id, opened with the server's private
-  key, names 26.3.27.
+  plays an Xray 26.9 server. It fails the run unless the hello meets four
+  conditions:
+  - it carries the X25519MLKEM768 share ahead of X25519, in the order the
+    server reads the shares;
+  - its session id, opened with the server's private key, names 26.3.27;
+  - every key share's group is among the supported groups, and
+    X25519MLKEM768 is not offered without its share;
+  - it offers ALPN h2 and http/1.1.
+
+  It checks `chrome` in one core process and `randomized` in twelve.
 - Every pull request that touches the core runs this.
 - A run by hand (**Core**, *Run workflow*, from any branch), or one
   **Bump sing-box** starts, also publishes the archives, their `SHA256SUMS`,

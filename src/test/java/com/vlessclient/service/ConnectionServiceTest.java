@@ -240,62 +240,6 @@ class ConnectionServiceTest {
                 Duration.ofSeconds(5));
     }
 
-    /**
-     * A REALITY server whose link asks for a random hello is given Chrome's,
-     * and the log says so once per start. The configuration is generated
-     * again on every dashboard update to compare, so a note written there
-     * would repeat all day; plain TLS keeps the link's own and goes unnamed.
-     */
-    @Test
-    void aRandomHelloReplacedForRealityIsLoggedOncePerConnect() throws Exception {
-        store.addServer(TestServers.server()
-                .id("srv-reality")
-                .name("Frankfurt")
-                .protocol(Protocol.VLESS)
-                .address("frankfurt.example.com")
-                .port(443)
-                .uuid("11111111-1111-1111-1111-111111111111")
-                .flow("xtls-rprx-vision")
-                .reality("www.microsoft.com",
-                        "Z84J2IelR9ch3k8VtlVhhs5ycBUlXA7wHBWcBrjqnAw", "0123abcd")
-                .fingerprint("randomized")
-                .build());
-        ServerConfig plainTls = server("srv-plain", "Osaka");
-        plainTls.getTls().setEnabled(true);
-        plainTls.getTls().setFingerprint("randomized");
-        store.addServer(plainTls);
-        store.setActiveServer("srv-reality");
-        ch.qos.logback.classic.Logger serviceLog = (ch.qos.logback.classic.Logger)
-                org.slf4j.LoggerFactory.getLogger(ConnectionService.class);
-        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
-                new ch.qos.logback.core.read.ListAppender<>();
-        appender.start();
-        serviceLog.addAppender(appender);
-        try {
-            ConnectionService service = service(engine());
-            assertThat(service.connect().started()).isTrue();
-            assertThat(service.runsCurrentSettings()).isTrue();
-            assertThat(service.runsCurrentSettings()).isTrue();
-
-            assertThat(replacedHelloNotes(appender)).containsExactly(
-                    "REALITY servers get uTLS fingerprint chrome in place of a random hello, "
-                            + "which the core draws once per run: 'Frankfurt' (randomized)");
-
-            assertThat(service.reconnect(null).started()).isTrue();
-            assertThat(replacedHelloNotes(appender)).hasSize(2);
-        } finally {
-            serviceLog.detachAppender(appender);
-        }
-    }
-
-    private static List<String> replacedHelloNotes(
-            ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> log) {
-        return log.list.stream()
-                .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
-                .filter(message -> message.contains("in place of a random hello"))
-                .toList();
-    }
-
     @Test
     void recoveryLeavesTheReconnectToTheUserOnlyWhereARestartWouldPrompt() {
         RecordingEngine engine = engine();

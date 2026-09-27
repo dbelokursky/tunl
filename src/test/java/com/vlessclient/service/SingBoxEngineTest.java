@@ -1,5 +1,8 @@
 package com.vlessclient.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.vlessclient.app.I18n;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
@@ -14,6 +17,7 @@ import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.CleanupMode;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InterruptedIOException;
@@ -22,6 +26,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -156,6 +161,55 @@ class SingBoxEngineTest {
                 + "fi\n"
                 + "echo 'sing-box started'\n"
                 + "sleep 30\n");
+    }
+
+    /**
+     * A core that passes the check, prints {@code output} when run and exits
+     * with {@code exitCode}. It types the lines out of a file, so brackets,
+     * quotes and tabs reach the engine as written, where the shell would read
+     * them in an echo.
+     */
+    private Path createCoreThatPrints(Path dir, String name, List<String> output, int exitCode)
+            throws Exception {
+        Path lines = Files.write(dir.resolve(name + "-output.txt"), output);
+        if (WINDOWS) {
+            return writeScript(dir, name,
+                    "@echo off\r\n"
+                    + "if \"%1\"==\"check\" exit /b 0\r\n"
+                    + "type \"" + lines + "\"\r\n"
+                    + "exit /b " + exitCode + "\r\n");
+        }
+        return writeScript(dir, name,
+                "#!/bin/sh\n"
+                + "[ \"$1\" = check ] && exit 0\n"
+                + "cat '" + lines + "'\n"
+                + "exit " + exitCode + "\n");
+    }
+
+    /**
+     * Records what the engine writes to the app log, the one a diagnostics
+     * bundle packs; the Logs tab is not it, since each start clears the tab.
+     */
+    private static ListAppender<ILoggingEvent> recordAppLog() {
+        ListAppender<ILoggingEvent> appLog = new ListAppender<>();
+        appLog.start();
+        engineLogger().addAppender(appLog);
+        return appLog;
+    }
+
+    private static ch.qos.logback.classic.Logger engineLogger() {
+        return (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(SingBoxEngine.class);
+    }
+
+    /** The entries the engine wrote about a core's exit, or about a connect cancelled. */
+    private static List<ILoggingEvent> exitEntries(ListAppender<ILoggingEvent> appLog) {
+        // The appender adds under its own lock, on the FX thread.
+        synchronized (appLog) {
+            return appLog.list.stream()
+                    .filter(entry -> entry.getFormattedMessage().contains("exited unexpectedly")
+                            || entry.getFormattedMessage().startsWith("Connect cancelled"))
+                    .toList();
+        }
     }
 
     private static final boolean WINDOWS =
@@ -638,6 +692,173 @@ class SingBoxEngineTest {
         awaitConnectionState(engine, ConnectionState.ERROR, AWAIT_STATE_TIMEOUT_MS);
         assertThat(engine.errorMessageProperty().get())
                 .isEqualTo(I18n.get("engine.exit.port", "1081"));
+    }
+
+    /**
+     * The lines that said why the core stopped were only in the Logs tab,
+     * which the next start clears, and recovery starts the core again within
+     * seconds: tunl.log, which a diagnostics bundle packs, said only that the
+     * core stopped. The exit now leaves its code and the core's last lines
+     * there.
+     */
+    @Test
+    void anUnexpectedExitLeavesItsCodeAndLastLinesInTheAppLog(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        List<String> output = new ArrayList<>();
+        for (int i = 1; i <= 25; i++) {
+            output.add("INFO[0001] [" + i + " 0ms] inbound/mixed[mixed-in]: "
+                    + "inbound connection from 127.0.0.1:" + (52000 + i));
+        }
+        output.add("FATAL[0002] start service: start inbound/http[http-in]: listen tcp "
+                + "127.0.0.1:1081: bind: address already in use");
+        SingBoxEngine engine = new SingBoxEngine(createCoreThatPrints(tmp, "sing-box", output, 1));
+        ListAppender<ILoggingEvent> appLog = recordAppLog();
+        try {
+            engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+            awaitConnectionState(engine, ConnectionState.ERROR, AWAIT_STATE_TIMEOUT_MS);
+        } finally {
+            engineLogger().detachAppender(appLog);
+        }
+
+        assertThat(exitEntries(appLog)).singleElement().satisfies(exit -> {
+            assertThat(exit.getLevel()).isEqualTo(Level.WARN);
+            List<String> entry = exit.getFormattedMessage().lines().toList();
+            assertThat(entry.getFirst()).isEqualTo("The core exited unexpectedly with code 1:");
+            assertThat(entry.subList(1, entry.size()))
+                    .as("the core's last lines, each indented under the entry")
+                    .hasSize(CoreExitReason.LAST_LINES)
+                    .allMatch(line -> line.startsWith("    "))
+                    .endsWith("    " + output.getLast());
+            assertThat(entry.get(1)).isEqualTo("    " + output.get(6));
+        });
+    }
+
+    /**
+     * A Go panic prints its reason and then the failing goroutine's stack,
+     * which runs past twenty lines. Twenty lines from the end would be the
+     * stack's bottom frames alone; the entry starts at the "panic:" line.
+     */
+    @Test
+    void aPanicAboveALongStackIsWhatTheAppLogKeeps(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        List<String> output = new ArrayList<>(List.of(
+                "sing-box started",
+                "panic: runtime error: invalid memory address or nil pointer dereference",
+                "[signal SIGSEGV: segmentation violation code=0x1 addr=0x28 pc=0x1045c3a2c]",
+                "",
+                "goroutine 4211 [running]:"));
+        for (int frame = 0; frame < 20; frame++) {
+            output.add("github.com/sagernet/sing-box/route.step" + frame + "(...)");
+            output.add("\tgithub.com/sagernet/sing-box/route/route.go:" + (100 + frame) + " +0x2c");
+        }
+        SingBoxEngine engine = new SingBoxEngine(createCoreThatPrints(tmp, "sing-box", output, 2));
+        ListAppender<ILoggingEvent> appLog = recordAppLog();
+        try {
+            engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+            awaitConnectionState(engine, ConnectionState.ERROR, AWAIT_STATE_TIMEOUT_MS);
+        } finally {
+            engineLogger().detachAppender(appLog);
+        }
+
+        assertThat(exitEntries(appLog)).singleElement().satisfies(exit -> {
+            List<String> entry = exit.getFormattedMessage().lines().toList();
+            assertThat(entry.getFirst()).isEqualTo("The core exited unexpectedly with code 2:");
+            assertThat(entry.get(1)).isEqualTo("    " + output.get(1));
+            assertThat(entry).hasSize(1 + CoreExitReason.LAST_LINES);
+        });
+    }
+
+    /** A core killed before its first line still leaves its code. */
+    @Test
+    void aCoreThatPrintedNothingStillLeavesItsCodeInTheAppLog(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        SingBoxEngine engine = new SingBoxEngine(
+                createCoreThatPrints(tmp, "sing-box", List.of(), 3));
+        ListAppender<ILoggingEvent> appLog = recordAppLog();
+        try {
+            engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+            awaitConnectionState(engine, ConnectionState.ERROR, AWAIT_STATE_TIMEOUT_MS);
+        } finally {
+            engineLogger().detachAppender(appLog);
+        }
+
+        assertThat(exitEntries(appLog)).singleElement().satisfies(exit ->
+                assertThat(exit.getFormattedMessage())
+                        .isEqualTo("The core exited unexpectedly with code 3 and printed nothing"));
+    }
+
+    /**
+     * A private resolver keeps the account it belongs to in its URL, and the
+     * core quotes that URL when a query fails. The line goes into the app log
+     * with the URL cut down to its host, as every URL on its way there is.
+     */
+    @Test
+    void anExitsLinesReachTheAppLogWithTheirUrlsCutDown(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        SingBoxEngine engine = new SingBoxEngine(createCoreThatPrints(tmp, "sing-box", List.of(
+                "ERROR[0003] dns: exchange failed for www.example.com. IN A: Post "
+                        + "\"https://dns.example/dns-query/abc123account\": "
+                        + "context deadline exceeded"), 1));
+        ListAppender<ILoggingEvent> appLog = recordAppLog();
+        try {
+            engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+            awaitConnectionState(engine, ConnectionState.ERROR, AWAIT_STATE_TIMEOUT_MS);
+        } finally {
+            engineLogger().detachAppender(appLog);
+        }
+
+        assertThat(exitEntries(appLog)).singleElement().satisfies(exit ->
+                assertThat(exit.getFormattedMessage())
+                        .contains("Post \"https://dns.example/…\": context deadline exceeded")
+                        .doesNotContain("abc123account"));
+    }
+
+    /**
+     * A dismissed administrator prompt is the user cancelling the connect: it
+     * goes into the app log as a cancel, not as a failure for a report to chase.
+     */
+    @Test
+    void aDismissedPromptGoesIntoTheAppLogAsACancel(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        SingBoxEngine engine = new SingBoxEngine(createCrashingSingBox(tmp, "sing-box",
+                "0:245: execution error: User canceled. (-128)"));
+        ListAppender<ILoggingEvent> appLog = recordAppLog();
+        try {
+            engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+            Await.until("the exit to be read as a dismissed prompt", engine::lastExitWasDeclined,
+                    Duration.ofMillis(AWAIT_STATE_TIMEOUT_MS));
+            flushFxEvents();
+        } finally {
+            engineLogger().detachAppender(appLog);
+        }
+
+        assertThat(exitEntries(appLog)).singleElement().satisfies(cancel -> {
+            assertThat(cancel.getLevel()).isEqualTo(Level.INFO);
+            assertThat(cancel.getFormattedMessage())
+                    .startsWith("Connect cancelled")
+                    .contains("User canceled. (-128)");
+        });
+    }
+
+    /** A stop that was asked for is no exit to explain. */
+    @Test
+    void aStopThatWasAskedForLeavesNoExitInTheAppLog(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+        Set<Thread> monitorsBefore = Await.liveThreadsNamed(MONITOR_THREAD);
+        ListAppender<ILoggingEvent> appLog = recordAppLog();
+        try {
+            engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+            awaitConnectionState(engine, ConnectionState.CONNECTED, AWAIT_STATE_TIMEOUT_MS);
+            engine.stop();
+            // The monitor queues its verdict before it finishes; the flush runs it.
+            awaitMonitorsFinished(monitorsBefore);
+            flushFxEvents();
+        } finally {
+            engineLogger().detachAppender(appLog);
+        }
+
+        assertThat(exitEntries(appLog)).isEmpty();
     }
 
     @Test
