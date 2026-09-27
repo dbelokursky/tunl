@@ -36,9 +36,6 @@ public final class CoreSettings {
     /** The uTLS fingerprint a server gets when its link names none. */
     private static final String DEFAULT_FINGERPRINT = "chrome";
 
-    /** The fingerprints the core draws a hello for once per process. */
-    private static final Set<String> RANDOM_FINGERPRINTS = Set.of("random", "randomized");
-
     /** The uTLS fingerprints the core knows. */
     private static final Set<String> FINGERPRINTS = Set.of(
             "chrome", "firefox", "edge", "safari", "360", "qq", "ios", "android",
@@ -115,12 +112,11 @@ public final class CoreSettings {
     }
 
     /**
-     * The uTLS fingerprint to send for this server: {@link #fingerprint},
-     * Chrome's where {@link #replacesRandomHello} says so, or none when its
-     * TLS runs inside QUIC, Hysteria2's or the QUIC transport's. The core
-     * passes {@code check} with uTLS there, then fails every connection with
-     * "unsupported usage for uTLS", for a fingerprint the link set as for the
-     * default.
+     * The uTLS fingerprint to send for this server: {@link #fingerprint}, or
+     * none when its TLS runs inside QUIC, Hysteria2's or the QUIC transport's.
+     * The core passes {@code check} with uTLS there, then fails every
+     * connection with "unsupported usage for uTLS", for a fingerprint the
+     * link set as for the default.
      *
      * @param server the server to connect to
      * @return the fingerprint, or null when uTLS cannot be used
@@ -129,34 +125,7 @@ public final class CoreSettings {
         TransportConfig transport = server.getTransport();
         boolean overQuic = server.getProtocol() == Protocol.HYSTERIA2
                 || transport != null && transport.getType() == TransportType.QUIC;
-        if (overQuic) {
-            return null;
-        }
-        return replacesRandomHello(server.getTls()) ? DEFAULT_FINGERPRINT
-                : fingerprint(server.getTls());
-    }
-
-    /**
-     * Whether a REALITY server is sent Chrome's fingerprint in place of the
-     * random hello its link asks for, {@code random} or {@code randomized}.
-     *
-     * <p>The core draws either once per process, so every connection of a
-     * run sends the hello drawn at its start. Xray 26.9.8 refuses a REALITY
-     * hello without an X25519MLKEM768 key share, which uTLS puts in a
-     * randomized hello half the time, and in a {@code random} one only when
-     * it picks Chrome: a run that drew one without it timed out on every
-     * connection until a restart drew again. Chrome's hello carries the
-     * share, and Chrome shuffles its extensions on every connection itself.
-     * The server keeps its link's value, which a subscription refresh would
-     * bring back anyway; plain TLS keeps it too, since an ordinary TLS server
-     * takes any hello.</p>
-     *
-     * @param tls the server's TLS settings, or null when it has none
-     * @return true when Chrome's goes in place of the link's
-     */
-    public static boolean replacesRandomHello(TlsConfig tls) {
-        return tls != null && tls.isEnabled() && tls.isReality()
-                && RANDOM_FINGERPRINTS.contains(fingerprint(tls));
+        return overQuic ? null : fingerprint(server.getTls());
     }
 
     /**
