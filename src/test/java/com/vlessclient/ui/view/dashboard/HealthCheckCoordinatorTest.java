@@ -5,13 +5,10 @@ import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.HealthCheckTarget;
-import com.vlessclient.model.RouteMode;
-import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.TunnelHealth;
 import com.vlessclient.service.ConfigRejectedException;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.FxExecutor;
-import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TestConfigStores;
@@ -92,20 +89,13 @@ class HealthCheckCoordinatorTest {
     /** Returns a canned result list instead of probing the network. */
     private static final class FakeChecker extends ServiceReachabilityChecker {
         private List<ProbeResult> results = List.of();
-        private List<ProbeResult> groupResults = List.of();
-        private final List<GroupRoute> groupRoutes = new ArrayList<>();
+        private final List<Integer> ports = new ArrayList<>();
 
         @Override
         public CompletableFuture<List<ProbeResult>> checkAll(
-                List<HealthCheckTarget> targets, int httpProxyPort) {
+                List<HealthCheckTarget> targets, int probePort) {
+            ports.add(probePort);
             return CompletableFuture.completedFuture(results);
-        }
-
-        @Override
-        public CompletableFuture<List<ProbeResult>> checkAllThroughGroup(
-                List<HealthCheckTarget> targets, GroupRoute route) {
-            groupRoutes.add(route);
-            return CompletableFuture.completedFuture(groupResults);
         }
     }
 
@@ -115,7 +105,7 @@ class HealthCheckCoordinatorTest {
 
         @Override
         public CompletableFuture<List<ProbeResult>> checkAll(
-                List<HealthCheckTarget> targets, int httpProxyPort) {
+                List<HealthCheckTarget> targets, int probePort) {
             return pending;
         }
 
@@ -132,7 +122,7 @@ class HealthCheckCoordinatorTest {
 
         @Override
         public CompletableFuture<List<ProbeResult>> checkAll(
-                List<HealthCheckTarget> targets, int httpProxyPort) {
+                List<HealthCheckTarget> targets, int probePort) {
             return pending.get(calls++);
         }
 
@@ -156,7 +146,7 @@ class HealthCheckCoordinatorTest {
 
         @Override
         public CompletableFuture<List<ProbeResult>> checkAll(
-                List<HealthCheckTarget> targets, int httpProxyPort) {
+                List<HealthCheckTarget> targets, int probePort) {
             calls.incrementAndGet();
             return CompletableFuture.completedFuture(results);
         }
@@ -284,37 +274,22 @@ class HealthCheckCoordinatorTest {
     }
 
     /**
-     * In the mode that sends only the blocked lists through the tunnel, the
-     * route rules sent the probes direct: Google answered past a dead server
-     * and recovery never saw it. There the probes go through the core's group.
+     * The probes go in through this run's probe inbound, which the route sends
+     * into the tunnel whatever the routing mode. They went in through the HTTP
+     * port, and in the blocked-only mode the rules sent them direct: Google
+     * answered past a dead server, and recovery never saw it.
      */
     @Test
-    void inBlockedOnlyModeTheProbesGoThroughTheProxyGroup() throws Exception {
-        healthSettings(false, new HealthCheckTarget("a", "https://a"));
-        RoutingService prior = ServiceLocator.find(RoutingService.class).orElse(null);
-        ServiceLocator.register(RoutingService.class, new RoutingService() {
-            @Override
-            public synchronized RoutingConfig getConfig() {
-                RoutingConfig config = new RoutingConfig();
-                config.setMode(RouteMode.BLOCKED_IN_RUSSIA);
-                return config;
-            }
-        });
-        try {
-            FakeChecker checker = new FakeChecker();
-            checker.results = List.of(probe("a", true));
-            checker.groupResults = List.of(probe("a", false));
+    void theProbesGoInThroughThisRunsProbeInbound() throws Exception {
+        AppSettings settings = healthSettings(false, new HealthCheckTarget("a", "https://a"));
+        settings.listenOn(settings.getSocksPort(), settings.getHttpPort(),
+                settings.getClashApiPort(), 47123);
+        FakeChecker checker = new FakeChecker();
+        checker.results = List.of(probe("a", true));
 
-            connectAndCheck(coordinatorWith(checker));
+        connectAndCheck(coordinatorWith(checker));
 
-            assertThat(checker.groupRoutes).hasSize(1);
-            assertThat(healthState.healthProperty().get())
-                    .as("what the group said, not the direct path")
-                    .isEqualTo(TunnelHealth.BROKEN);
-        } finally {
-            ServiceLocator.register(RoutingService.class,
-                    prior != null ? prior : new RoutingService());
-        }
+        assertThat(checker.ports).containsExactly(47123);
     }
 
     @Test
@@ -785,7 +760,7 @@ class HealthCheckCoordinatorTest {
     private static final class EchoChecker extends ServiceReachabilityChecker {
         @Override
         public CompletableFuture<List<ProbeResult>> checkAll(
-                List<HealthCheckTarget> targets, int httpProxyPort) {
+                List<HealthCheckTarget> targets, int probePort) {
             return CompletableFuture.completedFuture(targets.stream()
                     .map(target -> probe(target.getName(), true))
                     .toList());

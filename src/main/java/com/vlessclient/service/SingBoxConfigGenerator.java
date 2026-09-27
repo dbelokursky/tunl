@@ -41,9 +41,10 @@ import tools.jackson.databind.node.ObjectNode;
  * Builds the JSON configuration handed to the sing-box core from a
  * {@link ServerConfig}, {@link AppSettings} and optional {@link RoutingConfig}.
  *
- * <p>Emits the sing-box 1.14 schema: log, DNS, inbounds (TUN/SOCKS/HTTP),
- * outbounds or a WireGuard endpoint, routing rules with remote rule-sets, and
- * the experimental Clash API / cache-file blocks.</p>
+ * <p>Emits the sing-box 1.14 schema: log, DNS, inbounds (TUN/SOCKS/HTTP and
+ * the health checks' own), outbounds or a WireGuard endpoint, routing rules
+ * with remote rule-sets, and the experimental Clash API / cache-file
+ * blocks.</p>
  *
  * <p>Per-protocol outbound/endpoint construction is delegated to the builders
  * in {@code com.vlessclient.service.outbound}; this class keeps the document
@@ -70,6 +71,9 @@ public class SingBoxConfigGenerator {
 
     /** Most servers the "Fastest" mode probes. */
     static final int MAX_AUTOMATIC_MEMBERS = 30;
+
+    /** The tag of the health checks' own inbound; see {@link #buildProbeInbound}. */
+    static final String PROBE_INBOUND = "probe-in";
 
     /**
      * How fast a server answered when it was last measured.
@@ -252,6 +256,13 @@ public class SingBoxConfigGenerator {
         if (!route.has("final")) {
             route.put("final", OutboundTags.PROXY);
         }
+        // Ahead of every rule, the TUN mode's sniff and DNS hijack included:
+        // a health check tests the tunnel, whatever the rules send direct.
+        ArrayNode rules = (ArrayNode) route.get("rules");
+        if (rules == null) {
+            rules = route.putArray("rules");
+        }
+        rules.insert(0, buildProbeRule());
 
         root.set("experimental", buildExperimental(settings));
 
@@ -905,7 +916,42 @@ public class SingBoxConfigGenerator {
         }
         inbounds.add(http);
 
+        inbounds.add(buildProbeInbound(settings));
         return inbounds;
+    }
+
+    /**
+     * The health checks' own way into the core, which {@link #buildProbeRule}
+     * sends into the tunnel ahead of every other rule.
+     *
+     * <p>The checks went in through http-in and followed the user's routing:
+     * in the blocked-only mode, and for a target the bypass list or a direct
+     * rule covers, they went direct, so a server that carried nothing still
+     * answered for them, and recovery never restarted it.</p>
+     *
+     * <p>SOCKS, because its reply waits for the tunnel's: the core answers a
+     * CONNECT there once the tunnel has carried the connection, or failed to.
+     * Its HTTP inbound answers one with 200 before it dials, and a plain
+     * request it could not dial with a 502 of its own. Only the app uses this
+     * inbound, so it asks for the password in every mode.</p>
+     */
+    private ObjectNode buildProbeInbound(AppSettings settings) {
+        ObjectNode probe = mapper.createObjectNode();
+        probe.put("type", "socks");
+        probe.put("tag", PROBE_INBOUND);
+        probe.put("listen", "127.0.0.1");
+        probe.put("listen_port", settings.listenProbePort());
+        requirePassword(probe);
+        return probe;
+    }
+
+    /** The route rule that sends the health checks' inbound into the tunnel. */
+    private ObjectNode buildProbeRule() {
+        ObjectNode rule = mapper.createObjectNode();
+        rule.putArray("inbound").add(PROBE_INBOUND);
+        rule.put("action", "route");
+        rule.put("outbound", OutboundTags.PROXY);
+        return rule;
     }
 
     /**
@@ -916,9 +962,12 @@ public class SingBoxConfigGenerator {
      * system-proxy mode the inbounds stay open.
      */
     private void requirePasswordIfNeeded(ObjectNode inbound, AppSettings settings) {
-        if (!settings.localProxyNeedsPassword()) {
-            return;
+        if (settings.localProxyNeedsPassword()) {
+            requirePassword(inbound);
         }
+    }
+
+    private void requirePassword(ObjectNode inbound) {
         ObjectNode user = inbound.putArray("users").addObject();
         user.put("username", LocalProxyCredentials.username());
         user.put("password", LocalProxyCredentials.password());

@@ -280,6 +280,13 @@ public class AppSettings extends KeepsUnknownFields {
     private Integer runHttpPort;
     @JsonIgnore
     private Integer runClashApiPort;
+    /**
+     * The port of the health checks' own inbound this run. Nobody chooses it
+     * and nothing but the app dials it, so the connect takes any free one;
+     * null before any connect.
+     */
+    @JsonIgnore
+    private Integer runProbePort;
 
     /** The SOCKS port this run listens on: the chosen one, or where it moved. */
     public int listenSocksPort() {
@@ -300,16 +307,30 @@ public class AppSettings extends KeepsUnknownFields {
     }
 
     /**
+     * The port the health checks' own inbound listens on this run. 0 before
+     * any connect has picked one, which leaves the pick to the core: a
+     * configuration generated outside a connect still starts.
+     *
+     * @return the port, or 0
+     */
+    public int listenProbePort() {
+        Integer run = runProbePort;
+        return run != null ? run : 0;
+    }
+
+    /**
      * Sets the ports this run listens on, leaving the chosen ones as they are.
      *
      * @param socks    the SOCKS port for the run
      * @param http     the HTTP port for the run
      * @param clashApi the control port for the run
+     * @param probe    the health checks' port for the run, which has no chosen one
      */
-    public void listenOn(int socks, int http, int clashApi) {
+    public void listenOn(int socks, int http, int clashApi, int probe) {
         runSocksPort = socks == socksPort ? null : socks;
         runHttpPort = http == httpPort ? null : http;
         runClashApiPort = clashApi == clashApiPort ? null : clashApi;
+        runProbePort = probe;
     }
 
     public int getSocksPort() {

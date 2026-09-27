@@ -191,7 +191,7 @@ public final class UiTestServices {
             super(NoNetworkReachabilityChecker::unreachable);
         }
 
-        private static ProbeResult unreachable(HealthCheckTarget target, int httpProxyPort) {
+        private static ProbeResult unreachable(HealthCheckTarget target, int probePort) {
             String url = target == null ? null : target.getUrl();
             String name = target == null || target.getName() == null
                     ? url

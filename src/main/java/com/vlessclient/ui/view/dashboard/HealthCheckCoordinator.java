@@ -5,16 +5,12 @@ import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.HealthCheckTarget;
-import com.vlessclient.model.RouteMode;
 import com.vlessclient.model.TunnelHealth;
 import com.vlessclient.service.ConfigStore;
-import com.vlessclient.service.ConnectionService;
-import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TunnelHealthState;
 import com.vlessclient.service.TunnelRecoveryService;
-import com.vlessclient.service.outbound.OutboundTags;
 import com.vlessclient.ui.view.FxTimer;
 import com.vlessclient.ui.view.Icons;
 import com.vlessclient.ui.view.OnScreen;
@@ -254,10 +250,11 @@ public final class HealthCheckCoordinator {
     }
 
     /**
-     * Probes the configured services through the local proxy and renders the
-     * results. Skips silently when the feature is disabled or prerequisites
-     * are missing. Stale results (a newer check started, or the loop was
-     * cancelled) are dropped via a generation token.
+     * Probes the configured services through the core's probe inbound, which
+     * the route sends into the tunnel whatever the rules send direct, and
+     * renders the results. Skips silently when the feature is disabled or
+     * prerequisites are missing. Stale results (a newer check started, or the
+     * loop was cancelled) are dropped via a generation token.
      */
     private void runReachabilityCheck() {
         // A check is starting now, so drop any pending periodic re-check; a new
@@ -297,12 +294,9 @@ public final class HealthCheckCoordinator {
         }
 
         final int gen = healthGeneration.incrementAndGet();
-        ServiceReachabilityChecker.GroupRoute group = throughGroup(settings);
+        final int probePort = settings.listenProbePort();
 
-        (group != null
-                ? reachabilityChecker.checkAllThroughGroup(targets, group)
-                : reachabilityChecker.checkAll(targets, settings.listenHttpPort()))
-                .whenComplete((results, err) ->
+        reachabilityChecker.checkAll(targets, probePort).whenComplete((results, err) ->
                 Platform.runLater(() -> {
                     if (gen != healthGeneration.get()) {
                         return;   // superseded by a newer check or cancelled
@@ -326,31 +320,6 @@ public final class HealthCheckCoordinator {
                     publishVerdict(results);
                     evaluateReconnect(results, settings);
                 }));
-    }
-
-    /**
-     * The proxy group to probe through, in the mode that sends only the
-     * blocked lists through the tunnel, else null. There the route rules sent
-     * the probes direct: Google answered past a dead server, and recovery
-     * never restarted a tunnel that carried nothing.
-     */
-    private static ServiceReachabilityChecker.GroupRoute throughGroup(AppSettings settings) {
-        RouteMode mode;
-        try {
-            mode = ServiceLocator.find(RoutingService.class)
-                    .map(routing -> routing.getConfig().getMode())
-                    .orElse(RouteMode.ALL);
-        } catch (RuntimeException unreadable) {
-            return null;
-        }
-        if (mode != RouteMode.BLOCKED_IN_RUSSIA) {
-            return null;
-        }
-        String group = ServiceLocator.find(ConnectionService.class)
-                .map(ConnectionService::getProxyGroupTag)
-                .orElse(OutboundTags.PROXY);
-        return new ServiceReachabilityChecker.GroupRoute(settings.listenHttpPort(),
-                settings.listenClashApiPort(), settings.getClashApiSecret(), group);
     }
 
     /**
