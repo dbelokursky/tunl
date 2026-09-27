@@ -536,7 +536,7 @@ No server selected — on the Servers tab click a server so it gets the
 **"Process exited unexpectedly (code N)"**
 sing-box crashed; the tray posts a "Tunnel stopped" notification. The reason
 is in the **Logs** tab. Common ones: wrong UUID, wrong transport, unreachable
-server, port conflict.
+server.
 
 **TUN mode asks for a password every time**
 Creating a TUN interface requires root/admin. macOS asks once, to install a
@@ -546,8 +546,14 @@ UAC every time; Linux asks once for `setcap` (pkexec at every Connect where
 that fails). Cancelling a prompt cancels the connect.
 
 **Port 1080 or 1081 is busy**
-The core fails to start and the **Logs** tab shows the bind error. Change
-**SOCKS Port** / **HTTP Port** in **Settings → Connection** to free ones.
+If another program holds a chosen port, Tunl listens on the next free one for
+that session, and the Dashboard says which: "The SOCKS port 1080 is taken by
+another program, so this session listens on 1082." A browser or terminal set
+to the chosen port by hand then reaches the other program, not the tunnel (the
+system proxy Tunl sets already points at the new port). Point it at the port
+the Dashboard names, or change **SOCKS Port** / **HTTP Port** in
+**Settings → Connection** to free ones: the move is not saved, and every
+connect tries the chosen port again.
 
 **Linux: no tray icon**
 Stock GNOME has no tray (needs an extension like AppIndicator), closing the
