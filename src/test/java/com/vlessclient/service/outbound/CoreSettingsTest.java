@@ -94,6 +94,30 @@ class CoreSettingsTest {
                         .isEqualTo("uTLS fingerprint randomizednoalpn"));
     }
 
+    /**
+     * Chrome's hello goes in place of a random one only for REALITY with TLS
+     * on; the server form asks with either unticked, and the connect log asks
+     * for every member, WireGuard's and Shadowsocks' included.
+     */
+    @Test
+    void onlyARealityServerIsSentChromeInPlaceOfARandomHello() {
+        assertThat(CoreSettings.replacesRandomHello(reality(server ->
+                server.getTls().setFingerprint("randomized")).getTls())).isTrue();
+        assertThat(CoreSettings.replacesRandomHello(reality(server ->
+                server.getTls().setFingerprint(" RANDOM ")).getTls())).isTrue();
+        assertThat(CoreSettings.replacesRandomHello(reality(server -> { }).getTls()))
+                .as("chrome").isFalse();
+        assertThat(CoreSettings.replacesRandomHello(reality(server -> {
+            server.getTls().setFingerprint("randomized");
+            server.getTls().setReality(false);
+        }).getTls())).as("plain TLS").isFalse();
+        assertThat(CoreSettings.replacesRandomHello(reality(server -> {
+            server.getTls().setFingerprint("randomized");
+            server.getTls().setEnabled(false);
+        }).getTls())).as("TLS off").isFalse();
+        assertThat(CoreSettings.replacesRandomHello(null)).as("no TLS settings").isFalse();
+    }
+
     @Test
     void aRealityKeyThatIsNotThirtyTwoBytesIsRefused() {
         assertThat(CoreSettings.refusal(reality(server ->
