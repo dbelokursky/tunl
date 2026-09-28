@@ -34,6 +34,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import javafx.application.Platform;
@@ -44,6 +45,7 @@ import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.testfx.framework.junit5.ApplicationTest;
 
@@ -133,7 +135,13 @@ public class MemoryProbe extends ApplicationTest {
         stage.show();
     }
 
+    /**
+     * The suite's two-minute default timeout (junit-platform.properties) would
+     * end the probe in its first hidden phase: the default phases alone take
+     * 160 s, and a long hidden phase is where the heap is given back or not.
+     */
     @Test
+    @Timeout(value = 40, unit = TimeUnit.MINUTES)
     void measure() throws Exception {
         StringBuilder report = new StringBuilder();
         report.append(String.format(Locale.ROOT, "%n##### MemoryProbe [%s] java %s%n  args: %s%n",
