@@ -659,10 +659,11 @@ public class SingBoxEngine {
      * Stops a sing-box process that was started with administrator privileges.
      *
      * <p>Instead of shelling out to {@code pkill} with another
-     * privilege-escalation prompt, we signal the root-owned wrapper shell by
-     * creating the stop-signal file. The wrapper's watch loop sees it and
-     * terminates sing-box, then the outer osascript process exits on its own.
-     * No password prompt.</p>
+     * privilege-escalation prompt, we tell the wrapper shell in both ways it
+     * may be listening: a wrapper that runs as root polls for the stop-signal
+     * file, one that runs as the user watches its stdin for end-of-file
+     * ({@code StdinWatch}). The wrapper terminates sing-box and exits once the
+     * core has. No password prompt.</p>
      */
     private void stopPrivilegedProcess() {
         Process p = process;
@@ -675,6 +676,7 @@ public class SingBoxEngine {
                 }
             }
             if (p != null) {
+                closeStdin(p);
                 if (!p.waitFor(STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                     p.destroyForcibly();
                     p.waitFor(2, TimeUnit.SECONDS);
@@ -1074,6 +1076,18 @@ public class SingBoxEngine {
     }
 
     /**
+     * Closes the wrapper's stdin, which a TUN wrapper that runs as the user
+     * takes for a stop. A no-op for the others and for a stream already closed.
+     */
+    private static void closeStdin(Process p) {
+        try {
+            p.getOutputStream().close();
+        } catch (IOException e) {
+            log.debug("Could not close the core wrapper's stdin: {}", e.getMessage());
+        }
+    }
+
+    /**
      * Force-stops the sing-box process without state transitions.
      * Used by the JVM shutdown hook.
      */
@@ -1089,9 +1103,9 @@ public class SingBoxEngine {
 
     private void forceStopLocked() {
         stopRequested = true;
-        // TUN mode: signal the wrapper via the stop file so it kills the
-        // root-owned sing-box gracefully. Parent-PID watch in the wrapper
-        // also catches this case, but touching the file is faster.
+        // TUN mode: signal the wrapper via the stop file (and its stdin,
+        // below) so it kills the root-owned sing-box gracefully. The wrappers
+        // also notice the app's death on their own, but this is faster.
         if (stopSignalFile != null) {
             try {
                 Files.createFile(stopSignalFile);
@@ -1102,6 +1116,7 @@ public class SingBoxEngine {
         Process p = process;
         try {
             if (p != null && p.isAlive()) {
+                closeStdin(p);
                 p.destroy();
                 if (!p.waitFor(STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                     p.destroyForcibly();
