@@ -70,4 +70,25 @@ public class OnScreenTest extends ApplicationTest {
         assertThat(onScreen.getValue()).isTrue();
         assertThat(seen).containsExactly(false, true);
     }
+
+    /**
+     * A window minimised to the Dock or the taskbar is still showing, and the
+     * dashboard went on redrawing its readout every second for nobody.
+     */
+    @Test
+    void followsTheWindowBeingMinimisedAndRestored() {
+        ObservableValue<Boolean> onScreen = OnScreen.of(node);
+        List<Boolean> seen = new ArrayList<>();
+        interact(() -> onScreen.addListener((obs, was, is) -> seen.add(is)));
+
+        interact(() -> stage.setIconified(true));
+        WaitForAsyncUtils.waitForFxEvents();
+        assertThat(stage.isShowing()).as("a minimised window still shows").isTrue();
+        assertThat(onScreen.getValue()).isFalse();
+
+        interact(() -> stage.setIconified(false));
+        WaitForAsyncUtils.waitForFxEvents();
+        assertThat(onScreen.getValue()).isTrue();
+        assertThat(seen).containsExactly(false, true);
+    }
 }
