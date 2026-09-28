@@ -964,10 +964,25 @@ class HealthCheckCoordinatorTest {
                 .isEqualTo(TunnelHealth.CHECKING);
 
         networkUp.set(true);
-        Await.until("the check once the network is back", () -> checker.calls.get() == 2,
-                Duration.ofSeconds(10));
-        flushFxEvents();
-        assertThat(healthState.get()).isEqualTo(TunnelHealth.HEALTHY);
+        // The verdict itself, not the probe: the count goes up on the FX thread
+        // in the same event that queues the verdict, and a flush started while
+        // that event runs lands ahead of it. That read CHECKING on the Linux
+        // arm runner.
+        Await.until("the verdict of the check once the network is back",
+                () -> healthSeenOnFx() == TunnelHealth.HEALTHY, Duration.ofSeconds(10));
+        assertThat(checker.calls).as("probes once the network is back").hasValue(2);
+    }
+
+    /** The published verdict, read on the FX thread that publishes it. */
+    private TunnelHealth healthSeenOnFx() {
+        java.util.concurrent.atomic.AtomicReference<TunnelHealth> seen =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        try {
+            onFxAndWait(() -> seen.set(healthState.get()));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        return seen.get();
     }
 
     /** A wake with the tunnel down has nothing to check. */
