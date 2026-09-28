@@ -1002,4 +1002,61 @@ class HealthCheckCoordinatorTest {
                 .isEqualTo(new TunnelRecoveryService.Retry(1, 3600));
         assertThat(banner.isVisible()).isTrue();
     }
+
+    /**
+     * Healthy verdicts in a row space the probes out; the first that is not
+     * healthy, and a re-check by hand, bring them back to the configured
+     * interval. At five seconds and two targets the probes made 24 tunnelled
+     * TLS connections a minute for as long as the tunnel was up.
+     */
+    @Test
+    void aTunnelThatKeepsAnsweringIsProbedLessOftenUntilAProbeFails() throws Exception {
+        AppSettings settings = healthSettings(false,
+                new HealthCheckTarget("a", "https://a"), new HealthCheckTarget("b", "https://b"));
+        settings.setHealthCheckIntervalSeconds(5);
+        FakeChecker checker = new FakeChecker();
+        checker.results = List.of(probe("a", true), probe("b", true));
+        HealthCheckCoordinator coordinator = coordinatorWith(checker);
+
+        connectAndCheck(coordinator);
+        List<Integer> waits = new ArrayList<>();
+        onFxAndWait(() -> waits.add(coordinator.scheduledCheckSeconds()));
+        for (int probe = 2; probe <= 12; probe++) {
+            runTheScheduledCheck(coordinator);
+            onFxAndWait(() -> waits.add(coordinator.scheduledCheckSeconds()));
+        }
+        assertThat(waits).as("the wait after each of twelve healthy verdicts")
+                .containsExactly(5, 5, 10, 10, 10, 20, 20, 20, 40, 40, 40, 60);
+
+        checker.results = List.of(probe("a", true), probe("b", false));
+        runTheScheduledCheck(coordinator);
+        assertWait(coordinator, 5);
+
+        checker.results = List.of(probe("a", true), probe("b", true));
+        for (int probe = 1; probe <= 6; probe++) {
+            runTheScheduledCheck(coordinator);
+        }
+        assertWait(coordinator, 20);
+        onFxAndWait(coordinator::recheck);
+        flushFxEvents();
+        assertWait(coordinator, 5);
+
+        engine.state.set(ConnectionState.DISCONNECTED);
+        onFxAndWait(() ->
+                coordinator.onConnectionStateChanged(ConnectionState.DISCONNECTED));
+        assertWait(coordinator, -1);
+    }
+
+    private static void runTheScheduledCheck(HealthCheckCoordinator coordinator)
+            throws InterruptedException {
+        onFxAndWait(coordinator::runScheduledCheckNow);
+        flushFxEvents();   // drain the whenComplete -> runLater hop
+    }
+
+    private static void assertWait(HealthCheckCoordinator coordinator, int seconds)
+            throws InterruptedException {
+        AtomicInteger wait = new AtomicInteger();
+        onFxAndWait(() -> wait.set(coordinator.scheduledCheckSeconds()));
+        assertThat(wait.get()).isEqualTo(seconds);
+    }
 }
