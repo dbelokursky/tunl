@@ -9,6 +9,7 @@ import javafx.scene.control.Button;
 import javafx.scene.effect.DropShadow;
 import javafx.scene.effect.Effect;
 import javafx.scene.layout.Background;
+import javafx.scene.layout.BackgroundFill;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
@@ -24,8 +25,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Guards the -c-* design-token system: verifies the tokens resolve at
  * runtime in both themes. A looked-up-color typo renders as a silent
  * fallback that JavaFX does not otherwise surface as a test failure, so
- * this asserts token-driven properties (the .card background and shadow)
- * actually resolve to the expected values in light and dark.
+ * this asserts token-driven properties (the .card background and shadow,
+ * the connect button's shadow) actually resolve to the expected values in
+ * light and dark.
  *
  * <p>Both stylesheets are applied, in the order the app applies them:
  * base.css carries the rules, the theme file carries only the token values,
@@ -37,6 +39,7 @@ public class ThemeTokenResolutionTest extends ApplicationTest {
     private static final PseudoClass HOVER = PseudoClass.getPseudoClass("hover");
 
     private Region card;
+    private Button connectButton;
     private Button iconButton;
     private Button destructiveIconButton;
     private Button borderlessDelete;
@@ -47,6 +50,8 @@ public class ThemeTokenResolutionTest extends ApplicationTest {
     public void start(Stage stage) {
         card = new Region();
         card.getStyleClass().add("card");
+        connectButton = new Button("Connect");
+        connectButton.getStyleClass().setAll("connect-button");
         // A text-labelled icon button: .icon-button only colours the SVG
         // .nav-icon-glyph, so a glyph-less one silently falls back to the
         // modena default text fill, which is unreadable on a dark surface.
@@ -60,8 +65,8 @@ public class ThemeTokenResolutionTest extends ApplicationTest {
         borderlessDelete = new Button();
         borderlessDelete.setGraphic(borderlessGlyph);
         borderlessDelete.getStyleClass().setAll("icon-button", "ghost", "destructive");
-        scene = new Scene(new VBox(card, iconButton, destructiveIconButton, borderlessDelete),
-                200, 200);
+        scene = new Scene(new VBox(card, connectButton, iconButton, destructiveIconButton,
+                borderlessDelete), 200, 200);
         stage.setScene(scene);
         stage.show();
     }
@@ -73,15 +78,27 @@ public class ThemeTokenResolutionTest extends ApplicationTest {
     }
 
     /**
+     * A card's shadow is a background layer in the shadow token's colour that
+     * reaches a pixel past the bottom edge, drawn under the surface, and not a
+     * dropshadow: an effect renders the whole card offscreen, and blurs it,
+     * every time anything inside changes.
+     */
+    @Test
+    void cardShadowIsABackgroundLayerInBothThemes() {
+        assertCardShadow("light", Color.rgb(16, 24, 40, 0.05));
+        assertCardShadow("dark", Color.rgb(0, 0, 0, 0.28));
+    }
+
+    /**
      * A token inside an effect function, not just as a whole property value.
      * JavaFX resolves looked-up colours in {@code dropshadow(...)} arguments —
-     * verified here rather than assumed, because if it did not, every card and
-     * button shadow would have to stay duplicated per theme.
+     * verified here rather than assumed, because if it did not, every button
+     * shadow would have to stay duplicated per theme.
      */
     @Test
     void shadowTokenResolvesInsideDropshadowInBothThemes() {
-        assertCardShadow("light", Color.rgb(16, 24, 40, 0.05));
-        assertCardShadow("dark", Color.rgb(0, 0, 0, 0.28));
+        assertConnectShadow("light", Color.rgb(46, 125, 50, 0.20));
+        assertConnectShadow("dark", Color.rgb(0, 0, 0, 0.30));
     }
 
     @Test
@@ -127,7 +144,9 @@ public class ThemeTokenResolutionTest extends ApplicationTest {
 
     private void assertCardBg(String theme, Color expected) {
         applyStylesheets(theme, card);
-        Color actual = (Color) card.getBackground().getFills().get(0).getFill();
+        List<BackgroundFill> fills = card.getBackground().getFills();
+        // The surface is the top layer, drawn over the shadow's.
+        Color actual = (Color) fills.get(fills.size() - 1).getFill();
         assertThat(actual)
                 .withFailMessage("%s: -c-surface did not resolve (got %s, want %s)",
                         theme, actual, expected)
@@ -136,14 +155,29 @@ public class ThemeTokenResolutionTest extends ApplicationTest {
 
     private void assertCardShadow(String theme, Color expected) {
         applyStylesheets(theme, card);
-        Effect effect = card.getEffect();
+        assertThat(card.getEffect()).as("%s: .card's effect", theme).isNull();
+        List<BackgroundFill> fills = card.getBackground().getFills();
+        assertThat(fills).as("%s: .card's background layers", theme).hasSize(2);
+        assertThat((Color) fills.get(0).getFill())
+                .withFailMessage("%s: -c-shadow-card did not resolve in the card's "
+                        + "shadow layer (got %s, want %s)", theme, fills.get(0).getFill(),
+                        expected)
+                .isEqualTo(expected);
+        assertThat(fills.get(0).getInsets().getBottom())
+                .as("%s: the shadow layer reaches past the bottom edge", theme)
+                .isEqualTo(-1.0);
+    }
+
+    private void assertConnectShadow(String theme, Color expected) {
+        applyStylesheets(theme, connectButton);
+        Effect effect = connectButton.getEffect();
         assertThat(effect)
-                .withFailMessage("%s: .card has no drop shadow — the -c-shadow-card token "
-                        + "inside dropshadow() did not parse", theme)
+                .withFailMessage("%s: .connect-button has no drop shadow — the "
+                        + "-c-shadow-connect token inside dropshadow() did not parse", theme)
                 .isInstanceOf(DropShadow.class);
         Color actual = (Color) ((DropShadow) effect).getColor();
         assertThat(actual)
-                .withFailMessage("%s: -c-shadow-card did not resolve inside dropshadow() "
+                .withFailMessage("%s: -c-shadow-connect did not resolve inside dropshadow() "
                         + "(got %s, want %s). If this ever fails, JavaFX has stopped "
                         + "resolving looked-up colours in effect arguments and the shadow "
                         + "rules have to move back into the per-theme files.",
