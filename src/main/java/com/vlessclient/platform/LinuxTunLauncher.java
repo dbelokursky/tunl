@@ -26,10 +26,12 @@ import org.slf4j.LoggerFactory;
  *       fallback.</li>
  * </ol>
  *
- * <p>Both paths spawn the same shell wrapper honoring the
- * {@link TunLauncher} contract: it forwards the core's output, watches the
- * stop-signal file and the app's pid, and terminates sing-box when either
- * fires. pkexec forwards stdio, so live logs work in the fallback too.</p>
+ * <p>Both paths spawn a shell wrapper honoring the {@link TunLauncher}
+ * contract: it forwards the core's output and terminates sing-box when the app
+ * stops it or dies. The fast path's wrapper runs as the user and watches its
+ * stdin ({@link StdinWatch}); the fallback's runs as root, and polls the
+ * stop-signal file and the app's pid. pkexec forwards stdio, so live logs work
+ * in the fallback too.</p>
  */
 public final class LinuxTunLauncher implements TunLauncher {
 
@@ -78,7 +80,9 @@ public final class LinuxTunLauncher implements TunLauncher {
         }
 
         boolean direct = hasNetAdminCapability(binary);
-        String wrapper = wrapperCommand(binary, configFile, stopSignalFile);
+        String wrapper = direct
+                ? directWrapperCommand(binary, configFile)
+                : wrapperCommand(binary, configFile, stopSignalFile);
         ProcessBuilder pb = direct
                 ? new ProcessBuilder("/bin/sh", "-c", wrapper)
                 : new ProcessBuilder(elevator, "/bin/sh", "-c", wrapper);
@@ -147,9 +151,19 @@ public final class LinuxTunLauncher implements TunLauncher {
     }
 
     /**
-     * The wrapper both paths share: start the core, watch the stop file and
-     * the app's pid, terminate the core when either fires. Mirrors the macOS
-     * wrappers' contract.
+     * The fast path's wrapper: the core runs as the user, with the capability,
+     * under a wrapper that waits on it and watches its own stdin instead of
+     * polling.
+     */
+    static String directWrapperCommand(Path binary, Path configFile) {
+        return StdinWatch.around(shellQuote(binary.toAbsolutePath().toString())
+                + " run -c " + shellQuote(configFile.toAbsolutePath().toString()));
+    }
+
+    /**
+     * The fallback's wrapper, run as root under pkexec: start the core, watch
+     * the stop file and the app's pid, terminate the core when either fires.
+     * Mirrors the macOS osascript wrapper.
      */
     static String wrapperCommand(Path binary, Path configFile, Path stopSignalFile) {
         long parentPid = ProcessHandle.current().pid();

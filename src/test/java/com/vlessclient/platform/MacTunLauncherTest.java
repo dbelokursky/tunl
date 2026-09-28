@@ -45,24 +45,17 @@ class MacTunLauncherTest {
     }
 
     @Test
-    void sudoWrapper_runsUnderSudoAndWatchesStopFileAndParent() {
+    void sudoWrapper_runsUnderSudoAndWatchesItsStdin() {
         String wrapper = MacTunLauncher.sudoWrapperCommand(
-                Path.of("/opt/sing-box"), Path.of("/tmp/c.json"), Path.of("/tmp/stop"));
+                Path.of("/opt/sing-box"), Path.of("/tmp/c.json"));
 
         assertThat(wrapper).contains("sudo -n '/opt/sing-box' run -c '/tmp/c.json'");
-        assertThat(wrapper).contains("[ ! -f '/tmp/stop' ]");
-        // The fix: a dead app must never leak an elevated core. Without the
-        // parent watch this assertion fails, forcing the loop-condition change.
-        assertThat(wrapper).contains("kill -0 " + ProcessHandle.current().pid());
-        // Must trap the signal the engine actually sends (Process.destroy =
-        // SIGTERM), not EXIT alone — see sudoWrapperKillsChildOnSigterm.
-        assertThat(wrapper).contains("EXIT INT TERM");
-        assertThat(wrapper).contains("rm -f '/tmp/stop'");
-        // The trap has to be in place before the core starts: a SIGTERM
-        // between the two killed the shell and left the core running.
-        assertThat(wrapper.indexOf("trap "))
-                .as("the trap is set before the core starts")
-                .isLessThan(wrapper.indexOf(" run -c "));
+        // A dead app must never leak an elevated core: its death closes the
+        // wrapper's stdin, which the watch reads (StdinWatchTest runs it).
+        assertThat(wrapper).isEqualTo(StdinWatch.around(
+                "sudo -n '/opt/sing-box' run -c '/tmp/c.json'"));
+        // No polling: the loop this replaced ran `sleep 0.3` three times a second.
+        assertThat(wrapper).doesNotContain("sleep");
     }
 
     @Test
@@ -86,7 +79,7 @@ class MacTunLauncherTest {
     @Test
     void wrappers_shellQuotePathsWithSpecials() {
         String sudo = MacTunLauncher.sudoWrapperCommand(
-                Path.of("/opt/a b/sing-box"), Path.of("/tmp/it's.json"), Path.of("/tmp/stop"));
+                Path.of("/opt/a b/sing-box"), Path.of("/tmp/it's.json"));
         assertThat(sudo).contains("'/opt/a b/sing-box'");
         assertThat(sudo).contains("'/tmp/it'\\''s.json'");
 
@@ -137,27 +130,25 @@ class MacTunLauncherTest {
     }
 
     @Test
-    void launcherWrapper_handsTheConfigOnStdinAndWatchesStopFileAndParent() {
+    void launcherWrapper_handsTheConfigOnStdinAndWatchesItsOwnStdin() {
         String wrapper = MacTunLauncher.launcherWrapperCommand(
                 Path.of("/usr/local/libexec/vless-client/tun-launch"),
-                Path.of("/tmp/it's.json"), Path.of("/tmp/stop"));
+                Path.of("/tmp/it's.json"));
 
         // The user's shell opens the config; the rule names no path for root.
         assertThat(wrapper).contains(
                 "sudo -n '/usr/local/libexec/vless-client/tun-launch' < '/tmp/it'\\''s.json'");
         assertThat(wrapper).doesNotContain(" run -c ");
-        assertThat(wrapper).contains("[ ! -f '/tmp/stop' ]");
-        assertThat(wrapper).contains("kill -0 " + ProcessHandle.current().pid());
-        assertThat(wrapper).contains("EXIT INT TERM");
-        assertThat(wrapper.indexOf("trap "))
-                .as("the trap is set before the core starts")
-                .isLessThan(wrapper.indexOf("sudo -n"));
+        assertThat(wrapper).isEqualTo(StdinWatch.around(
+                "sudo -n '/usr/local/libexec/vless-client/tun-launch' < '/tmp/it'\\''s.json'"));
+        assertThat(wrapper).doesNotContain("sleep");
     }
 
     /**
      * The launcher path end to end, with {@code sudo} standing in for itself:
      * the wrapper feeds the config to the real launcher script, the core it
-     * starts gets the filtered config on stdin, and the stop file ends it.
+     * starts gets the filtered config on stdin, and closing the wrapper's own
+     * stdin, which is how the engine stops it, ends it.
      * The launcher replaces itself with the core, so the pid the wrapper
      * watches and kills is the core's.
      */
@@ -181,10 +172,8 @@ class MacTunLauncherTest {
         }
         Path config = Files.writeString(base.resolve("config.json"),
                 "{\"log\": {\"level\": \"info\", \"output\": \"/etc/owned\"}}");
-        Path stop = base.resolve("stop");
-
         ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c",
-                MacTunLauncher.launcherWrapperCommand(launcher, config, stop))
+                MacTunLauncher.launcherWrapperCommand(launcher, config))
                 .redirectErrorStream(true);
         pb.environment().put("PATH", bin + ":" + System.getenv("PATH"));
         Process sh = pb.start();
@@ -199,8 +188,8 @@ class MacTunLauncherTest {
                 Duration.ofSeconds(5));
         assertThat(readQuietly(received)).doesNotContain("/etc/owned").contains("\"info\"");
 
-        Files.writeString(stop, "");
-        assertThat(sh.waitFor(10, TimeUnit.SECONDS)).as("the wrapper ends on the stop file")
+        sh.getOutputStream().close();
+        assertThat(sh.waitFor(10, TimeUnit.SECONDS)).as("the wrapper ends once its stdin closes")
                 .isTrue();
         Await.until("core " + pid + " to be stopped", () -> !running.isAlive(),
                 Duration.ofSeconds(5));
