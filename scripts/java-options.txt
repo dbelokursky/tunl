@@ -20,13 +20,28 @@
 # MinHeapFreeRatio keeps the heap above that level however far the live data
 # grows, which a fixed -Xms cannot.
 #
+# JDK 27 changed G1's defaults for MinHeapFreeRatio and MaxHeapFreeRatio from
+# 40 and 70 to 0 and 100, and at 100 G1 never shrinks the heap, not even after
+# a full GC. These options named only the minimum, so from the move to JDK 27
+# on nothing was given back: on 2026-09-28 an instance five hours up held all
+# 512 MB for 46 MB of live data. The periodic concurrent cycle made it worse.
+# G1 now sizes the heap by the CPU it spends on GC, and it counts a cycle's
+# concurrent CPU against the short gap since the last pause, so an idle JVM
+# reads 17-20 % and grows: 185 to 497 MB in two minutes with 12 MB live and a
+# 5 s period. A periodic full GC has no concurrent phase to misread, compacts,
+# and applies both ratios. At 40 MB live it pauses for 17-30 ms, once for each
+# minute in which nothing else collected. JvmOptionsHeapTest runs these
+# options and fails if the heap no longer comes back down.
+#
 # One option per line (an option and its value stay on the same line);
 # everything after a '#' is a comment.
 
--Xms64m                          # start small; the heap grows when the app needs it
--Xmx512m                         # about eight times today's live data, and a ceiling for a leak
--XX:MinHeapFreeRatio=60          # after each mark keep 60 % free: heap >= 2.5x live, no marking storms
--XX:G1PeriodicGCInterval=60000   # a minute without any GC runs a concurrent cycle that gives memory back
+-Xms64m                             # start small; the heap grows when the app needs it
+-Xmx512m                            # about eight times today's live data, and a ceiling for a leak
+-XX:MinHeapFreeRatio=60             # after a full GC keep 60 % free: heap >= 2.5x live, no marking storms
+-XX:MaxHeapFreeRatio=70             # ...and at most 70 %: JDK 27's default of 100 never shrinks the heap
+-XX:G1PeriodicGCInterval=60000      # a minute without any GC runs a GC that gives memory back
+-XX:-G1PeriodicGCInvokesConcurrent  # ...as a full GC, not a concurrent cycle G1 reads as GC pressure
 
 # Each of the JDK's HTTP clients has a selector thread that wakes every 3 s
 # while it has nothing to do. The app keeps up to nine clients (subscriptions,
