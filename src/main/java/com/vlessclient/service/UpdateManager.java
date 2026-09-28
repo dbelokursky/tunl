@@ -73,6 +73,15 @@ public class UpdateManager {
     private volatile long lastEventCheckMs;
 
     /**
+     * When a check last got an answer from GitHub, of either kind; 0 = never.
+     * The tunnel coming up checks because the timer's check may not have got
+     * through, and when it did, a second one is a wasted request: every launch
+     * with auto-connect made two a second apart, against an hourly allowance
+     * GitHub shares with the whole address.
+     */
+    private volatile long lastAnsweredMs;
+
+    /**
      * The release the last check found, held outside the JavaFX properties so
      * the background download can read it on its own thread. The properties
      * below drive the UI and are only ever touched on the FX thread.
@@ -159,7 +168,9 @@ public class UpdateManager {
     public void startPeriodicCheck() {
         scheduler.scheduleAtFixedRate(() -> {
             try {
-                checkForUpdates();
+                if (checkForUpdates() != CheckResult.UNREACHABLE) {
+                    answered(System.currentTimeMillis());
+                }
                 autoDownloadIfAllowed();
             } catch (Exception e) {
                 log.warn("Scheduled update check failed", e);
@@ -203,8 +214,17 @@ public class UpdateManager {
         // thread the engine changed state on, and neither should wait on HTTP.
         scheduler.execute(() -> {
             try {
-                if (checkForUpdates() == CheckResult.UNREACHABLE) {
+                // Runs after whatever the checker was doing: at launch, the
+                // timer's first check, which may just have got its answer.
+                if (answeredRecently(System.currentTimeMillis())) {
+                    log.debug("Skipping the event's update check: GitHub answered moments ago");
+                    return;
+                }
+                CheckResult result = checkForUpdates();
+                if (result == CheckResult.UNREACHABLE) {
                     eventCheckFailed(claimedAt);
+                } else {
+                    answered(System.currentTimeMillis());
                 }
                 autoDownloadIfAllowed();
             } catch (Exception e) {
@@ -223,8 +243,32 @@ public class UpdateManager {
         if (lastEventCheckMs != 0 && nowMs - lastEventCheckMs < EVENT_CHECK_THROTTLE_MS) {
             return false;
         }
+        if (answeredRecently(nowMs)) {
+            return false;
+        }
         lastEventCheckMs = nowMs;
         return true;
+    }
+
+    /**
+     * Records that a check got an answer from GitHub.
+     *
+     * @param nowMs when it did
+     */
+    synchronized void answered(long nowMs) {
+        lastAnsweredMs = nowMs;
+    }
+
+    /**
+     * Whether a check got an answer within the event throttle, which makes an
+     * event's check redundant.
+     *
+     * @param nowMs the current time
+     * @return true when GitHub answered less than the throttle ago
+     */
+    boolean answeredRecently(long nowMs) {
+        long answered = lastAnsweredMs;
+        return answered != 0 && nowMs - answered < EVENT_CHECK_THROTTLE_MS;
     }
 
     /**

@@ -184,6 +184,29 @@ class UpdateManagerTest {
         assertThat(UpdateManager.CHECK_INTERVAL_HOURS).isEqualTo(6);
     }
 
+    /**
+     * The tunnel coming up checks because the timer's check may not have got
+     * through. When it did, the second check is a wasted request: every launch
+     * with auto-connect made two a second apart.
+     */
+    @Test
+    void aCheckGitHubJustAnsweredMakesTheTunnelsCheckRedundant() {
+        UpdateManager manager = new UpdateManager(java.net.http.HttpClient.newHttpClient());
+        try {
+            long start = 1_000_000L;
+            assertThat(manager.answeredRecently(start)).isFalse();
+
+            manager.answered(start);
+            assertThat(manager.claimEventCheck(start + 1_000)).isFalse();
+            assertThat(manager.answeredRecently(start + UpdateManager.EVENT_CHECK_THROTTLE_MS - 1))
+                    .isTrue();
+            assertThat(manager.claimEventCheck(start + UpdateManager.EVENT_CHECK_THROTTLE_MS))
+                    .isTrue();
+        } finally {
+            manager.shutdown();
+        }
+    }
+
     @Test
     void aFlappingTunnelDoesNotBecomeAFlappingCheck() {
         UpdateManager manager = new UpdateManager();
