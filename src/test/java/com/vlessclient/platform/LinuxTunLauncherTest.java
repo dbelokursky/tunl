@@ -105,6 +105,21 @@ class LinuxTunLauncherTest {
                 .hasNetAdminCapability(Path.of("/opt/sing-box"))).isFalse();
     }
 
+    /**
+     * The fast path's core runs as the user, so its wrapper can watch its own
+     * stdin instead of polling (StdinWatchTest runs that watch).
+     */
+    @Test
+    void directWrapperCommand_watchesItsStdinAndDoesNotPoll() {
+        String wrapper = LinuxTunLauncher.directWrapperCommand(
+                Path.of("/opt/a b/sing-box"), Path.of("/tmp/it's.json"));
+
+        assertThat(wrapper).isEqualTo(StdinWatch.around(
+                "'/opt/a b/sing-box' run -c '/tmp/it'\\''s.json'"));
+        assertThat(wrapper).doesNotContain("sleep");
+    }
+
+    /** The pkexec fallback's wrapper runs as root and keeps polling. */
     @Test
     @org.junit.jupiter.api.condition.EnabledOnOs({org.junit.jupiter.api.condition.OS.MAC,
             org.junit.jupiter.api.condition.OS.LINUX})
