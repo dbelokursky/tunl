@@ -31,6 +31,9 @@ public class LogReader {
     /** Matches ANSI CSI SGR escape sequences (e.g. {@code \u001B[31m}, {@code \u001B[0m}). */
     private static final Pattern ANSI_ESCAPE = Pattern.compile("\\x1B\\[[\\d;]*[A-Za-z]");
 
+    /** The escape character every ANSI sequence starts with. */
+    private static final char ESC = 0x1B;
+
     private final InputStream inputStream;
     private final ObservableList<String> logLines;
     private final int maxLines;
@@ -105,11 +108,15 @@ public class LogReader {
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
             String line;
+            // The core logs its "started" line once. Checked on every line, it
+            // lower-cased every line of the session to find a line long past.
+            boolean startedSeen = false;
             while ((line = reader.readLine()) != null) {
                 String logLine = stripAnsi(line);
                 handOver(logLine);
 
-                if (isStartedMessage(logLine)) {
+                if (!startedSeen && isStartedMessage(logLine)) {
+                    startedSeen = true;
                     onStartedDetected.accept(logLine);
                 }
             }
@@ -120,9 +127,13 @@ public class LogReader {
         }
     }
 
-    /** Removes ANSI color escape codes from {@code line}. */
+    /**
+     * Removes ANSI color escape codes from {@code line}. A line without an
+     * escape character, which is most of them, is returned without running
+     * the pattern over it.
+     */
     static String stripAnsi(String line) {
-        if (line == null || line.isEmpty()) {
+        if (line == null || line.indexOf(ESC) < 0) {
             return line;
         }
         return ANSI_ESCAPE.matcher(line).replaceAll("");
