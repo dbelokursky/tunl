@@ -399,7 +399,7 @@ else saves on click.
 | | Set system proxy automatically | In System Proxy mode, point the OS at the local ports on connect and restore it on disconnect |
 | Health Check | Enable health check | After connecting, verify that traffic actually reaches a few services through the tunnel, whatever the routing sends direct (on by default) |
 | | Auto-reconnect when unreachable | Recover after a core crash or when every check fails; retry delay doubles up to 5 minutes. While a Mac sleeps or wakes in the dark for maintenance, the checks wait and restart nothing; when you wake it they run at once, and the delay starts over |
-| | Check interval / Reconnect delay | Seconds between checks (`5`) and before the first retry (`10`) |
+| | Check interval / Reconnect delay | Seconds between checks (`5`) and before the first retry (`10`). While every check passes, the wait doubles after every three, up to a minute; any other result, a connect, a wake or **Re-check** brings it back to the interval |
 | Advanced | Proxy DNS | Resolver for tunnelled names, queried through the tunnel (`https://1.1.1.1/dns-query`) |
 | | Direct DNS | Resolver for direct-routed names — the bypass list, Direct rules, bypassed countries (`system`: the resolver of the network you are on) |
 | | DNS strategy | Which addresses the core asks for when it resolves a name: Prefer IPv4 (default) / Prefer IPv6 / IPv4 only / IPv6 only; in TUN mode without IPv6 it is IPv4 only |
