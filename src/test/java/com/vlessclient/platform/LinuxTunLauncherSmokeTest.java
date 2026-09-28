@@ -51,8 +51,9 @@ class LinuxTunLauncherSmokeTest {
     /**
      * Fast path: after a one-time {@code setcap cap_net_admin+ep}, the core
      * creates its TUN adapter as a plain user process — the launcher takes
-     * the promptless direct path and the stop-file contract shuts it down
-     * gracefully.
+     * the promptless direct path, and a stop the way the engine makes one
+     * shuts it down gracefully. The wrapper runs as the user and watches its
+     * stdin instead of polling for the stop file ({@code StdinWatch}).
      */
     @Test
     void fastPath_capabilityGrantsTunWithoutRoot() throws Exception {
@@ -76,9 +77,12 @@ class LinuxTunLauncherSmokeTest {
         try {
             awaitPort(clashPort, launched.process());
 
+            // As SingBoxEngine.stopPrivilegedProcess does: the stop file for a
+            // wrapper that polls, the end of stdin for one that watches it.
             Files.createFile(launched.stopSignalFile());
+            launched.process().getOutputStream().close();
             assertThat(launched.process().waitFor(15, TimeUnit.SECONDS))
-                    .as("wrapper exits after the stop file appears")
+                    .as("wrapper exits after the engine's stop")
                     .isTrue();
             assertThat(launched.process().exitValue()).isZero();
         } finally {
