@@ -8,12 +8,14 @@ import com.vlessclient.service.DaemonThreads;
 import com.vlessclient.service.TrafficMonitor;
 import com.vlessclient.ui.view.OnScreen;
 import com.vlessclient.ui.view.TrafficText;
+import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
+import javafx.application.Platform;
 import javafx.beans.value.ObservableValue;
 import javafx.scene.Node;
 import javafx.scene.control.Label;
@@ -77,11 +79,14 @@ public final class TrafficDisplayBinder {
 
     /**
      * The per-direction split behind the session total: one instance whose text
-     * follows the samples. A Tooltip is a popup window with a scene of its own,
+     * is set when it shows. A Tooltip is a popup window with a scene of its own,
      * and both totals changing on every sample meant two new ones a second for
      * as long as a tunnel stayed up.
      */
     private Tooltip sessionSplit;
+
+    /** Whether a render of the session total is queued; see {@link #queueSessionTotal}. */
+    private boolean sessionTotalQueued;
 
     /**
      * Whether a tunnel is up, tracked rather than read back off a node.
@@ -204,14 +209,14 @@ public final class TrafficDisplayBinder {
         trafficMonitor.totalUploadProperty().addListener((obs, oldVal, newVal) -> {
             lastTotalUpload = newVal.longValue();
             if (isOnScreen()) {
-                renderSessionTotal();
+                queueSessionTotal();
             }
         });
 
         trafficMonitor.totalDownloadProperty().addListener((obs, oldVal, newVal) -> {
             lastTotalDownload = newVal.longValue();
             if (isOnScreen()) {
-                renderSessionTotal();
+                queueSessionTotal();
             }
         });
 
@@ -254,11 +259,43 @@ public final class TrafficDisplayBinder {
         }
         boolean idle = bytesPerSec == 0;
         readout.speed().setText(TrafficText.speed(bytesPerSec));
-        readout.speed().getStyleClass().setAll("speed-value",
-                idle ? "speed-value-idle" : activeSpeedClass);
+        styleAs(readout.speed(), "speed-value", idle ? "speed-value-idle" : activeSpeedClass);
         if (readout.icon() != null) {
-            readout.icon().getStyleClass().setAll(idle ? "stats-icon-idle" : activeIconClass);
+            styleAs(readout.icon(), idle ? "stats-icon-idle" : activeIconClass);
         }
+    }
+
+    /**
+     * Makes {@code styleClasses} the node's style classes, leaving a list that
+     * already is just that alone: setting it again fires a change, and every
+     * change re-applies the node's CSS. Each sample did that to all four
+     * readout nodes, once a second, while the colours changed only when a
+     * direction went idle or woke.
+     */
+    private static void styleAs(Node node, String... styleClasses) {
+        if (!node.getStyleClass().equals(List.of(styleClasses))) {
+            node.getStyleClass().setAll(styleClasses);
+        }
+    }
+
+    /**
+     * Renders the session total once for a sample. A sample sets both totals,
+     * one right after the other, and each used to render the line: two
+     * formatted strings and two text changes a second, the first of them
+     * showing a total with only one direction counted. The queued render runs
+     * after the sample has set both.
+     */
+    private void queueSessionTotal() {
+        if (sessionTotalQueued) {
+            return;
+        }
+        sessionTotalQueued = true;
+        Platform.runLater(() -> {
+            sessionTotalQueued = false;
+            if (connected && isOnScreen()) {
+                renderSessionTotal();
+            }
+        });
     }
 
     /**
@@ -274,12 +311,20 @@ public final class TrafficDisplayBinder {
         sessionTotalLabel.setText(
                 I18n.get("dashboard.traffic.session", TrafficText.bytes(total)));
         if (sessionSplit == null) {
-            sessionSplit = new Tooltip();
+            sessionSplit = new Tooltip(sessionSplitText());
+            // Read while the tooltip is up; formatted per sample it was a
+            // string a second that nobody saw.
+            sessionSplit.setOnShowing(event -> sessionSplit.setText(sessionSplitText()));
             sessionTotalLabel.setTooltip(sessionSplit);
+        } else if (sessionSplit.isShowing()) {
+            sessionSplit.setText(sessionSplitText());
         }
-        sessionSplit.setText(I18n.get("dashboard.traffic.session.split",
+    }
+
+    private String sessionSplitText() {
+        return I18n.get("dashboard.traffic.session.split",
                 TrafficText.bytes(lastTotalUpload),
-                TrafficText.bytes(lastTotalDownload)));
+                TrafficText.bytes(lastTotalDownload));
     }
 
     /**
