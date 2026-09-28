@@ -72,6 +72,11 @@ public class McpServerService {
         }
         loggedEngine = engine;
         engine.getLogLines().addListener((javafx.collections.ListChangeListener<String>) change -> {
+            // Nobody subscribed, which is always the case with MCP off: the
+            // redaction below ran on the UI thread for every core log line.
+            if (notifier.subscriberCount() == 0) {
+                return;
+            }
             while (change.next()) {
                 if (change.wasAdded()) {
                     for (String line : change.getAddedSubList()) {

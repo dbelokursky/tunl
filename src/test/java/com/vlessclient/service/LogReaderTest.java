@@ -78,6 +78,41 @@ class LogReaderTest {
         assertThat(detected.get()).containsIgnoringCase("started");
     }
 
+    /**
+     * The core logs its "started" line once, and once it is seen the reader
+     * stops looking: checked on every line, it lower-cased every line of the
+     * session to find a line long past.
+     */
+    @Test
+    void reportsTheStartedLineOnceAndStopsLooking() throws Exception {
+        String input = "+0200 INFO sing-box started (1.37s)\n"
+                + "+0200 INFO sing-box started (again, as a quoted log line)\n"
+                + "+0200 INFO dns: exchanged A example.com\n";
+        InputStream stream = new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8));
+        ObservableList<String> logLines = FXCollections.observableArrayList();
+        java.util.concurrent.atomic.AtomicInteger reported =
+                new java.util.concurrent.atomic.AtomicInteger();
+
+        Set<Thread> before = Await.liveThreadsNamed(READER_THREAD);
+        LogReader reader = new LogReader(stream, logLines, 100, line -> reported.incrementAndGet());
+        reader.start();
+        awaitReaderFinished(before);
+        flushFxEvents();
+
+        assertThat(reported.get()).isEqualTo(1);
+        assertThat(logLines).hasSize(3);
+    }
+
+    @Test
+    void aLineWithoutAnEscapeIsLeftAsItIsAndOneWithEscapesIsStripped() {
+        String plain = "+0200 INFO outbound/vless[proxy]: outbound connection to 1.2.3.4:443";
+        assertThat(LogReader.stripAnsi(plain)).isSameAs(plain);
+        String esc = String.valueOf((char) 0x1B);
+        assertThat(LogReader.stripAnsi(esc + "[36mINFO" + esc + "[0m ready")).isEqualTo("INFO ready");
+        assertThat(LogReader.stripAnsi("")).isEmpty();
+        assertThat(LogReader.stripAnsi(null)).isNull();
+    }
+
     @Test
     void trimsListToMaxLinesActingAsRingBuffer() throws Exception {
         StringBuilder sb = new StringBuilder();
