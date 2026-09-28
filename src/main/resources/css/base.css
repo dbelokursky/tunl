@@ -110,13 +110,21 @@
 
 /* ===== Cards =====
    One flat surface, one soft shadow level. Depth comes from the hairline
-   border, not from gradients or heavy drop shadows. */
+   border, not from gradients or heavy drop shadows.
+
+   The shadow is a background layer in the shadow colour that reaches past
+   the bottom edge, not an -fx-effect. A dropshadow renders the whole card to
+   an offscreen texture and blurs it every time anything inside it changes,
+   and the dashboard's cards change every second; on the Metal pipeline each
+   such texture also keeps a copy of its pixels in the Java heap. Measured
+   with the real views on a Mac: about 150 MB less footprint with the window
+   in the tray, and half the render thread's CPU with it showing. */
 .card {
-    -fx-background-color: -c-surface;
-    -fx-background-radius: 12;
+    -fx-background-color: -c-shadow-card, -c-surface;
+    -fx-background-insets: 0 0 -1 0, 0;
+    -fx-background-radius: 12, 12;
     -fx-border-color: -c-border;
     -fx-border-radius: 12;
-    -fx-effect: dropshadow(gaussian, -c-shadow-card, 4, 0, 0, 1);
     /* Stated here so every card in the app agrees. Written into each card's
        FXML instead, they drifted into three recipes on the dashboard alone —
        left 18 on one card and 20 on the next, against a right of 18 on both,
@@ -126,8 +134,8 @@
 }
 
 .hero-card {
-    -fx-background-color: -c-surface;
-    -fx-effect: dropshadow(gaussian, -c-shadow-elevated, 6, 0, 0, 2);
+    -fx-background-color: -c-shadow-elevated, -c-surface;
+    -fx-background-insets: 0 0 -2 0, 0;
 }
 
 .status-bar {
@@ -426,12 +434,13 @@
 }
 
 .server-list-item {
-    -fx-background-color: -c-row-bg;
-    -fx-background-radius: 10;
+    /* A layer, not a dropshadow, for the reason given at .card. */
+    -fx-background-color: -c-shadow-row, -c-row-bg;
+    -fx-background-insets: 0 0 -1 0, 0;
+    -fx-background-radius: 10, 10;
     -fx-border-color: -c-row-border;
     -fx-border-radius: 10;
     -fx-padding: 12 16;
-    -fx-effect: dropshadow(gaussian, -c-shadow-row, 4, 0, 0, 1);
 }
 
 .server-list-item:hover {
