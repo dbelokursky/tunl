@@ -110,6 +110,8 @@ class LinuxTunLauncherTest {
      * stdin instead of polling (StdinWatchTest runs that watch).
      */
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs({org.junit.jupiter.api.condition.OS.MAC,
+            org.junit.jupiter.api.condition.OS.LINUX})
     void directWrapperCommand_watchesItsStdinAndDoesNotPoll() {
         String wrapper = LinuxTunLauncher.directWrapperCommand(
                 Path.of("/opt/a b/sing-box"), Path.of("/tmp/it's.json"));
