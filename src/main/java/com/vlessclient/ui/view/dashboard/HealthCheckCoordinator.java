@@ -110,6 +110,8 @@ public final class HealthCheckCoordinator {
     // lasts as long as the tunnel does, window hidden to the tray included, and
     // a playing animation keeps JavaFX pulsing at the display refresh rate.
     private FxTimer.Cancellable periodicCheck;
+    /** The wait before {@link #periodicCheck}, in seconds; -1 while none is scheduled. */
+    private final AtomicInteger periodicCheckSeconds = new AtomicInteger(-1);
     private final AtomicBoolean healthCheckInFlight = new AtomicBoolean();
     private final AtomicInteger healthGeneration = new AtomicInteger();
     // Whether this connection has produced a verdict yet. Gates the CHECKING
@@ -117,6 +119,13 @@ public final class HealthCheckCoordinator {
     // re-probe would flicker the tray icon and the hero card twelve times a
     // minute. Only the unproven window after a connect is worth showing.
     private final AtomicBoolean hasVerdict = new AtomicBoolean();
+
+    /**
+     * Verdicts in a row that found every target reachable, which spaces the
+     * probes out (see {@link ProbeCadence}). Back to 0 after any other verdict,
+     * a connect, a wake and a manual re-check. FX thread only.
+     */
+    private final AtomicInteger healthyStreak = new AtomicInteger();
 
     /** The wait for the network before the check on a wake; null when none is waiting. */
     private FxTimer.Cancellable wakeWait;
@@ -261,6 +270,7 @@ public final class HealthCheckCoordinator {
         healthGeneration.incrementAndGet();
         healthCheckInFlight.set(false);
         hasVerdict.set(false);
+        healthyStreak.set(0);
         checkOnceOnline(WAKE_NETWORK_LOOKS);
     }
 
@@ -343,6 +353,7 @@ public final class HealthCheckCoordinator {
         if (healthCard == null) {
             return;
         }
+        healthyStreak.set(0);
         if (state == ConnectionState.CONNECTED) {
             runReachabilityCheck();
             return;
@@ -374,6 +385,7 @@ public final class HealthCheckCoordinator {
         if (engine.connectionStateProperty().get() != ConnectionState.CONNECTED) {
             return;
         }
+        healthyStreak.set(0);
         runReachabilityCheck();
     }
 
@@ -476,6 +488,7 @@ public final class HealthCheckCoordinator {
                         // broken one — say so rather than leaving the last
                         // answer standing.
                         hasVerdict.set(true);
+                        healthyStreak.set(0);
                         publishHealth(TunnelHealth.UNKNOWN);
                         return;
                     }
@@ -494,6 +507,7 @@ public final class HealthCheckCoordinator {
      */
     private void publishVerdict(List<ServiceReachabilityChecker.ProbeResult> results) {
         if (results == null || results.isEmpty()) {
+            healthyStreak.set(0);
             publishHealth(TunnelHealth.UNMONITORED);
             return;
         }
@@ -502,10 +516,13 @@ public final class HealthCheckCoordinator {
                 .filter(ServiceReachabilityChecker.ProbeResult::reachable)
                 .count();
         if (reachable == results.size()) {
+            healthyStreak.incrementAndGet();
             publishHealth(TunnelHealth.HEALTHY);
         } else if (ServiceReachabilityChecker.allUnreachable(results)) {
+            healthyStreak.set(0);
             publishHealth(TunnelHealth.BROKEN);
         } else {
+            healthyStreak.set(0);
             publishHealth(TunnelHealth.DEGRADED);
         }
     }
@@ -531,7 +548,8 @@ public final class HealthCheckCoordinator {
      *
      * <p>The probes go on while the window is hidden to the tray: the menu-bar
      * icon and auto-reconnect act on their verdicts, and neither is on screen
-     * with the dashboard.</p>
+     * with the dashboard. A tunnel that keeps answering is probed less often;
+     * see {@link ProbeCadence}.</p>
      */
     private void schedulePeriodicCheck(AppSettings settings) {
         cancelPeriodicCheck();
@@ -541,9 +559,12 @@ public final class HealthCheckCoordinator {
         if (engine.connectionStateProperty().get() != ConnectionState.CONNECTED) {
             return;
         }
-        int seconds = Math.max(1, settings.getHealthCheckIntervalSeconds());
+        int seconds = ProbeCadence.nextDelaySeconds(
+                Math.max(1, settings.getHealthCheckIntervalSeconds()), healthyStreak.get());
+        periodicCheckSeconds.set(seconds);
         periodicCheck = FxTimer.after(Duration.ofSeconds(seconds), () -> {
             periodicCheck = null;
+            periodicCheckSeconds.set(-1);
             runReachabilityCheck();
         });
     }
@@ -554,6 +575,26 @@ public final class HealthCheckCoordinator {
             // it is dropped too, as a stopped PauseTransition's was.
             periodicCheck.cancel();
             periodicCheck = null;
+        }
+        periodicCheckSeconds.set(-1);
+    }
+
+    /**
+     * Test seam: the wait before the periodic check now scheduled, in seconds,
+     * or -1 while none is. FX thread.
+     */
+    int scheduledCheckSeconds() {
+        return periodicCheckSeconds.get();
+    }
+
+    /**
+     * Test seam: runs the scheduled periodic check at once, as its timer would
+     * have. No-op while none is scheduled. FX thread.
+     */
+    void runScheduledCheckNow() {
+        if (periodicCheck != null) {
+            cancelPeriodicCheck();
+            runReachabilityCheck();
         }
     }
 
