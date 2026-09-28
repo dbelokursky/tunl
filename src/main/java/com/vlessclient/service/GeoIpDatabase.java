@@ -65,20 +65,24 @@ public class GeoIpDatabase {
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
 
     private final Path databasePath;
-    private final HttpClient httpClient;
+    private final LazyHttpClient httpClient;
     private final String urlTemplate;
 
     /** Opened lazily and kept: the reader memory-maps the file. */
     private volatile Reader reader;
     private volatile boolean unavailable;
 
-    /** Uses the app data directory and a redirect-following HTTP client. */
+    /**
+     * Uses the app data directory and a redirect-following HTTP client, built
+     * on the first download: once the database is on disk there is none.
+     */
     public GeoIpDatabase() {
         this(PlatformPaths.current().dataDir().resolve("geoip").resolve(DB_FILE),
-                AppHttpClients.newBuilder()
+                LazyHttpClient.of(() -> AppHttpClients.newBuilder()
                         .connectTimeout(TIMEOUT)
                         .followRedirects(HttpClient.Redirect.NORMAL)
-                        .build());
+                        .build()),
+                URL_TEMPLATE);
     }
 
     /** Test seam: explicit database location and HTTP client. */
@@ -88,6 +92,10 @@ public class GeoIpDatabase {
 
     /** Test seam: also where to download from (a {@code %s} takes the month). */
     GeoIpDatabase(Path databasePath, HttpClient httpClient, String urlTemplate) {
+        this(databasePath, LazyHttpClient.ofBuilt(httpClient), urlTemplate);
+    }
+
+    private GeoIpDatabase(Path databasePath, LazyHttpClient httpClient, String urlTemplate) {
         this.databasePath = databasePath;
         this.httpClient = httpClient;
         this.urlTemplate = urlTemplate;
@@ -167,7 +175,7 @@ public class GeoIpDatabase {
                     .GET()
                     .build();
             HttpResponse<InputStream> response =
-                    httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+                    httpClient.get().send(request, HttpResponse.BodyHandlers.ofInputStream());
             if (response.statusCode() != 200) {
                 log.debug("Geo-IP database not at {} (HTTP {})", url, response.statusCode());
                 return false;
@@ -287,8 +295,6 @@ public class GeoIpDatabase {
                 log.debug("Error closing the geo-IP database", e);
             }
         }
-        if (httpClient != null) {
-            httpClient.shutdownNow();
-        }
+        httpClient.shutdownNow();
     }
 }

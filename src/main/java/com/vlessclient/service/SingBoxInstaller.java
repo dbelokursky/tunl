@@ -136,7 +136,7 @@ public class SingBoxInstaller {
     private final String binaryName = corePlatform.binaryName();
 
     private final Path installDir;
-    private final HttpClient httpClient;
+    private final LazyHttpClient httpClient;
     private final String downloadUrlTemplate;
     private final Map<String, String> expectedSha256;
 
@@ -160,27 +160,36 @@ public class SingBoxInstaller {
     /** Test constructor: allows overriding install dir, URL template, and checksums. */
     SingBoxInstaller(
             Path installDir, String downloadUrlTemplate, Map<String, String> expectedSha256) {
+        // Built on the first download, which the bundled core makes rare.
         this(installDir, downloadUrlTemplate, expectedSha256,
-                AppHttpClients.newBuilder()
+                LazyHttpClient.of(() -> AppHttpClients.newBuilder()
                         .connectTimeout(Duration.ofSeconds(30))
                         .followRedirects(HttpClient.Redirect.ALWAYS)
-                        .build());
+                        .build()));
     }
 
     /** Test constructor: also the HTTP client, like every other downloading service. */
     SingBoxInstaller(Path installDir, String downloadUrlTemplate,
                      Map<String, String> expectedSha256, HttpClient httpClient) {
+        this(installDir, downloadUrlTemplate, expectedSha256, LazyHttpClient.ofBuilt(httpClient));
+    }
+
+    private SingBoxInstaller(Path installDir, String downloadUrlTemplate,
+                             Map<String, String> expectedSha256, LazyHttpClient httpClient) {
         this.installDir = installDir;
         this.downloadUrlTemplate = downloadUrlTemplate;
         this.expectedSha256 = Map.copyOf(expectedSha256);
         this.httpClient = httpClient;
     }
 
-    /** Releases the HTTP client; the installer downloads nothing after startup. */
+    /** Releases the HTTP client, if a download ever built it. */
     public void shutdown() {
-        if (httpClient != null) {
-            httpClient.shutdownNow();
-        }
+        httpClient.shutdownNow();
+    }
+
+    /** Whether a download has built the HTTP client. Test seam. */
+    boolean hasBuiltHttpClient() {
+        return httpClient.isBuilt();
     }
 
     /** Test constructor: install dir only, uses production URL + checksums. */
@@ -559,7 +568,7 @@ public class SingBoxInstaller {
                 .build();
 
         HttpResponse<InputStream> response =
-                httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+                httpClient.get().send(request, HttpResponse.BodyHandlers.ofInputStream());
 
         int status = response.statusCode();
         if (status != 200) {
