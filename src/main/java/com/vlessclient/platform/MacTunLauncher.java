@@ -15,8 +15,9 @@ import org.slf4j.LoggerFactory;
  *       current user and runs the root side with {@code sudo -n}, so no
  *       password prompt appears: the launcher with the config on stdin where
  *       {@link PrivilegeHelper#usesLauncher()}, {@code sing-box run -c} on
- *       the published config otherwise. Stop is signalled via the
- *       user-writable stop file.</li>
+ *       the published config otherwise. Stop is signalled by closing the
+ *       wrapper's stdin, which the app holds and the system closes when the
+ *       app dies.</li>
  *   <li>Fallback: if NOPASSWD is not available (e.g. user declined the
  *       one-time configure step), spawn the wrapper inside
  *       {@code osascript ... with administrator privileges}. A password
@@ -54,9 +55,9 @@ public final class MacTunLauncher implements TunLauncher {
             process = startViaOsascriptPrompt(binary, configFile, stopSignalFile,
                     prompt.eachConnect());
         } else if (PrivilegeHelper.usesLauncher()) {
-            process = startViaLauncher(binary, configFile, stopSignalFile);
+            process = startViaLauncher(binary, configFile);
         } else {
-            process = startViaSudoNoPassword(binary, configFile, stopSignalFile);
+            process = startViaSudoNoPassword(binary, configFile);
         }
         return new Launched(process, stopSignalFile, !withoutPrompt);
     }
@@ -92,10 +93,8 @@ public final class MacTunLauncher implements TunLauncher {
      * filters it and runs the core on what is left. No copy is published: the
      * rule does not name a config path, so the engine's own file serves.
      */
-    private Process startViaLauncher(Path binary, Path configFile,
-                                     Path stopSignalFile) throws IOException {
-        String shellCommand = launcherWrapperCommand(
-                PrivilegeHelper.launcher(), configFile, stopSignalFile);
+    private Process startViaLauncher(Path binary, Path configFile) throws IOException {
+        String shellCommand = launcherWrapperCommand(PrivilegeHelper.launcher(), configFile);
 
         ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", shellCommand);
         pb.directory(SecureFiles.parentDirectory(binary).toFile());
@@ -111,10 +110,9 @@ public final class MacTunLauncher implements TunLauncher {
      * The launcher replaces itself with the core, so the process sudo forwards
      * TERM/INT to is the core itself.
      */
-    static String launcherWrapperCommand(Path launcher, Path configFile, Path stopSignalFile) {
-        return watched("sudo -n " + shellQuote(launcher.toString())
-                        + " < " + shellQuote(configFile.toAbsolutePath().toString()),
-                stopSignalFile);
+    static String launcherWrapperCommand(Path launcher, Path configFile) {
+        return StdinWatch.around("sudo -n " + shellQuote(launcher.toString())
+                + " < " + shellQuote(configFile.toAbsolutePath().toString()));
     }
 
     /**
@@ -125,15 +123,13 @@ public final class MacTunLauncher implements TunLauncher {
      * the normal Process pipes and stop it by signalling the user-owned
      * wrapper (who forwards SIGTERM to the root-owned sing-box via sudo).
      */
-    private Process startViaSudoNoPassword(Path binary, Path configFile,
-                                           Path stopSignalFile) throws IOException {
+    private Process startViaSudoNoPassword(Path binary, Path configFile) throws IOException {
         // The rule pins the config path, so the generated config has to be
         // published at that exact location; any other path is refused by sudo.
         // Written 0600 in the user-owned run dir — it carries the server's
         // credentials.
         Path published = publishConfig(configFile);
-        String shellCommand = sudoWrapperCommand(
-                PrivilegeHelper.elevatedBinary(), published, stopSignalFile);
+        String shellCommand = sudoWrapperCommand(PrivilegeHelper.elevatedBinary(), published);
 
         ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", shellCommand);
         pb.directory(SecureFiles.parentDirectory(binary).toFile());
@@ -149,21 +145,18 @@ public final class MacTunLauncher implements TunLauncher {
      * under {@code sudo -n}; sudo forwards TERM/INT to it, so killing the
      * user-owned sudo propagates to root-owned sing-box cleanly.
      *
-     * <p>Watches three things and tears the core down when any fires: the core
-     * itself, the stop-signal file, and the app's pid. The parent-pid watch is
-     * the safety net the osascript and Linux wrappers already had and this path
-     * lacked — on a hard app death (SIGKILL, crash: no shutdown hook, no stop
-     * file) the re-parented wrapper would otherwise loop forever, leaving a
+     * <p>Tears the core down when the app stops it, when the app dies and when
+     * the core exits on its own; see {@link StdinWatch}. A hard app
+     * death (SIGKILL, a crash: no shutdown hook, no stop) must not leave a
      * root-owned core holding the TUN up. Trap TERM/INT as well as EXIT: the
-     * engine stops us with SIGTERM, and a signal-killed shell skips an
+     * engine's last resort is SIGTERM, and a signal-killed shell skips an
      * EXIT-only trap. The trap is set before the core starts, so no signal
      * can land between the two and leave the core orphaned.</p>
      */
-    static String sudoWrapperCommand(Path elevatedBinary, Path publishedConfig,
-                                     Path stopSignalFile) {
-        return watched("sudo -n " + shellQuote(elevatedBinary.toAbsolutePath().toString())
-                        + " run -c " + shellQuote(publishedConfig.toString()),
-                stopSignalFile);
+    static String sudoWrapperCommand(Path elevatedBinary, Path publishedConfig) {
+        return StdinWatch.around("sudo -n "
+                + shellQuote(elevatedBinary.toAbsolutePath().toString())
+                + " run -c " + shellQuote(publishedConfig.toString()));
     }
 
     /**
@@ -188,8 +181,9 @@ public final class MacTunLauncher implements TunLauncher {
 
     /**
      * The wrapper for the osascript fallback (the core runs as root because the
-     * whole script is elevated). Same three-way watch as
-     * {@link #sudoWrapperCommand}: core, stop file, and the app's pid.
+     * whole script is elevated). It still polls, see {@link #watched}: a shell
+     * that {@code do shell script} starts gets no stdin from the app, and the
+     * app cannot signal a root process.
      */
     static String osascriptWrapperCommand(Path binary, Path configFile,
                                           Path stopSignalFile) {
@@ -200,9 +194,11 @@ public final class MacTunLauncher implements TunLauncher {
 
     /**
      * Runs {@code start} in the background and tears it down when the core
-     * exits, the stop file appears, or the app's pid is gone. The trap is set
-     * before the core starts, so no signal can land between the two and leave
-     * the core orphaned.
+     * exits, the stop file appears, or the app's pid is gone, checking every
+     * 0.3 s. Only for a wrapper that runs as root with no stdin from the app;
+     * see {@link StdinWatch} for the others. The trap is set before
+     * the core starts, so no signal can land between the two and leave the
+     * core orphaned.
      */
     private static String watched(String start, Path stopSignalFile) {
         long parentPid = ProcessHandle.current().pid();

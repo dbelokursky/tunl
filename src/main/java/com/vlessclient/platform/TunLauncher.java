@@ -12,7 +12,10 @@ import java.nio.file.Path;
  * process whose lifetime mirrors the core's and whose stdout carries the
  * core's log lines, plus a <em>stop-signal file</em>. Creating that file asks
  * the privileged side to terminate sing-box — necessary because an
- * unprivileged parent cannot kill an elevated child directly on either OS.</p>
+ * unprivileged parent cannot kill an elevated child directly on either OS.
+ * Closing the process's stdin asks the same: the wrappers that run as the user
+ * watch it instead of the file (see {@link StdinWatch}), so a stop does
+ * both.</p>
  */
 public interface TunLauncher {
 
