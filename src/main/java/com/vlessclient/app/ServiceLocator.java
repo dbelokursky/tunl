@@ -4,6 +4,7 @@ import com.vlessclient.model.AppSettings;
 import com.vlessclient.platform.Autostart;
 import com.vlessclient.platform.CoreRecord;
 import com.vlessclient.platform.PlatformPaths;
+import com.vlessclient.platform.PowerState;
 import com.vlessclient.platform.SecretSealer;
 import com.vlessclient.platform.SecretSealers;
 import com.vlessclient.service.AppHttpClients;
@@ -184,12 +185,20 @@ public class ServiceLocator {
 
         register(Autostart.class, Autostart.current());
 
+        // Whether the machine is in a full wake. The health checks and the
+        // restarts they drive hold off while it sleeps or wakes in the dark
+        // for maintenance, and start over on the wake. The test graph never
+        // asks the host, whose power state a test does not control.
+        PowerState power = mode == StartupMode.TEST
+                ? PowerState.ALWAYS_AWAKE : PowerState.current();
+        register(PowerState.class, power);
+
         // The one owner of the connect flow: the dashboard, the tray and the MCP
         // facade all drive the tunnel through it, so the three no longer carry
         // their own copies of resolve-generate-await-start.
         SingBoxEngine engine = get(SingBoxEngine.class);
         ConnectionService connectionService = new ConnectionService(
-                configStore, configGenerator, routingService, engine);
+                configStore, configGenerator, routingService, engine, power);
         register(ConnectionService.class, connectionService);
         TunnelRecoveryService recovery = connectionService.getRecoveryService();
         register(TunnelRecoveryService.class, recovery);

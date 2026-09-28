@@ -26,9 +26,11 @@ public enum TunnelHealth {
 
     /**
      * A probe is in flight and this connection has produced no verdict yet.
-     * Only the first probe after a connect reports this; later periodic
-     * re-checks keep the previous verdict until they replace it, so the
-     * indicator does not blink every {@code health_check_interval_seconds}.
+     * Only the first probe after a connect, or after the machine wakes,
+     * reports this, as does the wait for the network that comes before the
+     * latter; later periodic re-checks keep the previous verdict until they
+     * replace it, so the indicator does not blink every
+     * {@code health_check_interval_seconds}.
      */
     CHECKING,
 

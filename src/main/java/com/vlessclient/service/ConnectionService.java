@@ -8,6 +8,7 @@ import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.ServerSelection;
 import com.vlessclient.platform.ElevationDeclinedException;
+import com.vlessclient.platform.PowerState;
 import com.vlessclient.service.outbound.CoreSettings;
 import com.vlessclient.service.outbound.OutboundTags;
 import java.io.IOException;
@@ -213,7 +214,8 @@ public class ConnectionService {
 
 
     /**
-     * Creates the service.
+     * Creates the service, whose recovery takes the machine to be always
+     * awake: for tests and tools, which have no sleep to wait out.
      *
      * @param configStore     source of the server list and the live settings
      * @param configGenerator builds the core configuration
@@ -224,13 +226,32 @@ public class ConnectionService {
                              SingBoxConfigGenerator configGenerator,
                              RoutingService routingService,
                              SingBoxEngine engine) {
+        this(configStore, configGenerator, routingService, engine, PowerState.ALWAYS_AWAKE);
+    }
+
+    /**
+     * Creates the service.
+     *
+     * @param configStore     source of the server list and the live settings
+     * @param configGenerator builds the core configuration
+     * @param routingService  supplies routing rules, or null for defaults
+     * @param engine          the engine to drive, with or without a core
+     * @param power           the machine's power state, which recovery asks
+     *                        before it restarts the tunnel for a failed
+     *                        health check
+     */
+    public ConnectionService(ConfigStore configStore,
+                             SingBoxConfigGenerator configGenerator,
+                             RoutingService routingService,
+                             SingBoxEngine engine,
+                             PowerState power) {
         this.configStore = configStore;
         this.configGenerator = configGenerator;
         this.routingService = routingService;
         this.engine = Objects.requireNonNull(engine, "engine");
         this.recovery = new TunnelRecoveryService(
                 () -> configStore != null ? configStore.getSettings() : new AppSettings(),
-                this::recover, this::restartNeedsTheUser);
+                this::recover, this::restartNeedsTheUser, power);
         this.stateListener = (obs, old, state) -> {
             // A notice about what the core was started without ends with it.
             if (state == ConnectionState.DISCONNECTED || state == ConnectionState.ERROR) {

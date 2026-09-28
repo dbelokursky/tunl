@@ -4,6 +4,7 @@ import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.TunnelHealth;
 import com.vlessclient.platform.NetworkPresence;
+import com.vlessclient.platform.PowerState;
 import java.io.IOException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -21,7 +22,15 @@ import javafx.beans.property.ReadOnlyStringWrapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Owns cancelable recovery after a core crash or a failed reachability verdict. */
+/**
+ * Owns cancelable recovery after a core crash or a failed reachability verdict.
+ *
+ * <p>A failed verdict restarts nothing while the machine is not fully awake
+ * ({@link PowerState}): asleep, in a dark wake or on its way into sleep, the
+ * probes fail with nothing wrong with the tunnel. A crash restarts the core
+ * whatever the power state, and the machine's wake starts the backoff
+ * over.</p>
+ */
 public final class TunnelRecoveryService implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(TunnelRecoveryService.class);
@@ -29,11 +38,14 @@ public final class TunnelRecoveryService implements AutoCloseable {
     private final Attempt attempt;
     private final BooleanSupplier restartNeedsTheUser;
     private final BooleanSupplier networkUp;
+    private final PowerState power;
     private final ScheduledExecutorService scheduler;
     private final ReadOnlyObjectWrapper<Retry> retry = new ReadOnlyObjectWrapper<>();
     private final ReadOnlyBooleanWrapper reconnectNeeded = new ReadOnlyBooleanWrapper();
     private final ReadOnlyStringWrapper stopReason = new ReadOnlyStringWrapper();
     private ScheduledFuture<?> pending;
+    /** Why the pending restart was scheduled; null with none pending. */
+    private Reason pendingReason;
     private long generation;
     private long publication;
     private int attempts;
@@ -103,7 +115,8 @@ public final class TunnelRecoveryService implements AutoCloseable {
     }
 
     /**
-     * Creates a recovery loop. Its daemon scheduler starts only when a retry is needed.
+     * Creates a recovery loop that takes the machine to be always awake. Its
+     * daemon scheduler starts only when a retry is needed.
      *
      * @param settings            the live settings
      * @param attempt             restarts the core
@@ -112,7 +125,24 @@ public final class TunnelRecoveryService implements AutoCloseable {
      */
     public TunnelRecoveryService(Supplier<AppSettings> settings, Attempt attempt,
                                  BooleanSupplier restartNeedsTheUser) {
-        this(settings, attempt, restartNeedsTheUser, NetworkPresence.current()::isUp,
+        this(settings, attempt, restartNeedsTheUser, PowerState.ALWAYS_AWAKE);
+    }
+
+    /**
+     * Creates a recovery loop that holds off while the machine sleeps. Its
+     * daemon scheduler starts only when a retry is needed.
+     *
+     * @param settings            the live settings
+     * @param attempt             restarts the core
+     * @param restartNeedsTheUser whether a restart would raise an elevation prompt, so
+     *                            the reconnect is left to the user; must not block
+     * @param power               the machine's power state: no restart for a failed
+     *                            health check while it is not fully awake, and the
+     *                            backoff starts over when it wakes
+     */
+    public TunnelRecoveryService(Supplier<AppSettings> settings, Attempt attempt,
+                                 BooleanSupplier restartNeedsTheUser, PowerState power) {
+        this(settings, attempt, restartNeedsTheUser, NetworkPresence.current()::isUp, power,
                 Executors.newSingleThreadScheduledExecutor(
                         DaemonThreads.factory("tunnel-recovery")));
     }
@@ -126,11 +156,20 @@ public final class TunnelRecoveryService implements AutoCloseable {
     TunnelRecoveryService(Supplier<AppSettings> settings, Attempt attempt,
                           BooleanSupplier restartNeedsTheUser, BooleanSupplier networkUp,
                           ScheduledExecutorService scheduler) {
+        this(settings, attempt, restartNeedsTheUser, networkUp, PowerState.ALWAYS_AWAKE,
+                scheduler);
+    }
+
+    TunnelRecoveryService(Supplier<AppSettings> settings, Attempt attempt,
+                          BooleanSupplier restartNeedsTheUser, BooleanSupplier networkUp,
+                          PowerState power, ScheduledExecutorService scheduler) {
         this.settings = settings;
         this.attempt = attempt;
         this.restartNeedsTheUser = restartNeedsTheUser;
         this.networkUp = networkUp;
+        this.power = power;
         this.scheduler = scheduler;
+        power.onWake(this::wake);
     }
 
     /** Observable pending retry, for rendering only. */
@@ -280,6 +319,16 @@ public final class TunnelRecoveryService implements AutoCloseable {
                 || !config.isHealthCheckAutoReconnect()) {
             return;
         }
+        if (why == Reason.UNREACHABLE && !power.isAwake()) {
+            // Asleep, in a dark wake or on the way into sleep, the probes time
+            // out with nothing wrong with the tunnel: a restart for them only
+            // tore the TUN device and its routes down and grew the backoff.
+            // The wake checks again. A crashed core is still restarted: that
+            // is a fact about the core, and the tunnel is gone either way.
+            log.info("Not restarting the tunnel: {}, but the system is not fully awake",
+                    why.described());
+            return;
+        }
         if (restartNeedsTheUser.getAsBoolean()) {
             // A restart would raise the elevation prompt again with nobody
             // asking for it. A tunnel that was up offers the reconnect instead;
@@ -294,18 +343,38 @@ public final class TunnelRecoveryService implements AutoCloseable {
         int seconds = (int) Math.min(Math.max(base, 300L),
                 (long) base * (1L << Math.min(attempts, 20)));
         long request = generation;
+        long sleeps = power.sleeps();
         publish(new Retry(++attempts, seconds, why));
         log.info("Restarting the tunnel in {} s (attempt {}): {}",
                 seconds, attempts, why.described());
-        pending = scheduler.schedule(() -> retry(request), seconds, TimeUnit.SECONDS);
+        pending = scheduler.schedule(() -> retry(request, why, sleeps),
+                seconds, TimeUnit.SECONDS);
+        pendingReason = why;
     }
 
-    private void retry(long request) {
+    /**
+     * Runs a scheduled restart.
+     *
+     * @param request the user's request it was scheduled under
+     * @param why     why it was scheduled
+     * @param sleeps  the machine's sleeps as it was scheduled
+     */
+    private void retry(long request, Reason why, long sleeps) {
         synchronized (this) {
             if (!isWanted(request)) {
                 return;
             }
             if (!settings.get().isHealthCheckAutoReconnect()) {
+                cancelPending();
+                return;
+            }
+            if (why == Reason.UNREACHABLE
+                    && (!power.isAwake() || power.sleeps() != sleeps)) {
+                // The check that asked for it ran before the machine went to
+                // sleep or dark, and says nothing about the tunnel now. The
+                // wake checks again.
+                log.info("Not restarting the tunnel: the health check that asked for it"
+                        + " ran before the system slept");
                 cancelPending();
                 return;
             }
@@ -317,10 +386,12 @@ public final class TunnelRecoveryService implements AutoCloseable {
                 publish(new Retry(attempts, seconds, Reason.NO_NETWORK));
                 log.info("Not restarting the tunnel: {}; asking again in {} s",
                         Reason.NO_NETWORK.described(), seconds);
-                pending = scheduler.schedule(() -> retry(request), seconds, TimeUnit.SECONDS);
+                pending = scheduler.schedule(() -> retry(request, why, sleeps),
+                        seconds, TimeUnit.SECONDS);
                 return;
             }
             pending = null;
+            pendingReason = null;
             running = true;
             publish(null);
         }
@@ -366,8 +437,33 @@ public final class TunnelRecoveryService implements AutoCloseable {
             pending.cancel(false);
             pending = null;
         }
+        pendingReason = null;
         stoppedBecause = reason;
         publish(null, false);
+    }
+
+    /**
+     * The machine is back in a full wake, and the user with it. The backoff
+     * starts over: it spaces out restarts that keep failing, and the sleep
+     * ended that run of them. A restart a failed health check asked for is
+     * dropped, since the check ran before the sleep and the wake checks
+     * again; one for a tunnel that is down runs at the first step, rather
+     * than at the end of a backoff that grew while nobody was there.
+     */
+    private synchronized void wake() {
+        if (closed || !wanted) {
+            return;
+        }
+        attempts = 0;
+        Reason why = pendingReason;
+        if (pending == null || why == null) {
+            return;
+        }
+        log.info("Tunnel recovery starts over on the wake");
+        cancelPending();
+        if (why != Reason.UNREACHABLE) {
+            schedule(why);
+        }
     }
 
     private void cancelPending() {
@@ -375,6 +471,7 @@ public final class TunnelRecoveryService implements AutoCloseable {
             pending.cancel(false);
             pending = null;
         }
+        pendingReason = null;
         publish(null);
     }
 

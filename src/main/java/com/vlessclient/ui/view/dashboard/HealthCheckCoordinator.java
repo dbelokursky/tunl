@@ -6,7 +6,10 @@ import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.HealthCheckTarget;
 import com.vlessclient.model.TunnelHealth;
+import com.vlessclient.platform.NetworkPresence;
+import com.vlessclient.platform.PowerState;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.service.FxExecutor;
 import com.vlessclient.service.ServiceReachabilityChecker;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.service.TunnelHealthState;
@@ -20,6 +23,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javafx.application.Platform;
@@ -57,10 +61,20 @@ import org.slf4j.LoggerFactory;
  *
  * <p>For the same reason the loop runs whether or not anyone can see the card,
  * while its rows and summary are drawn only when someone can.</p>
+ *
+ * <p>It holds its probes while the machine is not fully awake
+ * ({@link PowerState}), where they fail with nothing wrong with the tunnel,
+ * and checks once more as soon as the user wakes it.</p>
  */
 public final class HealthCheckCoordinator {
 
     private static final Logger log = LoggerFactory.getLogger(HealthCheckCoordinator.class);
+
+    /** How often a check on the wake looks for the network it waits for. */
+    private static final Duration WAKE_NETWORK_POLL = Duration.ofSeconds(1);
+
+    /** How many looks a check on the wake waits for the network before it goes ahead. */
+    private static final int WAKE_NETWORK_LOOKS = 30;
 
     /**
      * The FXML-injected controls the health card drives. They remain owned
@@ -88,6 +102,8 @@ public final class HealthCheckCoordinator {
     private final TunnelRecoveryService recovery;
     private final Supplier<AppSettings> settingsSupplier;
     private final Consumer<AppSettings> settingsSaver;
+    private final PowerState power;
+    private final BooleanSupplier networkUp;
 
     // Probe scheduling and rendering remain FX-owned; recovery lives in the service.
     // The wait between probes is an FxTimer rather than a PauseTransition: it
@@ -101,6 +117,12 @@ public final class HealthCheckCoordinator {
     // re-probe would flicker the tray icon and the hero card twelve times a
     // minute. Only the unproven window after a connect is worth showing.
     private final AtomicBoolean hasVerdict = new AtomicBoolean();
+
+    /** The wait for the network before the check on a wake; null when none is waiting. */
+    private FxTimer.Cancellable wakeWait;
+
+    /** Whether the probes are held for the machine's power state, which is logged once. */
+    private final AtomicBoolean heldForPower = new AtomicBoolean();
 
     /** Whether the card is in a scene whose window is showing; null without a card. */
     private final ObservableValue<Boolean> cardOnScreen;
@@ -125,11 +147,34 @@ public final class HealthCheckCoordinator {
             SingBoxEngine engine,
             TunnelRecoveryService recovery) {
         this(controls, reachabilityChecker, healthState, engine, recovery,
+                ServiceLocator.find(PowerState.class).orElse(PowerState.ALWAYS_AWAKE),
+                NetworkPresence.current()::isUp);
+    }
+
+    /**
+     * Creates the coordinator over the given power state and network, for a
+     * test to put the machine to sleep, wake it, and take its network away;
+     * settings as the application has them.
+     *
+     * @param power     the machine's power state
+     * @param networkUp whether the host is on a network, which a check after a
+     *                  wake waits for
+     */
+    HealthCheckCoordinator(
+            Controls controls,
+            ServiceReachabilityChecker reachabilityChecker,
+            TunnelHealthState healthState,
+            SingBoxEngine engine,
+            TunnelRecoveryService recovery,
+            PowerState power,
+            BooleanSupplier networkUp) {
+        this(controls, reachabilityChecker, healthState, engine, recovery,
                 () -> ServiceLocator.find(AppSettings.class).orElse(null),
                 settings -> ServiceLocator.find(ConfigStore.class).ifPresentOrElse(
                         store -> store.saveSettings(settings),
                         () -> log.warn("ConfigStore not available; "
-                                + "health-target change not persisted")));
+                                + "health-target change not persisted")),
+                power, networkUp);
     }
 
     /**
@@ -148,8 +193,26 @@ public final class HealthCheckCoordinator {
             TunnelRecoveryService recovery,
             Supplier<AppSettings> settingsSupplier,
             Consumer<AppSettings> settingsSaver) {
+        this(controls, reachabilityChecker, healthState, engine, recovery,
+                settingsSupplier, settingsSaver,
+                ServiceLocator.find(PowerState.class).orElse(PowerState.ALWAYS_AWAKE),
+                NetworkPresence.current()::isUp);
+    }
+
+    private HealthCheckCoordinator(
+            Controls controls,
+            ServiceReachabilityChecker reachabilityChecker,
+            TunnelHealthState healthState,
+            SingBoxEngine engine,
+            TunnelRecoveryService recovery,
+            Supplier<AppSettings> settingsSupplier,
+            Consumer<AppSettings> settingsSaver,
+            PowerState power,
+            BooleanSupplier networkUp) {
         this.settingsSupplier = settingsSupplier;
         this.settingsSaver = settingsSaver;
+        this.power = Objects.requireNonNull(power, "power");
+        this.networkUp = Objects.requireNonNull(networkUp, "networkUp");
         this.healthCard = controls.healthCard();
         this.healthSummaryLabel = controls.healthSummaryLabel();
         this.serviceStatusList = controls.serviceStatusList();
@@ -176,6 +239,81 @@ public final class HealthCheckCoordinator {
         } else {
             hideReconnectBanner();
         }
+        power.onWake(() -> FxExecutor.later(this::checkAfterWake));
+    }
+
+    /**
+     * The machine is back in a full wake, and the user with it: checks the
+     * tunnel as soon as there is a network to check it over, rather than an
+     * interval later. A probe still out went out before the sleep and is
+     * dropped. The check is the wake's first, like a connect's: the verdict
+     * from before the sleep says nothing about now, and a broken one left
+     * standing would keep a fresh broken one from recovery, which hears only
+     * a verdict that changes.
+     */
+    private void checkAfterWake() {
+        if (healthCard == null
+                || engine.connectionStateProperty().get() != ConnectionState.CONNECTED) {
+            return;
+        }
+        cancelPeriodicCheck();
+        cancelWakeWait();
+        healthGeneration.incrementAndGet();
+        healthCheckInFlight.set(false);
+        hasVerdict.set(false);
+        checkOnceOnline(WAKE_NETWORK_LOOKS);
+    }
+
+    /**
+     * Checks once the host is on a network, looking again every
+     * {@link #WAKE_NETWORK_POLL}; with {@code looksLeft} spent it checks
+     * anyway, and recovery waits for the network in its turn.
+     */
+    private void checkOnceOnline(int looksLeft) {
+        wakeWait = null;
+        if (engine.connectionStateProperty().get() != ConnectionState.CONNECTED) {
+            return;
+        }
+        if (looksLeft > 0 && !networkUp.getAsBoolean()) {
+            showWaitingForTheNetwork();
+            wakeWait = FxTimer.after(WAKE_NETWORK_POLL, () -> checkOnceOnline(looksLeft - 1));
+            return;
+        }
+        runReachabilityCheck();
+    }
+
+    /** Says on the card, and to the tray, that the check waits for the network. */
+    private void showWaitingForTheNetwork() {
+        AppSettings settings = settingsSupplier.get();
+        if (reachabilityChecker == null || settings == null || !settings.isHealthCheckEnabled()) {
+            return;
+        }
+        List<HealthCheckTarget> targets = settings.getHealthCheckTargets();
+        if (targets == null || targets.isEmpty()) {
+            return;
+        }
+        setHealthCardVisible(true);
+        renderPendingRows(targets, () -> I18n.get("dashboard.health.waiting.network"));
+        publishHealth(TunnelHealth.CHECKING);
+    }
+
+    private void cancelWakeWait() {
+        if (wakeWait != null) {
+            wakeWait.cancel();
+            wakeWait = null;
+        }
+    }
+
+    /**
+     * Holds the probes while the machine is not fully awake. The loop keeps
+     * its timer, whose every turn costs a read of the power state: a wake the
+     * system does not announce is then noticed at the next turn.
+     */
+    private void holdForPower(AppSettings settings) {
+        if (heldForPower.compareAndSet(false, true)) {
+            log.info("Health checks held: the system is not fully awake");
+        }
+        schedulePeriodicCheck(settings);
     }
 
     /**
@@ -219,6 +357,7 @@ public final class HealthCheckCoordinator {
         healthGeneration.incrementAndGet();
         healthCheckInFlight.set(false);
         cancelPeriodicCheck();
+        cancelWakeWait();
         if (state == ConnectionState.DISCONNECTED || state == ConnectionState.ERROR) {
             if (recovery != null && recovery.isRecovering()) {
                 return;
@@ -260,6 +399,7 @@ public final class HealthCheckCoordinator {
         // A check is starting now, so drop any pending periodic re-check; a new
         // one is scheduled once this probe completes.
         cancelPeriodicCheck();
+        cancelWakeWait();
         if (reachabilityChecker == null) {
             setHealthCardVisible(false);
             publishHealth(TunnelHealth.UNMONITORED);
@@ -283,18 +423,29 @@ public final class HealthCheckCoordinator {
             publishHealth(TunnelHealth.UNMONITORED);
             return;
         }
+        if (!power.isAwake()) {
+            // Asleep, in a dark wake or on the way into sleep, the probes time
+            // out with nothing wrong with the tunnel, and a failed verdict
+            // restarted it for nothing. The verdict from before stands.
+            holdForPower(settings);
+            return;
+        }
         if (!healthCheckInFlight.compareAndSet(false, true)) {
             return;
         }
+        if (heldForPower.compareAndSet(true, false)) {
+            log.info("Health checks resume: the system is awake");
+        }
 
         setHealthCardVisible(true);
-        renderPendingRows(targets);
+        renderPendingRows(targets, () -> I18n.get("dashboard.health.checking"));
         if (!hasVerdict.get()) {
             publishHealth(TunnelHealth.CHECKING);
         }
 
         final int gen = healthGeneration.incrementAndGet();
         final int probePort = settings.listenProbePort();
+        final long sleeps = power.sleeps();
 
         reachabilityChecker.checkAll(targets, probePort).whenComplete((results, err) ->
                 Platform.runLater(() -> {
@@ -305,6 +456,18 @@ public final class HealthCheckCoordinator {
                     if (engine.connectionStateProperty().get()
                             != ConnectionState.CONNECTED) {
                         return;   // no longer connected
+                    }
+                    boolean awake = power.isAwake();
+                    if (!awake || power.sleeps() != sleeps) {
+                        // The probes ran into a sleep or a dark wake, which is
+                        // what they timed out on: no verdict. The wake checks
+                        // again, told or noticed at the next turn.
+                        if (!awake) {
+                            holdForPower(settings);
+                        } else {
+                            schedulePeriodicCheck(settings);
+                        }
+                        return;
                     }
                     if (err != null) {
                         log.warn("Reachability check failed", err);
@@ -439,6 +602,7 @@ public final class HealthCheckCoordinator {
      */
     private void cancelHealthLoop() {
         cancelPeriodicCheck();
+        cancelWakeWait();
         healthGeneration.incrementAndGet(); // invalidate any in-flight probe result
         healthCheckInFlight.set(false);
         hasVerdict.set(false);
@@ -451,14 +615,19 @@ public final class HealthCheckCoordinator {
         }
     }
 
-    private void renderPendingRows(List<HealthCheckTarget> targets) {
+    /**
+     * Shows every service as waiting for its answer.
+     *
+     * @param summary the summary line: checking, or waiting for the network
+     */
+    private void renderPendingRows(List<HealthCheckTarget> targets, Supplier<String> summary) {
         List<RowContent> pending = new ArrayList<>(targets.size());
         for (HealthCheckTarget t : targets) {
             String name = t.getName() != null && !t.getName().isBlank() ? t.getName() : t.getUrl();
             pending.add(new RowContent(name, t.getUrl(), "status-circle-connecting",
                     () -> I18n.get("dashboard.health.checking"), "service-pending"));
         }
-        showOnCard(pending, () -> I18n.get("dashboard.health.checking"));
+        showOnCard(pending, summary);
     }
 
     private void renderResultRows(List<ServiceReachabilityChecker.ProbeResult> results) {

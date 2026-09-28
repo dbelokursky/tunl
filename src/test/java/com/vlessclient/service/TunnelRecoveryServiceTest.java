@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.TunnelHealth;
+import com.vlessclient.testing.ManualPowerState;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -25,6 +26,8 @@ class TunnelRecoveryServiceTest {
     private final ManualScheduler scheduler = new ManualScheduler();
     private final AtomicInteger starts = new AtomicInteger();
     private final AtomicBoolean restartPrompts = new AtomicBoolean();
+    /** Awake unless a test puts it to sleep, so every test goes through the power seam. */
+    private final ManualPowerState power = new ManualPowerState();
     private TunnelRecoveryService recovery;
 
     @BeforeEach
@@ -37,7 +40,7 @@ class TunnelRecoveryServiceTest {
                 starts.incrementAndGet();
             }
             return false;
-        }, restartPrompts::get, scheduler);
+        }, restartPrompts::get, () -> true, power, scheduler);
         recovery.connectionRequested();
     }
 
@@ -326,6 +329,145 @@ class TunnelRecoveryServiceTest {
         scheduler.jobs.getFirst().run();
 
         assertThat(published().reason()).isEqualTo(TunnelRecoveryService.Reason.RESTART_FAILED);
+    }
+
+    // ===== the machine's sleep =====
+
+    /**
+     * The reported restarts: a Mac in a maintenance wake, the display off, the
+     * probes timing out through a tunnel with nothing wrong with it. Each
+     * verdict restarted the tunnel, tearing the TUN device and its routes down
+     * and climbing the backoff.
+     */
+    @Test
+    void aFailedCheckOutsideTheFullWakeRestartsNothing() throws Exception {
+        recovery.onConnectionState(ConnectionState.CONNECTED);
+        power.sleep();
+
+        recovery.onHealth(TunnelHealth.BROKEN);
+
+        assertThat(scheduler.jobs).as("restarts scheduled in a dark wake").isEmpty();
+        assertThat(published()).as("the countdown the banner shows").isNull();
+    }
+
+    /** Nor is the user asked to reconnect for a verdict the sleep made. */
+    @Test
+    void aFailedCheckOutsideTheFullWakeOffersNoReconnect() {
+        restartPrompts.set(true);
+        recovery.onConnectionState(ConnectionState.CONNECTED);
+        power.sleep();
+
+        recovery.onHealth(TunnelHealth.BROKEN);
+
+        assertThat(recovery.isReconnectNeeded()).isFalse();
+    }
+
+    /** The restart a failed check asked for waits out its delay; the lid may close meanwhile. */
+    @Test
+    void aRestartAFailedCheckAskedForIsDroppedOnceTheMachineLeavesItsFullWake() {
+        recovery.onHealth(TunnelHealth.BROKEN);
+        power.sleep();
+
+        scheduler.jobs.getFirst().run();
+
+        assertThat(starts).as("restarts outside the full wake").hasValue(0);
+        assertThat(scheduler.jobs).as("restarts scheduled after").hasSize(1);
+    }
+
+    /**
+     * The timer can fire after the wake and before anyone says so. The check
+     * it acts on ran before the sleep all the same.
+     */
+    @Test
+    void aRestartAFailedCheckAskedForBeforeASleepIsNotRunAfterIt() {
+        recovery.onHealth(TunnelHealth.BROKEN);
+        power.sleep();
+        power.wakeUnannounced();
+
+        scheduler.jobs.getFirst().run();
+
+        assertThat(starts).as("restarts for a check made before the sleep").hasValue(0);
+    }
+
+    /**
+     * A crash is a fact about the core that no sleep fakes, and the tunnel is
+     * gone: what macOS sends in a maintenance wake, mail and backups, would
+     * leave outside it. The core restarts in the dark as in the light.
+     */
+    @Test
+    void aCrashedCoreIsRestartedOutsideTheFullWakeToo() {
+        power.sleep();
+
+        recovery.onConnectionState(ConnectionState.ERROR);
+        scheduler.jobs.getFirst().run();
+
+        assertThat(starts).hasValue(1);
+    }
+
+    /**
+     * Restarts that kept failing in the dark grow the backoff to minutes, and
+     * the user who opens the lid would wait them out. The wake starts it over.
+     */
+    @Test
+    void theWakeStartsTheBackoffOver() throws Exception {
+        recovery.onConnectionState(ConnectionState.ERROR);
+        scheduler.jobs.get(0).run();
+        scheduler.jobs.get(1).run();
+        assertThat(scheduler.jobs).extracting(job -> job.seconds)
+                .as("precondition: the backoff grew").containsExactly(10L, 20L, 40L);
+
+        power.sleep();
+        power.wake();
+
+        assertThat(scheduler.jobs.get(2).isCancelled())
+                .as("the restart at the end of the grown backoff").isTrue();
+        assertThat(scheduler.jobs).extracting(job -> job.seconds)
+                .as("the restart in its place").containsExactly(10L, 20L, 40L, 10L);
+        assertThat(published().attempt()).as("its attempt").isEqualTo(1);
+    }
+
+    /**
+     * A restart a failed check asked for before the sleep is dropped on the
+     * wake, which checks again; the verdict that follows starts at the first
+     * step.
+     */
+    @Test
+    void theWakeDropsARestartAFailedCheckAskedForAndTheNextVerdictStartsOver() {
+        recovery.close();
+        recovery = new TunnelRecoveryService(() -> settings, guard -> true,
+                restartPrompts::get, () -> true, power, scheduler);
+        recovery.connectionRequested();
+        recovery.onHealth(TunnelHealth.BROKEN);
+        // The restart brings a core up, whose check fails too.
+        scheduler.jobs.getFirst().run();
+        recovery.onHealth(TunnelHealth.CHECKING);
+        recovery.onHealth(TunnelHealth.BROKEN);
+        assertThat(scheduler.jobs).extracting(job -> job.seconds)
+                .as("precondition: the backoff grew").containsExactly(10L, 20L);
+
+        power.sleep();
+        power.wake();
+
+        assertThat(scheduler.jobs.get(1).isCancelled())
+                .as("the restart the check before the sleep asked for").isTrue();
+        assertThat(scheduler.jobs).as("restarts the wake itself scheduled").hasSize(2);
+
+        recovery.onHealth(TunnelHealth.CHECKING);
+        recovery.onHealth(TunnelHealth.BROKEN);
+
+        assertThat(scheduler.jobs).extracting(job -> job.seconds)
+                .as("the restart the verdict after the wake asks for")
+                .containsExactly(10L, 20L, 10L);
+    }
+
+    /** Awake, a failed check restarts the tunnel exactly as before. */
+    @Test
+    void awakeAFailedCheckRestartsAsBefore() {
+        recovery.onHealth(TunnelHealth.BROKEN);
+        scheduler.jobs.getFirst().run();
+
+        assertThat(starts).hasValue(1);
+        assertThat(scheduler.jobs).extracting(job -> job.seconds).containsExactly(10L, 20L);
     }
 
     /** The retry as published, once an update queued to the FX thread has run. */

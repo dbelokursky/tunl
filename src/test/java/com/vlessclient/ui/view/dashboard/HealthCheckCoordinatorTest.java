@@ -19,6 +19,7 @@ import org.junit.jupiter.api.AfterEach;
 import com.vlessclient.testing.Await;
 import com.vlessclient.testing.FxPulses;
 import com.vlessclient.testing.FxToolkitExtension;
+import com.vlessclient.testing.ManualPowerState;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -26,6 +27,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyObjectProperty;
@@ -201,6 +203,9 @@ class HealthCheckCoordinatorTest {
     private Runnable reconnectAction = () -> { };
     private TunnelRecoveryService recovery;
     private Stage window;
+    /** Awake unless a test puts it to sleep, so every test goes through the power seam. */
+    private final ManualPowerState power = new ManualPowerState();
+    private final AtomicBoolean networkUp = new AtomicBoolean(true);
 
     @AfterEach
     void stopRecovery() {
@@ -224,7 +229,7 @@ class HealthCheckCoordinatorTest {
     private HealthCheckCoordinator coordinatorWith(ServiceReachabilityChecker checker,
                                                    TunnelRecoveryService.Attempt attempt) {
         recovery = new TunnelRecoveryService(
-                () -> ServiceLocator.get(AppSettings.class), attempt, () -> false);
+                () -> ServiceLocator.get(AppSettings.class), attempt, () -> false, power);
         recovery.connectionRequested();
         engine.state.addListener((obs, old, next) -> recovery.onConnectionState(next));
         healthState.healthProperty().addListener((obs, old, next) -> recovery.onHealth(next));
@@ -234,7 +239,9 @@ class HealthCheckCoordinatorTest {
                 checker,
                 healthState,
                 engine,
-                recovery);
+                recovery,
+                power,
+                networkUp::get);
     }
 
     private static AppSettings healthSettings(boolean autoReconnect, HealthCheckTarget... targets) {
@@ -846,5 +853,153 @@ class HealthCheckCoordinatorTest {
     private void disconnect(HealthCheckCoordinator coordinator) throws InterruptedException {
         engine.state.set(ConnectionState.DISCONNECTED);
         onFxAndWait(() -> coordinator.onConnectionStateChanged(ConnectionState.DISCONNECTED));
+    }
+
+    // ===== the machine's sleep =====
+
+    /**
+     * The reported restarts: in a maintenance wake the probes time out through
+     * a tunnel with nothing wrong with it, and each such verdict restarted it.
+     * Outside the full wake no probe goes out, and the verdict stands.
+     */
+    @Test
+    void outsideTheFullWakeACheckGivesNoVerdictAndRestartsNothing() throws Exception {
+        healthSettings(true, new HealthCheckTarget("a", "https://a"));
+        FakeChecker checker = new FakeChecker();
+        checker.results = List.of(probe("a", true));
+        HealthCheckCoordinator coordinator = coordinatorWith(checker);
+        connectAndCheck(coordinator);
+
+        power.sleep();
+        checker.results = List.of(probe("a", false));
+        onFxAndWait(coordinator::recheck);
+        flushFxEvents();
+
+        assertThat(checker.ports).as("probes sent outside the full wake").hasSize(1);
+        assertThat(healthState.get()).as("the verdict").isEqualTo(TunnelHealth.HEALTHY);
+        assertThat(recovery.retryProperty().get()).as("the restart scheduled").isNull();
+        assertThat(banner.isVisible()).as("the countdown").isFalse();
+    }
+
+    /** A probe that went out awake and ran into the sleep found the sleep, not the tunnel. */
+    @Test
+    void aProbeThatRunsIntoASleepGivesNoVerdict() throws Exception {
+        healthSettings(true, new HealthCheckTarget("a", "https://a"));
+        BlockingChecker checker = new BlockingChecker();
+        HealthCheckCoordinator coordinator = coordinatorWith(checker);
+        engine.state.set(ConnectionState.CONNECTED);
+        onFxAndWait(() -> coordinator.onConnectionStateChanged(ConnectionState.CONNECTED));
+
+        power.sleep();
+        checker.complete(List.of(probe("a", false)));
+        flushFxEvents();
+
+        assertThat(healthState.get()).as("the verdict").isEqualTo(TunnelHealth.CHECKING);
+        assertThat(recovery.retryProperty().get()).as("the restart scheduled").isNull();
+    }
+
+    /** Nor once the machine is awake again: the probe timed out on the sleep in between. */
+    @Test
+    void aProbeThatSpannedASleepGivesNoVerdictOnTheWakeEither() throws Exception {
+        healthSettings(true, new HealthCheckTarget("a", "https://a"));
+        BlockingChecker checker = new BlockingChecker();
+        HealthCheckCoordinator coordinator = coordinatorWith(checker);
+        engine.state.set(ConnectionState.CONNECTED);
+        onFxAndWait(() -> coordinator.onConnectionStateChanged(ConnectionState.CONNECTED));
+
+        power.sleep();
+        power.wakeUnannounced();
+        checker.complete(List.of(probe("a", false)));
+        flushFxEvents();
+
+        assertThat(healthState.get()).as("the verdict").isEqualTo(TunnelHealth.CHECKING);
+        assertThat(recovery.retryProperty().get()).as("the restart scheduled").isNull();
+    }
+
+    /**
+     * The user is back: the tunnel is checked right away, once, and the
+     * restart a failed check asks for starts at the first step. A verdict
+     * from before the sleep counts for nothing, a broken one included: the
+     * fresh check's is published anew, so recovery hears it.
+     */
+    @Test
+    void theWakeChecksOnceRightAwayAndRecoveryStartsOver() throws Exception {
+        healthSettings(true, new HealthCheckTarget("a", "https://a"));
+        CountingChecker checker = new CountingChecker(List.of(probe("a", false)));
+        HealthCheckCoordinator coordinator = coordinatorWith(checker);
+        connectAndCheck(coordinator);
+        assertThat(recovery.retryProperty().get())
+                .as("precondition: a restart pending").isNotNull();
+
+        power.sleep();
+        power.wake();
+        flushFxEvents();   // the wake reaches the FX thread
+        flushFxEvents();   // and so does the probe's answer
+
+        assertThat(checker.calls).as("probes: the connect's, then the wake's").hasValue(2);
+        assertThat(healthState.get()).isEqualTo(TunnelHealth.BROKEN);
+        assertThat(recovery.retryProperty().get())
+                .as("the restart the check on the wake asks for")
+                .isEqualTo(new TunnelRecoveryService.Retry(1, 3600));
+    }
+
+    /** Right after a wake the Wi-Fi is often still joining; the check waits for it. */
+    @Test
+    void theCheckOnTheWakeWaitsForTheNetwork() throws Exception {
+        healthSettings(false, new HealthCheckTarget("a", "https://a"));
+        CountingChecker checker = new CountingChecker(List.of(probe("a", true)));
+        HealthCheckCoordinator coordinator = coordinatorWith(checker);
+        connectAndCheck(coordinator);
+
+        power.sleep();
+        networkUp.set(false);
+        power.wake();
+        flushFxEvents();
+        flushFxEvents();
+
+        assertThat(checker.calls).as("probes with no network yet").hasValue(1);
+        assertThat(summaryLabel.getText()).isEqualTo(I18n.get("dashboard.health.waiting.network"));
+        assertThat(healthState.get())
+                .as("the verdict from before the sleep, while the check waits")
+                .isEqualTo(TunnelHealth.CHECKING);
+
+        networkUp.set(true);
+        Await.until("the check once the network is back", () -> checker.calls.get() == 2,
+                Duration.ofSeconds(10));
+        flushFxEvents();
+        assertThat(healthState.get()).isEqualTo(TunnelHealth.HEALTHY);
+    }
+
+    /** A wake with the tunnel down has nothing to check. */
+    @Test
+    void theWakeChecksNothingWhileDisconnected() throws Exception {
+        healthSettings(false, new HealthCheckTarget("a", "https://a"));
+        CountingChecker checker = new CountingChecker(List.of(probe("a", true)));
+        HealthCheckCoordinator coordinator = coordinatorWith(checker);
+        connectAndCheck(coordinator);
+        disconnect(coordinator);
+
+        power.sleep();
+        power.wake();
+        flushFxEvents();
+        flushFxEvents();
+
+        assertThat(checker.calls).hasValue(1);
+        assertThat(healthState.get()).isEqualTo(TunnelHealth.UNMONITORED);
+    }
+
+    /** Awake, a failed check is published and restarts the tunnel exactly as before. */
+    @Test
+    void awakeAFailedCheckIsPublishedAndRestartsAsBefore() throws Exception {
+        healthSettings(true, new HealthCheckTarget("a", "https://a"));
+        FakeChecker checker = new FakeChecker();
+        checker.results = List.of(probe("a", false));
+
+        connectAndCheck(coordinatorWith(checker));
+
+        assertThat(healthState.get()).isEqualTo(TunnelHealth.BROKEN);
+        assertThat(recovery.retryProperty().get())
+                .isEqualTo(new TunnelRecoveryService.Retry(1, 3600));
+        assertThat(banner.isVisible()).isTrue();
     }
 }
