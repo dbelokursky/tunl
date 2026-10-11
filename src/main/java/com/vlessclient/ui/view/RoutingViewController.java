@@ -437,8 +437,11 @@ public class RoutingViewController {
 
         Optional<ButtonType> result = dialog.showAndWait();
         if (result.isPresent() && result.get() == ButtonType.OK) {
+            // strip(), as the check that enabled OK did: trim() kept an em
+            // or ideographic space, the store refused the value on this
+            // thread, and the rule was lost without a word.
             RoutingRule rule = new RoutingRule(
-                    typeCombo.getValue(), valueField.getText().trim(), actionCombo.getValue());
+                    typeCombo.getValue(), valueField.getText().strip(), actionCombo.getValue());
             routingService.addRule(rule);
             loadRules();
         }
