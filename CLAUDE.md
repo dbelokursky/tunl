@@ -18,7 +18,7 @@ truth read by `pom.xml`, `scripts/bundle-singbox.*` and `SingBoxInstaller`.
 - `./mvnw clean verify` is the gate: Checkstyle at `validate`, ~1350 tests,
   JaCoCo line and branch floors, SpotBugs at `verify`. Run it from a clean
   state before calling anything done, and report failures verbatim. The
-  wrapper pins Maven 3.9.16, which is what CI runs; a local `mvn` of that
+  wrapper pins Maven 3.10.0, which is what CI runs; a local `mvn` of that
   version or newer does the same, and every command below works either way.
   The floors live in the jacoco `check` execution in `pom.xml`, about two
   points under the lowest CI leg, and only go up.
