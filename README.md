@@ -467,7 +467,8 @@ and more.
 - Every mutating call is appended to `logs/mcp-audit.log`.
 - Log lines handed to agents (`get_logs`, the SSE stream) have URLs reduced to
   scheme and host, so a subscription's account token never leaves the app
-  through this door.
+  through this door; so do the subscription URLs and DNS resolver URLs that the
+  read tools report.
 
 ### Enable it
 

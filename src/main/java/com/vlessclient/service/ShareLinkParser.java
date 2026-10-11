@@ -98,12 +98,13 @@ public class ShareLinkParser {
      * went into {@code tunl.log} verbatim on every connect. A fragment holding
      * {@code %0A} forged a line in the file people attach to bug reports, and
      * an unbounded one could be as long as the provider liked. Control
-     * characters become spaces and the result is trimmed and capped.</p>
+     * characters become spaces and the result is trimmed and capped. A backup
+     * being restored and a name an agent gives over MCP go through it too.</p>
      *
      * @param raw the decoded fragment or JSON name, possibly null
      * @return the cleaned name, empty when nothing usable remains
      */
-    static String cleanName(String raw) {
+    public static String cleanName(String raw) {
         if (raw == null) {
             return "";
         }

@@ -50,7 +50,8 @@ import tools.jackson.databind.node.ObjectNode;
 public class SubscriptionService {
 
     private static final Logger log = LoggerFactory.getLogger(SubscriptionService.class);
-    private static final String SUBSCRIPTIONS_FILE = "subscriptions.json";
+    /** The subscription list's file in the data directory, as save failures name it. */
+    public static final String SUBSCRIPTIONS_FILE = "subscriptions.json";
 
     /**
      * Version stream of subscriptions.json: v0 is the pre-envelope bare

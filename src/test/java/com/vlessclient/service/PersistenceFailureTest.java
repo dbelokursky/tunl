@@ -4,13 +4,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.vlessclient.app.I18n;
+import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.service.mcp.DefaultAppControlService;
 import com.vlessclient.service.mcp.McpToolException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.json.JsonMapper;
 
 class PersistenceFailureTest {
     @TempDir Path dir;
@@ -131,5 +134,68 @@ class PersistenceFailureTest {
         control.addServer("vless://test@example.com:443#One", null);
 
         assertThat(new ConfigStore(dir).getServers()).hasSize(1);
+    }
+
+    /**
+     * Every tool was blamed for every file: a routing.json held since startup,
+     * or one failed save of subscriptions.json, failed set_setting and
+     * add_server although what they wrote was saved.
+     */
+    @Test
+    void mcpBlamesAToolOnlyForTheFilesItWrote() throws Exception {
+        ConfigStore store = new ConfigStore(dir);
+        store.getPersistenceState().couldNotOpen("routing.json", "Access denied");
+        store.getPersistenceState().failed("subscriptions.json", () -> { });
+        DefaultAppControlService control = new DefaultAppControlService(store, null, null, null,
+                null, null, new ShareLinkParser(), SingBoxEngine.withoutCore());
+
+        control.setSetting("auto_connect",
+                JsonMapper.builder().build().getNodeFactory().booleanNode(true));
+        String id = control.addServer("vless://test@example.com:443#One", null).id();
+        control.selectServer(id);
+
+        ConfigStore restored = new ConfigStore(dir);
+        assertThat(restored.getSettings().isAutoConnect()).isTrue();
+        assertThat(restored.getServerById(id).orElseThrow().isActive()).isTrue();
+        assertThatThrownBy(control::retrySaving).as("retry_saving still names them all")
+                .isInstanceOf(McpToolException.class).hasMessageContaining("subscriptions.json");
+    }
+
+    /**
+     * connect checked the saves before it tried, so a file it had not written,
+     * or a pick it could not save, kept the tunnel down until a restart, while
+     * the Dashboard connected at once.
+     */
+    @Test
+    void mcpConnectIsTriedWhateverCouldNotBeSaved() throws Exception {
+        ConfigStore store = new ConfigStore(dir);
+        ServerConfig first = new ServerConfig();
+        first.setName("Tokyo");
+        store.addServer(first);
+        store.setActiveServer(first.getId());
+        ServerConfig server = new ServerConfig();
+        server.setName("Osaka");
+        store.addServer(server);
+        store.getPersistenceState().couldNotOpen("routing.json", "Access denied");
+        Files.delete(dir.resolve("servers.json"));
+        block("servers.json");
+        AtomicInteger connects = new AtomicInteger();
+        ConnectionService connection = new ConnectionService(null, null, null,
+                SingBoxEngine.withoutCore()) {
+            @Override
+            public ConnectAttempt connect(ProxyMode modeOverride) {
+                connects.incrementAndGet();
+                return new ConnectAttempt(Outcome.STARTED, server);
+            }
+        };
+        DefaultAppControlService control = new DefaultAppControlService(store, null, null, null,
+                connection, null, new ShareLinkParser(), new SingBoxEngine(dir.resolve("core")));
+
+        control.connect(server.getId(), null, false);
+
+        assertThat(connects).hasValue(1);
+        assertThat(store.getServerById(server.getId()).orElseThrow().isActive()).isTrue();
+        assertThat(store.getPersistenceState().failedFiles()).as("the pick that was not saved")
+                .containsExactly("servers.json");
     }
 }

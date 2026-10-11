@@ -71,6 +71,8 @@ class DefaultAppControlServiceTest {
         private ConnectAttempt attempt;
         private IOException failure;
         private int disconnects;
+        /** The mode a core runs in, as the real service reports it; null when none runs. */
+        private ProxyMode running;
 
         RecordingConnectionService(ServerConfig server) {
             super(null, null, null, SingBoxEngine.withoutCore());
@@ -83,7 +85,12 @@ class DefaultAppControlServiceTest {
             if (failure != null) {
                 throw failure;
             }
-            return attempt;
+            return running != null ? new ConnectAttempt(Outcome.ALREADY_RUNNING, null) : attempt;
+        }
+
+        @Override
+        public Optional<ProxyMode> runningMode() {
+            return Optional.ofNullable(running);
         }
 
         @Override
@@ -142,14 +149,95 @@ class DefaultAppControlServiceTest {
         ServerConfig active = store.getServerById("srv-1").orElseThrow();
         RecordingConnectionService connection = new RecordingConnectionService(active);
         connection.attempt =
-                new ConnectionService.ConnectAttempt(ConnectionService.Outcome.ALREADY_RUNNING,
+                new ConnectionService.ConnectAttempt(ConnectionService.Outcome.CANCELLED,
                         active);
         DefaultAppControlService svc = serviceWith(connection,
                 new SingBoxEngine(tempDir.resolve("sing-box")));
 
         assertThatThrownBy(() -> svc.connect(null, null, false))
                 .isInstanceOf(McpToolException.class)
-                .hasMessageContaining("already running");
+                .hasMessageContaining("cancelled");
+    }
+
+    /**
+     * A connect while the tunnel was up saved the server and the mode it was
+     * given, then said "sing-box is already running". The Dashboard had
+     * meanwhile switched the live tunnel to that server, and a mode alone was
+     * saved for a core that kept running in the old one. Nothing is changed
+     * now, and the agent is told how to get what it asked for.
+     */
+    @Test
+    void connect_whileATunnelRuns_anotherServerOrModeIsRefusedBeforeAnythingChanges() {
+        store.addServer(server("srv-2", "Osaka"));
+        store.setActiveServer("srv-1");
+        RecordingConnectionService connection = new RecordingConnectionService(null);
+        connection.running = ProxyMode.SYSTEM_PROXY;
+        DefaultAppControlService svc = serviceWith(connection,
+                new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        assertThatThrownBy(() -> svc.connect("srv-2", null, false))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining("select_server");
+        assertThatThrownBy(() -> svc.connect("srv-2", "tun", true))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining("disconnect");
+        assertThatThrownBy(() -> svc.connect(null, "tun", true))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining("disconnect");
+
+        assertThat(connection.modes).as("no connect was tried").isEmpty();
+        ConfigStore reloaded = new ConfigStore(tempDir);
+        assertThat(reloaded.getServerById("srv-1").orElseThrow().isActive()).isTrue();
+        assertThat(store.getServerById("srv-1").orElseThrow().isActive()).isTrue();
+        assertThat(reloaded.getSettings().getProxyMode()).isEqualTo(ProxyMode.SYSTEM_PROXY);
+    }
+
+    /**
+     * Connecting what is already connected is done: an agent asking twice,
+     * or asking after the user connected, was told it had failed.
+     */
+    @Test
+    void connect_whileATunnelRuns_withNothingToChange_reportsTheRunningTunnel()
+            throws Exception {
+        store.setActiveServer("srv-1");
+        RecordingConnectionService connection = new RecordingConnectionService(null);
+        connection.running = ProxyMode.TUN;
+        DefaultAppControlService svc = serviceWith(connection,
+                new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        StatusInfo plain = svc.connect(null, null, false);
+        StatusInfo same = svc.connect("srv-1", "tun", false);
+
+        assertThat(plain.activeServerId()).isEqualTo("srv-1");
+        assertThat(plain.runningProxyMode()).isEqualTo("tun");
+        assertThat(same.activeServerId()).isEqualTo("srv-1");
+        assertThat(connection.modes).as("nothing to start").isEmpty();
+    }
+
+    /** A core another request started between the check and the start is the same answer. */
+    @Test
+    void connect_aCoreStartedMeanwhileIsTheRunningTunnel() throws Exception {
+        ServerConfig active = store.getServerById("srv-1").orElseThrow();
+        RecordingConnectionService connection = new RecordingConnectionService(active);
+        connection.attempt =
+                new ConnectionService.ConnectAttempt(ConnectionService.Outcome.ALREADY_RUNNING,
+                        active);
+        DefaultAppControlService svc = serviceWith(connection,
+                new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        assertThat(svc.connect(null, null, false).activeServerId()).isEqualTo("srv-1");
+    }
+
+    @Test
+    void connect_anUnknownServerIsRefusedWhileATunnelRuns() {
+        RecordingConnectionService connection = new RecordingConnectionService(null);
+        connection.running = ProxyMode.SYSTEM_PROXY;
+        DefaultAppControlService svc = serviceWith(connection,
+                new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        assertThatThrownBy(() -> svc.connect("nope", null, false))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining("No server with id: nope");
     }
 
     @Test
@@ -448,13 +536,14 @@ class DefaultAppControlServiceTest {
     void measureLatency_tellsANotMeasuredServerFromAnUnreachableOne() throws Exception {
         store.addServer(server("srv-2", "Hysteria"));
         store.addServer(server("srv-3", "Down"));
+        Map<String, LatencyTester.Result> results = Map.of(
+                "srv-1", new LatencyTester.Result(42, true),
+                "srv-2", LatencyTester.Result.notMeasured(),
+                "srv-3", new LatencyTester.Result(-1, true));
         LatencyTester tester = new LatencyTester() {
             @Override
-            public CompletableFuture<Map<String, Result>> testAll(List<ServerConfig> servers) {
-                return CompletableFuture.completedFuture(Map.of(
-                        "srv-1", new Result(42, true),
-                        "srv-2", Result.notMeasured(),
-                        "srv-3", new Result(-1, true)));
+            public CompletableFuture<Result> measure(ServerConfig server) {
+                return CompletableFuture.completedFuture(results.get(server.getId()));
             }
         };
         DefaultAppControlService svc = new DefaultAppControlService(store, null, null, null,
@@ -524,5 +613,218 @@ class DefaultAppControlServiceTest {
 
         assertThat(info.theme()).as("the legacy name, as startup reads it").isEqualTo("auto");
         assertThat(store.getSettings().getDnsStrategy()).isEqualTo("ipv4_only");
+    }
+
+    /**
+     * Ten probes run at a time, each of up to 5-7 s, and one fixed budget of
+     * 15 s ran out at a few dozen blocked servers: the call failed with
+     * "Latency test failed: null" and dropped the servers that had answered.
+     */
+    @Test
+    void measureLatency_aListThatOutlastsTheDeadlineReportsWhatCameIn() throws Exception {
+        store.addServer(server("srv-2", "Blocked"));
+        CompletableFuture<LatencyTester.Result> never = new CompletableFuture<>();
+        LatencyTester tester = new LatencyTester() {
+            @Override
+            public CompletableFuture<Result> measure(ServerConfig server) {
+                return "srv-1".equals(server.getId())
+                        ? CompletableFuture.completedFuture(new Result(42, true)) : never;
+            }
+        };
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, null, null,
+                null, tester, null, new SingBoxEngine(tempDir.resolve("sing-box")));
+        svc.setLatencyDeadline(java.time.Duration.ofMillis(200));
+
+        assertThat(svc.measureLatency(null))
+                .extracting(LatencyResult::serverId, LatencyResult::latencyMs,
+                        LatencyResult::outcome)
+                .containsExactly(
+                        tuple("srv-1", 42L, LatencyResult.MEASURED),
+                        tuple("srv-2", -1L, LatencyResult.TIMED_OUT));
+        assertThat(never).as("not left queued on the tester's pool").isCancelled();
+    }
+
+    @Test
+    void measureLatency_theDeadlineGrowsWithTheList() {
+        assertThat(DefaultAppControlService.latencyDeadline(1))
+                .isEqualTo(java.time.Duration.ofSeconds(15));
+        assertThat(DefaultAppControlService.latencyDeadline(40))
+                .isGreaterThanOrEqualTo(java.time.Duration.ofSeconds(4 * 7));
+        assertThat(DefaultAppControlService.latencyDeadline(10_000))
+                .isEqualTo(java.time.Duration.ofSeconds(60));
+    }
+
+    /**
+     * A link's own name is cleaned of control characters and capped, and so
+     * is a restored backup's; the name an agent gave went in as it came, and
+     * every connect wrote it into tunl.log, where a newline forged a line.
+     */
+    @Test
+    void addServerAndUpdateServer_cleanTheNameAsAnImportedLinkWould() throws Exception {
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, null, null,
+                null, null, new ShareLinkParser(), new SingBoxEngine(tempDir.resolve("sing-box")));
+        String forged = "Tokyo\n2026-10-11 09:00:00.000 [main] INFO  c.v.service.UpdateManager"
+                + " - Update verified";
+
+        ServerSummary added = svc.addServer("vless://test-uuid@example.com:443#One", forged);
+        ServerSummary renamed = svc.updateServer("srv-1", "x".repeat(10_000), null);
+
+        assertThat(added.name()).doesNotContain("\n").startsWith("Tokyo 2026-10-11");
+        assertThat(new ConfigStore(tempDir).getServerById(added.id()).orElseThrow().getName())
+                .doesNotContain("\n");
+        assertThat(renamed.name()).hasSize(200);
+        assertThatThrownBy(() -> svc.updateServer("srv-1", "\u0000\u0007", null))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining("name");
+        assertThat(store.getServerById("srv-1").orElseThrow().getName()).hasSize(200);
+    }
+
+    /**
+     * Under a Turkish locale "INFO" lowers to "ınfo", with a dotless i, and
+     * the filter "info" matched none of the core's INFO lines.
+     */
+    @Test
+    void getLogs_filtersRegardlessOfTheMachinesLocale() {
+        SingBoxEngine engine = new SingBoxEngine(tempDir.resolve("sing-box"));
+        com.vlessclient.service.FxExecutor.run(() -> engine.getLogLines().addAll(
+                "+0300 2026-10-11 09:00:00 INFO router: started",
+                "+0300 2026-10-11 09:00:01 WARN dns: slow"));
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, null, null,
+                null, null, null, engine);
+        java.util.Locale before = java.util.Locale.getDefault();
+        java.util.Locale.setDefault(java.util.Locale.forLanguageTag("tr-TR"));
+        try {
+            assertThat(svc.getLogs(0, "info")).singleElement().asString().contains("router");
+            assertThat(svc.getLogs(0, "Started")).hasSize(1);
+        } finally {
+            java.util.Locale.setDefault(before);
+        }
+    }
+
+    /**
+     * The subscription list belongs to the FX thread, which adds to it while
+     * the user works; streamed from an HTTP worker it could throw a
+     * ConcurrentModificationException, as list_subscriptions already avoided.
+     */
+    @Test
+    void refreshSubscription_readsTheListOnTheFxThread() throws Exception {
+        TestSubscriptionServices.Scripted subscriptions =
+                TestSubscriptionServices.scripted(tempDir.resolve("subs"));
+        subscriptions.addSubscription("Provider", "https://sub.example.com/s");
+        Subscription sub = subscriptions.getSubscriptions().getFirst();
+        List<Boolean> readOnFx = new java.util.concurrent.CopyOnWriteArrayList<>();
+        subscriptions.onListRead(
+                () -> readOnFx.add(javafx.application.Platform.isFxApplicationThread()));
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, subscriptions,
+                null, null, null, null, new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        svc.refreshSubscription(sub.getId());
+
+        assertThat(readOnFx).isNotEmpty().containsOnly(true);
+    }
+
+    @Test
+    void updateServer_renamesInPlace() throws Exception {
+        ServerSummary renamed = service.updateServer("srv-1", "Kyoto", null);
+
+        assertThat(renamed.name()).isEqualTo("Kyoto");
+        assertThat(renamed.address()).isEqualTo("example.com");
+        assertThat(new ConfigStore(tempDir).getServerById("srv-1").orElseThrow().getName())
+                .isEqualTo("Kyoto");
+    }
+
+    /**
+     * A new link replaced the server with a fresh one, which kept the id and
+     * the active flag but not the subscription it came from: the stamp the
+     * subscription recovers its members by after a crash between two saves.
+     * An edit in the server form keeps it.
+     */
+    @Test
+    void updateServer_aNewLinkKeepsTheIdThePickAndTheSubscription() throws Exception {
+        ServerConfig existing = store.getServerById("srv-1").orElseThrow();
+        existing.setSubscriptionId("sub-1");
+        store.updateServer(existing);
+        store.setActiveServer("srv-1");
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, null, null,
+                null, null, new ShareLinkParser(), new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        ServerSummary relinked = svc.updateServer("srv-1", null,
+                "vless://test-uuid@relinked.example.net:8443#FromLink");
+
+        assertThat(relinked.id()).isEqualTo("srv-1");
+        assertThat(relinked.active()).isTrue();
+        assertThat(relinked.name()).as("the name it had").isEqualTo("Tokyo");
+        assertThat(relinked.address()).isEqualTo("relinked.example.net");
+        ServerConfig stored = new ConfigStore(tempDir).getServerById("srv-1").orElseThrow();
+        assertThat(stored.getPort()).isEqualTo(8443);
+        assertThat(stored.getSubscriptionId()).isEqualTo("sub-1");
+    }
+
+    @Test
+    void updateServer_unknownIdOrBadLink_isRejected() {
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, null, null,
+                null, null, new ShareLinkParser(), new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        assertThatThrownBy(() -> svc.updateServer("nope", "Kyoto", null))
+                .isInstanceOf(McpToolException.class).hasMessageContaining("nope");
+        assertThatThrownBy(() -> svc.updateServer("srv-1", null, "not-a-link"))
+                .isInstanceOf(McpToolException.class);
+        assertThat(store.getServerById("srv-1").orElseThrow().getAddress())
+                .isEqualTo("example.com");
+    }
+
+    @Test
+    void removeRoutingRule_removesAPresentRuleAndRefusesAnUnknownOne() throws Exception {
+        RoutingService routing = com.vlessclient.service.TestRoutingServices.at(
+                tempDir.resolve("routing"));
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, null,
+                routing, null, null, new ShareLinkParser(),
+                new SingBoxEngine(tempDir.resolve("sing-box")));
+        String ruleId = svc.addRoutingRule("domain_suffix", "example.org", "direct")
+                .rules().getFirst().id();
+
+        assertThatThrownBy(() -> svc.removeRoutingRule("nope"))
+                .isInstanceOf(McpToolException.class).hasMessageContaining("nope");
+        assertThat(svc.removeRoutingRule(ruleId).rules()).isEmpty();
+        assertThat(routing.getConfig().getRules()).isEmpty();
+    }
+
+    @Test
+    void setProxyMode_persistsTheMode() throws Exception {
+        SettingsInfo info = service.setProxyMode("tun");
+
+        assertThat(info.proxyMode()).isEqualTo("tun");
+        assertThat(new ConfigStore(tempDir).getSettings().getProxyMode())
+                .isEqualTo(ProxyMode.TUN);
+        assertThatThrownBy(() -> service.setProxyMode("socks"))
+                .isInstanceOf(McpToolException.class);
+    }
+
+    /**
+     * A private DNS-over-HTTPS resolver keeps the account in its path, which
+     * the diagnostics bundle redacts; get_settings, which every agent can call
+     * with changes off, returned it whole.
+     */
+    @Test
+    void getSettings_keepsTheAccountInAResolversPathFromAgents() {
+        store.getSettings().setProxyDns("https://dns.nextdns.io/ab12cd");
+        store.getSettings().setDirectDns("https://d.adguard-dns.com/dns-query/SECRET-TOKEN");
+
+        SettingsInfo info = service.getSettings();
+
+        assertThat(info.proxyDns()).startsWith("https://dns.nextdns.io").doesNotContain("ab12cd");
+        assertThat(info.directDns()).startsWith("https://d.adguard-dns.com")
+                .doesNotContain("SECRET-TOKEN");
+    }
+
+    @Test
+    void getSettings_showsAPlainResolverAddressAsItIs() {
+        store.getSettings().setProxyDns("8.8.8.8:53");
+        store.getSettings().setDirectDns(com.vlessclient.model.AppSettings.SYSTEM_DNS);
+
+        SettingsInfo info = service.getSettings();
+
+        assertThat(info.proxyDns()).isEqualTo("8.8.8.8:53");
+        assertThat(info.directDns()).isEqualTo(com.vlessclient.model.AppSettings.SYSTEM_DNS);
     }
 }
