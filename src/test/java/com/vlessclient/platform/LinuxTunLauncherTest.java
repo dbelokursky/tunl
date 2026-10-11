@@ -237,6 +237,10 @@ class LinuxTunLauncherTest {
      */
     @Test
     void aCoreThisUserCannotRestrictIsNeverGrantedTheCapability(@TempDir Path dir) {
+        // A file system with no POSIX permissions has nothing to restrict, and
+        // this launcher only ever runs on Linux.
+        Assumptions.assumeTrue(
+                FileSystems.getDefault().supportedFileAttributeViews().contains("posix"));
         Path notOurs = dir.resolve("missing/sing-box");
         FakeRunner runner = new FakeRunner(cmd -> new CommandRunner.Result(0, ""));
         LinuxTunLauncher launcher = new LinuxTunLauncher(runner, "elevator-that-must-not-launch");
