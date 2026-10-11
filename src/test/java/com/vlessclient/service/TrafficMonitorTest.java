@@ -202,6 +202,40 @@ class TrafficMonitorTest {
         assertThat(monitor.downloadSpeedProperty().get()).isZero();
     }
 
+    /**
+     * The totals are what the Dashboard reads as "N this session" and an
+     * agent's get_status as the bytes of this session. The monitor is one
+     * for the whole run and never reset them, so the second session opened
+     * on the first one's gigabytes and kept counting from there.
+     */
+    @Test
+    void eachStreamCountsItsSessionFromZero() throws Exception {
+        TrafficMonitor monitor = new TrafficMonitor();
+        try {
+            monitor.processTrafficLine("{\"up\":700000000,\"down\":3000000000}");
+            awaitFx();
+            monitor.stop();
+
+            // Nothing listens there: the stream retries until it is stopped.
+            monitor.start(closedPort(), "");
+            monitor.processTrafficLine("{\"up\":4000,\"down\":8000}");
+            awaitFx();
+
+            assertThat(monitor.totalUploadProperty().get()).isEqualTo(4000);
+            assertThat(monitor.totalDownloadProperty().get()).isEqualTo(8000);
+        } finally {
+            monitor.shutdown();
+        }
+    }
+
+    /** A loopback port nothing listens on. */
+    private static int closedPort() throws java.io.IOException {
+        try (java.net.ServerSocket socket = new java.net.ServerSocket(
+                0, 1, java.net.InetAddress.getLoopbackAddress())) {
+            return socket.getLocalPort();
+        }
+    }
+
     /** Lets the pending Platform.runLater work land. */
     private static void awaitFx() throws InterruptedException {
         CountDownLatch latch = new CountDownLatch(1);
