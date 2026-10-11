@@ -34,6 +34,7 @@ import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -235,6 +236,29 @@ public class DashboardRunningCoreTest extends ApplicationTest {
         assertThat(connect.getText()).isEqualTo(I18n.get("button.disconnect"));
         assertThat(connect.isDisabled()).as("Disconnect, with no server left in the list")
                 .isFalse();
+    }
+
+    /**
+     * Checks switched on in Settings, or by an agent's set_setting, while a
+     * tunnel was up never started until the next connect or wake: the tray
+     * showed the tunnel unmonitored, and recovery never heard of a broken one.
+     */
+    @Test
+    void checksSwitchedOnWhileConnectedStartAtOnce() {
+        settings.setHealthCheckEnabled(false);
+        service.applied = tokyo.getId();
+        interact(() -> engine.state.set(ConnectionState.CONNECTED));
+        assertThat(checker.batches.get()).as("probes with the checks off").isZero();
+
+        settings.setHealthCheckEnabled(true);
+        // Off the FX thread, as an agent's set_setting saves.
+        store.saveSettings(settings);
+
+        Await.until("a probe of the running tunnel", () -> checker.batches.get() == 1,
+                Duration.ofSeconds(5));
+        WaitForAsyncUtils.waitForFxEvents();
+        assertThat(lookup("#healthCard").queryAs(VBox.class).isVisible())
+                .as("the health card").isTrue();
     }
 
     /**

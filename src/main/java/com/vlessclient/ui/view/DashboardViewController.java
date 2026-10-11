@@ -13,6 +13,7 @@ import com.vlessclient.platform.SystemProxySupport;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.CountryResolver;
+import com.vlessclient.service.FxExecutor;
 import com.vlessclient.service.LatencyTester;
 import com.vlessclient.service.ProxyGroupMonitor;
 import com.vlessclient.service.ServiceReachabilityChecker;
@@ -315,6 +316,12 @@ public class DashboardViewController implements ViewShownAware {
                         cancelReconnectButton),
                 reachabilityChecker, healthState, singBoxEngine,
                 connectionService() != null ? connectionService().getRecoveryService() : null);
+        // Settings and an agent's set_setting only save the checks' settings,
+        // which the loop read at its next turn: switched on while connected,
+        // they had none coming. Saves come from any thread.
+        ServiceLocator.find(ConfigStore.class).ifPresent(configStore ->
+                configStore.addSettingsListener(saved ->
+                        FxExecutor.later(healthChecks::onSettingsChanged)));
 
         // A verdict arriving does not change the process state, so the hero
         // card has to be repainted on its own signal — otherwise a tunnel that

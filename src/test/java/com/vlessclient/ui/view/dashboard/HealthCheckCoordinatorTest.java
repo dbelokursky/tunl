@@ -1094,6 +1094,41 @@ class HealthCheckCoordinatorTest {
         assertWait(coordinator, 5);
     }
 
+    /**
+     * Settings applied to a running tunnel: an interval changed in Settings
+     * or by an agent waited out the wait it was meant to change, and checks
+     * switched off went on reporting the last verdict.
+     */
+    @Test
+    void savedSettingsApplyToTheRunningChecks() throws Exception {
+        AppSettings settings = healthSettings(false, new HealthCheckTarget("a", "https://a"));
+        FakeChecker checker = new FakeChecker();
+        checker.results = List.of(probe("a", true));
+        HealthCheckCoordinator coordinator = coordinatorWith(checker);
+        connectAndCheck(coordinator);
+        assertWait(coordinator, 3600);
+
+        onFxAndWait(coordinator::onSettingsChanged);
+        assertWait(coordinator, 3600);
+        assertThat(checker.ports).as("a save that changed nothing probes nothing").hasSize(1);
+
+        settings.setHealthCheckIntervalSeconds(10);
+        onFxAndWait(coordinator::onSettingsChanged);
+        assertWait(coordinator, 10);
+
+        settings.setHealthCheckEnabled(false);
+        onFxAndWait(coordinator::onSettingsChanged);
+        assertWait(coordinator, -1);
+        assertThat(healthCard.isVisible()).as("the card of checks switched off").isFalse();
+        assertThat(healthState.get()).isEqualTo(TunnelHealth.UNMONITORED);
+
+        settings.setHealthCheckEnabled(true);
+        onFxAndWait(coordinator::onSettingsChanged);
+        flushFxEvents();
+        assertThat(checker.ports).as("checks switched back on probe at once").hasSize(2);
+        assertThat(healthState.get()).isEqualTo(TunnelHealth.HEALTHY);
+    }
+
     private static void runTheScheduledCheck(HealthCheckCoordinator coordinator)
             throws InterruptedException {
         onFxAndWait(coordinator::runScheduledCheckNow);
