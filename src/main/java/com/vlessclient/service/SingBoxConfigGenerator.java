@@ -585,8 +585,14 @@ public class SingBoxConfigGenerator {
      * such rule gives them an address, and rules above it still match by name
      * without one. It names no server, so the DNS rules pick one: the system
      * resolver for LAN names, proxy DNS for the rest, so a name bound for the
-     * tunnel is not asked of the local network. The direct outbound still
-     * resolves a name itself, so bypassed traffic keeps a nearby CDN node.
+     * tunnel is not asked of the local network.
+     *
+     * <p>The lookup is not free. Every outbound below it dials the address it
+     * found, not the name: this said the direct outbound still resolved names
+     * itself, but the core hands each outbound the looked-up addresses, so the
+     * proxy server receives a bare IP, and routing by domain on the server
+     * (to WARP, say) no longer matches. Each new name also costs a DNS round
+     * trip through the tunnel before the connection starts.</p>
      *
      * <p>A name the chosen resolver cannot answer is dropped at that rule; it
      * used to reach the proxy, which could not resolve it either. TUN mode
