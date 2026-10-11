@@ -137,11 +137,18 @@ public class RoutingViewController {
         });
     }
 
-    /** Every ISO country as "code — name", in the language the app is in. */
+    /**
+     * Every country that can be bypassed as "code — name", in the language the
+     * app is in: the ISO countries sing-geoip has a list for. It offered the
+     * rest too, and one of those picked stopped every connect.
+     */
     private static List<String> countryCatalogue() {
         List<String> catalog = new ArrayList<>();
         for (String iso : java.util.Locale.getISOCountries()) {
-            catalog.add(catalogEntryFor(iso.toLowerCase(java.util.Locale.ROOT)));
+            String code = iso.toLowerCase(java.util.Locale.ROOT);
+            if (RoutingConfig.isBypassCountry(code)) {
+                catalog.add(catalogEntryFor(code));
+            }
         }
         catalog.sort(String.CASE_INSENSITIVE_ORDER);
         return catalog;
