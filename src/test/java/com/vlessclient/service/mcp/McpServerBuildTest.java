@@ -70,11 +70,13 @@ class McpServerBuildTest {
                 "add_routing_rule", "remove_routing_rule");
     }
 
+    /**
+     * The list is the same with changes off: it is declared as one that never
+     * changes, and an agent that listed it before the user allowed changes
+     * kept a list without them until its session restarted.
+     */
     @Test
-    void buildServer_hidesMutationToolsWhenDisabled() {
-        control.settings = new SettingsInfo("system", "en", false, "system_proxy",
-                1080, 1081, 9090, "d", "d", "prefer_ipv4", "utun99", "info",
-                true, true, 55555, false, "single", true, "172.19.0.1/30", false);
+    void buildServer_listsMutationToolsWhenDisabled() {
         // The allowMutations supplier reads ConfigStore settings, so flip that store's flag.
         ConfigStore store = new ConfigStore(tempDir);
         store.getSettings().setMcpAllowMutations(false);
@@ -84,27 +86,46 @@ class McpServerBuildTest {
                 .path("result").path("tools");
         List<String> names = new ArrayList<>();
         tools.forEach(t -> names.add(t.path("name").asString()));
-        assertThat(names).contains("get_status").doesNotContain("connect", "add_server",
-                "delete_server");
+        assertThat(names).contains("get_status", "connect", "add_server", "delete_server");
     }
 
     /**
      * An agent can be steered by what it reads, and the change tools let it add
      * a server and send traffic through it, in TUN mode too: the confirm it has
-     * to pass is one it supplies itself. A new install therefore offers only the
-     * read tools until the user allows configuration changes.
+     * to pass is one it supplies itself. A new install therefore refuses every
+     * change until the user allows configuration changes.
      */
     @Test
-    void buildServer_offersOnlyReadToolsUntilTheUserAllowsChanges() {
+    void buildServer_refusesEveryChangeUntilTheUserAllowsChanges() {
         McpServerService fresh = new McpServerService(
                 new ConfigStore(tempDir.resolve("fresh-install")), control);
+        McpServer server = fresh.buildServer();
 
-        JsonNode tools = call(fresh.buildServer(), "tools/list", null)
-                .path("result").path("tools");
-        List<String> names = new ArrayList<>();
-        tools.forEach(t -> names.add(t.path("name").asString()));
-        assertThat(names).contains("get_status", "list_servers")
-                .doesNotContain("connect", "add_server", "set_setting", "delete_server");
+        ObjectNode link = MAPPER.createObjectNode().put("shareLink", "vless://u@h.example:1");
+        ObjectNode setting = MAPPER.createObjectNode().put("key", "auto_connect")
+                .put("value", true);
+        ObjectNode delete = MAPPER.createObjectNode().put("id", "srv-1").put("confirm", true);
+        for (JsonNode result : List.of(toolCall(server, "connect", null),
+                toolCall(server, "add_server", link), toolCall(server, "set_setting", setting),
+                toolCall(server, "delete_server", delete))) {
+            assertThat(result.path("result").path("isError").asBoolean()).isTrue();
+            assertThat(result.path("result").path("content").get(0).path("text").asString())
+                    .contains("mcp_allow_mutations");
+        }
+        assertThat(toolCall(server, "get_status", null).path("result").path("isError")
+                .asBoolean()).isFalse();
+        assertThat(control.status.proxyMode()).as("connect never ran").isEqualTo("tun");
+        assertThat(control.lastAddedShareLink).isNull();
+        assertThat(control.lastSetSettingKey).isNull();
+        assertThat(control.lastDeletedServerId).isNull();
+    }
+
+    @Test
+    void buildServer_takesTheLogLevelItAdvertises() {
+        JsonNode response = call(service.buildServer(), "logging/setLevel",
+                MAPPER.createObjectNode().put("level", "error"));
+
+        assertThat(response.path("result").isObject()).as(response.toString()).isTrue();
     }
 
     @Test

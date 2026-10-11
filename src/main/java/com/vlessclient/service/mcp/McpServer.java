@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
@@ -19,10 +20,11 @@ import tools.jackson.databind.node.ObjectNode;
  *
  * <p>Given a single parsed JSON-RPC message (or a batch array), it dispatches
  * the MCP methods this client needs — {@code initialize}, {@code ping},
- * {@code tools/list}, {@code tools/call}, plus empty {@code resources/list} and
- * {@code prompts/list} so probing clients don't choke — and returns the response
- * node, or {@code null} for notification-only input (which the transport answers
- * with {@code 202 Accepted}).</p>
+ * {@code tools/list}, {@code tools/call}, the resources, {@code logging/setLevel}
+ * where logging is advertised, plus an empty {@code prompts/list} so probing
+ * clients don't choke — and returns the response node, or {@code null} for
+ * notification-only input (which the transport answers with
+ * {@code 202 Accepted}).</p>
  *
  * <p>Kept free of any HTTP concern so it can be unit-tested by feeding JSON
  * straight to {@link #handle(JsonNode)}.</p>
@@ -33,6 +35,13 @@ public class McpServer {
 
     /** MCP protocol revision this server implements. */
     static final String PROTOCOL_VERSION = "2025-06-18";
+
+    /**
+     * The revisions a client may ask for and get. The methods and results
+     * this server uses read the same in each; the later ones only add.
+     */
+    private static final Set<String> SUPPORTED_PROTOCOL_VERSIONS =
+            Set.of("2024-11-05", "2025-03-26", PROTOCOL_VERSION);
     private static final String JSONRPC = "2.0";
 
     // JSON-RPC standard error codes.
@@ -57,6 +66,7 @@ public class McpServer {
     private final Map<String, McpResource> resources = new LinkedHashMap<>();
     private McpAuditLog auditLog = McpAuditLog.NOOP;
     private boolean loggingCapability;
+    private Consumer<String> logLevelListener = level -> { };
 
     /**
      * Creates a server advertising the given identity and mutation policy.
@@ -95,6 +105,14 @@ public class McpServer {
     }
 
     /**
+     * Sets where {@code logging/setLevel} sends the level an agent asked for:
+     * one of {@link McpNotifier#LEVELS}, checked before it is passed on.
+     */
+    public void setLogLevelListener(Consumer<String> listener) {
+        this.logLevelListener = listener != null ? listener : level -> { };
+    }
+
+    /**
      * Handles one JSON-RPC message or a batch.
      *
      * @param message the parsed request (object) or batch (array)
@@ -130,7 +148,14 @@ public class McpServer {
         String method = methodNode.asString();
         ObjectNode params = message.get("params") instanceof ObjectNode p
                 ? p : mapper.createObjectNode();
+        JsonNode response = dispatch(method, idNode, params);
+        // A message without an id is a notification, which JSON-RPC never
+        // answers, whatever its method: a tools/call sent as one was run and
+        // then answered, with "id": null.
+        return isNotification ? null : response;
+    }
 
+    private JsonNode dispatch(String method, JsonNode idNode, ObjectNode params) {
         try {
             switch (method) {
                 case "initialize" -> {
@@ -157,13 +182,18 @@ public class McpServer {
                 case "prompts/list" -> {
                     return result(idNode, arrayResult("prompts"));
                 }
+                case "logging/setLevel" -> {
+                    // Advertising logging promises this method, which was
+                    // missing: a client that used it got "Unknown method".
+                    return loggingCapability ? result(idNode, setLogLevel(params))
+                            : error(idNode, METHOD_NOT_FOUND, "Unknown method: " + method);
+                }
                 default -> {
                     if (method.startsWith("notifications/")) {
                         // Client notifications (initialized, cancelled, ...): no reply.
                         return null;
                     }
-                    return isNotification ? null
-                            : error(idNode, METHOD_NOT_FOUND, "Unknown method: " + method);
+                    return error(idNode, METHOD_NOT_FOUND, "Unknown method: " + method);
                 }
             }
         } catch (IllegalArgumentException e) {
@@ -176,12 +206,18 @@ public class McpServer {
 
     private ObjectNode initializeResult(ObjectNode params) {
         ObjectNode res = mapper.createObjectNode();
+        // The version asked for when this server speaks it, and its own
+        // otherwise, as the lifecycle says: whatever string the client sent
+        // was echoed, versions this server never implemented included.
         JsonNode requested = params.get("protocolVersion");
         res.put("protocolVersion",
                 requested != null && requested.isString()
+                        && SUPPORTED_PROTOCOL_VERSIONS.contains(requested.asString())
                         ? requested.asString() : PROTOCOL_VERSION);
 
         ObjectNode capabilities = mapper.createObjectNode();
+        // True to its word: the list is the same whether or not changes are
+        // allowed, and a call says when they are not (see toolsList).
         capabilities.set("tools", mapper.createObjectNode().put("listChanged", false));
         if (!resources.isEmpty()) {
             ObjectNode resourceCaps = mapper.createObjectNode();
@@ -201,14 +237,17 @@ public class McpServer {
         return res;
     }
 
+    /**
+     * Every tool, whether or not changes are allowed. The change tools were
+     * left out while they were off, under a list declared as one that never
+     * changes and with no notice when it did: an agent that listed the tools
+     * before the user allowed changes had no connect until its session
+     * restarted. callTool refuses them while changes are off.
+     */
     private ObjectNode toolsList() {
         ObjectNode res = mapper.createObjectNode();
         ArrayNode arr = res.putArray("tools");
-        boolean mutationsOn = allowMutations.getAsBoolean();
         for (McpTool tool : tools.values()) {
-            if (tool.mutating() && !mutationsOn) {
-                continue;
-            }
             ObjectNode t = mapper.createObjectNode();
             t.put("name", tool.name());
             t.put("description", tool.description());
@@ -286,7 +325,29 @@ public class McpServer {
                 auditLog.record(toolName, auditArgs(arguments), true, e.getMessage());
             }
             return toolError(e.getMessage());
+        } catch (RuntimeException e) {
+            // A failure of the tool, so a tool error, audited like any other.
+            // It came back as a JSON-RPC protocol error and left no line in
+            // the audit log: a connect interrupted while it read the status
+            // of the core it had just started left no record that it ran.
+            log.warn("MCP tool {} failed", toolName, e);
+            String message = Redact.urlsIn(e.getMessage() != null && !e.getMessage().isBlank()
+                    ? e.getMessage() : e.getClass().getSimpleName());
+            if (tool.mutating()) {
+                auditLog.record(toolName, auditArgs(arguments), true, message);
+            }
+            return toolError(message);
         }
+    }
+
+    private ObjectNode setLogLevel(ObjectNode params) {
+        JsonNode level = params.get("level");
+        if (level == null || !level.isString() || !McpNotifier.LEVELS.contains(level.asString())) {
+            throw new IllegalArgumentException("logging/setLevel requires a 'level', one of: "
+                    + String.join(", ", McpNotifier.LEVELS));
+        }
+        logLevelListener.accept(level.asString());
+        return mapper.createObjectNode();
     }
 
     /**

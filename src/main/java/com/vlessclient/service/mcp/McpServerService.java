@@ -246,7 +246,7 @@ public class McpServerService {
         server.addTool(new SimpleReadTool("get_settings",
                 "Get application settings (no secrets).", control::getSettings));
 
-        // Action tools (mutating; hidden/blocked when mutations are off).
+        // Action tools (mutating; listed always, refused when mutations are off).
         server.addTool(new ConnectTool(control));
         server.addTool(new DisconnectTool(control));
         server.addTool(new SelectServerTool(control));
@@ -261,8 +261,10 @@ public class McpServerService {
         // Audit every mutating call to logs/mcp-audit.log (rolling; see logback.xml).
         server.setAuditLog(new FileAuditLog());
 
-        // Advertise server-initiated log streaming (GET /mcp SSE via the notifier).
+        // Advertise server-initiated log streaming (GET /mcp SSE via the notifier),
+        // and take the level an agent sets for it.
         server.setLoggingCapability(true);
+        server.setLogLevelListener(notifier::setMinimumLevel);
 
         // Browsable resources mirroring the read tools.
         server.addResource(new JsonResource("vless://status",

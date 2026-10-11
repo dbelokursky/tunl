@@ -457,11 +457,13 @@ and more.
   in `mcp-token` (in the data dir) with `0600` permissions.
 - **Off by default** — enabled from Settings.
 - Every tool outside the Read row below changes something, and those tools are
-  **off by default**: they appear only once **Allow configuration changes** is
-  ticked. An agent can be steered by what it reads, and these tools let it add a
-  server and send all traffic through it. Connecting in TUN mode and deleting a
-  server also take an explicit `confirm: true`, but the agent supplies that
-  itself: it catches a slip, not an agent following someone else's instructions.
+  **off by default**: an agent sees them listed, but every call is refused until
+  **Allow configuration changes** is ticked (the list stays the same, so an agent
+  that listed it earlier needs no restart). An agent can be steered by what it
+  reads, and these tools let it add a server and send all traffic through it.
+  Connecting in TUN mode and deleting a server also take an explicit
+  `confirm: true`, but the agent supplies that itself: it catches a slip, not an
+  agent following someone else's instructions.
 - Every mutating call is appended to `logs/mcp-audit.log`.
 - Log lines handed to agents (`get_logs`, the SSE stream) have URLs reduced to
   scheme and host, so a subscription's account token never leaves the app
