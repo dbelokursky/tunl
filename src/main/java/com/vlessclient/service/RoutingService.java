@@ -33,7 +33,8 @@ public class RoutingService {
 
     private static final Logger log = LoggerFactory.getLogger(RoutingService.class);
 
-    private static final String ROUTING_FILE = "routing.json";
+    /** The routing rules' file in the data directory, as save failures name it. */
+    public static final String ROUTING_FILE = "routing.json";
 
     private final Path dataDir;
     private final ObjectMapper objectMapper;

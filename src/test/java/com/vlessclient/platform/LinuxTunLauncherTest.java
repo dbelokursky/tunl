@@ -228,4 +228,28 @@ class LinuxTunLauncherTest {
         assertThat(PosixFilePermissions.toString(Files.getPosixFilePermissions(binary)))
                 .isEqualTo("rwx------");
     }
+
+    /**
+     * A core found on the PATH can be a system-wide, root-owned one that every
+     * account may run. The chmod fails there, and the grant used to go ahead
+     * anyway, handing CAP_NET_ADMIN to every user of the machine. A core this
+     * user cannot restrict gets no grant; the connect elevates per session.
+     */
+    @Test
+    void aCoreThisUserCannotRestrictIsNeverGrantedTheCapability(@TempDir Path dir) {
+        // A file system with no POSIX permissions has nothing to restrict, and
+        // this launcher only ever runs on Linux.
+        Assumptions.assumeTrue(
+                FileSystems.getDefault().supportedFileAttributeViews().contains("posix"));
+        Path notOurs = dir.resolve("missing/sing-box");
+        FakeRunner runner = new FakeRunner(cmd -> new CommandRunner.Result(0, ""));
+        LinuxTunLauncher launcher = new LinuxTunLauncher(runner, "elevator-that-must-not-launch");
+
+        assertThat(LinuxTunLauncher.restrictToOwner(notOurs)).isFalse();
+        assertThatThrownBy(() -> launcher.launch(notOurs, dir.resolve("config.json"),
+                new TunLauncher.Prompt("setup", "each connect")))
+                .isInstanceOf(IOException.class);
+        assertThat(runner.calls).extracting(List::getFirst).doesNotContain("elevator-that-must-not-launch")
+                .allMatch("getcap"::equals);
+    }
 }

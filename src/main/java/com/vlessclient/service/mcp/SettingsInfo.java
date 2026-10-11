@@ -11,8 +11,10 @@ package com.vlessclient.service.mcp;
  * @param socksPort        local SOCKS5 port
  * @param httpPort         local HTTP proxy port
  * @param clashApiPort     Clash API port
- * @param proxyDns         DNS used for proxied traffic
- * @param directDns        DNS used for direct traffic
+ * @param proxyDns         DNS used for proxied traffic; a URL as scheme and
+ *                         host only, since a private resolver keeps the
+ *                         account in its path
+ * @param directDns        DNS used for direct traffic, shown the same way
  * @param dnsStrategy      DNS resolution strategy
  * @param tunInterfaceName TUN interface name
  * @param coreLogLevel     sing-box log level ({@code debug}/{@code info}/{@code warn}/{@code

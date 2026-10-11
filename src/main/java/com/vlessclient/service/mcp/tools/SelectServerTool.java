@@ -9,7 +9,8 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
- * {@code select_server} — marks a server active for the next connect. Mutating.
+ * {@code select_server} — makes a server the active one, which a connected
+ * tunnel switches to at once and the next connect uses. Mutating.
  */
 public class SelectServerTool implements McpTool {
 
@@ -28,7 +29,10 @@ public class SelectServerTool implements McpTool {
 
     @Override
     public String description() {
-        return "Mark a server active (used on the next connect). Requires 'serverId'.";
+        // It said "used on the next connect", but a connected tunnel switches
+        // to the server at once, as it does for a pick in the app's list.
+        return "Make a server the active one. A connected tunnel switches to it at once; "
+                + "otherwise the next connect uses it. Requires 'serverId'.";
     }
 
     @Override

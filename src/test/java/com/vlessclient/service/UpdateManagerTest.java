@@ -65,6 +65,10 @@ class UpdateManagerTest {
                     {
                       "name": "vless-client_0.2.0_amd64.deb",
                       "browser_download_url": "https://github.com/x/releases/vless-client_0.2.0_amd64.deb"
+                    },
+                    {
+                      "name": "vless-client_0.2.0_arm64.deb",
+                      "browser_download_url": "https://github.com/x/releases/vless-client_0.2.0_arm64.deb"
                     }
                   ]
                 }
@@ -255,10 +259,17 @@ class UpdateManagerTest {
     }
 
     @Test
-    void downloadPolicy_downloadsUnlessSomethingIsAlreadyStaged() {
+    void downloadPolicy_downloadsUnlessTheSameOrANewerReleaseIsAlreadyStaged() {
         // Re-downloading on top of a verified installer that is already
-        // waiting is the one case not worth the bytes; everything else is.
-        assertThat(UpdateDownloadPolicy.shouldDownloadNow(true)).isFalse();
-        assertThat(UpdateDownloadPolicy.shouldDownloadNow(false)).isTrue();
+        // waiting is not worth the bytes, unless what waits is older than
+        // what was found: then the newer release must win.
+        assertThat(UpdateDownloadPolicy.shouldDownloadNow(
+                java.util.Optional.of("1.6.0"), "1.6.0")).isFalse();
+        assertThat(UpdateDownloadPolicy.shouldDownloadNow(
+                java.util.Optional.of("1.6.1"), "1.6.0")).isFalse();
+        assertThat(UpdateDownloadPolicy.shouldDownloadNow(
+                java.util.Optional.of("1.6.0"), "1.6.1")).isTrue();
+        assertThat(UpdateDownloadPolicy.shouldDownloadNow(
+                java.util.Optional.empty(), "1.6.1")).isTrue();
     }
 }

@@ -143,6 +143,9 @@ public final class UpdatesSection {
          */
         MOVE_TO_APPLICATIONS,
 
+        /** Newer release exists, and the user installs it from the release page. */
+        INSTALL_MANUALLY,
+
         /** Its installer is being fetched right now. */
         DOWNLOADING,
 
@@ -193,6 +196,9 @@ public final class UpdatesSection {
             case MOVE_TO_APPLICATIONS -> {
                 return AppRowState.MOVE_TO_APPLICATIONS;
             }
+            case INSTALL_MANUALLY -> {
+                return AppRowState.INSTALL_MANUALLY;
+            }
             default -> {
                 // Installs itself: what follows is where it has got to.
             }
@@ -211,7 +217,7 @@ public final class UpdatesSection {
                 updateManager.updateAvailableProperty().get(),
                 updateManager.hasStagedUpdate(),
                 updateManager.downloadingProperty().get(),
-                UpdateApplier.current().hold());
+                updateManager.hold());
         appUpdateButton.setVisible(state.offersRestart());
         appUpdateButton.setManaged(state.offersRestart());
         appVersionValue.setText(versionText(state));
@@ -231,6 +237,8 @@ public final class UpdatesSection {
                     I18n.get("settings.version.packagemanager", AppVersion.VERSION, latest);
             case MOVE_TO_APPLICATIONS ->
                     I18n.get("settings.version.move", AppVersion.VERSION, latest);
+            case INSTALL_MANUALLY ->
+                    I18n.get("settings.version.manual", AppVersion.VERSION, latest);
             case DOWNLOADING ->
                     I18n.get("settings.version.downloading", AppVersion.VERSION, latest);
             case AVAILABLE -> I18n.get("settings.version.available", AppVersion.VERSION, latest);
@@ -287,7 +295,7 @@ public final class UpdatesSection {
         // be running: this check's own attempt was then declined rather than
         // failed — one installer at a time — and calling that a failed download
         // reports an error over a download that is going fine.
-        if (UpdateApplier.current().selfUpdates()
+        if (updateManager.hold() == UpdateApplier.Hold.NONE
                 && !updateManager.hasStagedUpdate()
                 && !updateManager.downloadingProperty().get()) {
             appVersionValue.setText(I18n.get("settings.version.downloadfailed",

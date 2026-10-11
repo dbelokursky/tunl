@@ -4,6 +4,7 @@ import com.vlessclient.app.I18n;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.platform.CoreRecord;
+import com.vlessclient.platform.PlatformPaths;
 import com.vlessclient.platform.SecureFiles;
 import com.vlessclient.platform.SystemProxyGuard;
 import com.vlessclient.platform.TunLauncher;
@@ -320,12 +321,7 @@ public class SingBoxEngine {
             realityRefused.set(false);
         });
 
-        tempConfigFile = Files.createTempFile(
-                Path.of(System.getProperty("java.io.tmpdir")),
-                "singbox-",
-                ".json"
-        );
-        Files.writeString(tempConfigFile, configJson);
+        tempConfigFile = writeSessionConfig(sessionConfigDir(), configJson);
 
         // Ask the core first: a configuration it refuses has to fail here,
         // before a TUN start raises the administrator or UAC prompt for nothing.
@@ -1139,6 +1135,56 @@ public class SingBoxEngine {
         // The JVM is going down: the daemon process monitor may never get to
         // run its own restore, so clear a stale OS proxy entry synchronously.
         restoreSystemProxyIfNeeded();
+    }
+
+    /** Prefix of the session configuration files, so an earlier run's can be found. */
+    static final String SESSION_CONFIG_PREFIX = "singbox-";
+
+    /**
+     * Where a session's configuration is written: the private run folder of
+     * the data directory, beside the stop signals.
+     *
+     * <p>It used to be the system temp dir. The file holds every configured
+     * server's credential in plain text, the same values servers.json keeps
+     * sealed in the Keychain, DPAPI or the Secret Service, and only a clean
+     * stop in this JVM deleted it. A crash, a kill from Task Manager or a
+     * power cut left it in %TEMP%, which Windows never empties, one more copy
+     * per crash.</p>
+     *
+     * @return the folder session configurations go in
+     */
+    static Path sessionConfigDir() {
+        return PlatformPaths.current().dataDir().resolve("run");
+    }
+
+    /**
+     * Writes a session configuration into {@code dir}, owner-only, after
+     * removing any an earlier run left behind. Only one engine runs at a time
+     * and a session's file goes when the session ends, so whatever is still
+     * there was orphaned by a run that did not end cleanly.
+     *
+     * @param dir        the folder to write in, created private if needed
+     * @param configJson the configuration
+     * @return the file written
+     * @throws IOException if the folder or the file cannot be written
+     */
+    static Path writeSessionConfig(Path dir, String configJson) throws IOException {
+        SecureFiles.createPrivateDir(dir);
+        try (var leftovers = Files.newDirectoryStream(dir, SESSION_CONFIG_PREFIX + "*.json")) {
+            for (Path leftover : leftovers) {
+                try {
+                    Files.deleteIfExists(leftover);
+                    log.info("Removed a configuration an earlier run left behind: {}",
+                            leftover.getFileName());
+                } catch (IOException e) {
+                    log.warn("Could not remove {}: {}", leftover, e.getMessage());
+                }
+            }
+        }
+        // createTempFile makes it 0600 on POSIX before a byte is written.
+        Path file = Files.createTempFile(dir, SESSION_CONFIG_PREFIX, ".json");
+        Files.writeString(file, configJson);
+        return file;
     }
 
     /**

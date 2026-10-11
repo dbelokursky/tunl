@@ -1,5 +1,7 @@
 package com.vlessclient.service;
 
+import java.util.Optional;
+
 /**
  * Decides whether the background download of an available update may start
  * right now.
@@ -28,13 +30,17 @@ public final class UpdateDownloadPolicy {
      * a rule that says "not now" simply defers to the next check rather than
      * abandoning the update.</p>
      *
-     * @param alreadyStaged whether a verified installer is already waiting to
-     *                      be applied at the next start
+     * @param stagedVersion the version of the verified installer already
+     *                      waiting to be applied at the next start, if any
+     * @param candidate     the version the check found
      * @return true to start the download now
      */
-    public static boolean shouldDownloadNow(boolean alreadyStaged) {
+    public static boolean shouldDownloadNow(Optional<String> stagedVersion, String candidate) {
         // Re-fetching on top of a verified installer that is already waiting
-        // is the one case that is never worth the bytes.
-        return !alreadyStaged;
+        // is never worth the bytes, unless what waits is older than what was
+        // found: a newer release is often the hotfix for the staged one, and
+        // deferring to it installed the very build the hotfix replaced.
+        return stagedVersion.isEmpty()
+                || UpdateManager.isNewerVersion(candidate, stagedVersion.get());
     }
 }

@@ -1,5 +1,6 @@
 package com.vlessclient.service;
 
+import com.vlessclient.model.Subscription;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.http.HttpClient;
@@ -8,6 +9,7 @@ import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import javafx.collections.ObservableList;
 
 /**
  * {@link SubscriptionService} doubles for tests that live outside this
@@ -87,9 +89,21 @@ public final class TestSubscriptionServices {
         private volatile Runnable beforeRemoveAction = () -> { };
         private volatile Consumer<String> refreshAction = id -> { };
         private volatile Runnable refreshAllAction = () -> { };
+        private volatile Runnable listReadAction = () -> { };
 
         private Scripted(ConfigStore store, Path dataDir) {
             super(store, dataDir);
+        }
+
+        /** Runs {@code action} on the reading thread each time the list is asked for. */
+        public void onListRead(Runnable action) {
+            listReadAction = action;
+        }
+
+        @Override
+        public ObservableList<Subscription> getSubscriptions() {
+            listReadAction.run();
+            return super.getSubscriptions();
         }
 
         /** Runs {@code action} just before each removal, on the removing thread. */

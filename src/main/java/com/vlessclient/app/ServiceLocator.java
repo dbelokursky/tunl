@@ -223,7 +223,7 @@ public class ServiceLocator {
                 subscriptionService::startAutoRefresh,
                 updateManager::startPeriodicCheck,
                 () -> updateManager.checkWhenConnected(engine),
-                mcpServerService::apply);
+                mcpServerService::applyAtLaunch);
 
         log.info("ServiceLocator initialized in {} mode", mode);
     }

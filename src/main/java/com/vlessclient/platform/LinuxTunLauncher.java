@@ -74,8 +74,11 @@ public final class LinuxTunLauncher implements TunLauncher {
         // shared /tmp; the root-side wrapper can read it there.
         Path stopSignalFile = StopSignals.newStopSignalFile();
 
-        restrictToOwner(binary);
-        if (!hasNetAdminCapability(binary)) {
+        // Granted only to a core this user owns and alone can run. The binary
+        // can be a system-wide one found on the PATH, root-owned and 0755:
+        // the chmod fails there, and setcap as root then made CAP_NET_ADMIN
+        // available to every account on the machine, with no prompt.
+        if (restrictToOwner(binary) && !hasNetAdminCapability(binary)) {
             grantNetAdminCapability(binary);
         }
 
@@ -101,12 +104,22 @@ public final class LinuxTunLauncher implements TunLauncher {
      * world-executable: on a shared machine another user could run it with a
      * config of their own and hold CAP_NET_ADMIN, with no prompt. A chmod
      * leaves the capability in place, so an install from before is closed too.
+     *
+     * @param binary the core
+     * @return false when the core could not be restricted, as for one this
+     *         user does not own; a file system with no permissions to set
+     *         counts as restricted
      */
-    static void restrictToOwner(Path binary) {
+    static boolean restrictToOwner(Path binary) {
         try {
             Files.setPosixFilePermissions(binary, PosixFilePermissions.fromString("rwx------"));
-        } catch (UnsupportedOperationException | IOException e) {
-            log.warn("Could not restrict {} to its owner: {}", binary, e.getMessage());
+            return true;
+        } catch (UnsupportedOperationException e) {
+            return true;
+        } catch (IOException e) {
+            log.warn("Could not restrict {} to its owner, so it gets no capability: {}",
+                    binary, e.getMessage());
+            return false;
         }
     }
 

@@ -2,6 +2,8 @@ package com.vlessclient.service;
 
 import com.vlessclient.app.AppVersion;
 import com.vlessclient.model.ConnectionState;
+import com.vlessclient.platform.PendingUpdate;
+import com.vlessclient.platform.UpdateApplier;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -12,9 +14,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyBooleanProperty;
 import javafx.beans.property.ReadOnlyBooleanWrapper;
@@ -43,6 +47,13 @@ public class UpdateManager {
     static final String RELEASE_DOWNLOAD_PREFIX =
             "https://github.com/dbelokursky/tunl/releases/download/";
     private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(15);
+
+    /**
+     * Appended to an installer's name while it downloads. It gets its real
+     * name only once its digest and signature check out, so a transfer that
+     * fails partway leaves nothing that looks like an installer.
+     */
+    static final String PART_SUFFIX = ".part";
 
     /**
      * How often the timer checks. Six hours rather than a day: this app runs
@@ -96,6 +107,13 @@ public class UpdateManager {
     private volatile Candidate candidate;
 
     /**
+     * Whether {@link #candidate} is a version that failed to install here
+     * twice and was given up on. Kept beside it, set on the checker thread,
+     * so the UI can ask {@link #hold()} without reading a file.
+     */
+    private volatile boolean candidateAbandoned;
+
+    /**
      * Whether an installer is waiting in staging, as of the last check. Kept
      * as a field because the Settings row asks on the FX thread, and the
      * answer otherwise costs a file read there.
@@ -119,6 +137,7 @@ public class UpdateManager {
     private final ObjectMapper objectMapper;
     private final ScheduledExecutorService scheduler;
     private final UpdateStaging staging;
+    private final Supplier<UpdateApplier> applier;
 
     private final ReadOnlyBooleanWrapper updateAvailable = new ReadOnlyBooleanWrapper(false);
     private final ReadOnlyStringWrapper latestVersion = new ReadOnlyStringWrapper("");
@@ -154,8 +173,15 @@ public class UpdateManager {
     }
 
     UpdateManager(HttpClient httpClient, UpdateStaging staging) {
+        this(httpClient, staging, UpdateApplier::current);
+    }
+
+    /** Test seam: also what decides whether this installation installs updates itself. */
+    UpdateManager(HttpClient httpClient, UpdateStaging staging,
+                  Supplier<UpdateApplier> applier) {
         this.httpClient = httpClient;
         this.staging = staging;
+        this.applier = applier;
         this.objectMapper = JsonMapper.builder().build();
         this.scheduler = Executors.newSingleThreadScheduledExecutor(
                 DaemonThreads.factory("update-checker"));
@@ -301,21 +327,49 @@ public class UpdateManager {
         if (pending == null) {
             return;
         }
-        com.vlessclient.platform.UpdateApplier applier =
-                com.vlessclient.platform.UpdateApplier.current();
-        if (!applier.selfUpdates()) {
+        if (pending.version().equals(staging.abandonedVersion())) {
+            // Fetching it again only restarted the loop the attempt bound was
+            // there to end: staged, handed off, failed, given up on, fetched
+            // again within seconds, and the app quit at two launches in three.
+            log.info("Update {} available; it failed to install here twice, so it is "
+                    + "left for the user to install", pending.version());
+            return;
+        }
+        UpdateApplier installer = applier.get();
+        if (!installer.selfUpdates()) {
             // Nothing here could install it — spending the bytes would only
             // leave an installer the user has to find and run themselves.
             log.info("Update {} available; this installation does not install it "
-                    + "itself ({})", pending.version(), applier.hold());
+                    + "itself ({})", pending.version(), installer.hold());
             return;
         }
-        setStaged(staging.pending().isPresent());
-        if (!UpdateDownloadPolicy.shouldDownloadNow(staged)) {
+        Optional<PendingUpdate> waiting = staging.pending();
+        setStaged(waiting.isPresent());
+        if (!UpdateDownloadPolicy.shouldDownloadNow(
+                waiting.map(PendingUpdate::version), pending.version())) {
             log.info("Update {} available; deferring the download", pending.version());
             return;
         }
+        if (waiting.isPresent()) {
+            // An older installer waiting must not hold back a newer release:
+            // the newer one is often the hotfix for the older.
+            log.info("Replacing staged update {} with {}",
+                    waiting.get().version(), pending.version());
+            staging.clear();
+            setStaged(false);
+        }
         downloadUpdate(pending.url(), pending.digest());
+    }
+
+    /**
+     * What keeps this installation from installing the update it found, for
+     * the UI to say.
+     *
+     * @return {@link UpdateApplier.Hold#INSTALL_MANUALLY} for a release that
+     *         failed to install here twice, otherwise the platform's answer
+     */
+    public UpdateApplier.Hold hold() {
+        return candidateAbandoned ? UpdateApplier.Hold.INSTALL_MANUALLY : applier.get().hold();
     }
 
     /**
@@ -423,6 +477,7 @@ public class UpdateManager {
 
             if (isNewerVersion(version, AppVersion.VERSION)) {
                 log.info("Update available: {} -> {}", AppVersion.VERSION, version);
+                candidateAbandoned = version.equals(staging.abandonedVersion());
                 candidate = new Candidate(version, installerUrl, asset.digest());
                 // FxExecutor rather than a bare runLater: with no toolkit (a
                 // service test) runLater throws, and the catch below turned a
@@ -434,6 +489,7 @@ public class UpdateManager {
                 return CheckResult.UPDATE_AVAILABLE;
             }
             log.info("Already on latest version ({})", AppVersion.VERSION);
+            forgetWithdrawn(version);
             return CheckResult.UP_TO_DATE;
         } catch (Exception e) {
             // A response we cannot read is an answer we did not get. Reporting
@@ -441,6 +497,39 @@ public class UpdateManager {
             // doing everywhere else.
             log.warn("Failed to parse release response: {}", e.getMessage());
             return CheckResult.UNREACHABLE;
+        }
+    }
+
+    /**
+     * Drops what an earlier check found once GitHub no longer reports it.
+     *
+     * <p>Nothing else ever cleared it: a release found once, then withdrawn
+     * or demoted to a prerelease, stayed the download candidate for the rest
+     * of a run that can last weeks. It was fetched every six hours and on
+     * every connect, offered in the banner, and, once staged, installed at the
+     * next restart: the build its maintainer had taken back. An installer
+     * already staged for a version newer than the latest release goes too.</p>
+     *
+     * @param latestReleased the version GitHub now reports as latest
+     */
+    private void forgetWithdrawn(String latestReleased) {
+        Candidate previous = candidate;
+        candidate = null;
+        candidateAbandoned = false;
+        if (previous != null) {
+            log.info("Update {} is no longer the latest release ({}); forgetting it",
+                    previous.version(), latestReleased);
+            FxExecutor.run(() -> {
+                updateAvailable.set(false);
+                latestVersion.set("");
+            });
+        }
+        Optional<PendingUpdate> waiting = staging.pending();
+        if (waiting.isPresent() && isNewerVersion(waiting.get().version(), latestReleased)) {
+            log.info("Staged update {} is newer than the latest release {}; discarding it",
+                    waiting.get().version(), latestReleased);
+            staging.clear();
+            setStaged(false);
         }
     }
 
@@ -460,8 +549,10 @@ public class UpdateManager {
      *       without one is not offered rather than trusted.</li>
      * </ul>
      *
-     * <p>A failed check deletes the partial file: a rejected installer must
-     * never be left sitting in Downloads where it could still be opened.</p>
+     * <p>The bytes land in a {@code .part} file that takes the installer's
+     * name only once both checks pass, and any failure deletes it: a rejected
+     * or half-downloaded installer must never be left where it could still be
+     * opened, and a transfer that ran out of disk must give the space back.</p>
      *
      * <p>One at a time. Three callers can reach this — the six-hourly timer,
      * the tunnel coming up, and Settings' own check — on three different
@@ -509,37 +600,46 @@ public class UpdateManager {
             return null;
         }
 
+        Path part = null;
         try {
+            if (staging.pending().isEmpty()) {
+                // Nothing is waiting, so whatever the folder holds is left over:
+                // an installer whose marker was lost, or a .part from a run that
+                // died mid-download. Each one is up to a hundred megabytes.
+                staging.clear();
+            }
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .header("Accept", "application/octet-stream")
-                    .timeout(Duration.ofMinutes(10))
+                    // No timeout here: on this JDK it bounds the whole transfer,
+                    // and a slow link lost every installer at the ten-minute
+                    // mark. LongDownload bounds the wait and each stall instead.
                     .GET()
                     .build();
 
-            HttpResponse<InputStream> response =
-                    httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            HttpResponse<InputStream> response = LongDownload.send(httpClient, request);
 
             if (response.statusCode() != 200) {
+                response.body().close();
                 log.error("Download failed with status {}", response.statusCode());
                 return null;
             }
 
             String fileName = extractFileName(url);
-            Path target = staging.dir().resolve(fileName);
+            part = staging.dir().resolve(fileName + PART_SUFFIX);
 
             String actualDigest;
-            try (InputStream in = response.body();
+            try (InputStream in = LongDownload.guard(response.body());
                  java.security.DigestInputStream digesting = new java.security.DigestInputStream(
                          in, java.security.MessageDigest.getInstance("SHA-256"))) {
-                Files.copy(digesting, target, StandardCopyOption.REPLACE_EXISTING);
+                Files.copy(digesting, part, StandardCopyOption.REPLACE_EXISTING);
                 actualDigest = "sha256:" + java.util.HexFormat.of()
                         .formatHex(digesting.getMessageDigest().digest());
             }
 
             if (!actualDigest.equalsIgnoreCase(expectedDigest)) {
-                // Don't leave a rejected installer where the user could open it.
-                Files.deleteIfExists(target);
+                // The .part goes on the way out: a rejected installer must not
+                // be left where the user could open it.
                 log.error("Update rejected: sha256 mismatch for {} (expected {}, got {})",
                         fileName, expectedDigest, actualDigest);
                 return null;
@@ -552,13 +652,14 @@ public class UpdateManager {
                 if (signature == null) {
                     // Same rule as a digest mismatch: an installer that fails a
                     // check must not be left where it could still be run.
-                    Files.deleteIfExists(target);
                     return null;
                 }
             }
 
+            Path target = staging.dir().resolve(fileName);
+            Files.move(part, target, StandardCopyOption.REPLACE_EXISTING);
             try {
-                staging.stage(new com.vlessclient.platform.PendingUpdate(
+                staging.stage(new PendingUpdate(
                         versionFromReleaseUrl(url), target, expectedDigest), signature);
             } catch (IOException | IllegalArgumentException e) {
                 // An installer nothing records is an installer nothing will
@@ -585,6 +686,18 @@ public class UpdateManager {
                 Thread.currentThread().interrupt();
             }
             return null;
+        } finally {
+            if (part != null) {
+                deleteQuietly(part);
+            }
+        }
+    }
+
+    private static void deleteQuietly(Path file) {
+        try {
+            Files.deleteIfExists(file);
+        } catch (IOException e) {
+            log.warn("Could not delete {}: {}", file, e.getMessage());
         }
     }
 
@@ -769,17 +882,35 @@ public class UpdateManager {
         return findInstallerAsset(assets, extension, arch).url();
     }
 
+    /** The architecture tokens release asset names carry. */
+    private static final java.util.List<String> ARCH_TOKENS = java.util.List.of("arm64", "amd64");
+
     /**
-     * Picks the release asset for this platform: prefers a name carrying the
-     * current architecture token (a release can ship e.g. both an amd64 and
-     * an arm64 deb), falling back to the first extension match for releases
-     * that predate multi-arch assets.
+     * The architecture an asset whose name carries no token is built for.
+     * The release workflow builds the one DMG on an Apple Silicon runner and
+     * the MSI on x64, and debs from before multi-arch releases were amd64.
+     */
+    static String untaggedArch(String extension) {
+        return ".dmg".equals(extension) ? "arm64" : "amd64";
+    }
+
+    /**
+     * Picks the release asset for this platform: a name carrying the current
+     * architecture token (a release can ship both an amd64 and an arm64 deb),
+     * or else one carrying no token, but only where such assets are built for
+     * this architecture.
+     *
+     * <p>The fallback used to be the first asset with the right extension,
+     * whatever it was built for. An Intel Mac then took the Apple Silicon DMG,
+     * whose signature is valid, and the relay replaced a working app with one
+     * the machine cannot run. No asset for this machine is the safe answer.</p>
      */
     static InstallerAsset findInstallerAsset(JsonNode assets, String extension, String arch) {
         if (assets == null || !assets.isArray()) {
             return InstallerAsset.NONE;
         }
         InstallerAsset fallback = InstallerAsset.NONE;
+        boolean untaggedFits = arch.equals(untaggedArch(extension));
         for (JsonNode asset : assets) {
             String name = asset.path("name").asString("");
             if (!name.endsWith(extension)) {
@@ -791,7 +922,8 @@ public class UpdateManager {
             if (name.contains(arch)) {
                 return candidate;
             }
-            if (fallback.isEmpty()) {
+            boolean untagged = ARCH_TOKENS.stream().noneMatch(name::contains);
+            if (untagged && untaggedFits && fallback.isEmpty()) {
                 fallback = candidate;
             }
         }

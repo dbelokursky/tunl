@@ -36,6 +36,13 @@ public final class UpdateStaging {
     private static final String DIR_NAME = "updates";
     private static final String MARKER_NAME = "pending.json";
 
+    /**
+     * Names the release that was given up on after failing to install twice.
+     * Outside what {@link #clear()} deletes: it has to outlive the cleanup
+     * that follows giving up, or the same release is fetched straight back.
+     */
+    private static final String ABANDONED_NAME = "abandoned.json";
+
     private final Path dir;
     private final ReleaseCheck signatureCheck;
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
@@ -167,6 +174,40 @@ public final class UpdateStaging {
     }
 
     /**
+     * Records that {@code version} failed to install here and will not be
+     * downloaded again. A newer release is unaffected.
+     *
+     * @param version the release given up on
+     */
+    public void abandon(String version) {
+        try {
+            Files.createDirectories(dir);
+            ObjectNode record = objectMapper.createObjectNode();
+            record.put("version", version);
+            Files.writeString(dir.resolve(ABANDONED_NAME), objectMapper.writeValueAsString(record));
+        } catch (IOException | JacksonException e) {
+            log.warn("Failed to record abandoning update {}: {}", version, e.getMessage());
+        }
+    }
+
+    /**
+     * The release that was given up on, so it is not fetched again.
+     *
+     * @return its version, or "" when none was
+     */
+    public String abandonedVersion() {
+        Path record = dir.resolve(ABANDONED_NAME);
+        if (!Files.isRegularFile(record)) {
+            return "";
+        }
+        try {
+            return objectMapper.readTree(Files.readString(record)).path("version").asString("");
+        } catch (IOException | JacksonException e) {
+            return "";
+        }
+    }
+
+    /**
      * Returns the staged update, if there is one whose installer is still on
      * disk. A marker pointing at a file that has since been deleted is treated
      * as no update at all, and cleared.
@@ -268,9 +309,10 @@ public final class UpdateStaging {
 
     /**
      * Removes everything in the staging directory: the installer, the marker
-     * and the relay script and log an applier may have left behind. Bounded to
-     * files directly inside the directory — nothing here ever creates
-     * subdirectories, so a recursive delete would only widen the blast radius.
+     * and any partial download, but not the record of a release given up on.
+     * Bounded to files directly inside the directory — nothing here ever
+     * creates subdirectories, so a recursive delete would only widen the
+     * blast radius.
      */
     public void clear() {
         if (!Files.isDirectory(dir)) {
@@ -278,7 +320,8 @@ public final class UpdateStaging {
         }
         try (DirectoryStream<Path> entries = Files.newDirectoryStream(dir)) {
             for (Path entry : entries) {
-                if (Files.isRegularFile(entry)) {
+                if (Files.isRegularFile(entry)
+                        && !ABANDONED_NAME.equals(String.valueOf(entry.getFileName()))) {
                     Files.deleteIfExists(entry);
                 }
             }
