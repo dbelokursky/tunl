@@ -204,6 +204,18 @@ What TUN asks for on each OS:
 | Windows | UAC prompt on every Connect; while the tunnel is up, DNS queries outside it are blocked (WFP), so names do not leak to the network's resolver |
 | Linux | one-time `setcap` via PolicyKit (no prompts afterwards), or a pkexec prompt on Connect where the grant fails; dismissing a prompt cancels the connect |
 
+On macOS the TUN helper stays installed after Tunl is deleted: a root-owned
+copy of the core and its launcher in `/usr/local/libexec/vless-client`, and the
+sudo rule in `/etc/sudoers.d/vless-client`. To remove them:
+
+```sh
+sudo rm -f /etc/sudoers.d/vless-client
+sudo rm -rf /usr/local/libexec/vless-client
+```
+
+On Linux the one-time grant is a file capability on Tunl's own copy of the
+core, which goes with Tunl's data folder.
+
 ---
 
 ## Usage

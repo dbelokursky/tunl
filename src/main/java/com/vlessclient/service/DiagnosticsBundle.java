@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -245,10 +246,26 @@ public class DiagnosticsBundle {
             return "(could not read the log file: " + e.getMessage() + ")\n";
         }
         // Only the lines kept: the log runs to 10 MB, and this runs on the UI thread.
-        Set<String> names = serverNames();
+        UnaryOperator<String> serverNames = serverNameRedactor();
         return tail.stream()
-                .map(line -> Redact.publicIpsIn(serverNamesIn(Redact.urlsIn(line), names)))
+                .map(line -> Redact.publicIpsIn(serverNames.apply(Redact.urlsIn(line))))
                 .collect(Collectors.joining("\n", "", "\n"));
+    }
+
+    /**
+     * Replaces, in a log line, every name a configured server goes by: its
+     * address, its SNI and the host its transport asks for.
+     *
+     * <p>Shared with the Logs view's "Save log", which cut URLs and nothing
+     * else: a file meant for a bug report kept the private server's hostname
+     * and the SNI a certificate did not match, which the bundle withholds.
+     * The names are read once, here, on the calling thread.</p>
+     *
+     * @return a function that redacts this configuration's server names
+     */
+    public UnaryOperator<String> serverNameRedactor() {
+        Set<String> names = serverNames();
+        return line -> serverNamesIn(line, names);
     }
 
     /**

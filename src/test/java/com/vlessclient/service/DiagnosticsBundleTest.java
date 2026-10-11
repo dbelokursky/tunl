@@ -338,4 +338,18 @@ class DiagnosticsBundleTest {
         assertThat(entries).containsKey("tunl.log");
         assertThat(entries.get("tunl.log")).contains("no log file");
     }
+
+    /**
+     * The Logs view's Save log uses this to withhold what the bundle does: a
+     * configured server's address, matched as a whole host, and nothing else.
+     */
+    @Test
+    void theServerNameRedactorReplacesTheConfiguredServersOnly() {
+        String line = "dial tcp 198.51.100.7:443 via 198.51.100.70 for example.org";
+
+        String redacted = bundle.serverNameRedactor().apply(line);
+
+        assertThat(redacted).doesNotContain("198.51.100.7:")
+                .contains("198.51.100.70").contains("example.org");
+    }
 }
