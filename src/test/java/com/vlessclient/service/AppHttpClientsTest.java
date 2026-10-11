@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
+import java.net.ProxySelector;
 import java.net.URI;
 import java.util.List;
 import java.util.OptionalInt;
@@ -14,6 +15,20 @@ import org.junit.jupiter.api.Test;
 class AppHttpClientsTest {
 
     private static final URI PUBLIC = URI.create("https://api.github.com/x");
+
+    private static final Proxy TUNNEL = new Proxy(Proxy.Type.HTTP,
+            new InetSocketAddress(InetAddress.getLoopbackAddress(), 2081));
+
+    /**
+     * Where a request goes when no tunnel carries it: wherever the JVM's own
+     * selector sends it. That is DIRECT on a bare JVM, but a machine or a CI
+     * sandbox that sets {@code https.proxyHost} (often through
+     * {@code JAVA_TOOL_OPTIONS}) gets its proxy here, and asserting NO_PROXY
+     * failed there with nothing wrong in the code.
+     */
+    private static List<Proxy> untunneled() {
+        return ProxySelector.getDefault().select(PUBLIC);
+    }
 
     @AfterEach
     void unbind() {
@@ -30,9 +45,7 @@ class AppHttpClientsTest {
 
         AppHttpClients.routeThroughTunnel(() -> OptionalInt.of(2081));
 
-        assertThat(client.proxy().orElseThrow().select(PUBLIC))
-                .containsExactly(new Proxy(Proxy.Type.HTTP,
-                        new InetSocketAddress(InetAddress.getLoopbackAddress(), 2081)));
+        assertThat(client.proxy().orElseThrow().select(PUBLIC)).containsExactly(TUNNEL);
     }
 
     @Test
@@ -40,14 +53,18 @@ class AppHttpClientsTest {
         AppHttpClients.routeThroughTunnel(() -> OptionalInt.of(2081));
         AppHttpClients.routeDirect();
 
-        assertThat(AppHttpClients.selector().select(PUBLIC)).containsExactly(Proxy.NO_PROXY);
+        assertThat(AppHttpClients.selector().select(PUBLIC))
+                .doesNotContain(TUNNEL)
+                .containsExactlyElementsOf(untunneled());
     }
 
     @Test
     void aNullSupplierIsTreatedAsNoTunnel() {
         AppHttpClients.routeThroughTunnel(null);
 
-        assertThat(AppHttpClients.selector().select(PUBLIC)).containsExactly(Proxy.NO_PROXY);
+        assertThat(AppHttpClients.selector().select(PUBLIC))
+                .doesNotContain(TUNNEL)
+                .containsExactlyElementsOf(untunneled());
     }
 
     @Test
@@ -56,7 +73,9 @@ class AppHttpClientsTest {
                 com.vlessclient.model.AppSettings::new,
                 new TunnelHealthState(), () -> false);
 
-        assertThat(AppHttpClients.selector().select(PUBLIC)).containsExactly(Proxy.NO_PROXY);
+        assertThat(AppHttpClients.selector().select(PUBLIC))
+                .doesNotContain(TUNNEL)
+                .containsExactlyElementsOf(untunneled());
     }
 
     /**
