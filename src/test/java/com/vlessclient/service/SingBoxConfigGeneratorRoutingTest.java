@@ -168,6 +168,36 @@ class SingBoxConfigGeneratorRoutingTest {
         assertThat(cidrs.get(1).asString()).isEqualTo("203.0.113.42/32");
     }
 
+    /**
+     * One mistyped address in the bypass list made the core refuse the whole
+     * configuration, so no server could connect until the line was found. The
+     * line is left out, and the rest of the list still goes direct.
+     */
+    @Test
+    void bypassList_aLineTheCoreCannotReadIsLeftOutAndTheRestStay() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setBypassList(List.of("192.168.1.256", "10.0.0.0/33", "dead:beef", ".",
+                "*.", "203.0.113.42", "example.com"));
+
+        for (com.vlessclient.model.ProxyMode mode : com.vlessclient.model.ProxyMode.values()) {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(mode);
+            JsonNode root = parse(generator.generate(createVlessServer(), settings,
+                    routingConfig));
+
+            JsonNode bypass = null;
+            for (JsonNode rule : root.get("route").get("rules")) {
+                if (rule.path("domain").toString().contains("example.com")) {
+                    bypass = rule;
+                }
+            }
+            assertThat(bypass).as("%s: the bypass rule", mode).isNotNull();
+            assertThat(bypass.get("ip_cidr").valueStream().map(JsonNode::asString))
+                    .as(mode.name()).containsExactly("203.0.113.42/32");
+            assertThat(bypass.has("domain_suffix")).as("%s: no empty suffix", mode).isFalse();
+        }
+    }
+
     @Test
     void bypassList_emptyProducesNoBypassRule() throws Exception {
         RoutingConfig routingConfig = new RoutingConfig();

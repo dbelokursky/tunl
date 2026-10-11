@@ -69,6 +69,10 @@
         <TextArea fx:id="bypassListArea" styleClass="code-area" prefRowCount="8"
                   wrapText="false" VBox.vgrow="ALWAYS"
                   promptText="*.github.com"/>
+        <!-- Why a save was refused: the lines the VPN core cannot read. The
+             controller fills it, and it takes no room until then. -->
+        <Label fx:id="bypassProblemLabel" styleClass="routing-rule-problem" wrapText="true"
+               minHeight="-Infinity" visible="false" managed="false"/>
     </VBox>
 
     <!-- Custom rules: always active, composing with the sections above -->

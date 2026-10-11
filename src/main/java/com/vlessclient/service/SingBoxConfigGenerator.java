@@ -1331,6 +1331,11 @@ public class SingBoxConfigGenerator {
         for (String raw : bypassList) {
             BypassPatternParser.Parsed parsed = BypassPatternParser.parse(raw);
             if (parsed == null) {
+                // An address the core cannot read made it refuse the whole
+                // configuration, so one mistyped line stopped every server
+                // from connecting. Left out, like an unusable custom rule.
+                BypassPatternParser.problem(raw).ifPresent(reason ->
+                        log.warn("Leaving out bypass entry {}: {}", raw, reason));
                 continue;
             }
             switch (parsed.kind()) {

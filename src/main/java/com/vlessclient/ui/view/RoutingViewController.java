@@ -5,10 +5,13 @@ import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.RouteMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.RoutingRule;
+import com.vlessclient.service.BypassPatternParser;
 import com.vlessclient.service.RoutingRuleCheck;
 import com.vlessclient.service.RoutingService;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
@@ -68,6 +71,7 @@ public class RoutingViewController {
     @FXML private Button addRuleButton;
     @FXML private TextArea bypassListArea;
     @FXML private Label bypassCountLabel;
+    @FXML private Label bypassProblemLabel;
     @FXML private Button saveBypassButton;
 
     private RoutingService routingService;
@@ -97,6 +101,9 @@ public class RoutingViewController {
         if (bypassListArea != null) {
             bypassListArea.textProperty().addListener(
                     (obs, oldText, newText) -> updateBypassCount());
+            // A refused save's reason was about the text as it was then.
+            bypassListArea.textProperty().addListener(
+                    (obs, oldText, newText) -> showBypassProblem(null));
             KeyboardReach.tabLeaves(bypassListArea);
         }
         updateBypassCount();
@@ -271,13 +278,31 @@ public class RoutingViewController {
         }
         String text = bypassListArea.getText();
         List<String> parsed = new ArrayList<>();
+        // The lines the core would refuse, under each reason, in their order.
+        Map<String, List<String>> problems = new LinkedHashMap<>();
         if (text != null) {
-            for (String line : text.split("\\R")) {
-                String trimmed = line.trim();
+            String[] lines = text.split("\\R");
+            for (int i = 0; i < lines.length; i++) {
+                String trimmed = lines[i].trim();
                 if (!trimmed.isEmpty()) {
                     parsed.add(trimmed);
+                    String number = String.valueOf(i + 1);
+                    BypassPatternParser.problem(trimmed).ifPresent(reason ->
+                            problems.computeIfAbsent(reason, r -> new ArrayList<>()).add(
+                                    I18n.get("routing.bypass.problem.line", number, trimmed)));
                 }
             }
+        }
+        // Saved anyway, one mistyped address made the core refuse the whole
+        // configuration at the next connect, and no server connected until
+        // the line was found. The configuration leaves such a line out now;
+        // here the user learns which one it is, and the stored list stays.
+        if (!problems.isEmpty()) {
+            List<String> messages = new ArrayList<>();
+            problems.forEach((reason, offending) -> messages.add(I18n.get(
+                    "routing.bypass.problem", String.join(", ", offending), reason)));
+            showBypassProblem(String.join("\n", messages));
+            return;
         }
         RoutingConfig config = routingService.getConfig();
         config.setBypassList(parsed);
@@ -285,6 +310,21 @@ public class RoutingViewController {
         log.info("Bypass list saved: {} entries", parsed.size());
 
         ButtonLabels.flash(saveBypassButton, "routing.bypass.saved");
+    }
+
+    /** Shows why the bypass list was not saved, under it; null clears it. */
+    private void showBypassProblem(String message) {
+        if (bypassProblemLabel == null) {
+            return;
+        }
+        boolean show = message != null;
+        bypassProblemLabel.setText(show ? message : "");
+        bypassProblemLabel.setVisible(show);
+        bypassProblemLabel.setManaged(show);
+        bypassListArea.getStyleClass().remove("field-error");
+        if (show) {
+            bypassListArea.getStyleClass().add("field-error");
+        }
     }
 
     @FXML

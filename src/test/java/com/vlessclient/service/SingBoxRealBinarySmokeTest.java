@@ -656,6 +656,25 @@ class SingBoxRealBinarySmokeTest {
     }
 
     /**
+     * One mistyped address in the bypass list reached the core as ip_cidr,
+     * and it refused the whole configuration, so no server connected. Such a
+     * line is left out, and the configuration has to pass.
+     */
+    @Test
+    void checkAcceptsABypassListWithLinesTheCoreCannotRead() throws Exception {
+        RoutingConfig routing = new RoutingConfig();
+        routing.setBypassList(List.of("192.168.1.256", "10.0.0.0/33", "192.168.01.1",
+                "cafe::/200", "1:2:3:4:5:6:7:8:9", "dead:beef", ".", "*.", "example.com",
+                "10.0.0.0/8"));
+        for (ProxyMode mode : ProxyMode.values()) {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(mode);
+            assertCheckPasses(generator.generate(serverFor(Protocol.VLESS), settings, routing),
+                    "bad-bypass-lines/" + mode);
+        }
+    }
+
+    /**
      * Boots the real binary with a generated SYSTEM_PROXY config on ephemeral
      * ports and exercises the two runtime contracts {@code sing-box check}
      * cannot see: the clash_api /traffic stream (TrafficMonitor) and proxying

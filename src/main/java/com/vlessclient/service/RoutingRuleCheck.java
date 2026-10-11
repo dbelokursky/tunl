@@ -175,9 +175,10 @@ public final class RoutingRuleCheck {
 
     /**
      * A CIDR as sing-box parses it: an IPv4 or IPv6 address, with or without
-     * a prefix length. Nothing around it: the core refuses a space.
+     * a prefix length. Nothing around it: the core refuses a space. The bypass
+     * list reads its addresses with this too.
      */
-    private static boolean isCidr(String value) {
+    static boolean isCidr(String value) {
         int slash = value.indexOf('/');
         String address = slash < 0 ? value : value.substring(0, slash);
         String bits = slash < 0 ? null : value.substring(slash + 1);

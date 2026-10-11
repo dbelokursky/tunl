@@ -1,8 +1,10 @@
 package com.vlessclient.service;
 
+import com.vlessclient.app.I18n;
 import java.net.IDN;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
@@ -55,38 +57,19 @@ public final class BypassPatternParser {
      *         comment, or can't be recognized
      */
     public static Parsed parse(String raw) {
-        if (raw == null) {
-            return null;
-        }
-        String line = raw.trim().toLowerCase(Locale.ROOT);
-        if (line.isEmpty() || line.startsWith("#")) {
+        String line = hostExpression(raw);
+        if (line == null) {
             return null;
         }
 
-        // Strip URL scheme and path only when input clearly is a URL; otherwise
-        // we'd chop off the CIDR suffix from 192.168.0.0/16.
-        if (line.contains("://")) {
-            line = stripUrl(line);
-        } else {
-            line = stripTrailingPort(line);
-        }
-        if (line.isEmpty()) {
-            return null;
-        }
-
-        // IP CIDR (v4 or v6)
-        if (IPV4_CIDR.matcher(line).matches() || IPV6_CIDR.matcher(line).matches()) {
-            return new Parsed(Kind.IP_CIDR, line);
-        }
-
-        // Bare IPv4 -> /32
-        if (IPV4.matcher(line).matches()) {
-            return new Parsed(Kind.IP_CIDR, line + "/32");
-        }
-
-        // Bare IPv6 -> /128
-        if (IPV6.matcher(line).matches()) {
-            return new Parsed(Kind.IP_CIDR, line + "/128");
+        // An address, with its network or alone. Checked as the core reads
+        // it: an octet over 255, a prefix over /32 or a short IPv6 string
+        // used to reach the core as ip_cidr, and it refused the whole
+        // configuration, so one mistyped line stopped every server from
+        // connecting. Such a line matches nothing now; see problem().
+        String address = addressOf(line);
+        if (address != null) {
+            return RoutingRuleCheck.isCidr(address) ? new Parsed(Kind.IP_CIDR, address) : null;
         }
 
         // Domain with wildcards
@@ -103,7 +86,9 @@ public final class BypassPatternParser {
             String body = line.startsWith("*.")
                     ? line.substring(2)
                     : line.substring(1);
-            return new Parsed(Kind.DOMAIN_SUFFIX, ascii(body));
+            // "." and "*." name no suffix: the core refuses an empty one
+            // ("empty item is not allowed"), and with it the configuration.
+            return body.isEmpty() ? null : new Parsed(Kind.DOMAIN_SUFFIX, ascii(body));
         }
 
         String bare = stripDots(line.replace("*", ""));
@@ -123,6 +108,58 @@ public final class BypassPatternParser {
 
         // Plain string — treat as exact domain
         return new Parsed(Kind.DOMAIN, ascii(bare));
+    }
+
+    /**
+     * Why the core would refuse a line written as an address, worded in the
+     * language of the UI; empty for any other line. Such a line is left out of
+     * the configuration, and the Routing screen names it instead of saving.
+     *
+     * @param raw the input line
+     * @return the reason, or empty
+     */
+    public static Optional<String> problem(String raw) {
+        String line = hostExpression(raw);
+        String address = line == null ? null : addressOf(line);
+        return address == null || RoutingRuleCheck.isCidr(address)
+                ? Optional.empty()
+                : Optional.of(I18n.get("routing.rule.problem.cidr"));
+    }
+
+    /**
+     * The host part of a line: lower-case, without a URL's scheme, path and
+     * port. Null for a blank line or a comment.
+     */
+    private static String hostExpression(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String line = raw.trim().toLowerCase(Locale.ROOT);
+        if (line.isEmpty() || line.startsWith("#")) {
+            return null;
+        }
+        // Strip URL scheme and path only when input clearly is a URL; otherwise
+        // we'd chop off the CIDR suffix from 192.168.0.0/16.
+        line = line.contains("://") ? stripUrl(line) : stripTrailingPort(line);
+        return line.isEmpty() ? null : line;
+    }
+
+    /**
+     * The network a line shaped like an address stands for, a bare address as
+     * a /32 or /128 one; null for a line of any other shape. Whether the core
+     * can read it is asked separately.
+     */
+    private static String addressOf(String line) {
+        if (IPV4_CIDR.matcher(line).matches() || IPV6_CIDR.matcher(line).matches()) {
+            return line;
+        }
+        if (IPV4.matcher(line).matches()) {
+            return line + "/32";
+        }
+        if (IPV6.matcher(line).matches()) {
+            return line + "/128";
+        }
+        return null;
     }
 
     /** Trims the dots a star leaves at either end: {@code *.google.*} → {@code google}. */
