@@ -243,6 +243,38 @@ class ConnectionServiceTest {
     }
 
     /**
+     * The core reports Connected from its own thread, and that is when
+     * {@link ConnectionService#followActiveServer} and the Dashboard ask which
+     * server it runs. The id was set only once the start had returned, so a
+     * first start could be read as none, which applied no pick made while it
+     * connected, and every later one as the server of the start before.
+     */
+    @Test
+    void theServerACoreWasStartedWithIsKnownAsItReportsRunning() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(server("srv-2", "Osaka"));
+        store.setActiveServer("srv-1");
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        List<String> seenAsItStarted = new CopyOnWriteArrayList<>();
+        engine.onStarted = () -> seenAsItStarted.add(String.valueOf(service.appliedServerId()));
+
+        assertThat(service.connect().started()).isTrue();
+        store.setActiveServer("srv-2");
+        assertThat(service.reconnect(null).started()).isTrue();
+
+        assertThat(seenAsItStarted).as("the first start, then a restart on another server")
+                .containsExactly("srv-1", "srv-2");
+
+        engine.failStartWith = new IOException("the core would not start");
+        store.setActiveServer("srv-1");
+        assertThatThrownBy(() -> service.reconnect(null)).isInstanceOf(IOException.class);
+        assertThat(service.appliedServerId())
+                .as("a start that failed leaves the record as it was")
+                .isEqualTo("srv-2");
+    }
+
+    /**
      * A REALITY server whose link asks for {@code random} is given
      * {@code randomized}, and the log says so once per start. The
      * configuration is generated again on every dashboard update to compare,

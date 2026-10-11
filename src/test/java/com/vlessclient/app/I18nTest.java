@@ -64,4 +64,29 @@ class I18nTest {
         I18n.setLocale(russian);
         assertThat(I18n.localeProperty().get()).isEqualTo(russian);
     }
+
+    /**
+     * A number in a message is written the way the UI's language writes it.
+     * MessageFormat.format used the host's format locale: on a host set to
+     * Persian with the app in English, the health card wrote its latencies in
+     * Persian digits, and on a German one "1.234 ms", beside Latin digits
+     * everywhere else.
+     */
+    @Test
+    void numbersInAMessageFollowTheUiLanguageNotTheHost() {
+        Locale host = Locale.getDefault(Locale.Category.FORMAT);
+        try {
+            Locale.setDefault(Locale.Category.FORMAT, Locale.forLanguageTag("fa-IR"));
+            I18n.setLocale(Locale.ENGLISH);
+            assertThat(I18n.get("unit.ms", 1234L)).isEqualTo("1,234\u00a0ms");
+
+            Locale.setDefault(Locale.Category.FORMAT, Locale.GERMANY);
+            I18n.setLocale(Locale.of("ru"));
+            assertThat(I18n.get("unit.ms", 1234L))
+                    .isEqualTo("1\u00a0234\u00a0\u043c\u0441");
+        } finally {
+            Locale.setDefault(Locale.Category.FORMAT, host);
+            I18n.setLocale(Locale.ENGLISH);
+        }
+    }
 }

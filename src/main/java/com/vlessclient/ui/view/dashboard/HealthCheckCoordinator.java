@@ -390,6 +390,67 @@ public final class HealthCheckCoordinator {
     }
 
     /**
+     * Applies saved settings to the running tunnel's checks. Settings and an
+     * agent's {@code set_setting} only save them, and the loop read them at
+     * its next turn: checks switched on while connected had no turn coming,
+     * so none ran until the next connect or wake, the tray showed the tunnel
+     * unmonitored and recovery never heard of a broken one; checks switched
+     * off went on reporting the last verdict; and a shorter interval waited
+     * out the wait it was meant to shorten. No-op while not connected: the
+     * next connect reads them. FX thread.
+     */
+    public void onSettingsChanged() {
+        if (healthCard == null
+                || engine.connectionStateProperty().get() != ConnectionState.CONNECTED) {
+            return;
+        }
+        AppSettings settings = settingsSupplier.get();
+        if (settings == null) {
+            return;
+        }
+        if (!settings.isHealthCheckEnabled()) {
+            // A probe still out is dropped; the check hides the card, stops
+            // the loop and reports the tunnel unmonitored.
+            healthGeneration.incrementAndGet();
+            healthCheckInFlight.set(false);
+            hasVerdict.set(false);
+            runReachabilityCheck();
+            return;
+        }
+        if (healthCheckInFlight.get() || wakeWait != null) {
+            return;   // what is under way schedules the next turn with these
+        }
+        if (periodicCheck == null) {
+            runReachabilityCheck();
+        } else if (nextDelaySeconds(settings) != periodicCheckSeconds.get()) {
+            schedulePeriodicCheck(settings);
+        }
+    }
+
+    /**
+     * The running core exits through another server now: a live switch,
+     * which changes no connection state. The verdict and the probe cadence
+     * were the old server's, so after a few minutes on a server that kept
+     * answering the next probe was up to a minute away, and a dead new
+     * server went on reading as healthy, on the card, in the tray and to
+     * recovery, until then. Checks the new exit at once, as after a connect:
+     * a probe still out went through the old one and is dropped, and the
+     * card says the tunnel is being verified until the new one answers.
+     * No-op while not connected.
+     */
+    public void onExitChanged() {
+        if (healthCard == null
+                || engine.connectionStateProperty().get() != ConnectionState.CONNECTED) {
+            return;
+        }
+        healthGeneration.incrementAndGet();
+        healthCheckInFlight.set(false);
+        hasVerdict.set(false);
+        healthyStreak.set(0);
+        runReachabilityCheck();
+    }
+
+    /**
      * Stops a pending auto-reconnect countdown and hides the banner, wired to
      * the banner's "Cancel" button.
      */
@@ -559,14 +620,19 @@ public final class HealthCheckCoordinator {
         if (engine.connectionStateProperty().get() != ConnectionState.CONNECTED) {
             return;
         }
-        int seconds = ProbeCadence.nextDelaySeconds(
-                Math.max(1, settings.getHealthCheckIntervalSeconds()), healthyStreak.get());
+        int seconds = nextDelaySeconds(settings);
         periodicCheckSeconds.set(seconds);
         periodicCheck = FxTimer.after(Duration.ofSeconds(seconds), () -> {
             periodicCheck = null;
             periodicCheckSeconds.set(-1);
             runReachabilityCheck();
         });
+    }
+
+    /** The wait before the next probe, by the settings and the healthy streak. */
+    private int nextDelaySeconds(AppSettings settings) {
+        return ProbeCadence.nextDelaySeconds(
+                Math.max(1, settings.getHealthCheckIntervalSeconds()), healthyStreak.get());
     }
 
     private void cancelPeriodicCheck() {
@@ -680,9 +746,13 @@ public final class HealthCheckCoordinator {
                 reachable++;
             }
             String dotClass = ok ? "status-circle-connected" : "status-circle-error";
-            String latency = I18n.get("unit.ms", r.latencyMs());
-            Supplier<String> resultText =
-                    ok ? () -> latency : () -> I18n.get("dashboard.health.unreachable");
+            // Put into words when the row is drawn, as RowContent says: put
+            // into words here, a card drawn after a language switch kept the
+            // old unit until the next probe.
+            long latencyMs = r.latencyMs();
+            Supplier<String> resultText = ok
+                    ? () -> I18n.get("unit.ms", latencyMs)
+                    : () -> I18n.get("dashboard.health.unreachable");
             String resultClass = ok ? "service-ok" : "service-fail";
             answered.add(new RowContent(r.name(), r.url(), dotClass, resultText, resultClass));
         }

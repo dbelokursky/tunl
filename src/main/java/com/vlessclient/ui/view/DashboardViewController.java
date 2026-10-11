@@ -13,6 +13,7 @@ import com.vlessclient.platform.SystemProxySupport;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.CountryResolver;
+import com.vlessclient.service.FxExecutor;
 import com.vlessclient.service.LatencyTester;
 import com.vlessclient.service.ProxyGroupMonitor;
 import com.vlessclient.service.ServiceReachabilityChecker;
@@ -151,7 +152,18 @@ public class DashboardViewController implements ViewShownAware {
      * grow a proxy store while the app runs. */
     private Boolean systemProxyCapable;
 
+    /**
+     * The server the core runs, or is being started with, as this card last
+     * knew it; {@link #runningServer()} keeps it in step with the service.
+     * Kept as the object, so the card still names a server that has since
+     * left the list.
+     */
     private ServerConfig activeServer;
+    /**
+     * A live switch this card asked for is under way. A pick made meanwhile
+     * is compared again once it is done, with the server it switched to.
+     */
+    private boolean applyingServer;
     /** The run's engine, which has no core until one is installed. */
     private SingBoxEngine singBoxEngine;
     private ProxyGroupMonitor groupMonitor;
@@ -304,6 +316,12 @@ public class DashboardViewController implements ViewShownAware {
                         cancelReconnectButton),
                 reachabilityChecker, healthState, singBoxEngine,
                 connectionService() != null ? connectionService().getRecoveryService() : null);
+        // Settings and an agent's set_setting only save the checks' settings,
+        // which the loop read at its next turn: switched on while connected,
+        // they had none coming. Saves come from any thread.
+        ServiceLocator.find(ConfigStore.class).ifPresent(configStore ->
+                configStore.addSettingsListener(saved ->
+                        FxExecutor.later(healthChecks::onSettingsChanged)));
 
         // A verdict arriving does not change the process state, so the hero
         // card has to be repainted on its own signal — otherwise a tunnel that
@@ -422,7 +440,54 @@ public class DashboardViewController implements ViewShownAware {
     private ServerConfig routedServer() {
         ServerConfig routed = serverTagged(
                 groupMonitor != null ? groupMonitor.currentMemberTagProperty().get() : null);
-        return routed != null ? routed : activeServer;
+        return routed != null ? routed : runningServer();
+    }
+
+    /**
+     * The server the running core is pointed at.
+     *
+     * <p>{@link ConnectionService} keeps it through every start and live
+     * switch, whoever asked: this card, the tray, an agent over MCP, a
+     * recovery restart, or a pick it applied once the core came up. The
+     * card's own copy was written by its own Connect alone, so after a
+     * Connect from the tray it named no server, and after a pick applied at
+     * Connected it named the one before, and the history counted the traffic
+     * to it. Looked up again only when the service names another.</p>
+     */
+    private ServerConfig runningServer() {
+        String applied = appliedServerId();
+        if (applied != null && (activeServer == null || !applied.equals(activeServer.getId()))) {
+            activeServer = serverWithId(applied);
+        }
+        return activeServer;
+    }
+
+    /**
+     * The id of the server the running core is pointed at, as the service
+     * keeps it; this card's own copy where the service has none, as a double
+     * in a test.
+     */
+    private String appliedServerId() {
+        ConnectionService service = ServiceLocator.find(ConnectionService.class).orElse(null);
+        String applied = service != null ? service.appliedServerId() : null;
+        if (applied != null) {
+            return applied;
+        }
+        return activeServer != null ? activeServer.getId() : null;
+    }
+
+    /** The stored server with this id, or null when the list has none. */
+    private static ServerConfig serverWithId(String id) {
+        ConfigStore configStore = ServiceLocator.find(ConfigStore.class).orElse(null);
+        if (configStore == null) {
+            return null;
+        }
+        for (ServerConfig server : configStore.getServers()) {
+            if (id.equals(server.getId())) {
+                return server;
+            }
+        }
+        return null;
     }
 
     /** The tag of the server the core picked itself (the Fastest mode), or null. */
@@ -734,16 +799,16 @@ public class DashboardViewController implements ViewShownAware {
     }
 
     /**
-     * The server the status card names. While a core runs, the one it was
-     * started with, which {@link #activeServer} keeps for spotting a switch;
-     * otherwise the one Connect would use, from the store. The field alone is
-     * set only by a connect, so a launch named no server ("Add a server to get
-     * started" beside an enabled Connect) and a new pick went unnoticed.
+     * The server the status card names. While a core runs, the one it is
+     * pointed at ({@link #runningServer()}); otherwise the one Connect would
+     * use, from the store. The field alone is set only by a connect, so a
+     * launch named no server ("Add a server to get started" beside an
+     * enabled Connect) and a new pick went unnoticed.
      */
     private ServerConfig cardServer() {
         ConnectionState state = currentConnectionState();
         return state == ConnectionState.CONNECTED || state == ConnectionState.CONNECTING
-                ? activeServer
+                ? runningServer()
                 : findActiveServer();
     }
 
@@ -930,7 +995,14 @@ public class DashboardViewController implements ViewShownAware {
                 case ALREADY_RUNNING -> log.warn("sing-box already running");
                 case CANCELLED -> log.debug("Connect superseded by a newer user request");
                 // STARTED: the engine's state listener drives the UI from here.
-                default -> Platform.runLater(() -> rememberStartedServer(attempt.server()));
+                // SWITCHED changes no state, so nothing else tells the health
+                // checks that the traffic leaves through another server.
+                default -> Platform.runLater(() -> {
+                    rememberStartedServer(attempt.server());
+                    if (attempt.outcome() == ConnectionService.Outcome.SWITCHED) {
+                        healthChecks.onExitChanged();
+                    }
+                });
             }
         } catch (IOException e) {
             log.error("Failed to start sing-box", e);
@@ -950,7 +1022,13 @@ public class DashboardViewController implements ViewShownAware {
             Platform.runLater(() ->
                     statusLabel.setText(I18n.get("error.connection.failed", detail)));
         } finally {
-            Platform.runLater(this::refreshConnectButtonAvailability);
+            Platform.runLater(() -> {
+                refreshConnectButtonAvailability();
+                if (switchServer) {
+                    applyingServer = false;
+                    reconnectIfActiveServerChanged();
+                }
+            });
         }
     }
 
@@ -992,24 +1070,38 @@ public class DashboardViewController implements ViewShownAware {
      * {@code ConfigStore.setActiveServer}, which re-sets the elements and
      * therefore fires a change. The service uses the core selector API when
      * only the selected member changed, and restarts for configuration changes.</p>
+     *
+     * <p>The pick is compared with the server the core runs, as the service
+     * keeps it ({@link #appliedServerId()}). It was compared with this card's
+     * own copy, which only its own Connect wrote: under a core started from
+     * the tray or by an agent the copy was empty and no pick was applied, and
+     * after the service moved the core at Connected to a pick made while
+     * connecting, picking the first server again read as no change.</p>
      */
     private void reconnectIfActiveServerChanged() {
-        if (singBoxEngine.connectionStateProperty().get() != ConnectionState.CONNECTED) {
+        if (applyingServer
+                || singBoxEngine.connectionStateProperty().get() != ConnectionState.CONNECTED) {
             return;
         }
         ServerConfig nowActive = findActiveServer();
-        if (nowActive == null || activeServer == null
-                || nowActive.getId().equals(activeServer.getId())) {
+        String applied = appliedServerId();
+        if (nowActive == null || applied == null || nowActive.getId().equals(applied)) {
             return;
         }
-        log.info("Active server changed while connected ({} -> {}); applying selection",
-                activeServer.getName(), nowActive.getName());
         ConnectionService service = connectionService();
-        if (service != null) {
-            activeServer = nowActive;
-            holdConnect();
-            Thread.startVirtualThread(() -> runConnect(service, true, true));
+        if (service == null) {
+            return;
         }
+        ServerConfig running = runningServer();
+        log.info("Active server changed while connected ({} -> {}); applying selection",
+                running != null ? running.getName() : applied, nowActive.getName());
+        // Compared again when the switch is done: while it runs, the service
+        // still names the server it is leaving, and a pick made meanwhile
+        // would start a second switch, or, if it went back to that server,
+        // none at all.
+        applyingServer = true;
+        holdConnect();
+        Thread.startVirtualThread(() -> runConnect(service, true, true));
     }
 
     // ===== Service availability / auto-reconnect =====
@@ -1090,7 +1182,16 @@ public class DashboardViewController implements ViewShownAware {
         // with the way forward two views away. The link is that way.
         addServerLink.setVisible(servers.isEmpty());
         addServerLink.setManaged(servers.isEmpty());
-        if (servers.isEmpty()) {
+        ConnectionState state = currentConnectionState();
+        if (state == ConnectionState.CONNECTED || state == ConnectionState.CONNECTING) {
+            // The button is Disconnect or Cancel here, which no server list
+            // gates. Asked of the list alone, deleting the only subscription
+            // to add it back with a new link emptied it under a running core,
+            // and greyed out the one control on the card that stops the
+            // tunnel, with "No servers configured", until something else
+            // repainted it: on a healthy tunnel, nothing did.
+            allowConnect();
+        } else if (servers.isEmpty()) {
             connectButton.setDisable(true);
             explainDisabledConnect("dashboard.no.servers");
         } else if (findActiveServer() == null) {
@@ -1100,10 +1201,15 @@ public class DashboardViewController implements ViewShownAware {
             connectButton.setDisable(true);
             explainDisabledConnect("dashboard.no.server");
         } else {
-            connectButton.setDisable(false);
-            Tooltip.uninstall(connectButtonHolder, connectBlockedTooltip);
-            connectButton.setAccessibleHelp(null);
+            allowConnect();
         }
+    }
+
+    /** Enables the button and drops the reason it was disabled. */
+    private void allowConnect() {
+        connectButton.setDisable(false);
+        Tooltip.uninstall(connectButtonHolder, connectBlockedTooltip);
+        connectButton.setAccessibleHelp(null);
     }
 
     /**

@@ -76,8 +76,9 @@ public class TrafficMonitor {
     }
 
     /**
-     * Starts streaming traffic stats from the Clash API on the given port.
-     * Does nothing if a monitor is already running.
+     * Starts streaming traffic stats from the Clash API on the given port,
+     * counting the session's totals from zero. Does nothing if a monitor is
+     * already running.
      *
      * @param clashApiPort the port the sing-box Clash API listens on
      * @param secret the clash_api auth token the core expects (may be blank
@@ -90,6 +91,16 @@ public class TrafficMonitor {
                 return;
             }
             clashApiSecret = secret == null ? "" : secret;
+            // A stream is a session. The monitor is one for the whole run and
+            // never reset its totals, so the Dashboard's "N this session" and
+            // get_status opened the second session on the first one's bytes.
+            // Queued ahead of this stream's samples, and after the last of the
+            // old one's: that stream had ended, or stop() had joined its
+            // thread, before a start could get here.
+            onFxThread(() -> {
+                totalUpload.set(0);
+                totalDownload.set(0);
+            });
 
             sseThread = Thread.ofVirtual().name("traffic-monitor").start(() -> {
                 log.info("TrafficMonitor started, connecting to Clash API on port {}",
@@ -110,16 +121,20 @@ public class TrafficMonitor {
 
     /** Puts the live readouts back to zero on the FX thread. */
     private void zeroSpeeds() {
-        Runnable zero = () -> {
+        onFxThread(() -> {
             uploadSpeed.set(0);
             downloadSpeed.set(0);
-        };
+        });
+    }
+
+    /** Hands a change of the properties to the FX thread, which owns them. */
+    private static void onFxThread(Runnable change) {
         try {
-            Platform.runLater(zero);
+            Platform.runLater(change);
         } catch (IllegalStateException toolkitNotRunning) {
             // No FX thread to hand it to, as for a graph shut down before
             // the toolkit started: nothing else can be reading them.
-            zero.run();
+            change.run();
         }
     }
 

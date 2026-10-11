@@ -220,7 +220,17 @@ public final class TrafficDisplayBinder {
             }
         });
 
-        I18n.localeProperty().addListener((obs, oldVal, newVal) -> renderSessionTotal());
+        // The line says this session's total or this month's, by the state.
+        // It rendered the session's whatever the state, so a switch while
+        // disconnected, which an agent's set_setting applies at once, put
+        // "0 B this session" where the month figure had been.
+        I18n.localeProperty().addListener((obs, oldVal, newVal) -> {
+            if (connected) {
+                renderSessionTotal();
+            } else {
+                showIdle();
+            }
+        });
     }
 
     /**
@@ -315,9 +325,12 @@ public final class TrafficDisplayBinder {
             // Read while the tooltip is up; formatted per sample it was a
             // string a second that nobody saw.
             sessionSplit.setOnShowing(event -> sessionSplit.setText(sessionSplitText()));
-            sessionTotalLabel.setTooltip(sessionSplit);
         } else if (sessionSplit.isShowing()) {
             sessionSplit.setText(sessionSplitText());
+        }
+        // Taken off by showIdle, which gives the same label the month figure.
+        if (sessionTotalLabel.getTooltip() != sessionSplit) {
+            sessionTotalLabel.setTooltip(sessionSplit);
         }
     }
 
@@ -372,11 +385,22 @@ public final class TrafficDisplayBinder {
         connected = true;
         setVisible(trafficSpeeds, true);
         setVisible(trafficSummary, true);
+        // The line held the month figure; the session's own count replaces
+        // it now rather than at the first sample. Off screen, repaint() does
+        // it on the way back.
+        if (isOnScreen()) {
+            renderSessionTotal();
+        }
     }
 
     private void showIdle() {
         connected = false;
         setVisible(trafficSpeeds, false);
+        if (sessionTotalLabel != null) {
+            // The split is the session's: over the month figure it read
+            // "Uploaded 0 B · downloaded 0 B".
+            sessionTotalLabel.setTooltip(null);
+        }
         String idle = idleSummary != null ? idleSummary.get() : null;
         if (idle == null || idle.isBlank()) {
             setVisible(trafficSummary, false);
@@ -400,12 +424,13 @@ public final class TrafficDisplayBinder {
     /**
      * Zeroes the readouts on the way down so the next session does not open on
      * the previous one's numbers for the second before its first sample lands.
+     * The total line is not drawn here: {@link #showIdle} gives it the month
+     * figure next, and {@link #showConnected} the count of the next session.
      */
     private void resetReadouts() {
         paint(upload, 0, "speed-value-up", "stats-icon-upload");
         paint(download, 0, "speed-value-down", "stats-icon-download");
         lastTotalUpload = 0;
         lastTotalDownload = 0;
-        renderSessionTotal();
     }
 }

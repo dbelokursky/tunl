@@ -90,6 +90,14 @@ public final class AddHealthTargetDialog extends Dialog<HealthCheckTarget> {
                 if (uri.getHost() == null || uri.getHost().isBlank()) {
                     return null;
                 }
+                // A port no TCP connection can have, refused as the host:port
+                // form refuses it. URI takes any digits, and the probe sends
+                // the port in two bytes: "https://example.com:70000", a typo
+                // for 7000, was saved, and every probe went to port 4464.
+                int port = uri.getPort();
+                if (port != -1 && (port < 1 || port > 65535)) {
+                    return null;
+                }
                 return new ParsedTarget(uri.toString(), uri.getHost());
             } catch (URISyntaxException e) {
                 return null;

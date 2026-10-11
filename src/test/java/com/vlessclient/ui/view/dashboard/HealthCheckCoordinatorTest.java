@@ -24,6 +24,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -763,6 +764,52 @@ class HealthCheckCoordinatorTest {
         assertThat(resultTexts()).containsExactly(I18n.get("dashboard.health.unreachable"));
     }
 
+    /**
+     * The latency and the counts are numbers in a sentence of the UI's
+     * language. They were written in the host's format locale: with the app
+     * in English on a host set to Persian, the rows and the summary came out
+     * in Persian digits. And the latency was put into words when the
+     * probe came back, so a card drawn after a language switch kept the old
+     * unit until the next probe.
+     */
+    @Test
+    void theCardsNumbersFollowTheUiLanguage() throws Exception {
+        Locale host = Locale.getDefault(Locale.Category.FORMAT);
+        Locale.setDefault(Locale.Category.FORMAT, Locale.forLanguageTag("fa-IR"));
+        try {
+            healthSettings(false, new HealthCheckTarget("a", "https://a"),
+                    new HealthCheckTarget("b", "https://b"), new HealthCheckTarget("c", "https://c"));
+            FakeChecker checker = new FakeChecker();
+            checker.results = List.of(probe("a", true, 1234), probe("b", true, 12),
+                    probe("c", false, -1));
+            HealthCheckCoordinator coordinator = coordinatorWith(checker);
+            connectAndCheck(coordinator);
+
+            assertThat(resultTexts()).first().isEqualTo("1,234 ms");
+            assertThat(summaryLabel.getText()).isEqualTo(
+                    I18n.get("dashboard.health.some.reachable", "2", "3"));
+
+            onFxAndWait(() -> window.getScene().setRoot(new VBox()));
+            onFxAndWait(() -> I18n.setLocale(Locale.of("ru")));
+            onFxAndWait(() -> window.getScene().setRoot(healthCard));
+
+            assertThat(resultTexts()).first().as("drawn after a switch to Russian")
+                    .isEqualTo("1 234 мс");
+            assertThat(summaryLabel.getText()).isEqualTo(
+                    I18n.get("dashboard.health.some.reachable", "2", "3"));
+        } finally {
+            Locale.setDefault(Locale.Category.FORMAT, host);
+            onFxAndWait(() -> I18n.setLocale(Locale.ENGLISH));
+        }
+    }
+
+    private static ServiceReachabilityChecker.ProbeResult probe(
+            String name, boolean reachable, long latencyMs) {
+        return new ServiceReachabilityChecker.ProbeResult(
+                name, "https://" + name, reachable, latencyMs,
+                reachable ? "HTTP 204" : "timeout");
+    }
+
     /** Answers for exactly the targets it is asked about, every one reachable. */
     private static final class EchoChecker extends ServiceReachabilityChecker {
         @Override
@@ -1060,6 +1107,73 @@ class HealthCheckCoordinatorTest {
         onFxAndWait(() ->
                 coordinator.onConnectionStateChanged(ConnectionState.DISCONNECTED));
         assertWait(coordinator, -1);
+    }
+
+    /**
+     * A live switch moves the traffic to another server and changes no
+     * connection state. The old server's verdict stood, and so did its
+     * cadence: after twelve healthy probes the next was a minute away. The
+     * new exit is checked at once, and reads as unverified until it answers.
+     */
+    @Test
+    void anExitSwitchedLiveIsCheckedAtOnceAndVerifiedAfresh() throws Exception {
+        AppSettings settings = healthSettings(false, new HealthCheckTarget("a", "https://a"));
+        settings.setHealthCheckIntervalSeconds(5);
+        FakeChecker checker = new FakeChecker();
+        checker.results = List.of(probe("a", true));
+        HealthCheckCoordinator coordinator = coordinatorWith(checker);
+        connectAndCheck(coordinator);
+        for (int probe = 2; probe <= 12; probe++) {
+            runTheScheduledCheck(coordinator);
+        }
+        assertWait(coordinator, 60);
+        List<TunnelHealth> published = new java.util.concurrent.CopyOnWriteArrayList<>();
+        onFxAndWait(() -> healthState.healthProperty()
+                .addListener((obs, old, next) -> published.add(next)));
+        int probes = checker.ports.size();
+
+        onFxAndWait(coordinator::onExitChanged);
+        flushFxEvents();
+
+        assertThat(checker.ports).as("a probe through the new exit").hasSize(probes + 1);
+        assertThat(published).as("what the tray and recovery heard")
+                .containsExactly(TunnelHealth.CHECKING, TunnelHealth.HEALTHY);
+        assertWait(coordinator, 5);
+    }
+
+    /**
+     * Settings applied to a running tunnel: an interval changed in Settings
+     * or by an agent waited out the wait it was meant to change, and checks
+     * switched off went on reporting the last verdict.
+     */
+    @Test
+    void savedSettingsApplyToTheRunningChecks() throws Exception {
+        AppSettings settings = healthSettings(false, new HealthCheckTarget("a", "https://a"));
+        FakeChecker checker = new FakeChecker();
+        checker.results = List.of(probe("a", true));
+        HealthCheckCoordinator coordinator = coordinatorWith(checker);
+        connectAndCheck(coordinator);
+        assertWait(coordinator, 3600);
+
+        onFxAndWait(coordinator::onSettingsChanged);
+        assertWait(coordinator, 3600);
+        assertThat(checker.ports).as("a save that changed nothing probes nothing").hasSize(1);
+
+        settings.setHealthCheckIntervalSeconds(10);
+        onFxAndWait(coordinator::onSettingsChanged);
+        assertWait(coordinator, 10);
+
+        settings.setHealthCheckEnabled(false);
+        onFxAndWait(coordinator::onSettingsChanged);
+        assertWait(coordinator, -1);
+        assertThat(healthCard.isVisible()).as("the card of checks switched off").isFalse();
+        assertThat(healthState.get()).isEqualTo(TunnelHealth.UNMONITORED);
+
+        settings.setHealthCheckEnabled(true);
+        onFxAndWait(coordinator::onSettingsChanged);
+        flushFxEvents();
+        assertThat(checker.ports).as("checks switched back on probe at once").hasSize(2);
+        assertThat(healthState.get()).isEqualTo(TunnelHealth.HEALTHY);
     }
 
     private static void runTheScheduledCheck(HealthCheckCoordinator coordinator)
