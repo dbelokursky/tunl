@@ -169,14 +169,16 @@ public class GeoIpDatabase {
     private boolean download(String url) {
         Path staging = databasePath.resolveSibling(DB_FILE + ".part");
         try {
+            // No request timeout: on this JDK it bounds the whole body, and
+            // thirty seconds lost the database on every launch below about
+            // 130 KB/s. LongDownload bounds the wait and each stall instead.
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
-                    .timeout(TIMEOUT)
                     .GET()
                     .build();
-            HttpResponse<InputStream> response =
-                    httpClient.get().send(request, HttpResponse.BodyHandlers.ofInputStream());
+            HttpResponse<InputStream> response = LongDownload.send(httpClient.get(), request);
             if (response.statusCode() != 200) {
+                response.body().close();
                 log.debug("Geo-IP database not at {} (HTTP {})", url, response.statusCode());
                 return false;
             }
@@ -186,7 +188,7 @@ public class GeoIpDatabase {
             // count after the copy let a gzip bomb fill the disk first: the
             // check only ran once the whole stream had landed.
             try (InputStream in = new BoundedInputStream(
-                    new GZIPInputStream(response.body()), MAX_BYTES)) {
+                    new GZIPInputStream(LongDownload.guard(response.body())), MAX_BYTES)) {
                 long written = Files.copy(in, staging, StandardCopyOption.REPLACE_EXISTING);
                 if (written <= 0) {
                     throw new IOException("empty download");

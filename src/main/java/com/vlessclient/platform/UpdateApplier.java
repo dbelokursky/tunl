@@ -50,7 +50,15 @@ public interface UpdateApplier {
          * A macOS copy running from where it was downloaded: translocated, or
          * the disk image itself. Moving Tunl to Applications is the fix.
          */
-        MOVE_TO_APPLICATIONS
+        MOVE_TO_APPLICATIONS,
+
+        /**
+         * It cannot install this update, but the user can, from the release
+         * page: a build that is not an installed package, an install location
+         * this account cannot write, or a release that failed to install here
+         * twice.
+         */
+        INSTALL_MANUALLY
     }
 
     /**

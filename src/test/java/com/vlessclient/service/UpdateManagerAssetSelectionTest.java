@@ -43,12 +43,28 @@ class UpdateManagerAssetSelectionTest {
     }
 
     @Test
-    void fallsBackToTheOnlyDebWhenNoArchTokenMatches() throws Exception {
-        // Releases published before multi-arch assets carry one deb.
+    void neverOffersAPackageBuiltForTheOtherArchitecture() throws Exception {
+        // It used to fall back to the first deb whatever it was built for.
         JsonNode release = assets("vless-client_1.1.0_amd64.deb", "vless-client_1.1.0.msi");
 
-        assertThat(UpdateManager.findInstallerAssetUrl(release, ".deb", "arm64"))
-                .endsWith("_amd64.deb");
+        assertThat(UpdateManager.findInstallerAssetUrl(release, ".deb", "arm64")).isEmpty();
+    }
+
+    /**
+     * The release ships one DMG, built on Apple Silicon, with no architecture
+     * in its name. An Intel Mac took it as a fallback, its signature checked
+     * out, and the relay replaced a working app with one the machine cannot
+     * open. No asset at all is the safe answer there.
+     */
+    @Test
+    void anIntelMacIsNotOfferedTheAppleSiliconDiskImage() throws Exception {
+        JsonNode release = assets(
+                "tunl_1.7.0_amd64.deb", "tunl_1.7.0_arm64.deb", "tunl_1.7.0.msi", "tunl_1.7.0.dmg");
+
+        assertThat(UpdateManager.findInstallerAssetUrl(release, ".dmg", "amd64")).isEmpty();
+        assertThat(UpdateManager.findInstallerAssetUrl(release, ".dmg", "arm64"))
+                .endsWith("tunl_1.7.0.dmg");
+        assertThat(UpdateManager.findInstallerAssetUrl(release, ".msi", "arm64")).isEmpty();
     }
 
     @Test

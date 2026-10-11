@@ -84,8 +84,13 @@ public final class UpdateBootstrap {
         }
 
         if (staging.attempts() >= MAX_ATTEMPTS) {
-            log.error("Staged update {} failed to apply {} times, giving up on it",
-                    update.version(), MAX_ATTEMPTS);
+            log.error("Staged update {} failed to apply {} times, giving up on it; "
+                    + "it will not be downloaded again", update.version(), MAX_ATTEMPTS);
+            // Remembered past the clear: the attempt count lived only in the
+            // marker, so the check that ran seconds later found the same
+            // release, fetched it again with the count back at zero, and the
+            // app quit at two launches out of every three, forever.
+            staging.abandon(update.version());
             staging.clear();
             return false;
         }

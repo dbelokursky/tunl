@@ -20,8 +20,6 @@ final class WindowsUpdateApplier implements UpdateApplier {
 
     private static final Logger log = LoggerFactory.getLogger(WindowsUpdateApplier.class);
 
-    private static final String LOG_NAME = "apply-update.log";
-
     @Override
     public Outcome apply(PendingUpdate update) {
         Path launcher = InstalledApp.launcher();
@@ -31,7 +29,6 @@ final class WindowsUpdateApplier implements UpdateApplier {
         }
 
         try {
-            Path workDir = SecureFiles.parentDirectory(update.installer());
             String relay = relayScript(
                     ProcessHandle.current().pid(), update.installer(), launcher);
 
@@ -44,7 +41,7 @@ final class WindowsUpdateApplier implements UpdateApplier {
                     "-EncodedCommand", WindowsTunLauncher.encode(relay))
                     .redirectErrorStream(true)
                     .redirectOutput(ProcessBuilder.Redirect.appendTo(
-                            workDir.resolve(LOG_NAME).toFile()))
+                            UpdateHelperLog.file().toFile()))
                     .start();
 
             log.info("Update {} handed off to the installer relay", update.version());
@@ -55,9 +52,18 @@ final class WindowsUpdateApplier implements UpdateApplier {
         }
     }
 
+    /**
+     * Not when this is no installed package: a jar or development run would
+     * download an MSI that {@link #apply} then refuses, every week.
+     */
     @Override
     public boolean selfUpdates() {
-        return true;
+        return hold() == Hold.NONE;
+    }
+
+    @Override
+    public Hold hold() {
+        return InstalledApp.launcher() == null ? Hold.INSTALL_MANUALLY : Hold.NONE;
     }
 
     /**
@@ -91,9 +97,13 @@ final class WindowsUpdateApplier implements UpdateApplier {
                 }
 
                 # /qb keeps a progress bar on screen: the app has just vanished,
-                # so something has to show that the update is running.
+                # so something has to show that the update is running. One
+                # argument string with the path in double quotes: Start-Process
+                # joins an array with spaces and quotes nothing, so a profile
+                # path with a space reached msiexec as two arguments. A Windows
+                # path cannot contain a double quote.
                 $installed = Start-Process msiexec `
-                    -ArgumentList '/i', $msi, '/qb', '/norestart' -Wait -PassThru
+                    -ArgumentList ('/i "{0}" /qb /norestart' -f $msi) -Wait -PassThru
                 # 3010 is "success, reboot pending" and is not a failure here.
                 if ($installed.ExitCode -ne 0 -and $installed.ExitCode -ne 3010) {
                     Write-Output "msiexec failed with $($installed.ExitCode)"
