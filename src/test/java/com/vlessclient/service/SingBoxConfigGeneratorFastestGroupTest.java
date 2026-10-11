@@ -142,4 +142,37 @@ class SingBoxConfigGeneratorFastestGroupTest {
 
         assertThat(members(group(generator, all, all.get(0), settings))).hasSize(100);
     }
+
+    /**
+     * The members were picked by the latest measurement each time the
+     * configuration was generated, and the Dashboard generates it again to
+     * tell whether the running core still matches the settings. After "Test
+     * all" re-measured the servers the group came out different, and the
+     * "reconnect to apply" banner appeared although nothing was changed;
+     * acting on it dropped every open connection. A run compares with the
+     * measurements it was started from, and a new run takes the latest.
+     */
+    @Test
+    void aRunIsComparedWithTheMeasurementsItStartedFrom() {
+        List<ServerConfig> all = servers(40);
+        Map<String, Long> latencies = new java.util.HashMap<>();
+        for (int i = 0; i < 40; i++) {
+            latencies.put("s" + i, (long) i);
+        }
+        SingBoxConfigGenerator generator = new SingBoxConfigGenerator(
+                serverId -> OptionalLong.of(latencies.get(serverId)));
+        HostFacts run = generator.hostFacts();
+        String atConnect = generator.generate(all, all.get(0), fastest(), null, run);
+
+        for (int i = 0; i < 40; i++) {
+            latencies.put("s" + i, 1000L - i);
+        }
+
+        assertThat(generator.generate(all, all.get(0), fastest(), null, run))
+                .as("generated again for the running core")
+                .isEqualTo(atConnect);
+        assertThat(generator.generate(all, all.get(0), fastest(), null, generator.hostFacts()))
+                .as("generated for a new run")
+                .isNotEqualTo(atConnect);
+    }
 }

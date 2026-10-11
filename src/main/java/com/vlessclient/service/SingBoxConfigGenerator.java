@@ -221,7 +221,7 @@ public class SingBoxConfigGenerator {
         // proxy group references it, exactly like an outbound member — a
         // selector may point at an endpoint (verified against the real core).
         List<ServerConfig> members = groupMembers(candidates, active,
-                settings.getServerSelection());
+                settings.getServerSelection(), host);
         ArrayNode endpoints = mapper.createArrayNode();
         for (ServerConfig member : members) {
             if (member.getProtocol() == Protocol.WIREGUARD) {
@@ -817,7 +817,7 @@ public class SingBoxConfigGenerator {
      * @return facts not yet asked
      */
     public HostFacts hostFacts() {
-        return new HostFacts(ipv6Uplink, systemProxySupport);
+        return new HostFacts(ipv6Uplink, systemProxySupport, ranking);
     }
 
     /**
@@ -1008,7 +1008,7 @@ public class SingBoxConfigGenerator {
      * it.</p>
      */
     private List<ServerConfig> groupMembers(List<ServerConfig> candidates, ServerConfig active,
-                                            ServerSelection selection) {
+                                            ServerSelection selection, HostFacts host) {
         if (candidates == null) {
             return List.of(active);
         }
@@ -1023,7 +1023,7 @@ public class SingBoxConfigGenerator {
         byId.putIfAbsent(active.getId(), active);
         List<ServerConfig> all = byId.isEmpty() ? List.of(active) : List.copyOf(byId.values());
         return selection != null && selection.isAutomatic() && all.size() > MAX_AUTOMATIC_MEMBERS
-                ? fastest(all, active)
+                ? fastest(all, active, host)
                 : all;
     }
 
@@ -1032,12 +1032,15 @@ public class SingBoxConfigGenerator {
      * fastest, then those not measured yet in the list's order, then those
      * that did not answer, and the picked server among them. The core probed
      * every server every three minutes: with 500, about 100 MB an hour.
+     * Measured as the run first asked ({@link HostFacts#lastLatency}), so
+     * generating again for the running core picks the same servers.
      */
-    private List<ServerConfig> fastest(List<ServerConfig> all, ServerConfig active) {
+    private List<ServerConfig> fastest(List<ServerConfig> all, ServerConfig active,
+                                       HostFacts host) {
         List<ServerConfig> ranked = new ArrayList<>(all);
         // Stable: servers with equal keys keep the list's order.
         ranked.sort(java.util.Comparator.comparingLong(
-                server -> ranking.lastLatency(server.getId()).orElse(Long.MAX_VALUE - 1)));
+                server -> host.lastLatency(server.getId()).orElse(Long.MAX_VALUE - 1)));
         List<ServerConfig> members = new ArrayList<>(ranked.subList(0, MAX_AUTOMATIC_MEMBERS));
         if (!members.contains(active)) {
             members.set(MAX_AUTOMATIC_MEMBERS - 1, active);
