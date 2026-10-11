@@ -368,7 +368,8 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <!-- 0.8.13+ understands Java 25 (class file 69) bytecode. -->
+                <!-- 0.8.15 reads Java 27 (class file 71) bytecode, but only as
+                     experimental support; official support comes after it. -->
                 <version>0.8.15</version>
                 <executions>
                     <execution>
