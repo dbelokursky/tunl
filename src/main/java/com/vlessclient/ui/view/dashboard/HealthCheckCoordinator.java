@@ -390,6 +390,29 @@ public final class HealthCheckCoordinator {
     }
 
     /**
+     * The running core exits through another server now: a live switch,
+     * which changes no connection state. The verdict and the probe cadence
+     * were the old server's, so after a few minutes on a server that kept
+     * answering the next probe was up to a minute away, and a dead new
+     * server went on reading as healthy, on the card, in the tray and to
+     * recovery, until then. Checks the new exit at once, as after a connect:
+     * a probe still out went through the old one and is dropped, and the
+     * card says the tunnel is being verified until the new one answers.
+     * No-op while not connected.
+     */
+    public void onExitChanged() {
+        if (healthCard == null
+                || engine.connectionStateProperty().get() != ConnectionState.CONNECTED) {
+            return;
+        }
+        healthGeneration.incrementAndGet();
+        healthCheckInFlight.set(false);
+        hasVerdict.set(false);
+        healthyStreak.set(0);
+        runReachabilityCheck();
+    }
+
+    /**
      * Stops a pending auto-reconnect countdown and hides the banner, wired to
      * the banner's "Cancel" button.
      */

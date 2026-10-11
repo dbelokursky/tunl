@@ -1062,6 +1062,38 @@ class HealthCheckCoordinatorTest {
         assertWait(coordinator, -1);
     }
 
+    /**
+     * A live switch moves the traffic to another server and changes no
+     * connection state. The old server's verdict stood, and so did its
+     * cadence: after twelve healthy probes the next was a minute away. The
+     * new exit is checked at once, and reads as unverified until it answers.
+     */
+    @Test
+    void anExitSwitchedLiveIsCheckedAtOnceAndVerifiedAfresh() throws Exception {
+        AppSettings settings = healthSettings(false, new HealthCheckTarget("a", "https://a"));
+        settings.setHealthCheckIntervalSeconds(5);
+        FakeChecker checker = new FakeChecker();
+        checker.results = List.of(probe("a", true));
+        HealthCheckCoordinator coordinator = coordinatorWith(checker);
+        connectAndCheck(coordinator);
+        for (int probe = 2; probe <= 12; probe++) {
+            runTheScheduledCheck(coordinator);
+        }
+        assertWait(coordinator, 60);
+        List<TunnelHealth> published = new java.util.concurrent.CopyOnWriteArrayList<>();
+        onFxAndWait(() -> healthState.healthProperty()
+                .addListener((obs, old, next) -> published.add(next)));
+        int probes = checker.ports.size();
+
+        onFxAndWait(coordinator::onExitChanged);
+        flushFxEvents();
+
+        assertThat(checker.ports).as("a probe through the new exit").hasSize(probes + 1);
+        assertThat(published).as("what the tray and recovery heard")
+                .containsExactly(TunnelHealth.CHECKING, TunnelHealth.HEALTHY);
+        assertWait(coordinator, 5);
+    }
+
     private static void runTheScheduledCheck(HealthCheckCoordinator coordinator)
             throws InterruptedException {
         onFxAndWait(coordinator::runScheduledCheckNow);

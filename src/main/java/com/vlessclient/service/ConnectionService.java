@@ -557,12 +557,21 @@ public class ConnectionService {
                 LiveSelector prepared = new LiveSelector(
                         configGenerator.generate(members, active, settings, routing, host));
                 Run previous = run;
+                String previousServer = appliedServerId;
                 run = new Run(prepared, mode, chosenPorts(settings), idsOf(skipped), host);
+                // Set with the run, for the same reason: followActiveServer and
+                // the Dashboard ask which server the core runs as it reports
+                // Connected. Set only once the start had returned, it could
+                // read as none on a first start, so a pick made while
+                // connecting was not applied, and on a later start as the
+                // server of the start before.
+                appliedServerId = active.getId();
                 try {
                     engine.start(prepared.config(), mode);
                     break;
                 } catch (ConfigRejectedException e) {
                     run = previous;
+                    appliedServerId = previousServer;
                     Refusal refusal = refusalOf(e, prepared.config(), members).orElse(null);
                     if (refusal == null) {
                         throw e;
@@ -587,11 +596,13 @@ public class ConnectionService {
                     // The setup prompt dismissed: the connect is cancelled,
                     // not failed, and the request goes with it.
                     run = previous;
+                    appliedServerId = previousServer;
                     recovery.cancel();
                     log.info("TUN connect cancelled: {}", declined.getMessage());
                     return new ConnectAttempt(Outcome.CANCELLED, active);
                 } catch (IOException | IllegalStateException e) {
                     run = previous;
+                    appliedServerId = previousServer;
                     throw e;
                 }
             }
@@ -607,7 +618,6 @@ public class ConnectionService {
                     + "the device stays IPv4-only so direct routes are not dialled over IPv6");
         }
         logReplacedFingerprints(members);
-        appliedServerId = active.getId();
         publishSkipped(skipped);
         publishMoved(moved);
         return new ConnectAttempt(Outcome.STARTED, active, skipped);
@@ -753,8 +763,16 @@ public class ConnectionService {
         });
     }
 
-    /** The server the running core was last pointed at, or null before any start. */
-    String appliedServerId() {
+    /**
+     * The id of the server the running core was last pointed at, by a start
+     * or a live switch, whoever asked for it: the Dashboard, the tray, an
+     * agent over MCP, recovery, or {@link #followActiveServer}. The Dashboard
+     * compares a new pick with this: its own copy knew only its own Connect,
+     * so a pick under a core the tray had started was never applied.
+     *
+     * @return the server's id, or null before any start
+     */
+    public String appliedServerId() {
         return appliedServerId;
     }
 
