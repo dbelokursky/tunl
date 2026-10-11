@@ -519,6 +519,56 @@ class SingBoxConfigGeneratorTunTest {
     }
 
     /**
+     * A rule sending a name through the tunnel above a direct rule that also
+     * covers it: the route proxied secret.example.com, but its name was
+     * resolved by the direct resolver, which learned it. Resolution follows
+     * the route's order.
+     */
+    @Test
+    void tunMode_aNameResolvesTheWayItsTrafficGoesWhicheverRuleComesFirst() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.DOMAIN, "secret.example.com",
+                        RoutingRule.RuleAction.PROXY),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "example.com",
+                        RoutingRule.RuleAction.DIRECT)));
+
+        JsonNode dnsRules = parse(generator.generate(createVlessServer(), tunSettings(),
+                routingConfig)).get("dns").get("rules");
+
+        JsonNode first = null;
+        for (JsonNode rule : dnsRules) {
+            if (rule.path("domain").toString().contains("secret.example.com")
+                    || rule.path("domain_suffix").toString().contains("example.com")) {
+                first = rule;
+                break;
+            }
+        }
+        assertThat(first).as("a DNS rule for the name").isNotNull();
+        assertThat(first.path("domain").toString()).contains("secret.example.com");
+        assertThat(first.path("server").asString()).isEqualTo("proxy-dns");
+    }
+
+    /**
+     * The TUN device makes the core the system's resolver, and only localhost
+     * and .local went to the local network's: a router's or NAS's own names
+     * (openwrt.lan, router.home.arpa) went to the remote resolver, which
+     * answered that they do not exist, and leaked there.
+     */
+    @Test
+    void tunMode_theLansOwnNamesResolveOnTheLan() throws Exception {
+        for (RoutingConfig routingConfig : java.util.Arrays.asList(null, new RoutingConfig())) {
+            JsonNode dnsRules = parse(generator.generate(createVlessServer(), tunSettings(),
+                    routingConfig)).get("dns").get("rules");
+
+            JsonNode local = dnsRules.get(0);
+            assertThat(local.get("server").asString()).isEqualTo("local-dns");
+            assertThat(local.get("domain_suffix").valueStream().map(JsonNode::asString))
+                    .contains(".local", ".lan", ".home.arpa", ".internal");
+        }
+    }
+
+    /**
      * With only an IPv4 address auto_route covered IPv4 alone, so on a
      * dual-stack network every IPv6 destination bypassed the tunnel while the
      * card said "Connected". The device now takes an IPv6 address too, unless
