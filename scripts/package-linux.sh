@@ -89,10 +89,11 @@ if [[ ${#JAVA_OPTIONS[@]} -eq 0 ]]; then
 fi
 
 # Stage just the shaded jar (not the original-*.jar the shade plugin
-# leaves alongside it).
+# leaves alongside it), and the licence files that install beside it.
 rm -rf staging dist
 mkdir -p staging
 cp "${JAR_PATH}" staging/
+"${REPO_ROOT}/scripts/stage-licenses.sh" staging
 
 # Per-user data lives under XDG paths at runtime; the package itself installs
 # to /opt/tunl with a menu entry and launcher symlink.
@@ -180,6 +181,29 @@ if [[ -f "${POSTINST}" ]]; then
     cat "${REPACK}/postinst" > "${POSTINST}"
 fi
 echo "[package-linux] $(grep -E '^(Exec|MimeType)=' "${desktop_entries[0]}" | tr '\n' ' ')"
+
+# jpackage's copyright file says "License: Unknown" for everything. This one
+# names Tunl's licence and the GPL-3.0 sing-box, and points at the files
+# stage-licenses.sh installed beside the jar.
+COPYRIGHT="${REPACK}/tree/opt/tunl/share/doc/copyright"
+[[ -f "${COPYRIGHT}" ]] || { echo "[package-linux] jpackage wrote no ${COPYRIGHT#"${REPACK}/tree"}" >&2; exit 1; }
+cat > "${COPYRIGHT}" <<'COPYRIGHT_EOF'
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Tunl
+Upstream-Contact: Dmitry Belokursky <dbelokursky@gmail.com>
+Source: https://github.com/dbelokursky/tunl
+
+Files: *
+Copyright: 2026 Dmitry Belokursky
+License: Apache-2.0
+ The full text is in /opt/tunl/lib/app/LICENSE.
+Comment: The application jar carries a sing-box binary, licensed under the
+ GPL-3.0 or later: /opt/tunl/lib/app/sing-box-LICENSE and
+ /opt/tunl/lib/app/sing-box-GPL-3.0.txt. /opt/tunl/lib/app/NOTICE lists it
+ with the other bundled components (the Java runtime, OpenJFX and the
+ libraries) and their licences, and says where sing-box's corresponding
+ source is.
+COPYRIGHT_EOF
 dpkg-deb --root-owner-group -Zxz --build "${REPACK}/tree" "${DEB}"
 rm -rf "${REPACK}"
 

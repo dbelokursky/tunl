@@ -184,6 +184,19 @@ else
 fi
 grep -qxF "${core_entry}" <<<"${entries}" \
     || fail "${jars[0]} does not contain ${core_entry}"
+
+# The licences install beside the jar (stage-licenses.sh), and the package's
+# copyright file names them: the package used to carry the GPL-3.0 core
+# without its licence, and its copyright file said "License: Unknown".
+for name in LICENSE NOTICE sing-box-LICENSE sing-box-GPL-3.0.txt; do
+    [[ -s "${APP_ROOT}/lib/app/${name}" ]] || fail "installed payload is missing ${APP_ROOT}/lib/app/${name}"
+done
+grep -qE '^    https://github\.com/.+/releases/tag/' "${APP_ROOT}/lib/app/NOTICE" \
+    || fail "${APP_ROOT}/lib/app/NOTICE does not say where the source of the bundled sing-box is"
+COPYRIGHT="${APP_ROOT}/share/doc/copyright"
+if ! grep -qx 'License: Apache-2.0' "${COPYRIGHT}" || grep -q 'Unknown' "${COPYRIGHT}"; then
+    fail "${COPYRIGHT} does not name the licences: $(grep '^License:' "${COPYRIGHT}" || true)"
+fi
 echo "[linux-deb-smoke] installed payload verified at ${APP_ROOT}"
 
 echo "[linux-deb-smoke] launching ${LAUNCHER} under Xvfb for ${LAUNCH_SECONDS}s"
