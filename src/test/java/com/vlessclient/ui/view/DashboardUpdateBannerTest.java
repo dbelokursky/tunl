@@ -122,4 +122,34 @@ public class DashboardUpdateBannerTest extends ApplicationTest {
             }
         }
     }
+
+    /**
+     * A build that cannot install this release (not an installed package, a
+     * folder this account cannot write, or a release that failed to install
+     * here twice) says where to get it, and offers no restart that would
+     * install nothing.
+     */
+    @Test
+    void anUpdateThisInstallCannotApplyPointsAtTheReleasePage() {
+        for (boolean staged : new boolean[] {false, true}) {
+            for (boolean downloading : new boolean[] {false, true}) {
+                assertThat(UpdateBannerSection.stateFor(true, staged, downloading,
+                        Hold.INSTALL_MANUALLY))
+                        .as("staged=%s downloading=%s", staged, downloading)
+                        .isEqualTo(State.INSTALL_MANUALLY);
+            }
+        }
+
+        HBox banner = new HBox();
+        Label title = new Label();
+        Label hint = new Label();
+        Button button = new Button();
+        interact(() -> new UpdateBannerSection(
+                new UpdateBannerSection.Controls(banner, title, hint, button))
+                .render(State.INSTALL_MANUALLY, "1.25.0"));
+
+        assertThat(banner.isVisible()).isTrue();
+        assertThat(hint.getText()).isEqualTo(I18n.get("dashboard.update.hint.manual"));
+        assertThat(button.isVisible()).isFalse();
+    }
 }

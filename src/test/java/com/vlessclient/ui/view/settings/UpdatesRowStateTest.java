@@ -98,4 +98,15 @@ class UpdatesRowStateTest {
             }
         }
     }
+
+    @Test
+    void anUpdateThisInstallCannotApplyIsNeverOfferedARestart() {
+        for (boolean staged : new boolean[] {false, true}) {
+            for (boolean downloading : new boolean[] {false, true}) {
+                assertThat(state(true, staged, downloading, Hold.INSTALL_MANUALLY))
+                        .as("staged=%s downloading=%s", staged, downloading)
+                        .isEqualTo(AppRowState.INSTALL_MANUALLY);
+            }
+        }
+    }
 }

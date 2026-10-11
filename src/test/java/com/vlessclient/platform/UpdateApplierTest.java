@@ -158,6 +158,23 @@ class UpdateApplierTest {
         assertThat(script).doesNotContain("$pid ");
     }
 
+    /**
+     * The PowerShell literal above is only half of it. Start-Process joins an
+     * -ArgumentList array with spaces and quotes nothing, so this path reached
+     * msiexec as "/i C:\Users\Dev User\...": the package was "C:\Users\Dev"
+     * and every update failed for anyone with a space in their user name. The
+     * path has to reach msiexec inside double quotes, as one argument.
+     */
+    @Test
+    void windowsRelayHandsMsiexecThePathAsOneQuotedArgument() {
+        String script = WindowsUpdateApplier.relayScript(4242,
+                Path.of("C:\\Users\\Dev User\\AppData\\Local\\Tunl\\update\\tunl.msi"),
+                Path.of("C:\\Users\\Dev User\\AppData\\Local\\Tunl\\Tunl.exe"));
+
+        assertThat(script).contains("-ArgumentList ('/i \"{0}\" /qb /norestart' -f $msi)");
+        assertThat(script).doesNotContain("'/i', $msi");
+    }
+
     // -- Linux: deliberately does nothing --
 
     @Test
@@ -169,13 +186,66 @@ class UpdateApplierTest {
                 .isEqualTo(UpdateApplier.Outcome.UNSUPPORTED);
     }
 
+    /**
+     * What this drives: where the answer is false, the updater does not spend
+     * a hundred megabytes on a file it could never install. This JVM is no
+     * installed package, and macOS and Windows used to claim to update it
+     * anyway: a jar or development run downloaded an installer that apply()
+     * then refused, and fetched it again every week.
+     */
     @Test
-    void onlyThePlatformsWithAnInstallerPathClaimToSelfUpdate() {
-        // What this drives: on a platform that answers false, the updater does
-        // not spend a hundred megabytes on a file it could never install.
-        assertThat(new MacUpdateApplier().selfUpdates()).isTrue();
-        assertThat(new WindowsUpdateApplier().selfUpdates()).isTrue();
+    void anUnpackagedRunUpdatesItselfNowhere() {
+        assertThat(InstalledApp.launcher()).as("tests run outside a package").isNull();
+
+        assertThat(new MacUpdateApplier().selfUpdates()).isFalse();
+        assertThat(new MacUpdateApplier().hold()).isEqualTo(UpdateApplier.Hold.INSTALL_MANUALLY);
+        assertThat(new WindowsUpdateApplier().selfUpdates()).isFalse();
+        assertThat(new WindowsUpdateApplier().hold())
+                .isEqualTo(UpdateApplier.Hold.INSTALL_MANUALLY);
         assertThat(new LinuxUpdateApplier().selfUpdates()).isFalse();
+    }
+
+    @Test
+    void anInstalledWindowsBuildUpdatesItself(@TempDir Path tmp) throws IOException {
+        Path launcher = tmp.resolve("Tunl/Tunl.exe");
+        Files.createDirectories(launcher.getParent());
+        Files.writeString(launcher, "");
+        String prior = System.getProperty(InstalledApp.APP_PATH_PROPERTY);
+        try {
+            System.setProperty(InstalledApp.APP_PATH_PROPERTY, launcher.toString());
+            assertThat(new WindowsUpdateApplier().selfUpdates()).isTrue();
+            assertThat(new WindowsUpdateApplier().hold()).isEqualTo(UpdateApplier.Hold.NONE);
+        } finally {
+            if (prior == null) {
+                System.clearProperty(InstalledApp.APP_PATH_PROPERTY);
+            } else {
+                System.setProperty(InstalledApp.APP_PATH_PROPERTY, prior);
+            }
+        }
+    }
+
+    /**
+     * The relay replaces the bundle with ditto and mv as this user. A standard
+     * account running a Tunl an administrator installed in /Applications
+     * counted as self-updating: every release was downloaded, and every
+     * handoff failed at the copy and quit the app.
+     */
+    @Test
+    void aMacBundleThisAccountCannotReplaceIsLeftToTheUser() {
+        Path launcher = Path.of("/Applications/Tunl.app/Contents/MacOS/Tunl");
+        Path bundle = Path.of("/Applications/Tunl.app");
+        Path folder = Path.of("/Applications");
+
+        assertThat(MacUpdateApplier.hold(launcher, p -> true)).isEqualTo(UpdateApplier.Hold.NONE);
+        assertThat(MacUpdateApplier.hold(launcher, p -> !p.equals(folder)))
+                .isEqualTo(UpdateApplier.Hold.INSTALL_MANUALLY);
+        assertThat(MacUpdateApplier.hold(launcher, p -> !p.equals(bundle)))
+                .isEqualTo(UpdateApplier.Hold.INSTALL_MANUALLY);
+        assertThat(MacUpdateApplier.hold(null, p -> true))
+                .isEqualTo(UpdateApplier.Hold.INSTALL_MANUALLY);
+        assertThat(MacUpdateApplier.hold(Path.of("/opt/tunl/bin/Tunl"), p -> true))
+                .as("not inside a bundle at all")
+                .isEqualTo(UpdateApplier.Hold.INSTALL_MANUALLY);
     }
 
     private static int run(List<String> command) throws IOException, InterruptedException {

@@ -561,23 +561,25 @@ public class SingBoxInstaller {
      */
     void downloadWithProgress(String url, Path target, DoubleConsumer progress, long maxBytes)
             throws IOException, InterruptedException {
+        // No request timeout: on this JDK it is a deadline on the whole body,
+        // and five minutes lost the core archive below about 70 KB/s.
+        // LongDownload bounds the wait for an answer and each stall instead.
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .timeout(Duration.ofMinutes(5))
                 .GET()
                 .build();
 
-        HttpResponse<InputStream> response =
-                httpClient.get().send(request, HttpResponse.BodyHandlers.ofInputStream());
+        HttpResponse<InputStream> response = LongDownload.send(httpClient.get(), request);
 
         int status = response.statusCode();
         if (status != 200) {
+            response.body().close();
             throw new IOException("Failed to download sing-box: HTTP " + status + " for " + url);
         }
 
         long contentLength = response.headers().firstValueAsLong("Content-Length").orElse(-1L);
 
-        try (InputStream in = response.body();
+        try (InputStream in = LongDownload.guard(response.body());
                 var out = Files.newOutputStream(target)) {
             byte[] buffer = new byte[16 * 1024];
             long downloaded = 0;

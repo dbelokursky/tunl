@@ -42,6 +42,12 @@ public class UpdateBannerSection {
          */
         MOVE_TO_APPLICATIONS,
 
+        /**
+         * Newer release exists, and this installation cannot install it: the
+         * user downloads it from the release page.
+         */
+        INSTALL_MANUALLY,
+
         /** Newer release seen, and its installer is being fetched right now. */
         DOWNLOADING,
 
@@ -95,6 +101,9 @@ public class UpdateBannerSection {
             case MOVE_TO_APPLICATIONS -> {
                 return State.MOVE_TO_APPLICATIONS;
             }
+            case INSTALL_MANUALLY -> {
+                return State.INSTALL_MANUALLY;
+            }
             default -> {
                 // Installs itself: what follows is where it has got to.
             }
@@ -147,7 +156,7 @@ public class UpdateBannerSection {
         render(stateFor(updateManager.updateAvailableProperty().get(),
                         updateManager.hasStagedUpdate(),
                         updateManager.downloadingProperty().get(),
-                        UpdateApplier.current().hold()),
+                        updateManager.hold()),
                 updateManager.latestVersionProperty().get());
     }
 
@@ -179,6 +188,7 @@ public class UpdateBannerSection {
             case READY -> "dashboard.update.hint.staged";
             case PACKAGE_MANAGER -> "dashboard.update.hint.packagemanager";
             case MOVE_TO_APPLICATIONS -> "dashboard.update.hint.move";
+            case INSTALL_MANUALLY -> "dashboard.update.hint.manual";
             case AVAILABLE -> "dashboard.update.hint.pending";
             default -> "dashboard.update.hint.downloading";
         };

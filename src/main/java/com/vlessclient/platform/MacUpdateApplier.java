@@ -1,7 +1,9 @@
 package com.vlessclient.platform;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.function.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,8 +20,6 @@ import org.slf4j.LoggerFactory;
 final class MacUpdateApplier implements UpdateApplier {
 
     private static final Logger log = LoggerFactory.getLogger(MacUpdateApplier.class);
-
-    private static final String LOG_NAME = "apply-update.log";
 
     /**
      * Mounts the DMG, copies the bundle out of it and swaps it in, then
@@ -115,25 +115,18 @@ final class MacUpdateApplier implements UpdateApplier {
     @Override
     public Outcome apply(PendingUpdate update) {
         Path launcher = InstalledApp.launcher();
-        if (launcher == null) {
-            log.info("Not a packaged build — leaving the staged update in place");
-            return Outcome.UNSUPPORTED;
-        }
-        Path bundle = bundleRoot(launcher);
-        if (bundle == null) {
-            log.warn("Launcher {} is not inside an .app bundle", launcher);
-            return Outcome.UNSUPPORTED;
-        }
-        if (InstalledApp.runsFromDownload(bundle)) {
-            log.warn("Running from {}, where it was downloaded: updating it would replace a "
-                    + "throwaway copy or fail on the disk image. Move Tunl to /Applications "
-                    + "first.", bundle);
+        Path bundle = launcher == null ? null : bundleRoot(launcher);
+        Hold hold = hold(launcher, Files::isWritable);
+        if (bundle == null || hold != Hold.NONE) {
+            log.warn("Not installing update {} here ({}): {}", update.version(), hold,
+                    hold == Hold.MOVE_TO_APPLICATIONS
+                            ? "it runs from where it was downloaded; move Tunl to "
+                                    + "/Applications first"
+                            : "not a packaged build, or its folder cannot be written");
             return Outcome.UNSUPPORTED;
         }
 
         try {
-            Path workDir = SecureFiles.parentDirectory(update.installer());
-
             // Passed as the -c body rather than written to a file, so nothing
             // lands on disk between here and the run that could be swapped
             // for something else. Arguments still ride argv: bash -c binds
@@ -146,10 +139,9 @@ final class MacUpdateApplier implements UpdateApplier {
                     bundle.toString())
                     .redirectErrorStream(true)
                     // The relay outlives this process, so its output is the
-                    // only account of what happened. Keep it beside the
-                    // installer.
+                    // only account of what happened.
                     .redirectOutput(ProcessBuilder.Redirect.appendTo(
-                            workDir.resolve(LOG_NAME).toFile()))
+                            UpdateHelperLog.file().toFile()))
                     .start();
 
             log.info("Update {} handed off to the installer relay", update.version());
@@ -172,9 +164,35 @@ final class MacUpdateApplier implements UpdateApplier {
 
     @Override
     public Hold hold() {
-        Path launcher = InstalledApp.launcher();
+        return hold(InstalledApp.launcher(), Files::isWritable);
+    }
+
+    /**
+     * What keeps the bundle around {@code launcher} from being replaced.
+     *
+     * <p>The relay swaps the bundle with {@code ditto} and {@code mv} as this
+     * user, so both the bundle and the folder it sits in must be writable. A
+     * standard account running a Tunl an administrator put in
+     * {@code /Applications} counted as self-updating: it downloaded every
+     * release, and every handoff failed at the copy and quit the app.</p>
+     *
+     * @param launcher the launcher executable, or {@code null} when not packaged
+     * @param writable whether a path can be written
+     * @return what keeps it from updating itself, or {@link Hold#NONE}
+     */
+    static Hold hold(Path launcher, Predicate<Path> writable) {
         Path bundle = launcher == null ? null : bundleRoot(launcher);
-        return InstalledApp.runsFromDownload(bundle) ? Hold.MOVE_TO_APPLICATIONS : Hold.NONE;
+        if (bundle == null) {
+            return Hold.INSTALL_MANUALLY;
+        }
+        if (InstalledApp.runsFromDownload(bundle, writable)) {
+            return Hold.MOVE_TO_APPLICATIONS;
+        }
+        Path folder = bundle.getParent();
+        if (folder == null || !writable.test(folder) || !writable.test(bundle)) {
+            return Hold.INSTALL_MANUALLY;
+        }
+        return Hold.NONE;
     }
 
     /**

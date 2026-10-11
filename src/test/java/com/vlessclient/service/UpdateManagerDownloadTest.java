@@ -168,8 +168,61 @@ class UpdateManagerDownloadTest {
         assertThat(filesIn(dir)).isEmpty();
     }
 
-    /** One canned reply. */
-    private record Canned(int status, byte[] bytes) {
+    /**
+     * The JDK's request timeout runs until the body is consumed, so the ten
+     * minutes it carried were a deadline on the whole installer, and a slow
+     * link lost every download at the same minute, mid-body. The download
+     * must carry none; LongDownload bounds the wait and each stall instead.
+     */
+    @Test
+    void theInstallerRequestCarriesNoDeadlineOnTheWholeTransfer(@TempDir Path dir) {
+        RoutingHttpClient client = new RoutingHttpClient(
+                Map.of(URL, new Canned(503, new byte[0])));
+
+        managerFor(dir, client).fetchAndStage(URL, "sha256:00");
+
+        assertThat(client.sent()).hasSize(1);
+        assertThat(client.sent().get(0).timeout()).isEmpty();
+    }
+
+    /**
+     * The body used to be copied straight to the installer's own name and
+     * left there when the transfer broke: up to a hundred megabytes per
+     * failed attempt, and on a full disk, a disk that stayed full.
+     */
+    @Test
+    void aTransferThatBreaksPartwayLeavesNothingBehind(@TempDir Path dir) throws Exception {
+        byte[] payload = new byte[64 * 1024];
+        RoutingHttpClient client = new RoutingHttpClient(
+                Map.of(URL, new Canned(200, payload, true)));
+
+        assertThat(managerFor(dir, client).fetchAndStage(URL, sha256Of(payload))).isNull();
+
+        assertThat(filesIn(dir)).isEmpty();
+    }
+
+    @Test
+    void leftoversOfEarlierDownloadsGoWhenNothingIsStaged(@TempDir Path dir) throws Exception {
+        Files.write(dir.resolve("tunl_9.9.8.dmg" + UpdateManager.PART_SUFFIX), new byte[1024]);
+        Files.write(dir.resolve("tunl_9.9.7.dmg"), new byte[1024]);
+        RoutingHttpClient client = new RoutingHttpClient(
+                Map.of(URL, new Canned(503, new byte[0])));
+
+        managerFor(dir, client).fetchAndStage(URL, "sha256:00");
+
+        assertThat(filesIn(dir)).isEmpty();
+    }
+
+    /**
+     * One canned reply.
+     *
+     * @param breakMidway whether the body fails partway, as a dropped link does
+     */
+    private record Canned(int status, byte[] bytes, boolean breakMidway) {
+
+        Canned(int status, byte[] bytes) {
+            this(status, bytes, false);
+        }
     }
 
     /**
@@ -180,6 +233,7 @@ class UpdateManagerDownloadTest {
 
         private final Map<String, Canned> replies;
         private final java.util.List<String> requests = new java.util.ArrayList<>();
+        private final java.util.List<HttpRequest> sent = new java.util.ArrayList<>();
 
         RoutingHttpClient(Map<String, Canned> replies) {
             this.replies = replies;
@@ -190,11 +244,17 @@ class UpdateManagerDownloadTest {
             return java.util.List.copyOf(requests);
         }
 
+        /** Every request this client was handed, in order. */
+        java.util.List<HttpRequest> sent() {
+            return java.util.List.copyOf(sent);
+        }
+
         @Override
         @SuppressWarnings("unchecked")
         public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> handler) {
             String uri = request.uri().toString();
             requests.add(uri);
+            sent.add(request);
             Canned canned = replies.get(uri);
             if (canned == null) {
                 throw new IllegalStateException("unexpected request: " + uri);
@@ -204,6 +264,7 @@ class UpdateManagerDownloadTest {
             // silently always take one branch.
             Object body = uri.endsWith(ReleaseSignature.SIGNATURE_SUFFIX)
                     ? new String(canned.bytes(), StandardCharsets.UTF_8)
+                    : canned.breakMidway() ? breaking(canned.bytes())
                     : new ByteArrayInputStream(canned.bytes());
             return (HttpResponse<T>) new CannedResponse<>(request, canned.status(), body);
         }
@@ -265,6 +326,18 @@ class UpdateManagerDownloadTest {
         public Optional<Executor> executor() {
             return Optional.empty();
         }
+    }
+
+    /** Half of {@code bytes}, then the IOException a dropped link gives. */
+    private static InputStream breaking(byte[] bytes) {
+        return new java.io.SequenceInputStream(
+                new ByteArrayInputStream(bytes, 0, bytes.length / 2),
+                new InputStream() {
+                    @Override
+                    public int read() throws IOException {
+                        throw new IOException("closed");
+                    }
+                });
     }
 
     /** Minimal {@link HttpResponse} carrying a status and a body. */
