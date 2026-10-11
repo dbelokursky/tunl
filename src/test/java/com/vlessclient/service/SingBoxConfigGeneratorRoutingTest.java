@@ -540,6 +540,60 @@ class SingBoxConfigGeneratorRoutingTest {
         assertThat(rules).noneSatisfy(rule -> assertThat(rule.has("domain_regex")).isTrue());
     }
 
+    /**
+     * A rule without a type or an action threw a NullPointerException here,
+     * so every connect failed. It is left out, and the rules around it stay.
+     */
+    @Test
+    void aRuleWithoutATypeOrAnActionIsLeftOut() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setRules(List.of(
+                new RoutingRule(null, "untyped.example", RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN, "no-action.example", null),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN, "kept.example",
+                        RoutingRule.RuleAction.DIRECT)));
+
+        String json = generator.generate(createVlessServer(), defaultSettings, routingConfig);
+
+        assertThat(json).contains("kept.example").doesNotContain("untyped.example")
+                .doesNotContain("no-action.example");
+    }
+
+    /**
+     * The core lower-cases the name a connection carries, and SNI and DNS
+     * carry punycode, but a custom rule's value went out as typed: a rule for
+     * "Gosuslugi.ru" or "госуслуги.рф" showed in the list and matched nothing.
+     * The bypass list had this fixed; the rules now share its spelling.
+     */
+    @Test
+    void aCustomRulesNameIsWrittenAsTheCoreComparesIt() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "Gosuslugi.RU",
+                        RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN,
+                        "пример.рф",
+                        RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX,
+                        ".Пример.рф",
+                        RoutingRule.RuleAction.PROXY),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_KEYWORD, "Ads",
+                        RoutingRule.RuleAction.BLOCK),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_REGEX, "^\\D+\\.Example$",
+                        RoutingRule.RuleAction.BLOCK)));
+
+        JsonNode rules = parse(generator.generate(createVlessServer(), defaultSettings,
+                routingConfig)).get("route").get("rules");
+        String all = rules.toString();
+
+        assertThat(all).contains("\"gosuslugi.ru\"")
+                .contains("\"xn--e1afmkfd.xn--p1ai\"")
+                .contains("\".xn--e1afmkfd.xn--p1ai\"")
+                .contains("\"ads\"")
+                .as("a regex is left alone: lower case would turn \\D into \\d")
+                .contains("^\\\\D+\\\\.Example$");
+    }
+
     /** The repository names its lists in lower case: "Google" was a 404, and no core. */
     @Test
     void aListNameIsWrittenInLowerCase() throws Exception {

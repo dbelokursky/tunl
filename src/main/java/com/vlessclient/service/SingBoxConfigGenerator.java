@@ -1382,6 +1382,11 @@ public class SingBoxConfigGenerator {
      * left out of the configuration, with a warning in the log.
      */
     private static boolean unusable(RoutingRule rule) {
+        if (rule.getType() == null || rule.getAction() == null) {
+            // It threw a NullPointerException below, and every connect failed.
+            log.warn("Leaving out routing rule {}: it has no type or no action", rule.getId());
+            return true;
+        }
         Optional<String> problem = RoutingRuleCheck.problem(rule.getType(), rule.getValue());
         problem.ifPresent(reason -> log.warn("Leaving out routing rule {} ({}): {}",
                 rule.getId(), rule.getType(), reason));
@@ -1391,20 +1396,25 @@ public class SingBoxConfigGenerator {
     private ObjectNode buildCustomRule(RoutingRule rule, Set<String> ruleSetTags) {
         ObjectNode ruleNode = mapper.createObjectNode();
 
+        // Names as the core compares them, the bypass list's way: it
+        // lower-cases the connection's name and not the rule's, and SNI and
+        // DNS carry punycode, so "Gosuslugi.ru" or any .рф name typed into a
+        // rule showed in the list and matched nothing. A regex stays as typed:
+        // lower case would turn \D, \S or \W into their opposites.
         switch (rule.getType()) {
             case DOMAIN -> {
                 ArrayNode values = mapper.createArrayNode();
-                values.add(rule.getValue());
+                values.add(BypassPatternParser.coreName(rule.getValue()));
                 ruleNode.set("domain", values);
             }
             case DOMAIN_SUFFIX -> {
                 ArrayNode values = mapper.createArrayNode();
-                values.add(rule.getValue());
+                values.add(BypassPatternParser.coreName(rule.getValue()));
                 ruleNode.set("domain_suffix", values);
             }
             case DOMAIN_KEYWORD -> {
                 ArrayNode values = mapper.createArrayNode();
-                values.add(rule.getValue());
+                values.add(BypassPatternParser.coreName(rule.getValue()));
                 ruleNode.set("domain_keyword", values);
             }
             case DOMAIN_REGEX -> {

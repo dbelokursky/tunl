@@ -176,6 +176,20 @@ public final class BypassPatternParser {
     }
 
     /**
+     * A name typed into a custom rule as the core compares it: lower case,
+     * internationalized labels in punycode, a leading dot kept. Shared with
+     * the bypass list so that the two cannot drift apart again.
+     *
+     * @param name a domain, suffix or keyword as stored
+     * @return the name to write into the configuration
+     */
+    static String coreName(String name) {
+        String lower = name.strip().toLowerCase(Locale.ROOT);
+        // IDN refuses the empty label before a leading dot.
+        return lower.startsWith(".") ? "." + ascii(lower.substring(1)) : ascii(lower);
+    }
+
+    /**
      * The name as the core compares it: punycode for an internationalized
      * one, which is all SNI and DNS carry. A name IDN cannot convert is kept
      * as typed.
