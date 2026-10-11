@@ -24,6 +24,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -761,6 +762,52 @@ class HealthCheckCoordinatorTest {
         assertThat(summaryLabel.getText())
                 .isEqualTo(I18n.get("dashboard.health.all.unreachable"));
         assertThat(resultTexts()).containsExactly(I18n.get("dashboard.health.unreachable"));
+    }
+
+    /**
+     * The latency and the counts are numbers in a sentence of the UI's
+     * language. They were written in the host's format locale: with the app
+     * in English on a host set to Persian, the rows and the summary came out
+     * in Persian digits. And the latency was put into words when the
+     * probe came back, so a card drawn after a language switch kept the old
+     * unit until the next probe.
+     */
+    @Test
+    void theCardsNumbersFollowTheUiLanguage() throws Exception {
+        Locale host = Locale.getDefault(Locale.Category.FORMAT);
+        Locale.setDefault(Locale.Category.FORMAT, Locale.forLanguageTag("fa-IR"));
+        try {
+            healthSettings(false, new HealthCheckTarget("a", "https://a"),
+                    new HealthCheckTarget("b", "https://b"), new HealthCheckTarget("c", "https://c"));
+            FakeChecker checker = new FakeChecker();
+            checker.results = List.of(probe("a", true, 1234), probe("b", true, 12),
+                    probe("c", false, -1));
+            HealthCheckCoordinator coordinator = coordinatorWith(checker);
+            connectAndCheck(coordinator);
+
+            assertThat(resultTexts()).first().isEqualTo("1,234 ms");
+            assertThat(summaryLabel.getText()).isEqualTo(
+                    I18n.get("dashboard.health.some.reachable", "2", "3"));
+
+            onFxAndWait(() -> window.getScene().setRoot(new VBox()));
+            onFxAndWait(() -> I18n.setLocale(Locale.of("ru")));
+            onFxAndWait(() -> window.getScene().setRoot(healthCard));
+
+            assertThat(resultTexts()).first().as("drawn after a switch to Russian")
+                    .isEqualTo("1 234 мс");
+            assertThat(summaryLabel.getText()).isEqualTo(
+                    I18n.get("dashboard.health.some.reachable", "2", "3"));
+        } finally {
+            Locale.setDefault(Locale.Category.FORMAT, host);
+            onFxAndWait(() -> I18n.setLocale(Locale.ENGLISH));
+        }
+    }
+
+    private static ServiceReachabilityChecker.ProbeResult probe(
+            String name, boolean reachable, long latencyMs) {
+        return new ServiceReachabilityChecker.ProbeResult(
+                name, "https://" + name, reachable, latencyMs,
+                reachable ? "HTTP 204" : "timeout");
     }
 
     /** Answers for exactly the targets it is asked about, every one reachable. */

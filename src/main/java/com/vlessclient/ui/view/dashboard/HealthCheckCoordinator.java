@@ -746,9 +746,13 @@ public final class HealthCheckCoordinator {
                 reachable++;
             }
             String dotClass = ok ? "status-circle-connected" : "status-circle-error";
-            String latency = I18n.get("unit.ms", r.latencyMs());
-            Supplier<String> resultText =
-                    ok ? () -> latency : () -> I18n.get("dashboard.health.unreachable");
+            // Put into words when the row is drawn, as RowContent says: put
+            // into words here, a card drawn after a language switch kept the
+            // old unit until the next probe.
+            long latencyMs = r.latencyMs();
+            Supplier<String> resultText = ok
+                    ? () -> I18n.get("unit.ms", latencyMs)
+                    : () -> I18n.get("dashboard.health.unreachable");
             String resultClass = ok ? "service-ok" : "service-fail";
             answered.add(new RowContent(r.name(), r.url(), dotClass, resultText, resultClass));
         }

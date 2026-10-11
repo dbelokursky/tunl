@@ -51,12 +51,19 @@ public final class I18n {
     }
 
     /**
-     * Returns the translated string with format arguments applied.
+     * Returns the translated string with format arguments applied. A number
+     * among them is written as the UI's language writes it.
+     *
+     * <p>{@code MessageFormat.format} wrote numbers in the host's format
+     * locale, whatever the UI's language: with the app in English on a host
+     * set to Persian the health card gave its latencies and counts in
+     * Persian digits, and on a German one read "1.234 ms", beside Latin
+     * digits everywhere else.</p>
      */
     public static String get(String key, Object... args) {
         try {
             String pattern = bundle.getString(key);
-            return MessageFormat.format(pattern, args);
+            return new MessageFormat(pattern, getLocale()).format(args);
         } catch (MissingResourceException e) {
             log.debug("Missing i18n key: {}", key);
             return key;
