@@ -14,9 +14,9 @@
 #   expected-app-version — the -Dapp.version label the installed launcher
 #                          config must carry ("1.2.0", "1.0.0-dev-abc1234")
 #
-# Needs passwordless sudo for dpkg, xvfb-run (apt-get install xvfb xauth) and
-# the GTK/X libraries JavaFX loads at runtime — the set scripts/linux-qa.sh
-# installs. The app runs as the calling user, so its log lands in that
+# Needs passwordless sudo for dpkg and apt-get, and xvfb-run (apt-get install
+# xvfb xauth). The GTK/X libraries JavaFX loads at runtime come from the
+# package's Depends. The app runs as the calling user, so its log lands in that
 # user's XDG data dir, the same place linux-qa.sh greps "Tunl started" from.
 # Leaves the package removed and the user's data dir in place.
 #
@@ -104,8 +104,10 @@ installed=1
 # dpkg cannot fetch a dependency the host lacks: it leaves the package
 # unconfigured and exits 1, and apt-get -f then installs the dependency and
 # finishes the configuration. The payload checks below catch anything else.
+# The workflows install only Xvfb before this, so the libraries the app
+# needs come from the package's Depends, without recommends.
 if ! sudo dpkg -i "${DEB}"; then
-    sudo apt-get install -f -y
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -f -y --no-install-recommends
 fi
 
 # The keyring client the credentials are sealed with comes with the package:
@@ -120,6 +122,14 @@ libc='(^|[ ,])libc6([ ,(]|$)'
     || fail "the package lost jpackage's own dependencies: ${DEPENDS}"
 command -v secret-tool >/dev/null 2>&1 \
     || fail "secret-tool is not installed after installing the package"
+# What JavaFX's own libraries link, which jpackage cannot see inside the jar
+# (package-linux.sh). Without them the package installed on a system with no
+# GTK 3 and the app died in toolkit start-up.
+for dep in libgtk-3-0 libfreetype6 libfontconfig1 libpangoft2-1.0-0 libgl1 libxxf86vm1; do
+    pattern="(^|[ ,|])${dep}(t64)?([ ,|(]|$)"
+    [[ "${DEPENDS}" =~ ${pattern} ]] \
+        || fail "the package does not depend on ${dep}, which JavaFX links: ${DEPENDS}"
+done
 
 for required in "${LAUNCHER}" "${LAUNCHER_CFG}" "${RUNTIME_JVM}"; do
     [[ -e "${required}" ]] || fail "installed payload is missing: ${required}"

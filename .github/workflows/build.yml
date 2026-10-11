@@ -191,13 +191,12 @@ jobs:
         if: matrix.name == 'linux'
         # Installs the .deb on the runner, runs /opt/tunl/bin/tunl under Xvfb
         # until the app writes "Tunl started" to its own log, then removes
-        # the package. The libraries are the set scripts/linux-qa.sh needs to
-        # render JavaFX without a GPU.
+        # the package. Only Xvfb is installed first: the libraries JavaFX
+        # needs come from the package's Depends. They used to be installed
+        # here by hand, so a package that named none of them passed.
         run: |
           sudo apt-get update -q
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
-            xvfb xauth libgtk-3-0t64 libglib2.0-0t64 libxtst6 libxi6 libxrender1 libxrandr2 \
-            libfreetype6 fontconfig libasound2t64 libgl1 libpango-1.0-0 libcairo2 fonts-dejavu-core
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends xvfb xauth
           scripts/linux-deb-smoke.sh dist/*.deb "1.0.0-dev-${GITHUB_SHA:0:7}"
       - name: Install the DEB on Debian 12 and Ubuntu 22.04
         if: matrix.name == 'linux'
@@ -239,9 +238,7 @@ jobs:
         # launch it under Xvfb until "Tunl started" is logged, uninstall.
         run: |
           sudo apt-get update -q
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
-            xvfb xauth libgtk-3-0t64 libglib2.0-0t64 libxtst6 libxi6 libxrender1 libxrandr2 \
-            libfreetype6 fontconfig libasound2t64 libgl1 libpango-1.0-0 libcairo2 fonts-dejavu-core
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends xvfb xauth
           scripts/linux-deb-smoke.sh dist/*.deb "1.0.0-dev-${GITHUB_SHA:0:7}"
       - name: Install the DEB on Debian 12 and Ubuntu 22.04 (arm64)
         if: matrix.name == 'linux-arm'

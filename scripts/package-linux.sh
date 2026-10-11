@@ -102,6 +102,14 @@ cp "${JAR_PATH}" staging/
 # without secret-tool the credentials went into the JSON files while Settings
 # said they were in the keychain. It is in Debian's main and Ubuntu's
 # universe, which a desktop install enables.
+#
+# The rest is what JavaFX's own native libraries link: glass (GTK 3),
+# the fonts (FreeType, fontconfig, Pango) and the ES2 pipeline (libGL,
+# libXxf86vm). They live inside the jar and are unpacked at run time, so
+# jpackage never sees them; the package installed on a system without GTK 3
+# and the app died in toolkit start-up, while the CI smoke passed because the
+# runner had the libraries put in by hand first. The t64 name is the build
+# host's (Ubuntu 24.04); the rewrite below adds the old one.
 jpackage \
     --type deb \
     --name tunl \
@@ -115,7 +123,7 @@ jpackage \
     --linux-menu-group Network \
     --linux-shortcut \
     --linux-deb-maintainer "dbelokursky@gmail.com" \
-    --linux-package-deps libsecret-tools \
+    --linux-package-deps "libsecret-tools, libgtk-3-0t64, libfreetype6, libfontconfig1, libpangoft2-1.0-0, libgl1, libxxf86vm1" \
     --vendor "Tunl" \
     --java-options "-Dapp.version=${VERSION}" \
     --java-options "-Djava.awt.headless=false" \
