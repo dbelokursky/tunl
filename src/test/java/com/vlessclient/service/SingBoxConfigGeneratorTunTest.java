@@ -345,6 +345,32 @@ class SingBoxConfigGeneratorTunTest {
         }
     }
 
+    /**
+     * The scheme of a DNS address became the server's type whatever it was:
+     * "dhcp://auto" or "http://…" made the core refuse the whole configuration,
+     * so TUN mode never started, and "system" as proxy DNS became a server
+     * named "system" that nothing could reach, so nothing resolved. Such a
+     * value is asked for as the field's default.
+     */
+    @Test
+    void tunMode_aDnsAddressTheCoreCannotUseIsAskedForAsTheDefault() throws Exception {
+        for (String address : List.of("dhcp://auto", "http://1.1.1.1/dns-query", "system",
+                "local://x")) {
+            AppSettings settings = tunSettings();
+            settings.setProxyDns(address);
+            settings.setDirectDns(address);
+
+            JsonNode servers = parse(generator.generate(createVlessServer(), settings))
+                    .get("dns").get("servers");
+
+            assertThat(servers.get(0).get("type").asString()).as(address).isEqualTo("https");
+            assertThat(servers.get(0).get("server").asString()).as(address).isEqualTo("1.1.1.1");
+            assertThat(servers.get(1).get("type").asString())
+                    .as("%s: the system resolver, Direct DNS's default", address)
+                    .isEqualTo("local");
+        }
+    }
+
     /** "8.8.8.8:53" reached the core as a name, which nothing could resolve. */
     @Test
     void tunMode_aPortWithoutASchemeIsSplitOffTheAddress() throws Exception {

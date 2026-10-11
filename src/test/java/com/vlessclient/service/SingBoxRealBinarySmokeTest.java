@@ -537,7 +537,11 @@ class SingBoxRealBinarySmokeTest {
                 "dns.google:53",
                 "[2001:4860:4860::8888]:53",
                 "2001:4860:4860::8888",
-                "https://[2606:4700:4700::1111]/dns-query");
+                "https://[2606:4700:4700::1111]/dns-query",
+                // Not addresses the core takes: asked for as the default.
+                "dhcp://auto",
+                "http://1.1.1.1/dns-query",
+                "system");
 
         for (String address : addresses) {
             AppSettings settings = new AppSettings();

@@ -293,17 +293,34 @@ public class SingBoxConfigGenerator {
     }
 
     private ObjectNode buildDns(AppSettings settings, ObjectNode route, boolean tunIpv6) {
+        // The fields and MCP store any text, and its scheme became the server's
+        // type: "dhcp://auto" or "http://..." made the core refuse the whole
+        // configuration, so TUN mode never started, and "system" as proxy DNS
+        // became a server named "system" that nothing could reach. Such a
+        // value is asked for as the field's default, as the DNS strategy is.
+        String proxyAddress = settings.getProxyDns();
+        if (!isCoreDnsAddress(proxyAddress)) {
+            log.warn("Proxy DNS {} is not an address the core takes; using {}",
+                    proxyAddress, DEFAULT_PROXY_DNS);
+            proxyAddress = DEFAULT_PROXY_DNS;
+        }
         ObjectNode proxyDns = mapper.createObjectNode();
         proxyDns.put("tag", DnsTags.PROXY);
-        populateDnsServerAddress(proxyDns, settings.getProxyDns());
+        populateDnsServerAddress(proxyDns, proxyAddress);
         proxyDns.put("detour", OutboundTags.PROXY);
 
         ArrayNode servers = mapper.createArrayNode();
         servers.add(proxyDns);
 
+        boolean systemDirect = isSystemDns(settings.getDirectDns());
+        if (!systemDirect && !isCoreDnsAddress(settings.getDirectDns())) {
+            log.warn("Direct DNS {} is not an address the core takes; using the system's",
+                    settings.getDirectDns());
+            systemDirect = true;
+        }
         ObjectNode directDns = mapper.createObjectNode();
         directDns.put("tag", DnsTags.DIRECT);
-        if (isSystemDns(settings.getDirectDns())) {
+        if (systemDirect) {
             // The OS resolver: the network's own, from the address the direct
             // connection leaves anyway.
             directDns.put("type", "local");
@@ -730,6 +747,30 @@ public class SingBoxConfigGenerator {
             server.put("type", "udp");
             server.put("server", address);
         }
+    }
+
+    /** Proxy DNS as Settings has it by default. */
+    private static final String DEFAULT_PROXY_DNS = "https://1.1.1.1/dns-query";
+
+    /** The DNS server types the core takes as a URL scheme; an address without one is udp. */
+    private static final Set<String> DNS_SCHEMES =
+            Set.of("udp", "tcp", "tls", "https", "h3", "quic");
+
+    /**
+     * Whether the core can use a DNS address as {@link #populateDnsServerAddress}
+     * writes it: one of the core's own schemes, or none, which reads as udp;
+     * blank stands for the default. The {@link AppSettings#SYSTEM_DNS} word is
+     * not an address: only Direct DNS takes it, and asks for it before this.
+     */
+    static boolean isCoreDnsAddress(String address) {
+        if (address == null || address.isBlank()) {
+            return true;
+        }
+        int scheme = address.indexOf("://");
+        return scheme < 0
+                ? !isSystemDns(address)
+                : DNS_SCHEMES.contains(
+                        address.substring(0, scheme).strip().toLowerCase(java.util.Locale.ROOT));
     }
 
     /** Whether a DNS setting names the OS resolver, {@link AppSettings#SYSTEM_DNS}. */
