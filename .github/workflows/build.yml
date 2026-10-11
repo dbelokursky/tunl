@@ -70,11 +70,15 @@ jobs:
       # those copies filled the 10 GB quota and pushed main's out; and with
       # no restore-keys, a pom change started from an empty repository, which
       # once failed main on a download from Central. restore-keys take the
-      # newest repository of the same OS and arch instead.
+      # newest repository of the same OS and arch instead. The wrapper's
+      # Maven too: mvnw fetched it from Central on every leg, with no retry.
+      # release.yml restores the same paths under the same key.
       - id: maven-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
-          path: ~/.m2/repository
+          path: |
+            ~/.m2/repository
+            ~/.m2/wrapper
           key: maven-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml') }}
           restore-keys: maven-${{ runner.os }}-${{ runner.arch }}-
       # The sing-box tarballs are fetched at generate-resources on every build
@@ -123,7 +127,30 @@ jobs:
         shell: bash
         run: |
           shopt -s nullglob
-          shellcheck scripts/*.sh src/main/resources/scripts/*.sh
+          shellcheck scripts/*.sh src/main/resources/scripts/*.sh packaging/sing-box/*.sh
+      - name: Lint the workflows
+        # The bash and PowerShell inside release.yml, core.yml and
+        # bump-singbox.yml run only on a tag, a schedule or a dispatch, so a
+        # mistyped output name or an expression error in them passed every
+        # required check and surfaced when a release tag was pushed, after
+        # its draft existed. actionlint checks the schema and expressions and
+        # runs shellcheck over each run: block. A pinned release, checked
+        # against its sha256: only GitHub's own actions may run here.
+        if: matrix.name == 'linux'
+        shell: bash
+        env:
+          ACTIONLINT_VERSION: 1.7.7
+          ACTIONLINT_SHA256: 023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+            --output "$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  ${archive}" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/actionlint"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/actionlint" actionlint
+          "$RUNNER_TEMP/actionlint/actionlint" -shellcheck shellcheck .github/workflows/*.yml
 
       - name: Name the failed tests
         # The job log is readable only signed in, or as a download from blob
@@ -147,7 +174,9 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.maven-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
-          path: ~/.m2/repository
+          path: |
+            ~/.m2/repository
+            ~/.m2/wrapper
           key: ${{ steps.maven-cache.outputs.cache-primary-key }}
       - name: Save the core download
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.core-cache.outputs.cache-hit != 'true'

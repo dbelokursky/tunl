@@ -285,7 +285,18 @@ jobs:
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'zulu'
-          cache: 'maven'
+      # main's Maven repository and the wrapper's Maven, restored only, as
+      # build.yml restores them. setup-java's cache: 'maven' keyed its own
+      # entries, which main never saves, so every release job started cold
+      # and downloaded everything from Central (a 429 there stalls a
+      # release), then saved a cache only a re-run of the same tag can read.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.m2/wrapper
+          key: maven-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: maven-${{ runner.os }}-${{ runner.arch }}-
       # Shares the cache the Build workflow populates on merge to main, so a
       # tagged release does not re-download the sing-box tarballs. Keyed on
       # singbox.properties: a core bump misses and re-fetches, and
@@ -497,7 +508,18 @@ jobs:
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'zulu'
-          cache: 'maven'
+      # main's Maven repository and the wrapper's Maven, restored only, as
+      # build.yml restores them. setup-java's cache: 'maven' keyed its own
+      # entries, which main never saves, so every release job started cold
+      # and downloaded everything from Central (a 429 there stalls a
+      # release), then saved a cache only a re-run of the same tag can read.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.m2/wrapper
+          key: maven-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: maven-${{ runner.os }}-${{ runner.arch }}-
       # Shares the cache the Build workflow populates on merge to main, so a
       # tagged release does not re-download the sing-box tarballs. Keyed on
       # singbox.properties: a core bump misses and re-fetches, and
@@ -601,7 +623,18 @@ jobs:
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'zulu'
-          cache: 'maven'
+      # main's Maven repository and the wrapper's Maven, restored only, as
+      # build.yml restores them. setup-java's cache: 'maven' keyed its own
+      # entries, which main never saves, so every release job started cold
+      # and downloaded everything from Central (a 429 there stalls a
+      # release), then saved a cache only a re-run of the same tag can read.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.m2/wrapper
+          key: maven-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: maven-${{ runner.os }}-${{ runner.arch }}-
       # Shares the cache the Build workflow populates on merge to main, so a
       # tagged release does not re-download the sing-box tarballs. Keyed on
       # singbox.properties: a core bump misses and re-fetches, and
@@ -670,7 +703,18 @@ jobs:
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'zulu'
-          cache: 'maven'
+      # main's Maven repository and the wrapper's Maven, restored only, as
+      # build.yml restores them. setup-java's cache: 'maven' keyed its own
+      # entries, which main never saves, so every release job started cold
+      # and downloaded everything from Central (a 429 there stalls a
+      # release), then saved a cache only a re-run of the same tag can read.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.m2/wrapper
+          key: maven-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: maven-${{ runner.os }}-${{ runner.arch }}-
       # Shares the cache the Build workflow populates on merge to main, so a
       # tagged release does not re-download the sing-box tarballs. Keyed on
       # singbox.properties: a core bump misses and re-fetches, and
