@@ -263,6 +263,11 @@ public class SingBoxConfigGenerator {
             rules = route.putArray("rules");
         }
         rules.insert(0, buildProbeRule());
+        // Over the finished lists, whichever step made a rule.
+        dropRulesThatMatchEverything(rules);
+        if (root.path("dns").path("rules") instanceof ArrayNode dnsRules) {
+            dropRulesThatMatchEverything(dnsRules);
+        }
 
         root.set("experimental", buildExperimental(settings));
 
@@ -1156,17 +1161,25 @@ public class SingBoxConfigGenerator {
             // matter how many countries are picked. geosite aggregates exist
             // only for some countries (see geositeTagFor); the rest match by
             // geoip alone, which is still useful at the IP level.
+            //
+            // Each rule names every selected country's list, whether or not a
+            // custom rule declared it first: the shared set only decides what
+            // route.rule_set declares. The rule's own list was deduplicated
+            // through it, so a GEOIP rule for the same country left the geoip
+            // rule as {"rule_set": []}, which the core matches for every
+            // connection: everything below it went direct while the card said
+            // Connected.
             ArrayNode geositeRefs = mapper.createArrayNode();
             ArrayNode geoipRefs = mapper.createArrayNode();
             for (String country : countries) {
                 String geositeTag = geositeTagFor(country);
-                if (geositeTag != null && ruleSetTags.add(geositeTag)) {
+                if (geositeTag != null) {
+                    ruleSetTags.add(geositeTag);
                     geositeRefs.add(geositeTag);
                 }
                 String geoipTag = "geoip-" + country;
-                if (ruleSetTags.add(geoipTag)) {
-                    geoipRefs.add(geoipTag);
-                }
+                ruleSetTags.add(geoipTag);
+                geoipRefs.add(geoipTag);
             }
 
             if (!geositeRefs.isEmpty()) {
@@ -1176,10 +1189,12 @@ public class SingBoxConfigGenerator {
                 rules.add(geositeRule);
             }
 
-            ObjectNode geoipRule = mapper.createObjectNode();
-            geoipRule.set("rule_set", geoipRefs);
-            geoipRule.put("outbound", OutboundTags.DIRECT);
-            rules.add(geoipRule);
+            if (!geoipRefs.isEmpty()) {
+                ObjectNode geoipRule = mapper.createObjectNode();
+                geoipRule.set("rule_set", geoipRefs);
+                geoipRule.put("outbound", OutboundTags.DIRECT);
+                rules.add(geoipRule);
+            }
 
             // The dedicated ip_is_private rule lives in the universal
             // LAN-bypass block below; not duplicated here.
@@ -1352,6 +1367,33 @@ public class SingBoxConfigGenerator {
         rule.put("action", "route");
         rule.put("outbound", OutboundTags.DIRECT);
         return rule;
+    }
+
+    /**
+     * Leaves out every rule that carries an empty matcher list. The core reads
+     * an empty list as no condition at all, so such a rule matches every
+     * connection, or every query: a country bypass whose geoip list a GEOIP
+     * rule had already named came out as {@code {"rule_set": [], "outbound":
+     * "direct"}}, and everything below it went direct, from the user's own
+     * address, while the card said Connected. No rule here is meant to have an
+     * empty list, so one that does is a bug, and leaving it out keeps what it
+     * would have caught in the tunnel. A rule meant to match everything, such
+     * as the sniff action, has no list at all.
+     *
+     * @param rules route or DNS rules, changed in place
+     */
+    static void dropRulesThatMatchEverything(ArrayNode rules) {
+        for (int i = rules.size() - 1; i >= 0; i--) {
+            JsonNode rule = rules.get(i);
+            for (java.util.Map.Entry<String, JsonNode> field : rule.properties()) {
+                if (field.getValue().isArray() && field.getValue().isEmpty()) {
+                    log.error("Leaving out a rule whose {} list is empty, which would "
+                            + "match everything: {}", field.getKey(), rule);
+                    rules.remove(i);
+                    break;
+                }
+            }
+        }
     }
 
     /**
