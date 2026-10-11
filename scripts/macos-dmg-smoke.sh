@@ -117,6 +117,38 @@ fi
 grep -qxF "${core_entry}" <<<"${entries}" \
     || fail "${jars[0]##*/} does not contain ${core_entry}"
 
+# The licences install beside the jar (stage-licenses.sh): the DMG used to
+# carry the GPL-3.0 core without its licence or a pointer to its source.
+for name in LICENSE NOTICE sing-box-LICENSE sing-box-GPL-3.0.txt; do
+    [[ -s "${APP}/Contents/app/${name}" ]] || fail "app bundle is missing Contents/app/${name}"
+done
+grep -qE '^    https://github\.com/.+/releases/tag/' "${APP}/Contents/app/NOTICE" \
+    || fail "Contents/app/NOTICE does not say where the source of the bundled sing-box is"
+
+# macOS refuses to open an app on a system older than LSMinimumSystemVersion,
+# with a message that says so. It must be at least the minimum the core and
+# the runtime are built for: it was 10.11 while the core needs 12, so Tunl
+# opened on macOS 11 and every Connect failed.
+minos_of() { # the LC_BUILD_VERSION minos of a Mach-O file
+    otool -l "$1" | awk '$1 == "cmd" && $2 == "LC_BUILD_VERSION" { b = 1 } b && $1 == "minos" { print $2; exit }'
+}
+CORE_COPY="$(mktemp "${TMPDIR:-/tmp}/tunl-core.XXXXXX")"
+unzip -p "${jars[0]}" "${core_entry}" > "${CORE_COPY}"
+core_minos="$(minos_of "${CORE_COPY}")"
+rm -f "${CORE_COPY}"
+runtime_minos="$(minos_of "${RUNTIME_JVM}")"
+[[ -n "${core_minos}" && -n "${runtime_minos}" ]] \
+    || fail "no LC_BUILD_VERSION minimum in the core ('${core_minos}') or libjvm ('${runtime_minos}')"
+min_system="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "${INFO_PLIST}")"
+# x.y.z throughout: sort -V ranks 12.0.0 above 12.0.
+ver3() { awk -F. '{ printf "%d.%d.%d\n", $1, $2, $3 }' <<<"$1"; }
+for needed in "${core_minos}" "${runtime_minos}"; do
+    [[ "$(printf '%s\n%s\n' "$(ver3 "${needed}")" "$(ver3 "${min_system}")" | sort -V | tail -n 1)" \
+            == "$(ver3 "${min_system}")" ]] \
+        || fail "LSMinimumSystemVersion is ${min_system}, but the core needs macOS ${core_minos} and the runtime ${runtime_minos}"
+done
+
 echo "[macos-dmg-smoke] Tunl.app verified: launcher, runtime," \
     "app.version=${EXPECTED_VERSION}, CFBundleVersion=${bundle_version}," \
-    "${core_entry} in ${jars[0]##*/}"
+    "${core_entry} in ${jars[0]##*/}, licences," \
+    "LSMinimumSystemVersion=${min_system} (core ${core_minos}, runtime ${runtime_minos})"

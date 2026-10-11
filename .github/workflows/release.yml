@@ -351,6 +351,74 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN" \
             $(security list-keychains -d user | tr -d '"')
           echo "MACOS_SIGN_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+      # jpackage --mac-sign signs the Mach-O files of the app bundle but does
+      # not open the jar, and Apple's notary service does. The jar's
+      # sing-box carries only the Go linker's ad-hoc signature (no Developer
+      # ID, no hardened runtime, no timestamp), which the notary rejects, so
+      # with the secrets set the release could not have been notarized. The
+      # core is signed where bundle-singbox.sh put it, the jar is built again
+      # around it, and the smoke suite runs the signed core. The JavaFX
+      # libraries in the jar come signed by their vendor.
+      - name: Sign the bundled core
+        if: ${{ env.MACOS_SIGNING_CONFIGURED == 'true' }}
+        env:
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          cores=(target/classes/native/darwin-*/sing-box)
+          if [ "${#cores[@]}" -ne 1 ]; then
+            echo "::error::expected one bundled darwin core, found ${#cores[@]}"
+            exit 1
+          fi
+          codesign --force --options runtime --timestamp \
+            --keychain "$MACOS_SIGN_KEYCHAIN" -s "$MACOS_SIGN_IDENTITY" "${cores[0]}"
+          codesign --verify --strict --verbose=2 "${cores[0]}"
+          # No clean: bundle-singbox.sh finds the core in place and keeps it,
+          # and the jar is written again rather than judged up to date.
+          ./mvnw -B package -DskipTests -Dmaven.jar.forceCreation=true
+          ./mvnw -B test -Psmoke -Dtest=SingBoxRealBinarySmokeTest
+      - name: Check that every Mach-O file in the jar is signed for notarization
+        if: ${{ env.MACOS_SIGNING_CONFIGURED == 'true' }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          jars=()
+          for jar in target/vless-client-*.jar; do
+            [[ "$(basename "$jar")" == original-* ]] || jars+=("$jar")
+          done
+          if [ "${#jars[@]}" -ne 1 ]; then
+            echo "::error::expected one target/vless-client-*.jar, found ${#jars[@]}"
+            exit 1
+          fi
+          work="$RUNNER_TEMP/jar-macho"
+          rm -rf "$work"
+          mkdir -p "$work"
+          unzip -q "${jars[0]}" -d "$work"
+          checked=0
+          bad=0
+          while IFS= read -r -d '' file; do
+            file -b "$file" | grep -q '^Mach-O' || continue
+            checked=$((checked + 1))
+            name="${file#"$work"/}"
+            if ! info="$(codesign -dvv "$file" 2>&1)" || ! codesign --verify --strict "$file"; then
+              echo "::error::$name in the jar has no valid signature"
+              bad=1
+              continue
+            fi
+            grep -q '^Authority=Developer ID Application' <<<"$info" \
+              || { echo "::error::$name in the jar is not signed with a Developer ID"; bad=1; }
+            grep -qE '^CodeDirectory .*flags=0x[0-9a-f]+\([^)]*runtime' <<<"$info" \
+              || { echo "::error::$name in the jar does not enable the hardened runtime"; bad=1; }
+            grep -q '^Timestamp=' <<<"$info" \
+              || { echo "::error::$name in the jar has no secure timestamp"; bad=1; }
+          done < <(find "$work" -type f -print0)
+          if [ "$checked" -eq 0 ]; then
+            echo "::error::found no Mach-O file in ${jars[0]}; the check would prove nothing"
+            exit 1
+          fi
+          echo "checked $checked Mach-O files in ${jars[0]}"
+          exit "$bad"
       - name: Create DMG with jpackage
         # Staging + jpackage live in scripts/package-dmg.sh, shared with the
         # per-merge build in build.yml. sing-box is already baked into the
