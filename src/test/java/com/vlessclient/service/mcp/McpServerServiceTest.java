@@ -59,6 +59,44 @@ class McpServerServiceTest {
         assertThat(service.getLastStartError()).isNull();
     }
 
+    /**
+     * The rollback above is for a click. At launch nobody clicked: a port
+     * taken for one boot, such as one Windows reserves for Hyper-V, turned
+     * agent access off for good, though the next launch would have bound.
+     */
+    @Test
+    void applyAtLaunch_bindFailureKeepsTheSettingAndTheNextLaunchStarts() throws Exception {
+        ConfigStore store = new ConfigStore(tempDir);
+        AppSettings settings = store.getSettings();
+
+        int blockedPort;
+        try (ServerSocket blocker = new ServerSocket()) {
+            blocker.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
+            blockedPort = blocker.getLocalPort();
+            settings.setMcpPort(blockedPort);
+            settings.setMcpEnabled(true);
+            store.saveSettings(settings);
+
+            service = new McpServerService(store, new FakeAppControlService());
+            service.applyAtLaunch();
+
+            assertThat(service.isRunning()).isFalse();
+            assertThat(service.getLastStartError())
+                    .isEqualTo("port " + blockedPort + " is already in use");
+            assertThat(settings.isMcpEnabled()).isTrue();
+            assertThat(new ConfigStore(tempDir).getSettings().isMcpEnabled()).isTrue();
+        }
+
+        McpServerService nextLaunch = new McpServerService(new ConfigStore(tempDir),
+                new FakeAppControlService());
+        try {
+            nextLaunch.applyAtLaunch();
+            assertThat(nextLaunch.isRunning()).isTrue();
+        } finally {
+            nextLaunch.stop();
+        }
+    }
+
     @Test
     void applicationShutdownStopsServerAndReleasesPort() throws Exception {
         ConfigStore store = new ConfigStore(tempDir);
