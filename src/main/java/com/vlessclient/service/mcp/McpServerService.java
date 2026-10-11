@@ -29,8 +29,9 @@ import tools.jackson.databind.node.ObjectNode;
  * the server when {@code mcp_enabled} turns on and stops it when it turns off,
  * restarting cleanly when the port changes.
  *
- * <p>Registered as a singleton in the {@code ServiceLocator}; {@link #apply()}
- * is called once at startup and again whenever settings are saved.</p>
+ * <p>Registered as a singleton in the {@code ServiceLocator}; {@link #applyAtLaunch()}
+ * is called once at startup, and {@link #apply()} whenever the Settings screen
+ * changes MCP's settings.</p>
  */
 public class McpServerService {
 
@@ -91,10 +92,29 @@ public class McpServerService {
     }
 
     /**
-     * Reconciles the running server with current settings. Safe to call
-     * repeatedly (e.g. after every settings save).
+     * Reconciles the running server with current settings, for a change the
+     * user made. Safe to call repeatedly (e.g. after every settings save). A
+     * start that fails turns {@code mcp_enabled} off again.
      */
     public synchronized void apply() {
+        reconcile(true);
+    }
+
+    /**
+     * Starts the server at launch when the settings ask for it. A start that
+     * fails leaves {@code mcp_enabled} on and keeps the reason for the
+     * Settings status line; the next launch tries again.
+     *
+     * <p>It ran {@link #apply()}, whose rollback is for a click: at launch
+     * nobody clicked, and a port taken for one boot, such as one in a range
+     * Windows reserves for Hyper-V or WSL at startup, turned agent access
+     * off for good, though the next launch would have bound.</p>
+     */
+    public synchronized void applyAtLaunch() {
+        reconcile(false);
+    }
+
+    private void reconcile(boolean userAction) {
         AppSettings settings = configStore.getSettings();
         boolean shouldRun = settings.isMcpEnabled();
         int desiredPort = settings.getMcpPort();
@@ -122,14 +142,17 @@ public class McpServerService {
             runningPort = -1;
             lastStartError = describeStartFailure(e, desiredPort);
 
-            // "Enabled" must describe a server that is actually listening. If
-            // startup fails, retaining the desired state leaves the Settings
-            // checkbox checked while the status says "stopped". A later click
-            // then looks like it did nothing even though another bind was
-            // attempted. Roll back the persisted toggle so the UI can reflect
-            // the failure and the next enable is an unambiguous retry.
-            settings.setMcpEnabled(false);
-            configStore.saveSettings(settings);
+            // After a click, "Enabled" must describe a server that is
+            // actually listening. If startup fails, retaining the desired
+            // state leaves the Settings checkbox checked while the status
+            // says "stopped". A later click then looks like it did nothing
+            // even though another bind was attempted. Roll back the persisted
+            // toggle so the UI can reflect the failure and the next enable is
+            // an unambiguous retry. Not at launch: see applyAtLaunch.
+            if (userAction) {
+                settings.setMcpEnabled(false);
+                configStore.saveSettings(settings);
+            }
         }
     }
 
@@ -246,7 +269,7 @@ public class McpServerService {
         server.addTool(new SimpleReadTool("get_settings",
                 "Get application settings (no secrets).", control::getSettings));
 
-        // Action tools (mutating; hidden/blocked when mutations are off).
+        // Action tools (mutating; listed always, refused when mutations are off).
         server.addTool(new ConnectTool(control));
         server.addTool(new DisconnectTool(control));
         server.addTool(new SelectServerTool(control));
@@ -261,8 +284,10 @@ public class McpServerService {
         // Audit every mutating call to logs/mcp-audit.log (rolling; see logback.xml).
         server.setAuditLog(new FileAuditLog());
 
-        // Advertise server-initiated log streaming (GET /mcp SSE via the notifier).
+        // Advertise server-initiated log streaming (GET /mcp SSE via the notifier),
+        // and take the level an agent sets for it.
         server.setLoggingCapability(true);
+        server.setLogLevelListener(notifier::setMinimumLevel);
 
         // Browsable resources mirroring the read tools.
         server.addResource(new JsonResource("vless://status",

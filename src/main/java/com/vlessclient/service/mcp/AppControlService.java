@@ -79,10 +79,13 @@ public interface AppControlService {
      *                 when {@code null} the configured mode is used
      * @param confirm  must be {@code true} to connect in TUN mode (which shows a
      *                 macOS admin password prompt)
-     * @return the status after initiating the connection
+     * @return the status after initiating the connection, or the running
+     *         tunnel's when one runs and nothing else was asked for
      * @throws McpToolException if there is no active server, the binary is
      *                          missing, TUN was requested without confirmation,
-     *                          or sing-box fails to start
+     *                          sing-box fails to start, or a tunnel runs and a
+     *                          different server or mode was asked for (nothing
+     *                          is changed then)
      */
     StatusInfo connect(String serverId, String mode, boolean confirm) throws McpToolException;
 
@@ -94,7 +97,8 @@ public interface AppControlService {
     StatusInfo disconnect();
 
     /**
-     * Marks the given server active (used on the next connect).
+     * Makes the given server the active one, which a connected tunnel
+     * switches to at once and the next connect uses.
      *
      * @param serverId the server to activate
      * @return the now-active server
@@ -107,7 +111,9 @@ public interface AppControlService {
      * {@code null}.
      *
      * @param serverId optional single server id
-     * @return per-server latencies
+     * @return per-server latencies; the servers whose result was not in when
+     *         the time, which grows with the list, ran out are
+     *         {@link LatencyResult#TIMED_OUT}
      * @throws McpToolException if the given server id is unknown or there are no
      *                          servers to test
      */

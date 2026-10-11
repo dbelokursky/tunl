@@ -1,5 +1,7 @@
 package com.vlessclient.service.mcp;
 
+import com.vlessclient.service.LogLineFormatter;
+import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -16,6 +18,11 @@ import tools.jackson.databind.node.ObjectNode;
  * <p>Each subscriber owns a bounded queue; a slow or dead client can only fall
  * behind by {@link #QUEUE_CAPACITY} messages before further ones are dropped for
  * that client — it never blocks the producer or other clients.</p>
+ *
+ * <p>A line goes out at the level the core gave it, and only at or above the
+ * level an agent set with {@code logging/setLevel}. Every line went out as
+ * {@code info}, and the level could not be set at all, although the logging
+ * capability that promises it was advertised.</p>
  */
 public class McpNotifier {
 
@@ -24,6 +31,13 @@ public class McpNotifier {
 
     private final ObjectMapper mapper;
     private final CopyOnWriteArrayList<Subscriber> subscribers = new CopyOnWriteArrayList<>();
+
+    /** The protocol's log levels, least severe first, as RFC 5424 orders them. */
+    static final List<String> LEVELS = List.of(
+            "debug", "info", "notice", "warning", "error", "critical", "alert", "emergency");
+
+    /** The index in {@link #LEVELS} below which lines are not sent: none, until one is set. */
+    private volatile int minimumLevel;
 
     public McpNotifier(ObjectMapper mapper) {
         this.mapper = mapper;
@@ -64,12 +78,31 @@ public class McpNotifier {
         return subscribers.size();
     }
 
+    /**
+     * Sends only lines at {@code level} or above from now on, as an agent's
+     * {@code logging/setLevel} asks.
+     *
+     * @param level one of {@link #LEVELS}
+     * @throws IllegalArgumentException for any other level
+     */
+    public void setMinimumLevel(String level) {
+        int index = LEVELS.indexOf(level);
+        if (index < 0) {
+            throw new IllegalArgumentException("Unknown log level: " + level);
+        }
+        minimumLevel = index;
+    }
+
     /** Broadcasts one log line as an MCP {@code notifications/message}. */
     public void broadcastLog(String line) {
         if (subscribers.isEmpty()) {
             return;
         }
-        String frame = logFrame(line);
+        String level = levelOf(line);
+        if (LEVELS.indexOf(level) < minimumLevel) {
+            return;
+        }
+        String frame = logFrame(line, level);
         if (frame == null) {
             return;
         }
@@ -81,10 +114,20 @@ public class McpNotifier {
         }
     }
 
-    private String logFrame(String line) {
+    /** The level the core gave a line, in the protocol's words; info for a line with none. */
+    private static String levelOf(String line) {
+        return switch (LogLineFormatter.levelOf(line)) {
+            case LEVEL_DEBUG -> "debug";
+            case LEVEL_WARN -> "warning";
+            case LEVEL_ERROR -> "error";
+            default -> "info";
+        };
+    }
+
+    private String logFrame(String line, String level) {
         try {
             ObjectNode params = mapper.createObjectNode();
-            params.put("level", "info");
+            params.put("level", level);
             params.put("logger", "sing-box");
             params.put("data", line);
             ObjectNode message = mapper.createObjectNode();

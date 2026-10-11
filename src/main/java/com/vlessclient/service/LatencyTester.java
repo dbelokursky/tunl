@@ -32,7 +32,8 @@ public class LatencyTester {
 
     private static final Logger log = LoggerFactory.getLogger(LatencyTester.class);
     private static final int CONNECT_TIMEOUT_MS = 5000;
-    private static final int MAX_CONCURRENT_TESTS = 10;
+    /** How many servers are measured at once; the rest wait for a thread. */
+    public static final int MAX_CONCURRENT_TESTS = 10;
 
     private final ExecutorService executor;
     private final ClashApiDelayProbe delayProbe;

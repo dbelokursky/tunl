@@ -52,8 +52,10 @@ public class ConfigStore {
 
     private static final Logger log = LoggerFactory.getLogger(ConfigStore.class);
 
-    private static final String SERVERS_FILE = "servers.json";
-    private static final String SETTINGS_FILE = "settings.json";
+    /** The server list's file in the data directory, as save failures name it. */
+    public static final String SERVERS_FILE = "servers.json";
+    /** The settings' file in the data directory, as save failures name it. */
+    public static final String SETTINGS_FILE = "settings.json";
     private static final SecureRandom CLASH_API_RANDOM = new SecureRandom();
 
     /**

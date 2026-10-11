@@ -96,17 +96,19 @@ class McpActionToolsTest {
     }
 
     @Test
-    void actionTools_hiddenWhenMutationsDisabled() {
-        JsonNode tools = callTool(buildServer(false), "connect", null); // still blocked below
-        // tools/list should not advertise any mutating tool.
+    void actionTools_listedButRefusedWhenMutationsDisabled() {
+        JsonNode tools = callTool(buildServer(false), "connect", null);
+        // tools/list advertises them either way: the list is declared as one
+        // that never changes.
         ObjectNode listMsg = MAPPER.createObjectNode();
         listMsg.put("jsonrpc", "2.0");
         listMsg.put("id", 2);
         listMsg.put("method", "tools/list");
         JsonNode list = buildServer(false).handle(listMsg).path("result").path("tools");
-        assertThat(list).isEmpty();
+        assertThat(list).hasSize(5);
         // And the direct call is refused.
         assertThat(tools.path("result").path("isError").asBoolean()).isTrue();
+        assertThat(control.status.proxyMode()).as("connect never ran").isEqualTo("tun");
         assertThat(control.disconnectCalled).isFalse();
     }
 }
