@@ -40,6 +40,21 @@ class AddHealthTargetDialogTest {
         assertThat(parsed.displayHost()).isEqualTo("example.com");
     }
 
+    /**
+     * The bare host:port form refused a port past 65535, but a URL took one:
+     * java.net.URI accepts it, and the probe writes the port into the SOCKS
+     * request as two bytes, so "https://example.com:70000", a typo for 7000,
+     * was saved and every probe went to port 4464.
+     */
+    @Test
+    void urlWithAPortOutOfRangeIsRejected() {
+        assertThat(AddHealthTargetDialog.normalizeTarget("https://example.com:70000")).isNull();
+        assertThat(AddHealthTargetDialog.normalizeTarget("http://example.com:99999/x")).isNull();
+        assertThat(AddHealthTargetDialog.normalizeTarget("http://example.com:0/")).isNull();
+        assertThat(AddHealthTargetDialog.normalizeTarget("https://example.com:65535/"))
+                .as("the last port there is").isNotNull();
+    }
+
     @Test
     void schemeWithoutHostIsRejected() {
         assertThat(AddHealthTargetDialog.normalizeTarget("http://")).isNull();
