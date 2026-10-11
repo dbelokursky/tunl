@@ -237,10 +237,29 @@ public class LogsViewTest extends ApplicationTest {
     void aSavedLogCutsTheTokensOutOfUrls() {
         String saved = LogsViewController.savedLog(List.of(
                 "INFO Refreshing https://sub.example.com/api/v1/client/subscribe?token=s3cr3t",
-                "INFO inbound/tun[tun-in]: inbound connection to [2a02:6b8::2:242]:443"));
+                "INFO inbound/tun[tun-in]: inbound connection to [2a02:6b8::2:242]:443"),
+                java.util.function.UnaryOperator.identity());
 
         assertThat(saved).doesNotContain("s3cr3t").contains("https://sub.example.com/")
                 .contains("[2a02:6b8::2:242]:443");
+    }
+
+    /**
+     * The core quotes the server it dialed and the SNI a certificate did not
+     * match. Save log cut URLs and nothing else, so a file meant for a public
+     * bug report published the private server's name, which the diagnostics
+     * bundle withholds; the two now share the bundle's redaction.
+     */
+    @Test
+    void aSavedLogWithholdsTheNamesTheServersGoBy() {
+        java.util.function.UnaryOperator<String> serverNames = line ->
+                line.replace("my-private-node.example.net", "[redacted]");
+
+        String saved = LogsViewController.savedLog(List.of(
+                "ERROR x509: certificate is valid for a.example, not my-private-node.example.net"),
+                serverNames);
+
+        assertThat(saved).doesNotContain("my-private-node.example.net").contains("a.example");
     }
 
     /**

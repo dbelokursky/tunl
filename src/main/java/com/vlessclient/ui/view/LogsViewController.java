@@ -18,6 +18,7 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import javafx.application.Platform;
 import javafx.beans.value.ObservableValue;
@@ -535,18 +536,22 @@ public class LogsViewController {
     }
 
     /**
-     * The log as saved: every line, with the paths and queries of URLs cut the
-     * way the diagnostics bundle cuts them. A subscription URL carries the
-     * account token, and "Save log" wrote it out whole, to a file meant for a
-     * bug report.
+     * The log as saved: every line, with the paths and queries of URLs cut and
+     * the names the configured servers go by replaced, the way the diagnostics
+     * bundle does both. A subscription URL carries the account token, and a
+     * core line quotes the private server it dialed and the SNI it sent; "Save
+     * log" wrote both out whole, to a file meant for a bug report. Where a
+     * connection went stays, since that is what a log is read for.
      *
-     * @param lines the buffered log lines
+     * @param lines       the buffered log lines
+     * @param serverNames redacts the configured servers' names in a line
      * @return the file's content
      */
-    static String savedLog(List<String> lines) {
+    static String savedLog(List<String> lines, UnaryOperator<String> serverNames) {
         return lines.stream()
                 .filter(line -> line != null)
                 .map(Redact::urlsIn)
+                .map(serverNames)
                 .collect(Collectors.joining(
                         System.lineSeparator(), "", System.lineSeparator()));
     }
@@ -575,7 +580,9 @@ public class LogsViewController {
         // Snapshot here is safe: appends run on the FX thread too, so the list
         // cannot mutate mid-iteration. Saves the full buffer, not the filtered
         // view — the level/search filters are a transient reading aid.
-        String content = savedLog(sourceLogLines);
+        String content = savedLog(sourceLogLines, ServiceLocator.find(DiagnosticsBundle.class)
+                .map(DiagnosticsBundle::serverNameRedactor)
+                .orElse(UnaryOperator.identity()));
         try {
             Files.writeString(file.toPath(), content, StandardCharsets.UTF_8);
             log.info("Saved {} log lines to {}", sourceLogLines.size(), file);

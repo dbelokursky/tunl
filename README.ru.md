@@ -188,6 +188,18 @@ sudo apt install ./tunl_*.deb
 | Windows | UAC-промпт на каждое подключение; пока туннель поднят, DNS-запросы мимо него блокируются (WFP), и имена не утекают резолверу сети |
 | Linux | одноразовый `setcap` через PolicyKit (дальше без промптов) или pkexec-промпт при подключении, если выдать права не удалось; закрытый запрос отменяет подключение |
 
+На macOS хелпер TUN остаётся после удаления Tunl: копия ядра и запускатель,
+принадлежащие root, в `/usr/local/libexec/vless-client` и правило sudo в
+`/etc/sudoers.d/vless-client`. Чтобы удалить их:
+
+```sh
+sudo rm -f /etc/sudoers.d/vless-client
+sudo rm -rf /usr/local/libexec/vless-client
+```
+
+На Linux однократно выданное право — это file capability на собственной копии
+ядра Tunl, и она уходит вместе с папкой данных Tunl.
+
 ---
 
 ## Как пользоваться
