@@ -381,6 +381,10 @@ public class VlessClientApp extends Application {
         offerToReplaceLegacySudoersRule(primaryStage);
     }
 
+    private static void stopAnsweringLaunches() {
+        SingleInstance.current().ifPresent(SingleInstance::stopListening);
+    }
+
     /** Shows the window over the others, from the tray or the Dock if need be. */
     private static void bringForward(Stage stage) {
         if (!stage.isShowing()) {
@@ -498,6 +502,10 @@ public class VlessClientApp extends Application {
                 // teardown, which can use its whole timeout on macOS: an
                 // update relay starts the new process as soon as this one
                 // exits, and the new one needs the port.
+                // First: a launch answered while this copy quits was shown
+                // nothing, by a window on its way out, and left; unanswered,
+                // it waits for this process to end and starts in its place.
+                AppSteps.step("single instance", VlessClientApp::stopAnsweringLaunches),
                 AppSteps.step("MCP server", ServiceLocator::stopMcpServer),
                 AppSteps.step("tray icon", this::removeTrayIcon),
                 AppSteps.step("services", this::shutdown));
@@ -626,6 +634,8 @@ public class VlessClientApp extends Application {
 
     private void shutdown() {
         log.info("Shutting down Tunl");
+        // The Cmd+Q path comes here without the steps above.
+        stopAnsweringLaunches();
         try {
             ServiceLocator.shutdown();
         } catch (Exception e) {
