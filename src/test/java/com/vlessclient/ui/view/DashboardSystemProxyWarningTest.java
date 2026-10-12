@@ -3,6 +3,7 @@ package com.vlessclient.ui.view;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.ProxyMode;
+import com.vlessclient.platform.SystemProxySupport;
 import com.vlessclient.testing.UiTest;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -112,6 +113,66 @@ public class DashboardSystemProxyWarningTest extends ApplicationTest {
         assertThat(onFxThread).as("gsettings must not run on the FX thread").isFalse();
         answer.countDown();
         WaitForAsyncUtils.waitFor(5, TimeUnit.SECONDS, warning::isVisible);
+    }
+
+    /**
+     * The dashboard asked the host itself, so every UI test that built one
+     * started a {@code gsettings} process on Linux, whose answer landed
+     * whenever it returned. Without the GNOME schema, as on the Linux
+     * runners, that answer was a no: it revealed the warning and grew the hero
+     * card under layout tests that had already hidden it. The test graph
+     * answers for the host, and the dashboard asks the graph.
+     */
+    @Test
+    void theDashboardAsksTheProxyStoreOfTheServiceGraph() throws Exception {
+        AtomicBoolean asked = new AtomicBoolean();
+        ServiceLocator.register(SystemProxySupport.class, () -> {
+            asked.set(true);
+            return true;
+        });
+        ServiceLocator.get(AppSettings.class).setProxyMode(ProxyMode.SYSTEM_PROXY);
+
+        WaitForAsyncUtils.asyncFx(() -> new FXMLLoader(
+                getClass().getResource("/fxml/DashboardView.fxml")).load())
+                .get(5, TimeUnit.SECONDS);
+
+        WaitForAsyncUtils.waitFor(5, TimeUnit.SECONDS, asked::get);
+    }
+
+    /**
+     * Pending shows no warning and neither does a yes, yet a yes redrew the
+     * line anyway and so took it from whoever had set it last, at whatever
+     * moment the answer came. DashboardLayoutTest sets the line itself to
+     * measure the card around it, and a yes landing mid-test hid it again.
+     */
+    @Test
+    void aYesThatComesLateLeavesTheLineAlone() throws Exception {
+        Label warning = lookup("#proxyModeWarning").query();
+        AppSettings settings = ServiceLocator.get(AppSettings.class);
+        CountDownLatch answer = new CountDownLatch(1);
+
+        interact(() -> {
+            settings.setProxyMode(ProxyMode.SYSTEM_PROXY);
+            controller.setSystemProxySupport(() -> {
+                try {
+                    answer.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return true;
+            });
+            controller.onViewShown();
+        });
+        interact(() -> {
+            warning.setText("TUN mode requires administrator privileges");
+            warning.setManaged(true);
+            warning.setVisible(true);
+        });
+        answer.countDown();
+        awaitVerdict();
+
+        assertThat(warning.isVisible()).isTrue();
+        assertThat(warning.getText()).isEqualTo("TUN mode requires administrator privileges");
     }
 
     /** Waits until the dashboard holds the answer and has shown it. */

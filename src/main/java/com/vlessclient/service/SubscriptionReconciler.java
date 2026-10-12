@@ -33,8 +33,9 @@ final class SubscriptionReconciler {
      *
      * @param existing      the subscription's stored servers
      * @param strays        stored servers of a subscription that no longer
-     *                      exists, which a fetched server may take back but
-     *                      which are never removed
+     *                      exists, which a fetched server may take back when
+     *                      it is the same server or has its name on its
+     *                      endpoint, but which are never removed
      * @param fetched       the servers the provider sent
      * @param allowRemovals whether a server of {@code existing} the provider
      *                      no longer sends is removed
@@ -54,14 +55,30 @@ final class SubscriptionReconciler {
         List<ServerConfig> unmatchedOld = new ArrayList<>(existing);
         List<ServerConfig> unmatchedNew = new ArrayList<>(upserts);
 
-        matchAll(unmatchedOld, unmatchedNew);
+        matchUnique(unmatchedOld, unmatchedNew, SubscriptionReconciler::identity);
+        // Credential rotation can change the exact identity. A unique provider
+        // label on the same endpoint is the next strongest correspondence.
+        matchUnique(unmatchedOld, unmatchedNew, SubscriptionReconciler::namedEndpoint);
+        matchUnique(unmatchedOld, unmatchedNew, SubscriptionReconciler::withoutCredentials);
+        // Preserve the legacy single-profile rename/reconfiguration behavior,
+        // but never choose arbitrarily among several variants on one endpoint.
+        matchUnique(unmatchedOld, unmatchedNew, SubscriptionReconciler::endpoint);
         // Then, for what the subscription's own servers did not account for,
         // a server a deleted subscription left behind: a restored backup
         // keeps each server's subscription stamp but not the subscription,
         // and the subscription added again matched none of them, so every
         // server was added a second time and the restored copies belonged to
         // nothing. After its own, so a stray cannot take a match from them.
-        matchAll(new ArrayList<>(strays), unmatchedNew);
+        // On the two strong keys only: the same server exactly, or the same
+        // name, which carries the subscription's "[name] " prefix, on the same
+        // endpoint. The weaker ones are safe among one provider's servers, but
+        // a stray can be any deleted subscription's: two providers fronting
+        // one CDN address share address, port and protocol, two accounts on
+        // one panel differ only in the uuid, and the other subscription's
+        // server took the stray over, its id and the user's pick with it.
+        List<ServerConfig> unmatchedStrays = new ArrayList<>(strays);
+        matchUnique(unmatchedStrays, unmatchedNew, SubscriptionReconciler::identity);
+        matchUnique(unmatchedStrays, unmatchedNew, SubscriptionReconciler::namedEndpoint);
 
         List<String> ids = new ArrayList<>(upserts.stream().map(ServerConfig::getId).toList());
         List<String> removals = new ArrayList<>();
@@ -73,20 +90,6 @@ final class SubscriptionReconciler {
             }
         }
         return new Batch(upserts, removals, ids);
-    }
-
-    private static void matchAll(List<ServerConfig> unmatchedOld,
-                                 List<ServerConfig> unmatchedNew) {
-        matchUnique(unmatchedOld, unmatchedNew, SubscriptionReconciler::identity);
-        // Credential rotation can change the exact identity. A unique provider
-        // label on the same endpoint is the next strongest correspondence.
-        matchUnique(unmatchedOld, unmatchedNew, server ->
-                server.getName() == null || server.getName().isBlank() ? null
-                        : new NamedEndpoint(endpoint(server), server.getName()));
-        matchUnique(unmatchedOld, unmatchedNew, SubscriptionReconciler::withoutCredentials);
-        // Preserve the legacy single-profile rename/reconfiguration behavior,
-        // but never choose arbitrarily among several variants on one endpoint.
-        matchUnique(unmatchedOld, unmatchedNew, SubscriptionReconciler::endpoint);
     }
 
     private static <K> void matchUnique(List<ServerConfig> oldServers,
@@ -141,5 +144,10 @@ final class SubscriptionReconciler {
 
     private static Endpoint endpoint(ServerConfig server) {
         return new Endpoint(server.getAddress(), server.getPort(), server.getProtocol());
+    }
+
+    private static NamedEndpoint namedEndpoint(ServerConfig server) {
+        return server.getName() == null || server.getName().isBlank() ? null
+                : new NamedEndpoint(endpoint(server), server.getName());
     }
 }

@@ -90,6 +90,46 @@ class ShareLinkParserRedactionTest {
         assertThat(config.getPlugin()).isEqualTo("obfs-local");
     }
 
+    /**
+     * An @ in the plugin's options belongs to the query, after the host, and
+     * does not move where the password ends.
+     */
+    @Test
+    void anAtSignInThePluginLeavesThePasswordWhereItEnds() {
+        ServerConfig config = parser.parse(
+                "ss://aes-256-gcm:alpha7@omega9@gateway.example:8388/?plugin=obfs-local"
+                        + "%3Bobfs%3Dhttp%3Bobfs-host%3Dcdn@example.com#Server");
+
+        assertThat(config.getUuid()).isEqualTo("alpha7@omega9");
+        assertThat(config.getAddress()).isEqualTo("gateway.example");
+        assertThat(config.getPort()).isEqualTo(8388);
+        assertThat(config.getPluginOpts()).isEqualTo("obfs=http;obfs-host=cdn@example.com");
+    }
+
+    /**
+     * A plain-form password can hold a ? as well as an @. The query was looked
+     * for from the start of the link, so the ? inside the password was taken
+     * for it; no @ stood before it, and the link was read as the legacy
+     * all-base64 form and refused ("Illegal base64 character"), though it
+     * imported before the @ fix.
+     */
+    @Test
+    void aQuestionMarkInsideAShadowsocksPasswordStaysInThePassword() {
+        ServerConfig plain = parser.parse("ss://aes-256-gcm:abc?def@host.example:8388#n");
+
+        assertThat(plain.getUuid()).isEqualTo("abc?def");
+        assertThat(plain.getAddress()).isEqualTo("host.example");
+        assertThat(plain.getPort()).isEqualTo(8388);
+
+        ServerConfig withPlugin = parser.parse("ss://aes-256-gcm:abc?def@host.example:8388"
+                + "/?plugin=obfs-local%3Bobfs%3Dhttp#n");
+
+        assertThat(withPlugin.getUuid()).isEqualTo("abc?def");
+        assertThat(withPlugin.getAddress()).isEqualTo("host.example");
+        assertThat(withPlugin.getPort()).isEqualTo(8388);
+        assertThat(withPlugin.getPlugin()).isEqualTo("obfs-local");
+    }
+
     /** What is left where the host goes is checked, not stored as it is. */
     @Test
     void aShadowsocksLinkWithoutAUsableHostIsRefused() {

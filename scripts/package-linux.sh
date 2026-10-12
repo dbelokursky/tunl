@@ -204,8 +204,12 @@ fi
 echo "[package-linux] $(grep -E '^(Exec|MimeType)=' "${desktop_entries[0]}" | tr '\n' ' ')"
 
 # jpackage's copyright file says "License: Unknown" for everything. This one
-# names Tunl's licence and the GPL-3.0 sing-box, and points at the files
-# stage-licenses.sh installed beside the jar.
+# gives each part of the package its licence, in the machine-readable format
+# (the last Files stanza matching a path applies), and points at the texts
+# stage-licenses.sh and jlink installed. It used to have one "Files: *"
+# stanza, Apache-2.0, with sing-box only in a Comment: a scanner read the
+# whole package as Apache-2.0, the GPL-2.0 runtime and the GPL-3.0 core in it
+# too. linux-deb-smoke.sh checks the licence it gives the runtime and the jar.
 COPYRIGHT="${REPACK}/tree/opt/tunl/share/doc/copyright"
 [[ -f "${COPYRIGHT}" ]] || { echo "[package-linux] jpackage wrote no ${COPYRIGHT#"${REPACK}/tree"}" >&2; exit 1; }
 cat > "${COPYRIGHT}" <<'COPYRIGHT_EOF'
@@ -213,17 +217,56 @@ Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: Tunl
 Upstream-Contact: Dmitry Belokursky <dbelokursky@gmail.com>
 Source: https://github.com/dbelokursky/tunl
+Comment: The paths below are relative to /opt/tunl, where the package
+ installs. /opt/tunl/lib/app/NOTICE lists every bundled component with its
+ licence, and says where the corresponding source of the bundled sing-box is.
 
 Files: *
 Copyright: 2026 Dmitry Belokursky
 License: Apache-2.0
+
+Files: bin/tunl lib/libapplauncher.so lib/runtime/*
+Copyright: Oracle and/or its affiliates, and the other contributors to OpenJDK
+License: GPL-2 with Classpath exception
+Comment: The jpackage launcher, and the Java runtime jlink made from Azul
+ Zulu, a build of OpenJDK. lib/runtime/legal/ holds, module by module, the
+ notices of the third-party code the runtime includes.
+
+Files: lib/app/vless-client-*.jar
+Copyright: 2026 Dmitry Belokursky
+ 2022 nekohasekai <contact-sagernet@sekai.icu>
+ Oracle and/or its affiliates
+ FasterXML, LLC and contributors
+ MaxMind, Inc.
+ QOS.ch Sarl
+License: Apache-2.0 and GPL-3+ and GPL-2 with Classpath exception and Expat, and EPL-1.0 or LGPL-2.1
+Comment: The application jar holds Tunl's classes (Apache-2.0); the sing-box
+ binary, native/*/sing-box (GPL-3+, with its notice native/*/LICENSE);
+ OpenJFX's classes and native libraries (GPL-2 with Classpath exception);
+ Jackson and the MaxMind DB Reader (Apache-2.0); SLF4J (Expat); and Logback
+ (EPL-1.0 or LGPL-2.1, at the user's choice).
+
+License: Apache-2.0
  The full text is in /opt/tunl/lib/app/LICENSE.
-Comment: The application jar carries a sing-box binary, licensed under the
- GPL-3.0 or later: /opt/tunl/lib/app/sing-box-LICENSE and
- /opt/tunl/lib/app/sing-box-GPL-3.0.txt. /opt/tunl/lib/app/NOTICE lists it
- with the other bundled components (the Java runtime, OpenJFX and the
- libraries) and their licences, and says where sing-box's corresponding
- source is.
+
+License: GPL-3+
+ sing-box is licensed under the GNU General Public License, version 3 or (at
+ your option) any later version. Its notice is in
+ /opt/tunl/lib/app/sing-box-LICENSE, and the full text of the GPL-3.0 in
+ /opt/tunl/lib/app/sing-box-GPL-3.0.txt.
+
+License: GPL-2 with Classpath exception
+ The full text, with the exception, is in
+ /opt/tunl/lib/runtime/legal/java.base/LICENSE.
+
+License: Expat
+ The full text is at https://www.slf4j.org/license.html.
+
+License: EPL-1.0
+ The full text is at https://www.eclipse.org/legal/epl-v10.html.
+
+License: LGPL-2.1
+ The full text is at https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html.
 COPYRIGHT_EOF
 dpkg-deb --root-owner-group -Zxz --build "${REPACK}/tree" "${DEB}"
 rm -rf "${REPACK}"

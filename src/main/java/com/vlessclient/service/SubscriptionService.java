@@ -1160,7 +1160,11 @@ public class SubscriptionService {
         // Try base64 decode first
         if (looksLikeBase64(trimmed)) {
             try {
-                String decoded = decodeBase64(trimmed);
+                // And of a list base64-encoded from such a file, whose mark
+                // the decoding brings back: before a first line that is a
+                // comment, it made that line an unreadable server, and every
+                // refresh partial.
+                String decoded = ShareLinkParser.withoutByteOrderMark(decodeBase64(trimmed));
                 ParsedContent parsed = parseLines(decoded);
                 // A list of links this client cannot run is still the list:
                 // read again as plain text, the blob is one unreadable line,
@@ -1218,6 +1222,14 @@ public class SubscriptionService {
         }
     }
 
+    /**
+     * The schemes of addresses on the web. In a list they are a portal's
+     * sign-in link or a footer pointing at the provider's site; no server
+     * this client could run is given in one.
+     */
+    private static final java.util.Set<String> WEB_SCHEMES =
+            java.util.Set.of("http", "https", "ftp", "file");
+
     private ParsedContent parseLines(String text) {
         List<ServerConfig> servers = new ArrayList<>();
         List<String> unsupported = new ArrayList<>();
@@ -1241,6 +1253,14 @@ public class SubscriptionService {
                 // a list of unsupported links instead of as no list at all.
                 log.debug("Passing over a line that is not a share link");
             } catch (ShareLinkParser.UnsupportedSchemeException e) {
+                if (WEB_SCHEMES.contains(e.scheme())) {
+                    // A web address on a line of its own: a portal's sign-in
+                    // link, or the provider's support page under its list.
+                    // Left out as a protocol this client lacks, a portal's
+                    // page read as the provider's links asking for "https".
+                    log.debug("Passing over a web address in the list");
+                    continue;
+                }
                 unsupported.add(e.scheme());
                 log.debug("Leaving out a {} link: protocol not supported", e.scheme());
             } catch (ShareLinkParser.UnsupportedFeatureException e) {
@@ -1305,16 +1325,31 @@ public class SubscriptionService {
      * restored from a backup, which keeps the stamps but not the
      * subscriptions, or left by a subscription list that could not be read.
      * A refresh may take one back when the provider sends the same server.
+     *
+     * <p>Not one that a subscription's list still names, whatever its stamp:
+     * that one is the subscription's. A backup imported over servers a
+     * subscription added again had taken back puts their old stamps back,
+     * and a subscription added while the subscription list could not be
+     * opened, which is then never saved, leaves the servers it took back
+     * stamped with an id the next launch does not know. Read as a stray as
+     * well, such a server was matched a second time, after the refresh had
+     * matched it as the subscription's own: a second fetched server took its
+     * id and its pick, and the server itself was gone. A server another
+     * subscription lists would have been shared, and taken back and forth by
+     * the two.</p>
      */
     private List<ServerConfig> strays() {
         java.util.Set<String> registered = new java.util.HashSet<>();
+        java.util.Set<String> listed = new java.util.HashSet<>();
         synchronized (this) {
             for (Subscription s : subscriptions) {
                 registered.add(s.getId());
+                listed.addAll(s.getServerIds());
             }
         }
         return configStore.getSubscriptionServers().stream()
-                .filter(server -> !registered.contains(server.getSubscriptionId()))
+                .filter(server -> !registered.contains(server.getSubscriptionId())
+                        && !listed.contains(server.getId()))
                 .toList();
     }
 
