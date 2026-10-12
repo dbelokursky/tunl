@@ -41,6 +41,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
@@ -77,6 +78,19 @@ public class SubscriptionService {
 
     private final Path dataDir;
     private final ObjectMapper objectMapper;
+
+    /**
+     * The subscriptions.json entries this build could not read, as they were
+     * read, written back by every save. Guarded by this object's monitor.
+     */
+    private final List<JsonNode> unreadableSubscriptions = new ArrayList<>();
+
+    /**
+     * The envelope's top-level fields other than the version and the list,
+     * as read, so a newer build's fields survive this build's saves. Guarded
+     * by this object's monitor.
+     */
+    private ObjectNode envelopeExtras;
     private final ObservableList<Subscription> subscriptions;
     private final ConfigStore configStore;
     private final ShareLinkParser shareLinkParser;
@@ -1234,8 +1248,14 @@ public class SubscriptionService {
         try {
             ObjectNode envelope = objectMapper.createObjectNode();
             envelope.put("config_version", SUBSCRIPTIONS_CONFIG_VERSION);
-            envelope.set("subscriptions",
-                    objectMapper.valueToTree(serializableSubscriptions()));
+            ArrayNode list = objectMapper.valueToTree(serializableSubscriptions());
+            // An entry this build cannot read goes back as it came: it comes
+            // from a newer build, and its sealed URL names a keychain entry.
+            unreadableSubscriptions.forEach(entry -> list.add(entry.deepCopy()));
+            envelope.set("subscriptions", list);
+            if (envelopeExtras != null) {
+                envelope.setAll(envelopeExtras.deepCopy());
+            }
             SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(envelope));
             configStore.getPersistenceState().saved(SUBSCRIPTIONS_FILE);
             ConfigStore.dropLegacyBackupOnceMigrated(file, objectMapper, "subscriptions");
@@ -1330,9 +1350,11 @@ public class SubscriptionService {
                 items = root.path("subscriptions");
             }
             if (!items.isArray()) {
-                log.error("subscriptions.json has no readable list; leaving it empty");
+                ConfigStore.keepWithoutList(file, SUBSCRIPTIONS_FILE, root,
+                        SUBSCRIPTIONS_CONFIG_VERSION, persistence);
                 return;
             }
+            ObjectNode extras = ConfigStore.envelopeExtras(root, "subscriptions");
             // Per entry, as servers.json is read: one subscription this build
             // cannot read used to fail the whole list and set every other
             // subscription aside with it.
@@ -1345,12 +1367,19 @@ public class SubscriptionService {
                     unreadable++;
                     log.warn("Skipping a subscription entry this build cannot read: {}",
                             e.getMessage());
+                    synchronized (this) {
+                        unreadableSubscriptions.add(item);
+                    }
                 }
             }
             Unsealing.each(loaded, this::unsealInPlace);
             subscriptions.addAll(loaded);
+            synchronized (this) {
+                envelopeExtras = extras;
+            }
             if (unreadable > 0) {
                 persistence.couldNotRead(SUBSCRIPTIONS_FILE, unreadable);
+                persistence.keepsUnreadableOnSave(SUBSCRIPTIONS_FILE);
             }
             log.info("Loaded {} subscriptions from {}", subscriptions.size(), file);
         } catch (JacksonException e) {

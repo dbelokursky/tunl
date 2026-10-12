@@ -2,8 +2,10 @@ package com.vlessclient.service;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyBooleanProperty;
 import javafx.beans.property.ReadOnlyBooleanWrapper;
@@ -20,6 +22,9 @@ public final class PersistenceState {
     private final ReadOnlyBooleanWrapper unsaved = new ReadOnlyBooleanWrapper();
     private final ReadOnlyBooleanWrapper hasUnreadable = new ReadOnlyBooleanWrapper();
     private final ReadOnlyStringWrapper unreadableFiles = new ReadOnlyStringWrapper("");
+    /** Files whose saves write back the entries this build could not read. */
+    private final Set<String> keptOnSave = new LinkedHashSet<>();
+    private final ReadOnlyStringWrapper keptUnreadableFiles = new ReadOnlyStringWrapper("");
     /** Files that could not be opened at startup, and why; they are never written. */
     private final Map<String, String> held = new LinkedHashMap<>();
     /** Damaged files moved aside at startup, and where each is now. */
@@ -39,11 +44,12 @@ public final class PersistenceState {
     /**
      * Clears only the file that was successfully written. Other failures remain
      * visible. Entries of that file this build could not read are gone from it
-     * once it is rewritten, so their notice goes with them.
+     * once it is rewritten, so their notice goes with them, unless its saves
+     * write them back ({@link #keepsUnreadableOnSave}).
      */
     public synchronized void saved(String file) {
         pending.remove(file);
-        if (unreadable.remove(file) != null) {
+        if (!keptOnSave.contains(file) && unreadable.remove(file) != null) {
             publishUnreadable();
         }
         publish();
@@ -63,15 +69,28 @@ public final class PersistenceState {
      * Records entries of {@code file} that this build could not read.
      *
      * <p>Loading keeps what it understands and reports the rest here. It is
-     * worth telling the user about rather than logging: the next save rewrites
-     * the file without those entries, so a rollback that was recoverable
-     * stops being so the moment they edit anything.</p>
+     * worth telling the user about rather than logging: unless the file's
+     * saves write them back, the next save rewrites the file without those
+     * entries, so a rollback that was recoverable stops being so the moment
+     * they edit anything.</p>
      */
     public synchronized void couldNotRead(String file, int entries) {
         if (entries <= 0) {
             return;
         }
         unreadable.merge(file, entries, Integer::sum);
+        publishUnreadable();
+    }
+
+    /**
+     * Records that saves of {@code file} write back the entries it could not
+     * read, as they were read. Its notice then stays for the session and says
+     * they are kept rather than that saving removes them.
+     *
+     * @param file the file's name
+     */
+    public synchronized void keepsUnreadableOnSave(String file) {
+        keptOnSave.add(file);
         publishUnreadable();
     }
 
@@ -155,9 +174,14 @@ public final class PersistenceState {
         return Map.copyOf(unreadable);
     }
 
-    /** The files with unreadable entries, as the banner names them. */
+    /** The files with unreadable entries a save removes, as the banner names them. */
     public ReadOnlyStringProperty unreadableFilesProperty() {
         return unreadableFiles.getReadOnlyProperty();
+    }
+
+    /** The files with unreadable entries a save writes back, as the banner names them. */
+    public ReadOnlyStringProperty keptUnreadableFilesProperty() {
+        return keptUnreadableFiles.getReadOnlyProperty();
     }
 
     /** Observable flag for the banner about entries this build cannot read. */
@@ -189,10 +213,14 @@ public final class PersistenceState {
 
     private void publishUnreadable() {
         boolean any = !unreadable.isEmpty();
-        String files = String.join(", ", unreadable.keySet());
+        String dropped = String.join(", ", unreadable.keySet().stream()
+                .filter(file -> !keptOnSave.contains(file)).toList());
+        String kept = String.join(", ", unreadable.keySet().stream()
+                .filter(keptOnSave::contains).toList());
         onFxThread(() -> {
             hasUnreadable.set(any);
-            unreadableFiles.set(files);
+            unreadableFiles.set(dropped);
+            keptUnreadableFiles.set(kept);
         });
     }
 
