@@ -255,8 +255,10 @@ public class ServiceLocator {
      * TUN mode captured the JVM's traffic anyway, which is why the gap was
      * only ever visible in one of the two modes.</p>
      *
-     * <p>The port is read per request, so a port changed in Settings is
-     * picked up.</p>
+     * <p>The port is read per request, and it is the port the running core
+     * listens on ({@code AppSettings.listenHttpPort()}): one changed in
+     * Settings while a core runs applies at the next start, where nothing
+     * listens on it yet.</p>
      */
     private static void routeAppTrafficThroughTunnel(ConfigStore configStore,
                                                      SingBoxEngine engine) {
