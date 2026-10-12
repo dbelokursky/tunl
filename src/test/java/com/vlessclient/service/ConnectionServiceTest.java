@@ -472,6 +472,35 @@ class ConnectionServiceTest {
     }
 
     /**
+     * The engine's own report of a crash reaches recovery through the
+     * listener the service puts on the engine's state. Every other recovery
+     * test hands the state to recovery directly, so that listener, which
+     * also starts and stops the network watch and clears the start notices,
+     * never ran in a test: dropping its call to recovery left every test
+     * green and a core that crashed at night never restarted.
+     */
+    @Test
+    void aCrashTheEngineReportsIsRecoveredThroughTheServicesListener() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.getSettings().setHealthCheckAutoReconnect(true);
+        store.getSettings().setHealthCheckDelaySeconds(1);
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        try {
+            assertThat(service.connect().started()).as("the first start").isTrue();
+            engine.state.set(ConnectionState.CONNECTED);
+            engine.running = false;
+
+            engine.state.set(ConnectionState.ERROR);
+
+            Await.until("recovery to start the core again",
+                    () -> starts(engine) >= 2, Duration.ofSeconds(10));
+        } finally {
+            service.getRecoveryService().close();
+        }
+    }
+
+    /**
      * A crash is recovered by stopping what is left of the core and starting it
      * again, through the service. {@code recover()} had no test of its own: the
      * recovery loop was tested with a stand-in restart only.

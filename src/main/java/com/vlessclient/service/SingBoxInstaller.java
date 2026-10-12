@@ -206,6 +206,15 @@ public class SingBoxInstaller {
      * Does not perform any downloads.
      */
     public Optional<Path> findExisting() {
+        return findExisting(System.getenv("PATH"));
+    }
+
+    /**
+     * {@link #findExisting()}, looking through {@code pathEnv} for the
+     * {@code $PATH} step. Package-private for tests, which cannot set the
+     * environment.
+     */
+    Optional<Path> findExisting(String pathEnv) {
         // 1. Bundled inside the macOS .app bundle
         String javaHome = System.getProperty("java.home");
         if (javaHome != null) {
@@ -239,6 +248,14 @@ public class SingBoxInstaller {
             }
         }
 
+        // Tests set vless.singbox.skipSystem=true as well: a sing-box the
+        // developer installed (Homebrew, a package, $PATH) became the UI
+        // tests' core, every Settings view ran it and asked GitHub for a newer
+        // release, and the network guard failed whichever test came next.
+        if (Boolean.getBoolean("vless.singbox.skipSystem")) {
+            return Optional.empty();
+        }
+
         // 3. Common system install locations
         String[] commonPaths = {
                 "/opt/homebrew/bin/sing-box",
@@ -253,7 +270,6 @@ public class SingBoxInstaller {
         }
 
         // 4. $PATH
-        String pathEnv = System.getenv("PATH");
         if (pathEnv != null) {
             for (String dir : pathEnv.split(File.pathSeparator)) {
                 Path candidate = Path.of(dir, binaryName);

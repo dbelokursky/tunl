@@ -902,10 +902,12 @@ public class SingBoxEngine {
     /**
      * Forgets a REALITY refusal: the running core was pointed at another
      * server without a restart, so the lines seen so far no longer describe
-     * the tunnel. Callable from any thread.
+     * the tunnel. Callable from any thread, with or without a toolkit: a bare
+     * {@code Platform.runLater} threw "Toolkit not initialized" when no FX
+     * toolkit was running, as in a service test run on its own.
      */
     public void forgetRealityRefusal() {
-        Platform.runLater(() -> realityRefused.set(false));
+        FxExecutor.later(() -> realityRefused.set(false));
     }
 
     static boolean isRealityRefusal(String line) {
@@ -1236,9 +1238,10 @@ public class SingBoxEngine {
      * The JVM shutdown hook: {@link #close()} without state transitions, for
      * a JVM on its way down. Taking {@code lifecycle} keeps it from racing a
      * start() or stop() in flight, which the interrupt shortens; the external
-     * quit killers halt the JVM if one does not end.
+     * quit killers halt the JVM if one does not end. Package-private for its
+     * test.
      */
-    private void closeForExit() {
+    void closeForExit() {
         refuseStarts();
         synchronized (lifecycle) {
             Process running = process;

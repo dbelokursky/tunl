@@ -97,6 +97,21 @@ public class ConfigStore {
     private final Map<String, SealedSecret> sealCache = new HashMap<>();
 
     /**
+     * The servers.json entries this build could not read, as they were read.
+     * Every save writes them back: they come from a newer build, and the
+     * first save used to delete them, though nobody had asked for that.
+     * Guarded by this object's monitor.
+     */
+    private final List<JsonNode> unreadableServers = new ArrayList<>();
+
+    /**
+     * The top-level fields of servers.json other than the version and the
+     * list, as read, so the fields a newer build wrote there are written back
+     * as settings.json's are. Guarded by this object's monitor.
+     */
+    private ObjectNode serversEnvelopeExtras;
+
+    /**
      * Serializes the writes of servers.json. The FX thread never waits for
      * it: a save asked for there while another runs is left to that one,
      * which writes again before it lets go.
@@ -785,18 +800,27 @@ public class ConfigStore {
         }
         ArrayNode snapshot;
         boolean secureStorage;
+        List<JsonNode> keep;
+        ObjectNode extras;
         synchronized (this) {
             snapshot = objectMapper.valueToTree(servers);
             secureStorage = settings.isStoreSecretsSecurely();
+            keep = List.copyOf(unreadableServers);
+            extras = serversEnvelopeExtras;
         }
         if (secureStorage && sealer.isAvailable()) {
             sealCredentials(snapshot);
         }
+        // After sealing: an entry this build cannot read goes back as it came.
+        keep.forEach(entry -> snapshot.add(entry.deepCopy()));
         Path file = dataDir.resolve(SERVERS_FILE);
         try {
             ObjectNode envelope = objectMapper.createObjectNode();
             envelope.put("config_version", SERVERS_CONFIG_VERSION);
             envelope.set("servers", snapshot);
+            if (extras != null) {
+                envelope.setAll(extras.deepCopy());
+            }
             SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(envelope));
             persistence.saved(SERVERS_FILE);
             dropLegacyBackupOnceMigrated(file, objectMapper, "servers");
@@ -920,9 +944,10 @@ public class ConfigStore {
                 items = root.path("servers");
             }
             if (!items.isArray()) {
-                log.error("servers.json has no readable server list; leaving list empty");
+                keepWithoutList(file, SERVERS_FILE, root, SERVERS_CONFIG_VERSION, persistence);
                 return;
             }
+            ObjectNode extras = envelopeExtras(root, "servers");
             List<ServerConfig> loaded = new ArrayList<>();
             int unreadable = 0;
             for (JsonNode item : items) {
@@ -935,12 +960,19 @@ public class ConfigStore {
                     unreadable++;
                     log.warn("Skipping a server entry this build cannot read: {}",
                             e.getMessage());
+                    synchronized (this) {
+                        unreadableServers.add(item);
+                    }
                 }
             }
             Unsealing.each(loaded, this::unsealInPlace);
             servers.addAll(loaded);
+            synchronized (this) {
+                serversEnvelopeExtras = extras;
+            }
             if (unreadable > 0) {
                 persistence.couldNotRead(SERVERS_FILE, unreadable);
+                persistence.keepsUnreadableOnSave(SERVERS_FILE);
             }
             log.info("Loaded {} servers from {}", servers.size(), file);
         } catch (JacksonException e) {
@@ -968,6 +1000,50 @@ public class ConfigStore {
     }
 
     /**
+     * The top-level fields of a list file's envelope other than its version
+     * and its list, to be written back by the next save; null for none, or
+     * for the pre-envelope bare array.
+     *
+     * <p>Package-private: {@link SubscriptionService} keeps its envelope's the
+     * same way.</p>
+     */
+    static ObjectNode envelopeExtras(JsonNode root, String listField) {
+        if (!(root instanceof ObjectNode envelope)) {
+            return null;
+        }
+        ObjectNode extras = envelope.deepCopy();
+        extras.remove("config_version");
+        extras.remove(listField);
+        return extras.isEmpty() ? null : extras;
+    }
+
+    /**
+     * Keeps a list file that parsed but holds no list this build can read.
+     *
+     * <p>It used to be logged and left in place with nothing recorded, so the
+     * app started empty, showed no notice, and the first save (an add, or a
+     * subscription refresh a minute after start) wrote the new list over it.
+     * One a newer build wrote is held where it is: it is likely fine, and the
+     * newer build reads it again after an upgrade. Anything else is set aside
+     * like a damaged file.</p>
+     *
+     * <p>Package-private: {@link SubscriptionService} reads its file the same
+     * way.</p>
+     */
+    static void keepWithoutList(Path file, String name, JsonNode root, int understood,
+                                PersistenceState persistence) {
+        int version = root.path("config_version").asInt(0);
+        if (version > understood) {
+            log.error("{} (config_version {}) holds no list this build can read; "
+                    + "leaving it as it is and not saving over it", file, version);
+            persistence.couldNotOpen(name, "written by a newer version of Tunl");
+            return;
+        }
+        log.error("{} holds no readable list; moving it aside", file);
+        setAsideDamaged(file, name, persistence);
+    }
+
+    /**
      * Leaves a file that is there and could not be opened as it is, and holds
      * its saves: it may be locked or left unreadable by a restore, and moving
      * it aside, or writing over it, lost data the app never saw.
@@ -983,11 +1059,18 @@ public class ConfigStore {
     /**
      * Moves a damaged file aside and says so: the app starts without it,
      * which looks like data loss unless the user hears where the file went.
+     *
+     * <p>A file that will not move (on Windows, one an editor or a sync client
+     * still has open) is held instead, so no save writes over it. It used to
+     * get neither: no notice, no hold, and the first save replaced the file
+     * that setting it aside was meant to keep.</p>
      */
     static void setAsideDamaged(Path file, String name, PersistenceState persistence) {
         Path aside = quarantineCorrupt(file);
         if (aside != null) {
             persistence.setAside(name, aside.toString());
+        } else if (Files.exists(file)) {
+            persistence.couldNotOpen(name, "damaged, and it could not be moved aside");
         }
     }
 

@@ -1,6 +1,7 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.ThemeCss;
+import com.vlessclient.testing.SettledLayout;
 import com.vlessclient.testing.UiTest;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Bounds;
@@ -49,19 +50,16 @@ public class ServerFormColumnTest extends ApplicationTest {
 
     private void assertSameRightEdge(int height) {
         Scene scene = load(height);
+        interact(() -> scene.getRoot().resize(DIALOG_WIDTH, height));
+        // Until it settles, not a fixed two passes: the actions bar's padding
+        // follows the viewport bounds, so the pass that produces those bounds
+        // cannot also be the pass that uses them, and the scroll pane's skin
+        // decides its bar from the size a pass just gave it. Nothing resizes
+        // the root in between: the scene is never shown, so no stage clamps it
+        // to the runner's screen.
+        SettledLayout.settle(scene);
         double[] edges = new double[2];
         interact(() -> {
-            // Sized and laid out in the same action as the measurement: a
-            // headless runner's screen can be smaller than the dialog asked
-            // for, and the pulse that follows a clamped stage lays the root
-            // out at that smaller size. Twice, because the actions bar's
-            // padding follows the viewport bounds, so the pass that produces
-            // those bounds cannot also be the pass that uses them.
-            scene.getRoot().resize(DIALOG_WIDTH, height);
-            scene.getRoot().applyCss();
-            scene.getRoot().layout();
-            scene.getRoot().applyCss();
-            scene.getRoot().layout();
             edges[0] = rightEdgeOf(scene, "#addressField");
             edges[1] = rightEdgeOf(scene, "#saveButton");
         });

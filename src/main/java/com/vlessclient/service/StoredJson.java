@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import tools.jackson.core.JacksonException;
+import tools.jackson.core.exc.StreamReadException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -70,7 +71,12 @@ final class StoredJson {
             // another process"), where Jackson's own FileInputStream says
             // "not found"; and whatever the parse throws is about the content.
             try {
-                return new Parsed(mapper.readTree(Files.readAllBytes(file)));
+                JsonNode root = mapper.readTree(Files.readAllBytes(file));
+                if (holdsNothing(root)) {
+                    return new Damaged(new StreamReadException(
+                            "the file holds no JSON value: it is empty, blank or null"));
+                }
+                return new Parsed(root);
             } catch (IOException e) {
                 last = e;
             } catch (JacksonException e) {
@@ -81,6 +87,18 @@ final class StoredJson {
             }
         }
         return new Unopenable(last);
+    }
+
+    /**
+     * Whether a parse found no value at all. Jackson reads an empty or blank
+     * file as a missing node and {@code null} as a null node, and throws for
+     * neither, so both came back as parsed. Every store then mapped the root
+     * to null and dereferenced it: a settings.json truncated to 0 bytes threw
+     * a NullPointerException in ConfigStore's constructor, and the app did
+     * not start again until the file was deleted by hand.
+     */
+    private static boolean holdsNothing(JsonNode root) {
+        return root == null || root.isMissingNode() || root.isNull();
     }
 
     /** Waits before the next attempt; false when interrupted. */
