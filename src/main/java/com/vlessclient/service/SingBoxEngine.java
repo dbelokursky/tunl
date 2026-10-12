@@ -1087,9 +1087,9 @@ public class SingBoxEngine {
 
     /**
      * Force-stops the sing-box process without state transitions.
-     * Used by the JVM shutdown hook.
+     * Used by the JVM shutdown hook; package-private for its test.
      */
-    private void forceStop() {
+    void forceStop() {
         // Runs from the JVM shutdown hook. Taking `lifecycle` keeps it from
         // racing a start()/stop() in flight; the wait is bounded (stop() blocks
         // at most STOP_TIMEOUT_SECONDS+2), and the external quit killers halt

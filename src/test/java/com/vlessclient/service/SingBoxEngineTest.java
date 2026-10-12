@@ -954,6 +954,35 @@ class SingBoxEngineTest {
         assertThat(guardCalls).containsExactly("127.0.0.1:1081");
     }
 
+    /**
+     * What the shutdown hook does when the user quits while connected: the
+     * core dies, and the OS proxy is cleared before forceStop returns, since
+     * the JVM goes on down and the monitor thread may never get to it. A
+     * proxy left pointing at the dead inbound breaks every browser until the
+     * next launch. Nothing ran this path before.
+     */
+    @Test
+    void forceStopAtQuitKillsTheCoreAndClearsTheProxyBeforeItReturns(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+        Thread quitting = Thread.currentThread();
+        List<String> clearedByTheQuit = new CopyOnWriteArrayList<>();
+        engine.setSystemProxyGuard((host, port) -> {
+            if (Thread.currentThread() == quitting) {
+                clearedByTheQuit.add(host + ":" + port);
+            }
+        });
+        engine.start(SET_SYSTEM_PROXY_CONFIG, ProxyMode.SYSTEM_PROXY);
+        assertThat(engine.isRunning()).isTrue();
+
+        engine.forceStop();
+
+        assertThat(engine.isRunning()).as("the core is gone").isFalse();
+        assertThat(clearedByTheQuit)
+                .as("cleared by forceStop itself, not left to the monitor thread")
+                .containsExactly("127.0.0.1:1081");
+    }
+
     @Test
     void crashRunsSystemProxyGuardToo(@TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
         Path fake = createCrashingSingBox(tmp, "sing-box");
