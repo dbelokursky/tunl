@@ -1296,16 +1296,31 @@ public class SubscriptionService {
      * restored from a backup, which keeps the stamps but not the
      * subscriptions, or left by a subscription list that could not be read.
      * A refresh may take one back when the provider sends the same server.
+     *
+     * <p>Not one that a subscription's list still names, whatever its stamp:
+     * that one is the subscription's. A backup imported over servers a
+     * subscription added again had taken back puts their old stamps back,
+     * and a subscription added while the subscription list could not be
+     * opened, which is then never saved, leaves the servers it took back
+     * stamped with an id the next launch does not know. Read as a stray as
+     * well, such a server was matched a second time, after the refresh had
+     * matched it as the subscription's own: a second fetched server took its
+     * id and its pick, and the server itself was gone. A server another
+     * subscription lists would have been shared, and taken back and forth by
+     * the two.</p>
      */
     private List<ServerConfig> strays() {
         java.util.Set<String> registered = new java.util.HashSet<>();
+        java.util.Set<String> listed = new java.util.HashSet<>();
         synchronized (this) {
             for (Subscription s : subscriptions) {
                 registered.add(s.getId());
+                listed.addAll(s.getServerIds());
             }
         }
         return configStore.getSubscriptionServers().stream()
-                .filter(server -> !registered.contains(server.getSubscriptionId()))
+                .filter(server -> !registered.contains(server.getSubscriptionId())
+                        && !listed.contains(server.getId()))
                 .toList();
     }
 
