@@ -213,6 +213,36 @@ class WindowsAutostartTest {
         assertThat(reg.calls).noneSatisfy(call -> assertThat(call).contains("add"));
     }
 
+    /**
+     * A launcher path with a space is registered quoted, but Java passes the
+     * quoted argument to {@code reg add} as it is and reg's own parsing takes
+     * the quotes off, so the Run value holds the path bare. Compared with the
+     * quoted command, it never matched, and every start still ran
+     * {@code reg add} for such an account.
+     */
+    @Test
+    void refreshTakesTheValueRegStoredWithoutQuotesForTheSameLauncher() {
+        String launcher = "C:\\Users\\John Smith\\AppData\\Local\\Tunl\\Tunl.exe";
+        FakeReg reg = registry(launcher, null);
+
+        new WindowsAutostart(reg,
+                () -> WindowsAutostart.launchCommandLine(java.util.Optional.of(launcher)))
+                .refresh();
+
+        assertThat(reg.calls).noneSatisfy(call -> assertThat(call).contains("add"));
+        assertThat(reg.calls).hasSize(2);
+    }
+
+    @Test
+    void refreshRewritesABareValueThatNamesAnotherLauncher() {
+        FakeReg reg = registry("C:\\Users\\John Smith\\Old place\\Tunl.exe", null);
+
+        new WindowsAutostart(reg, () -> WindowsAutostart.launchCommandLine(java.util.Optional.of(
+                "C:\\Users\\John Smith\\AppData\\Local\\Tunl\\Tunl.exe"))).refresh();
+
+        assertThat(reg.calls.getLast()).containsSequence("reg", "add", RUN_KEY);
+    }
+
     @Test
     void refreshRewritesAValueThatNamesAnotherLauncher() {
         FakeReg reg = registry("\"C:\\Old place\\Tunl.exe\"", null);
