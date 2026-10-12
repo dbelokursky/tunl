@@ -5,9 +5,11 @@
 # This is a binary repackage: instead of building from source it downloads the
 # official release .deb (produced by the project's release workflow with
 # jpackage) and unpacks it, so Arch users get the exact same artifact — bundled
-# JRE and sing-box binary included. The .deb installs the app under
-# /opt/tunl with a launcher and a /usr/share/applications/*.desktop
-# menu entry; package() extracts that tree verbatim into $pkgdir.
+# JRE and sing-box binary included. The .deb's payload is only /opt/tunl:
+# its menu entry is put in place by its post-install script, which makepkg
+# never runs, so package() installs that entry and a launcher on PATH itself.
+# Before it did, the package installed with no menu entry, no `tunl` command
+# and no tunl:// handler.
 #
 # pkgver and the sha256sums_* lines are rewritten by scripts/update-packaging.sh
 # after the release assets are built; the committed template carries a 0.0.0
@@ -49,8 +51,16 @@ package() {
     # A .deb is an `ar` archive wrapping data.tar.<zst|xz|gz>. bsdtar (from
     # libarchive, always present on Arch) reads both layers: first unpack the
     # arch-matching .deb, then extract its data tree into $pkgdir so every file
-    # keeps its path (/opt/tunl, /usr/share/applications, the hicolor
-    # icons and the launcher symlink).
+    # keeps its path under /opt/tunl.
     bsdtar -xf "tunl-${pkgver}-${CARCH}.deb"
     bsdtar -xf data.tar.* -C "$pkgdir/"
+
+    # What the .deb's post-install script does with xdg-desktop-menu, under
+    # the same name: the menu entry, which also registers the tunl:// scheme
+    # (pacman's desktop-file-utils hook refreshes the database). Then the
+    # launcher on PATH.
+    install -Dm644 "$pkgdir/opt/tunl/lib/tunl-tunl.desktop" \
+        "$pkgdir/usr/share/applications/tunl-tunl.desktop"
+    install -d "$pkgdir/usr/bin"
+    ln -s /opt/tunl/bin/tunl "$pkgdir/usr/bin/tunl"
 }

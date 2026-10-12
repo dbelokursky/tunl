@@ -36,7 +36,7 @@ VLESS, VMess, Trojan, Shadowsocks, Hysteria2 и WireGuard на JavaFX — обо
 | macOS (Apple Silicon) | `tunl_x.y.z.dmg` | |
 | Windows 10/11 (x64) | `tunl_x.y.z.msi` | ставится per-user, без прав администратора |
 | Debian/Ubuntu (amd64) | `tunl_x.y.z_amd64.deb` | |
-| Debian/Ubuntu (arm64) | `tunl_x.y.z_arm64.deb` | Raspberry Pi 5 и другие ARM-машины |
+| Debian/Ubuntu (arm64) | `tunl_x.y.z_arm64.deb` | Raspberry Pi 5 и другие ARM-машины; Debian 13 / Ubuntu 24.04 или новее |
 
 Сборка самого свежего мержа в `main` (может быть сырой) — в prerelease
 [**dev-latest**](https://github.com/dbelokursky/tunl/releases/tag/dev-latest).

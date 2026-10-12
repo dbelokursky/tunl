@@ -26,6 +26,12 @@
 # the release, makes incremental builds re-bundle after either changes
 # instead of silently keeping the old binary.
 #
+# The archive's LICENSE, sing-box's GPL-3.0 notice, goes beside the binary
+# as well, so the jar carries it as native/<os>-<arch>/LICENSE and the
+# packaging scripts can ship it with the installers (stage-licenses.sh).
+# Only the binary used to be extracted, and the installers carried GPL-3.0
+# object code without its licence.
+#
 set -euo pipefail
 
 OUT_DIR="${1:?usage: $0 <out_dir> <version>}"
@@ -107,9 +113,10 @@ for target in ${targets}; do
     arch="${target##*:}"
     target_dir="${OUT_DIR}/${os}-${arch}"
     target_binary="${target_dir}/sing-box"
+    target_license="${target_dir}/LICENSE"
     stamp_file="${target_dir}/.singbox-version"
 
-    if [[ -x "${target_binary}" && -f "${stamp_file}" ]] \
+    if [[ -x "${target_binary}" && -f "${target_license}" && -f "${stamp_file}" ]] \
             && [[ "$(cat "${stamp_file}")" == "${STAMP}" ]]; then
         echo "[bundle-singbox] already present: ${target_binary} (${STAMP})"
         continue
@@ -144,10 +151,11 @@ for target in ${targets}; do
     fi
 
     mkdir -p "${target_dir}"
-    rm -f "${target_binary}" "${stamp_file}"
+    rm -f "${target_binary}" "${target_license}" "${stamp_file}"
     tar -xzf "${tarball}" -C "${target_dir}" \
         --strip-components=1 \
-        "sing-box-${VERSION}-${os}-${arch}/sing-box"
+        "sing-box-${VERSION}-${os}-${arch}/sing-box" \
+        "sing-box-${VERSION}-${os}-${arch}/LICENSE"
     chmod +x "${target_binary}"
     printf '%s' "${STAMP}" > "${stamp_file}"
     echo "[bundle-singbox] bundled ${target_binary} (${STAMP})"

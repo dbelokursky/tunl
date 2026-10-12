@@ -99,10 +99,11 @@ if [[ ${#JAVA_OPTIONS[@]} -eq 0 ]]; then
 fi
 
 # Stage just the shaded jar (not the original-*.jar the shade plugin
-# leaves alongside it).
+# leaves alongside it), and the licence files that install beside it.
 rm -rf staging dist
 mkdir -p staging
 cp "${JAR_PATH}" staging/
+"${REPO_ROOT}/scripts/stage-licenses.sh" staging
 
 # Optional signing args, appended only when an identity is configured, so the
 # default (unsigned) invocation is byte-for-byte unchanged.

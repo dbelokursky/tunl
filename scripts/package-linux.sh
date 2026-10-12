@@ -89,10 +89,11 @@ if [[ ${#JAVA_OPTIONS[@]} -eq 0 ]]; then
 fi
 
 # Stage just the shaded jar (not the original-*.jar the shade plugin
-# leaves alongside it).
+# leaves alongside it), and the licence files that install beside it.
 rm -rf staging dist
 mkdir -p staging
 cp "${JAR_PATH}" staging/
+"${REPO_ROOT}/scripts/stage-licenses.sh" staging
 
 # Per-user data lives under XDG paths at runtime; the package itself installs
 # to /opt/tunl with a menu entry and launcher symlink.
@@ -102,6 +103,14 @@ cp "${JAR_PATH}" staging/
 # without secret-tool the credentials went into the JSON files while Settings
 # said they were in the keychain. It is in Debian's main and Ubuntu's
 # universe, which a desktop install enables.
+#
+# The rest is what JavaFX's own native libraries link: glass (GTK 3),
+# the fonts (FreeType, fontconfig, Pango) and the ES2 pipeline (libGL,
+# libXxf86vm). They live inside the jar and are unpacked at run time, so
+# jpackage never sees them; the package installed on a system without GTK 3
+# and the app died in toolkit start-up, while the CI smoke passed because the
+# runner had the libraries put in by hand first. The t64 name is the build
+# host's (Ubuntu 24.04); the rewrite below adds the old one.
 jpackage \
     --type deb \
     --name tunl \
@@ -115,7 +124,7 @@ jpackage \
     --linux-menu-group Network \
     --linux-shortcut \
     --linux-deb-maintainer "dbelokursky@gmail.com" \
-    --linux-package-deps libsecret-tools \
+    --linux-package-deps "libsecret-tools, libgtk-3-0t64, libfreetype6, libfontconfig1, libpangoft2-1.0-0, libgl1, libxxf86vm1" \
     --vendor "Tunl" \
     --java-options "-Dapp.version=${VERSION}" \
     --java-options "-Djava.awt.headless=false" \
@@ -140,6 +149,27 @@ REPACK="$(mktemp -d)"
 dpkg-deb --raw-extract "${DEB}" "${REPACK}/tree"
 sed -i -E '/^Depends:/ s/([a-z0-9][a-z0-9.+-]*)t64(,|[[:space:]]*$)/\1t64 | \1\2/g' \
     "${REPACK}/tree/DEBIAN/control"
+
+# Depends also names the oldest glibc the package runs on. jpackage writes a
+# bare "libc6", but JavaFX's libraries, inside the jar where it never looks,
+# can need a newer one than the runtime does: the linux-aarch64 build of
+# JavaFX 27 links glibc 2.38 symbols, so the arm64 package installed cleanly
+# on Debian 12 and Ubuntu 22.04 (2.36, 2.35) and the app died loading its
+# window toolkit. With the version declared, apt refuses it there instead.
+# The minimum is read from the files themselves: the highest GLIBC_x.y
+# symbol version the launcher, the runtime or a JavaFX library requires.
+command -v objdump >/dev/null \
+    || { echo "[package-linux] objdump (binutils) is needed to read the glibc the package needs" >&2; exit 1; }
+GLIBC_SCAN="$(mktemp -d)"
+unzip -qq -o "${REPACK}"/tree/opt/tunl/lib/app/vless-client-*.jar 'lib*.so' -d "${GLIBC_SCAN}"
+GLIBC_MIN="$(find "${REPACK}/tree/opt/tunl" "${GLIBC_SCAN}" -type f \
+        \( -name '*.so' -o -path '*/bin/*' \) -print0 \
+    | { xargs -0 objdump -T 2>/dev/null || true; } \
+    | grep -o 'GLIBC_[0-9][0-9.]*' | sed 's/^GLIBC_//' | sort -uV | tail -n 1)"
+rm -rf "${GLIBC_SCAN}"
+[[ "${GLIBC_MIN}" =~ ^2\.[0-9]+(\.[0-9]+)?$ ]] \
+    || { echo "[package-linux] could not read the glibc the package needs (got '${GLIBC_MIN}')" >&2; exit 1; }
+sed -i -E "/^Depends:/ s/\$/, libc6 (>= ${GLIBC_MIN})/" "${REPACK}/tree/DEBIAN/control"
 echo "[package-linux] $(grep '^Depends:' "${REPACK}/tree/DEBIAN/control")"
 
 # tunl:// links (DeepLinks): the menu entry names Tunl's URL scheme and hands
@@ -172,6 +202,29 @@ if [[ -f "${POSTINST}" ]]; then
     cat "${REPACK}/postinst" > "${POSTINST}"
 fi
 echo "[package-linux] $(grep -E '^(Exec|MimeType)=' "${desktop_entries[0]}" | tr '\n' ' ')"
+
+# jpackage's copyright file says "License: Unknown" for everything. This one
+# names Tunl's licence and the GPL-3.0 sing-box, and points at the files
+# stage-licenses.sh installed beside the jar.
+COPYRIGHT="${REPACK}/tree/opt/tunl/share/doc/copyright"
+[[ -f "${COPYRIGHT}" ]] || { echo "[package-linux] jpackage wrote no ${COPYRIGHT#"${REPACK}/tree"}" >&2; exit 1; }
+cat > "${COPYRIGHT}" <<'COPYRIGHT_EOF'
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Tunl
+Upstream-Contact: Dmitry Belokursky <dbelokursky@gmail.com>
+Source: https://github.com/dbelokursky/tunl
+
+Files: *
+Copyright: 2026 Dmitry Belokursky
+License: Apache-2.0
+ The full text is in /opt/tunl/lib/app/LICENSE.
+Comment: The application jar carries a sing-box binary, licensed under the
+ GPL-3.0 or later: /opt/tunl/lib/app/sing-box-LICENSE and
+ /opt/tunl/lib/app/sing-box-GPL-3.0.txt. /opt/tunl/lib/app/NOTICE lists it
+ with the other bundled components (the Java runtime, OpenJFX and the
+ libraries) and their licences, and says where sing-box's corresponding
+ source is.
+COPYRIGHT_EOF
 dpkg-deb --root-owner-group -Zxz --build "${REPACK}/tree" "${DEB}"
 rm -rf "${REPACK}"
 
