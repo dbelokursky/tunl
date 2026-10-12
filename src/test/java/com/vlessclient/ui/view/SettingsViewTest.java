@@ -3,7 +3,9 @@ package com.vlessclient.ui.view;
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.app.ThemeCss;
+import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.CoreLogLevel;
+import com.vlessclient.model.ProxyMode;
 import com.vlessclient.platform.PlatformPaths;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.testing.Await;
@@ -144,6 +146,78 @@ public class SettingsViewTest extends ApplicationTest {
                 combo.setValue(initial);
             });
         }
+    }
+
+    /**
+     * Settings redrew its combos after a language switch by setting each to
+     * null and back, which their listeners took for the user's choice: the
+     * switch saved the settings again, and wrote back the proxy mode the page
+     * showed over the one an agent had set meanwhile.
+     */
+    @Test
+    void aLanguageSwitchHereWritesNothingElseBack() {
+        ConfigStore store = ServiceLocator.get(ConfigStore.class);
+        AppSettings settings = store.getSettings();
+        ComboBox<ProxyMode> mode = lookup("#proxyModeCombo").query();
+        ComboBox<String> language = lookup("#languageCombo").query();
+        ProxyMode shown = mode.getValue();
+        ProxyMode agents = shown == ProxyMode.TUN ? ProxyMode.SYSTEM_PROXY : ProxyMode.TUN;
+        String initialLanguage = language.getValue();
+        try {
+            // An agent sets the mode over MCP while the page is open.
+            interact(() -> {
+                settings.setProxyMode(agents);
+                store.saveSettings(settings);
+            });
+
+            interact(() -> language.setValue("ru"));
+            WaitForAsyncUtils.waitForFxEvents();
+
+            assertThat(store.getSettings().getProxyMode()).as("the agent's mode")
+                    .isEqualTo(agents);
+            assertThat(shownText(mode)).isEqualTo(proxyModeText(shown));
+        } finally {
+            interact(() -> {
+                language.setValue(initialLanguage);
+                I18n.setLocale(java.util.Locale.ENGLISH);
+                settings.setProxyMode(shown);
+                store.saveSettings(settings);
+            });
+        }
+    }
+
+    /**
+     * A language an agent sets is applied without this page, and its combos
+     * stayed in the language they were drawn in for the rest of the run.
+     */
+    @Test
+    void theCombosFollowALanguageSetElsewhere() {
+        ComboBox<String> theme = lookup("#themeCombo").query();
+        ComboBox<ProxyMode> mode = lookup("#proxyModeCombo").query();
+        ComboBox<CoreLogLevel> level = lookup("#coreLogLevelCombo").query();
+        ComboBox<String> strategy = lookup("#dnsStrategyCombo").query();
+        try {
+            interact(() -> I18n.setLocale(java.util.Locale.of("ru")));
+            WaitForAsyncUtils.waitForFxEvents();
+
+            assertThat(shownText(theme)).isEqualTo(I18n.get("settings.theme." + theme.getValue()));
+            assertThat(shownText(mode)).isEqualTo(proxyModeText(mode.getValue()));
+            assertThat(shownText(level)).isEqualTo(I18n.get("settings.core.log.level."
+                    + level.getValue().name().toLowerCase(java.util.Locale.ROOT)));
+            assertThat(shownText(strategy))
+                    .isEqualTo(I18n.get("settings.dns.strategy." + strategy.getValue()));
+        } finally {
+            interact(() -> I18n.setLocale(java.util.Locale.ENGLISH));
+        }
+    }
+
+    /** The text the closed combo shows. */
+    private static String shownText(ComboBox<?> combo) {
+        return combo.getButtonCell().getText();
+    }
+
+    private static String proxyModeText(ProxyMode mode) {
+        return I18n.get(mode == ProxyMode.TUN ? "settings.proxy.tun" : "settings.proxy.system");
     }
 
     private void press(ComboBox<?> combo, KeyCode code) {

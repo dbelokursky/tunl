@@ -83,6 +83,41 @@ public class RoutingViewTest extends ApplicationTest {
         }
     }
 
+    /**
+     * The rows were worded when they were drawn: after a language switch they
+     * still said "Domain suffix", "Direct" and "Delete".
+     */
+    @Test
+    void theRulesFollowALanguageSwitch() {
+        RoutingService routing = ServiceLocator.get(RoutingService.class);
+        RoutingRule rule = new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "words.example",
+                RoutingRule.RuleAction.DIRECT);
+        try {
+            interact(() -> routing.addRule(rule));
+            WaitForAsyncUtils.waitForFxEvents();
+            interact(() -> I18n.setLocale(java.util.Locale.of("ru")));
+            WaitForAsyncUtils.waitForFxEvents();
+
+            javafx.scene.layout.HBox row = (javafx.scene.layout.HBox) lookup(".list-cell")
+                    .queryAll().stream()
+                    .map(node -> (javafx.scene.control.ListCell<?>) node)
+                    .filter(cell -> cell.getItem() == rule)
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("no row shows the rule"))
+                    .getGraphic();
+            assertThat(row.getChildren().stream()
+                    .filter(node -> node instanceof javafx.scene.control.Labeled)
+                    .map(node -> ((javafx.scene.control.Labeled) node).getText()))
+                    .contains(I18n.get("routing.rule.type.domain.suffix"),
+                            I18n.get("routing.action.direct"), I18n.get("button.delete"));
+        } finally {
+            interact(() -> {
+                I18n.setLocale(java.util.Locale.ENGLISH);
+                routing.removeRule(rule.getId());
+            });
+        }
+    }
+
     @Test
     void redesignedControlsExist() {
         assertThat(lookup("#bypassCountryCombo").tryQuery()).isPresent();

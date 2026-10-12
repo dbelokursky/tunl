@@ -34,7 +34,6 @@ import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
-import javafx.scene.control.ListCell;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextFormatter;
@@ -267,24 +266,11 @@ public class SettingsViewController implements ViewShownAware {
 
     private void initThemeCombo(AppSettings settings) {
         themeCombo.getItems().addAll("auto", "light", "dark");
-        themeCombo.setConverter(new StringConverter<>() {
-            @Override
-            public String toString(String value) {
-                if (value == null) {
-                    return "";
-                }
-                return switch (value) {
-                    case "auto", "system" -> I18n.get("settings.theme.auto");
-                    case "light" -> I18n.get("settings.theme.light");
-                    case "dark" -> I18n.get("settings.theme.dark");
-                    default -> value;
-                };
-            }
-
-            @Override
-            public String fromString(String string) {
-                return string;
-            }
+        ComboLabels.follow(themeCombo, value -> switch (value) {
+            case "auto", "system" -> I18n.get("settings.theme.auto");
+            case "light" -> I18n.get("settings.theme.light");
+            case "dark" -> I18n.get("settings.theme.dark");
+            default -> value;
         });
 
         onUserChange(ComboCommits.committed(themeCombo), (oldVal, newVal) -> {
@@ -327,7 +313,6 @@ public class SettingsViewController implements ViewShownAware {
                 settings.setLanguage(newVal);
                 I18n.setLocale(SettingsEffects.localeFor(newVal));
                 saveSettings(settings);
-                refreshLabels();
             }
         });
     }
@@ -488,20 +473,7 @@ public class SettingsViewController implements ViewShownAware {
      */
     private void initCoreLogLevelCombo(AppSettings settings) {
         coreLogLevelCombo.getItems().addAll(CoreLogLevel.values());
-        coreLogLevelCombo.setCellFactory(cb -> new ListCell<>() {
-            @Override
-            protected void updateItem(CoreLogLevel item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : formatCoreLogLevel(item));
-            }
-        });
-        coreLogLevelCombo.setButtonCell(new ListCell<>() {
-            @Override
-            protected void updateItem(CoreLogLevel item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : formatCoreLogLevel(item));
-            }
-        });
+        ComboLabels.follow(coreLogLevelCombo, this::formatCoreLogLevel);
 
         onUserChange(coreLogLevelCombo.valueProperty(), (oldVal, newVal) -> {
             if (newVal != null && newVal != oldVal) {
@@ -517,20 +489,7 @@ public class SettingsViewController implements ViewShownAware {
      */
     private void initDnsStrategyCombo(AppSettings settings) {
         dnsStrategyCombo.getItems().addAll(AppSettings.DNS_STRATEGIES);
-        dnsStrategyCombo.setCellFactory(cb -> new ListCell<>() {
-            @Override
-            protected void updateItem(String item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : formatDnsStrategy(item));
-            }
-        });
-        dnsStrategyCombo.setButtonCell(new ListCell<>() {
-            @Override
-            protected void updateItem(String item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : formatDnsStrategy(item));
-            }
-        });
+        ComboLabels.follow(dnsStrategyCombo, SettingsViewController::formatDnsStrategy);
 
         onUserChange(ComboCommits.committed(dnsStrategyCombo), (oldVal, newVal) -> {
             if (newVal != null && !newVal.equals(oldVal)) {
@@ -553,20 +512,7 @@ public class SettingsViewController implements ViewShownAware {
 
     private void initProxyModeCombo(AppSettings settings) {
         proxyModeCombo.getItems().addAll(ProxyMode.values());
-        proxyModeCombo.setCellFactory(cb -> new ListCell<>() {
-            @Override
-            protected void updateItem(ProxyMode item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : formatProxyMode(item));
-            }
-        });
-        proxyModeCombo.setButtonCell(new ListCell<>() {
-            @Override
-            protected void updateItem(ProxyMode item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : formatProxyMode(item));
-            }
-        });
+        ComboLabels.follow(proxyModeCombo, this::formatProxyMode);
 
         onUserChange(proxyModeCombo.valueProperty(), (oldVal, newVal) -> {
             if (newVal != null && newVal != oldVal) {
@@ -709,34 +655,6 @@ public class SettingsViewController implements ViewShownAware {
                 .bind(I18n.binding("settings.traffic.history.recorded"));
         trafficHistoryHint.textProperty().bind(I18n.binding("settings.traffic.history.hint"));
         ButtonLabels.bindStatic(clearTrafficHistoryButton, "settings.traffic.history.clear");
-    }
-
-    private void refreshLabels() {
-        // Force theme combo to re-render display text
-        String currentTheme = themeCombo.getValue();
-        themeCombo.setValue(null);
-        themeCombo.setValue(currentTheme);
-
-        // Force proxy mode combo to re-render display text
-        ProxyMode currentMode = proxyModeCombo.getValue();
-        proxyModeCombo.setValue(null);
-        proxyModeCombo.setValue(currentMode);
-
-        // ...and the core log level combo
-        CoreLogLevel currentLevel = coreLogLevelCombo.getValue();
-        coreLogLevelCombo.setValue(null);
-        coreLogLevelCombo.setValue(currentLevel);
-
-        // ...and the DNS strategy combo, which is showing, not choosing
-        boolean wasShowingStored = showingStored;
-        showingStored = true;
-        try {
-            String currentStrategy = dnsStrategyCombo.getValue();
-            dnsStrategyCombo.setValue(null);
-            dnsStrategyCombo.setValue(currentStrategy);
-        } finally {
-            showingStored = wasShowingStored;
-        }
     }
 
     private String formatCoreLogLevel(CoreLogLevel level) {
