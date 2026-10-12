@@ -105,8 +105,33 @@ class ConnectionServiceTest {
         volatile java.util.function.Predicate<java.util.function.BooleanSupplier> earlierTunnel =
                 stillWanted -> true;
 
+        /**
+         * The state the engine publishes, which a test sets on the FX thread:
+         * the real one's comes from a core, and these tests start none.
+         */
+        final javafx.beans.property.ReadOnlyObjectWrapper<ConnectionState> state =
+                new javafx.beans.property.ReadOnlyObjectWrapper<>(ConnectionState.DISCONNECTED);
+        /** The last launch ended at a dismissed administrator prompt. */
+        volatile boolean declined;
+
         RecordingEngine(Path binary) {
             super(binary);
+        }
+
+        @Override
+        public javafx.beans.property.ReadOnlyObjectProperty<ConnectionState>
+                connectionStateProperty() {
+            return state.getReadOnlyProperty();
+        }
+
+        @Override
+        public boolean lastExitWasDeclined() {
+            return declined;
+        }
+
+        /** Publishes {@code next} as the engine does, on the FX thread. */
+        void report(ConnectionState next) {
+            FxExecutor.run(() -> state.set(next));
         }
 
         @Override
@@ -1123,6 +1148,74 @@ class ConnectionServiceTest {
     }
 
     /**
+     * With the fastest server picked, the core's group holds every server
+     * whichever one is picked, so a pick changes nothing the core runs. It
+     * still stopped and started the core: every connection dropped, the TUN
+     * device went down and came back, and on Windows each click raised a UAC
+     * prompt. A change of what the core runs still restarts it.
+     */
+    @Test
+    void aPickUnderTheAutomaticSelectionKeepsTheCoreRunning() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(server("srv-2", "Osaka"));
+        store.setActiveServer("srv-1");
+        store.getSettings().setServerSelection(ServerSelection.AUTO_BEST);
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        try {
+            assertThat(service.connect().started()).isTrue();
+            store.setActiveServer("srv-2");
+
+            assertThat(service.switchToActiveServer().outcome())
+                    .isEqualTo(ConnectionService.Outcome.SWITCHED);
+            assertThat(engine.calls).as("the core kept running").doesNotContain("stop");
+            assertThat(service.appliedServerId()).isEqualTo("srv-2");
+
+            store.getSettings().setCoreLogLevel(com.vlessclient.model.CoreLogLevel.DEBUG);
+            store.setActiveServer("srv-1");
+            assertThat(service.switchToActiveServer().outcome())
+                    .as("a pick after the settings changed")
+                    .isEqualTo(ConnectionService.Outcome.STARTED);
+            assertThat(starts(engine)).isEqualTo(2);
+        } finally {
+            service.getRecoveryService().close();
+        }
+    }
+
+    /**
+     * A pick the running core cannot take live restarts it in the saved mode,
+     * as a Connect click starts it. An agent's connect over MCP names its
+     * mode, and the service kept that one: every later pick restarted in it,
+     * with a configuration generated for the mode saved since, so a TUN
+     * configuration ran without the privileges it needs, or a system-proxy
+     * one through the TUN launcher's prompt.
+     */
+    @Test
+    void aPickAfterAnAgentsConnectRestartsInTheSavedMode() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(server("srv-2", "Osaka"));
+        store.setActiveServer("srv-1");
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        try {
+            assertThat(service.connect(ProxyMode.SYSTEM_PROXY).started()).isTrue();
+            store.getSettings().setProxyMode(ProxyMode.TUN);
+            store.setActiveServer("srv-2");
+
+            assertThat(service.switchToActiveServer().outcome())
+                    .isEqualTo(ConnectionService.Outcome.STARTED);
+
+            assertThat(engine.modes).containsExactly(ProxyMode.SYSTEM_PROXY, ProxyMode.TUN);
+            assertThat(JsonMapper.builder().build().readTree(engine.configs.get(1))
+                    .path("inbounds").valueStream()
+                    .map(inbound -> inbound.path("type").asString()))
+                    .as("the configuration the core restarted with").contains("tun");
+        } finally {
+            service.getRecoveryService().close();
+        }
+    }
+
+    /**
      * The configuration is generated again on every dashboard update to tell
      * whether the core still matches, and that asked the host afresh on the FX
      * thread: a host that changed under a run read as a change of the settings
@@ -1248,6 +1341,137 @@ class ConnectionServiceTest {
     /** The published change, once the FX thread has taken it. */
     private static ConnectionService.NetworkChange networkChange(ConnectionService service) {
         return FxExecutor.get(() -> service.networkChangeProperty().get());
+    }
+
+    /*
+     * The engine's state reaches the service through one listener, which
+     * wires recovery, the network watch, the notices and the pick made while
+     * connecting. No test ran it: the tests above call recovery themselves,
+     * and their engine never published a state, so a listener that forgot
+     * any of the five left the suite green.
+     */
+
+    /** A core that dies is restarted because the engine says so. */
+    @Test
+    void anEngineReportingACrashGetsTheCoreRestarted() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.getSettings().setHealthCheckAutoReconnect(true);
+        store.getSettings().setHealthCheckDelaySeconds(1);
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        try {
+            assertThat(service.connect().started()).isTrue();
+            engine.report(ConnectionState.CONNECTED);
+            engine.running = false;
+
+            engine.report(ConnectionState.ERROR);
+
+            Await.until("recovery to start the core again",
+                    () -> starts(engine) >= 2, Duration.ofSeconds(10));
+        } finally {
+            service.getRecoveryService().close();
+        }
+    }
+
+    /** An administrator prompt the user dismissed withdraws the request for a tunnel. */
+    @Test
+    void anEngineReportingADeclinedPromptWithdrawsTheRequest() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        try {
+            assertThat(service.connect().started()).isTrue();
+            engine.report(ConnectionState.CONNECTING);
+            engine.running = false;
+            engine.declined = true;
+
+            engine.report(ConnectionState.DISCONNECTED);
+
+            assertThat(service.isTunnelWanted()).isFalse();
+        } finally {
+            service.getRecoveryService().close();
+        }
+    }
+
+    /** What the core was started without is said until it stops, and no longer. */
+    @Test
+    void theNoticesOfARunEndWhenTheEngineReportsItStopped() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(server("srv-2", "Frankfurt"));
+        RecordingEngine engine = engine();
+        engine.refuseWith = config -> config.contains(tag("srv-2"))
+                ? "initialize outbound[" + outboundIndex(config, "srv-2")
+                        + "]: unsupported flow: xtls-rprx-direct"
+                : null;
+        ConnectionService service = service(engine);
+        try {
+            assertThat(service.connect().skipped()).hasSize(1);
+            engine.report(ConnectionState.CONNECTED);
+            assertThat(FxExecutor.get(() -> service.skippedServersProperty().get())).hasSize(1);
+
+            engine.report(ConnectionState.DISCONNECTED);
+
+            assertThat(FxExecutor.get(() -> service.skippedServersProperty().get())).isEmpty();
+        } finally {
+            service.getRecoveryService().close();
+        }
+    }
+
+    /** A server picked while the core was starting is applied as it reports Connected. */
+    @Test
+    void anEngineReportingConnectedAppliesThePickMadeWhileConnecting() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(server("srv-2", "Osaka"));
+        store.setActiveServer("srv-1");
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        try {
+            assertThat(service.connect().started()).isTrue();
+            store.setActiveServer("srv-2");
+
+            engine.report(ConnectionState.CONNECTED);
+
+            Await.until("the pick applied", () -> "srv-2".equals(service.appliedServerId()),
+                    Duration.ofSeconds(5));
+        } finally {
+            service.getRecoveryService().close();
+        }
+    }
+
+    /**
+     * Only a TUN run with IPv6 on is watched, from Connected until it stops,
+     * and each start begins without a change to report.
+     */
+    @Test
+    void theNetworkIsWatchedWhileATunRunWithIpv6IsUp() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.getSettings().setProxyMode(ProxyMode.TUN);
+        store.getSettings().setTunIpv6Enabled(true);
+        AtomicBoolean ipv6 = new AtomicBoolean(false);
+        RecordingEngine engine = engine();
+        ConnectionService service = new ConnectionService(store,
+                new SingBoxConfigGenerator(() -> true, ipv6::get), new RoutingService(), engine);
+        try {
+            assertThat(service.connect().started()).isTrue();
+            engine.report(ConnectionState.CONNECTED);
+            assertThat(service.watchesNetwork()).isTrue();
+            ipv6.set(true);
+            service.checkNetwork();
+            assertThat(networkChange(service))
+                    .isEqualTo(ConnectionService.NetworkChange.IPV6_GAINED);
+
+            engine.report(ConnectionState.DISCONNECTED);
+            assertThat(service.watchesNetwork()).as("stopped with the core").isFalse();
+            assertThat(networkChange(service)).isEqualTo(ConnectionService.NetworkChange.NONE);
+
+            store.getSettings().setProxyMode(ProxyMode.SYSTEM_PROXY);
+            assertThat(service.reconnect(null).started()).isTrue();
+            engine.report(ConnectionState.CONNECTED);
+            assertThat(service.watchesNetwork()).as("a system-proxy run").isFalse();
+        } finally {
+            service.disconnect();
+            service.getRecoveryService().close();
+        }
     }
 
     /**

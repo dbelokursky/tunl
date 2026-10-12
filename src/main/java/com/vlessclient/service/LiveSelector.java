@@ -68,6 +68,18 @@ final class LiveSelector {
     }
 
     /**
+     * Whether a pick needs nothing of this core: it runs the automatic
+     * selection, whose group a configuration generated now holds as this
+     * core loaded it, whichever server is picked.
+     *
+     * @param generated a configuration generated from the current settings
+     * @return true when the core takes any pick as it runs
+     */
+    boolean keepsAnyPick(String generated) {
+        return !manual && matches(generated);
+    }
+
+    /**
      * Whether a configuration generated now is the one this core loaded, but
      * for the manual selector's pick, which changes without a restart. Unlike
      * {@link #accepts}, it answers for every group: with the automatic
