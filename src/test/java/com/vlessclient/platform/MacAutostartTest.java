@@ -1,11 +1,13 @@
 package com.vlessclient.platform;
 
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -16,17 +18,55 @@ class MacAutostartTest {
 
     private static final String PLIST_NAME = "com.vlessclient.client.plist";
 
+    private static final int UID = 501;
+
     @TempDir
     Path tempDir;
 
+    /**
+     * Records every launchctl invocation; {@code print-disabled} answers with
+     * {@code disabled}, every other command succeeds.
+     */
+    private static final class FakeLaunchctl implements CommandRunner {
+        final List<List<String>> calls = new ArrayList<>();
+        String disabled;
+
+        FakeLaunchctl(String disabled) {
+            this.disabled = disabled;
+        }
+
+        @Override
+        public CommandRunner.Result run(List<String> command) {
+            calls.add(List.copyOf(command));
+            if (command.get(1).equals("print-disabled")) {
+                return new CommandRunner.Result(0, disabled);
+            }
+            return new CommandRunner.Result(0, "");
+        }
+    }
+
+    /** What {@code launchctl print-disabled gui/<uid>} prints since macOS 13. */
+    private static String printDisabled(String... entries) {
+        StringBuilder out = new StringBuilder("disabled services = {\n");
+        for (String entry : entries) {
+            out.append('\t').append(entry).append('\n');
+        }
+        return out.append("}\n\nlogin item associations = {\n}\n").toString();
+    }
+
+    /** An autostart over {@code dir} whose launchd has switched nothing off. */
+    private static MacAutostart autostart(Path dir) {
+        return new MacAutostart(dir, new FakeLaunchctl(printDisabled()), () -> UID);
+    }
+
     @Test
     void isEnabled_falseWhenPlistAbsent() {
-        assertThat(new MacAutostart(tempDir).isEnabled()).isFalse();
+        assertThat(autostart(tempDir).isEnabled()).isFalse();
     }
 
     @Test
     void setEnabledTrue_writesPlistAndReportsEnabled() throws IOException {
-        MacAutostart service = new MacAutostart(tempDir);
+        MacAutostart service = autostart(tempDir);
 
         service.setEnabled(true);
 
@@ -40,7 +80,7 @@ class MacAutostartTest {
 
     @Test
     void setEnabledFalse_removesPlist() throws IOException {
-        MacAutostart service = new MacAutostart(tempDir);
+        MacAutostart service = autostart(tempDir);
         service.setEnabled(true);
         assertThat(service.isEnabled()).isTrue();
 
@@ -52,7 +92,7 @@ class MacAutostartTest {
 
     @Test
     void setEnabledFalse_whenAlreadyDisabledIsNoOp() throws IOException {
-        MacAutostart service = new MacAutostart(tempDir);
+        MacAutostart service = autostart(tempDir);
 
         service.setEnabled(false);
 
@@ -62,7 +102,7 @@ class MacAutostartTest {
     @Test
     void setEnabledTrue_createsLaunchAgentsDirWhenMissing() throws IOException {
         Path missingDir = tempDir.resolve("Library").resolve("LaunchAgents");
-        MacAutostart service = new MacAutostart(missingDir);
+        MacAutostart service = autostart(missingDir);
 
         service.setEnabled(true);
 
@@ -71,7 +111,7 @@ class MacAutostartTest {
 
     @Test
     void refresh_rewritesPlistWhenEnabled() throws IOException {
-        MacAutostart service = new MacAutostart(tempDir);
+        MacAutostart service = autostart(tempDir);
         service.setEnabled(true);
         Path plist = tempDir.resolve(PLIST_NAME);
         Files.writeString(plist, "stale");
@@ -83,7 +123,7 @@ class MacAutostartTest {
 
     @Test
     void refresh_doesNothingWhenDisabled() {
-        MacAutostart service = new MacAutostart(tempDir);
+        MacAutostart service = autostart(tempDir);
 
         service.refresh();
 
@@ -118,7 +158,7 @@ class MacAutostartTest {
     void anInstalledAppStartsAtLoginThroughItsOwnLauncher() throws IOException {
         Path launcher = fakeLauncher(tempDir.resolve("Applications"));
 
-        withAppPath(launcher, () -> new MacAutostart(tempDir).setEnabled(true));
+        withAppPath(launcher, () -> autostart(tempDir).setEnabled(true));
 
         assertThat(programArguments(Files.readString(tempDir.resolve(PLIST_NAME))))
                 .containsExactly(launcher.toString());
@@ -137,7 +177,7 @@ class MacAutostartTest {
                         .toString(),
                 "-cp", "app.jar", "com.vlessclient.app.Launcher")));
 
-        withAppPath(launcher, () -> new MacAutostart(tempDir).refresh());
+        withAppPath(launcher, () -> autostart(tempDir).refresh());
 
         assertThat(programArguments(Files.readString(plist)))
                 .containsExactly(launcher.toString());
@@ -155,11 +195,11 @@ class MacAutostartTest {
         Path translocated = fakeLauncher(tempDir.resolve("private/var/folders/xy/T")
                 .resolve("AppTranslocation").resolve("5C1A0F2E").resolve("d"));
         Path plist = tempDir.resolve(PLIST_NAME);
-        withAppPath(installed, () -> new MacAutostart(tempDir).setEnabled(true));
+        withAppPath(installed, () -> autostart(tempDir).setEnabled(true));
         String written = Files.readString(plist);
 
         withAppPath(translocated, () -> {
-            MacAutostart service = new MacAutostart(tempDir);
+            MacAutostart service = autostart(tempDir);
             assertThatThrownBy(() -> service.setEnabled(true))
                     .isInstanceOf(IOException.class)
                     .hasMessageContaining("Applications");
@@ -167,6 +207,100 @@ class MacAutostartTest {
         });
 
         assertThat(Files.readString(plist)).isEqualTo(written);
+    }
+
+    /**
+     * System Settings, General, Login Items ("Allow in the Background")
+     * switches the agent off without touching its plist; launchd keeps the
+     * label as disabled for the user's session. Only the file was read, so
+     * Settings kept the box ticked for an agent launchd no longer starts.
+     */
+    @Test
+    void anAgentSwitchedOffInLoginItemsIsOff() throws IOException {
+        autostart(tempDir).setEnabled(true);
+        FakeLaunchctl launchctl = new FakeLaunchctl(printDisabled(
+                "\"com.apple.Siri.agent\" => enabled",
+                "\"com.vlessclient.client\" => disabled"));
+
+        assertThat(new MacAutostart(tempDir, launchctl, () -> UID).isEnabled()).isFalse();
+        assertThat(launchctl.calls)
+                .containsExactly(List.of("launchctl", "print-disabled", "gui/" + UID));
+        // Before macOS 13 the same switch printed as true.
+        launchctl.disabled = printDisabled("\"com.vlessclient.client\" => true");
+        assertThat(new MacAutostart(tempDir, launchctl, () -> UID).isEnabled()).isFalse();
+    }
+
+    @Test
+    void anAgentLaunchdLeftOnOrCannotSpeakForIsOn() throws IOException {
+        autostart(tempDir).setEnabled(true);
+
+        for (String answer : List.of(
+                printDisabled("\"com.vlessclient.client\" => enabled"),
+                printDisabled("\"com.vlessclient.client\" => false"),
+                printDisabled("\"com.vlessclient.client.other\" => disabled"),
+                "")) {
+            assertThat(new MacAutostart(tempDir, new FakeLaunchctl(answer), () -> UID)
+                    .isEnabled()).as(answer).isTrue();
+        }
+        // A launchctl that fails, or no uid to name the session by, leaves
+        // the file to decide, as before.
+        CommandRunner failing = command -> new CommandRunner.Result(113, "Bad request.");
+        assertThat(new MacAutostart(tempDir, failing, () -> UID).isEnabled()).isTrue();
+        CommandRunner missing = command -> {
+            throw new IOException("launchctl not found");
+        };
+        assertThat(new MacAutostart(tempDir, missing, () -> UID).isEnabled()).isTrue();
+        FakeLaunchctl unasked = new FakeLaunchctl(
+                printDisabled("\"com.vlessclient.client\" => disabled"));
+        assertThat(new MacAutostart(tempDir, unasked, () -> -1).isEnabled()).isTrue();
+        assertThat(unasked.calls).isEmpty();
+    }
+
+    @Test
+    void refreshLeavesAnAgentSwitchedOffInLoginItemsAlone() throws IOException {
+        Path plist = tempDir.resolve(PLIST_NAME);
+        Files.writeString(plist, "stale");
+        FakeLaunchctl launchctl = new FakeLaunchctl(
+                printDisabled("\"com.vlessclient.client\" => disabled"));
+
+        new MacAutostart(tempDir, launchctl, () -> UID).refresh();
+
+        assertThat(Files.readString(plist)).isEqualTo("stale");
+    }
+
+    /**
+     * Ticking the box only rewrote the plist, and launchd's switch, which
+     * wins, still said off: the user's re-enable did nothing.
+     */
+    @Test
+    void enablingClearsLaunchdsSwitch() throws IOException {
+        FakeLaunchctl launchctl = new FakeLaunchctl(
+                printDisabled("\"com.vlessclient.client\" => disabled"));
+
+        new MacAutostart(tempDir, launchctl, () -> UID).setEnabled(true);
+
+        assertThat(launchctl.calls).contains(
+                List.of("launchctl", "enable", "gui/" + UID + "/com.vlessclient.client"));
+        assertThat(tempDir.resolve(PLIST_NAME)).isRegularFile();
+    }
+
+    /** A switch launchd does not hold is not written into its database. */
+    @Test
+    void enablingLeavesLaunchdAloneWhenNothingIsSwitchedOff() throws IOException {
+        FakeLaunchctl launchctl = new FakeLaunchctl(printDisabled());
+
+        new MacAutostart(tempDir, launchctl, () -> UID).setEnabled(true);
+
+        assertThat(launchctl.calls).noneSatisfy(call -> assertThat(call).contains("enable"));
+    }
+
+    /** launchd names the session by the process's uid, which Java has no API for. */
+    @Test
+    void theSessionIsNamedByThisProcesssUid() throws IOException {
+        Assumptions.assumeTrue(Platform.current() != Platform.WINDOWS, "no getuid on Windows");
+        Path mine = Files.writeString(tempDir.resolve("mine"), "");
+
+        assertThat(MacAutostart.processUid()).isEqualTo(Files.getAttribute(mine, "unix:uid"));
     }
 
     /** A jpackage launcher at {@code <dir>/Tunl.app/Contents/MacOS/Tunl}. */

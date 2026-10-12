@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -40,13 +41,20 @@ public final class WindowsAutostart implements Autostart {
             "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run";
 
     private final CommandRunner runner;
+    private final Supplier<String> launchCommand;
 
     public WindowsAutostart() {
         this(CommandRunner.system());
     }
 
     WindowsAutostart(CommandRunner runner) {
+        this(runner, WindowsAutostart::launchCommandLine);
+    }
+
+    /** Test seam: the command line this launcher would register. */
+    WindowsAutostart(CommandRunner runner, Supplier<String> launchCommand) {
         this.runner = runner;
+        this.launchCommand = launchCommand;
     }
 
     @Override
@@ -68,7 +76,7 @@ public final class WindowsAutostart implements Autostart {
     @Override
     public synchronized void setEnabled(boolean enabled) throws IOException {
         if (enabled) {
-            install(launchCommandLine());
+            install(launchCommand.get());
             // Re-adding the Run value alone left Task Manager's switch saying
             // off, which wins, so ticking the box again did nothing.
             clearTaskManagerSwitch();
@@ -88,8 +96,9 @@ public final class WindowsAutostart implements Autostart {
             // this launcher already: one more process at login, for nothing.
             // A path reg prints in another code page reads as different and
             // is rewritten, as it always was.
-            String command = launchCommandLine();
-            if (command.equals(storedValue(run.output(), "REG_SZ"))) {
+            String command = launchCommand.get();
+            String stored = storedValue(run.output(), "REG_SZ");
+            if (stored != null && unquoted(command).equals(unquoted(stored))) {
                 return;
             }
             install(command);
@@ -153,6 +162,23 @@ public final class WindowsAutostart implements Autostart {
             }
         }
         return null;
+    }
+
+    /**
+     * {@code value} without one pair of double quotes around the whole of it.
+     *
+     * <p>A launcher path with a space, {@code C:\Users\John Smith\...\Tunl.exe}
+     * under such an account, is registered quoted. Java hands an argument
+     * that is already quoted to {@code reg add} as it is, and reg's own
+     * command-line parsing takes the quotes off again, so the Run value holds
+     * the path bare and {@code reg query} prints it so. Compared as they
+     * were, the two never matched, and every start rewrote the value.</p>
+     */
+    private static String unquoted(String value) {
+        if (value.length() >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
+            return value.substring(1, value.length() - 1);
+        }
+        return value;
     }
 
     private void install(String command) throws IOException {
