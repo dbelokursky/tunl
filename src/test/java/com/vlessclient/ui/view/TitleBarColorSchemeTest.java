@@ -4,6 +4,7 @@ import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.service.ThemeManager;
 import com.vlessclient.testing.Await;
 import com.vlessclient.testing.UiTest;
+import com.vlessclient.ui.view.dashboard.AddHealthTargetDialog;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -13,6 +14,8 @@ import javafx.application.ColorScheme;
 import javafx.application.Platform;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.Dialog;
 import javafx.scene.layout.StackPane;
 import javafx.stage.Stage;
 import javafx.stage.Window;
@@ -105,6 +108,31 @@ public class TitleBarColorSchemeTest extends ApplicationTest {
             Scene alert = onFx(() -> Dialogs.alert(Alert.AlertType.INFORMATION)
                     .getDialogPane().getScene());
             assertThat(schemeOf(alert)).as(theme).isEqualTo(schemeFor(theme));
+        }
+    }
+
+    /**
+     * The dialogs the app builds itself rather than as an alert: Add rule,
+     * Import link, Add subscription and the dashboard's Add service. They
+     * worded their buttons through Dialogs and were never dressed, so in the
+     * dark theme each came up under a white title bar. Add service can be
+     * built here; DialogsTest holds the other three to the same path.
+     */
+    @Test
+    void aDialogOfTheAppsOwnBuildingOpensInTheTheme() {
+        for (String theme : List.of("dark", "light")) {
+            themes.setTheme(theme);
+            Scene addService = onFx(() -> new AddHealthTargetDialog().getDialogPane().getScene());
+            Scene plain = onFx(() -> {
+                Dialog<ButtonType> dialog = new Dialog<>();
+                dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+                Dialogs.localizeButtons(dialog.getDialogPane());
+                return dialog.getDialogPane().getScene();
+            });
+            assertThat(schemeOf(addService)).as("Add service, " + theme)
+                    .isEqualTo(schemeFor(theme));
+            assertThat(schemeOf(plain)).as("a plain Dialog, " + theme)
+                    .isEqualTo(schemeFor(theme));
         }
     }
 
