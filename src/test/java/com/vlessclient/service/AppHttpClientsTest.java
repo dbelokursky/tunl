@@ -2,13 +2,18 @@ package com.vlessclient.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.vlessclient.model.AppSettings;
+import com.vlessclient.model.ConnectionState;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
 import java.net.ProxySelector;
 import java.net.URI;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.OptionalInt;
+import javafx.beans.property.ReadOnlyObjectProperty;
+import javafx.beans.property.ReadOnlyObjectWrapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -98,6 +103,43 @@ class AppHttpClientsTest {
                     .as("disconnected by the user").isFalse();
         } finally {
             AppHttpClients.routeDirect();
+        }
+    }
+
+    /**
+     * A port takes effect when a core starts on it. Changed in Settings, or by
+     * an agent, while a core ran, the app's own requests followed the new
+     * port at once, where nothing listened: every subscription refresh, update
+     * check and country database download failed until a reconnect, and a
+     * program that held the new port was handed them as a proxy.
+     */
+    @Test
+    void aPortChangedWhileConnectedLeavesTheRequestsOnThePortTheCoreListensOn() {
+        AppSettings settings = new AppSettings();
+        settings.setHttpPort(2081);
+        // What a connect does before it starts the core: the chosen port is free.
+        settings.listenOn(settings.getSocksPort(), 2081, settings.getClashApiPort(), 0);
+        AppHttpClients.followTunnel(new ConnectedEngine(), () -> settings,
+                new TunnelHealthState(), () -> true);
+        assertThat(AppHttpClients.selector().select(PUBLIC)).containsExactly(TUNNEL);
+
+        settings.setHttpPort(18080);
+
+        assertThat(AppHttpClients.selector().select(PUBLIC))
+                .as("the running core still listens on 2081")
+                .containsExactly(TUNNEL);
+    }
+
+    /** An engine whose core is up and connected. */
+    private static final class ConnectedEngine extends SingBoxEngine {
+
+        ConnectedEngine() {
+            super(Path.of("target", "connected-engine"));
+        }
+
+        @Override
+        public ReadOnlyObjectProperty<ConnectionState> connectionStateProperty() {
+            return new ReadOnlyObjectWrapper<>(ConnectionState.CONNECTED).getReadOnlyProperty();
         }
     }
 

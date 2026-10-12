@@ -149,8 +149,12 @@ public class DashboardViewController implements ViewShownAware {
     private SystemProxySupport systemProxySupport = SystemProxySupport.current();
 
     /** Cached: probing shells out to {@code gsettings}, and a host cannot
-     * grow a proxy store while the app runs. */
+     * grow a proxy store while the app runs. Null until the probe answers.
+     * FX thread only, like the rest of this controller. */
     private Boolean systemProxyCapable;
+
+    /** The support a probe is under way for, so another look starts none. */
+    private SystemProxySupport probing;
 
     /**
      * The server the core runs, or is being started with, as this card last
@@ -695,7 +699,7 @@ public class DashboardViewController implements ViewShownAware {
         if (mode == ProxyMode.TUN) {
             return I18n.get("settings.tun.warning");
         }
-        if (mode == ProxyMode.SYSTEM_PROXY && !systemProxyCapable()) {
+        if (mode == ProxyMode.SYSTEM_PROXY && Boolean.FALSE.equals(systemProxyCapable())) {
             AppSettings settings = ServiceLocator.find(AppSettings.class).orElse(null);
             if (settings == null) {
                 log.warn("Could not read the HTTP port for the proxy warning");
@@ -733,10 +737,42 @@ public class DashboardViewController implements ViewShownAware {
         return true;
     }
 
-    private boolean systemProxyCapable() {
-        if (systemProxyCapable == null) {
-            systemProxyCapable = systemProxySupport.canAutoConfigure();
+    /**
+     * The host verdict, or null while it is being asked; its answer updates
+     * the warning when it comes.
+     *
+     * <p>Asked on a thread of its own. On Linux the answer is a
+     * {@code gsettings} process, which ran on the FX thread while the
+     * dashboard was built at startup: a slow or hung dconf held the window
+     * for as long as it took.</p>
+     */
+    private Boolean systemProxyCapable() {
+        if (systemProxyCapable == null && probing != systemProxySupport) {
+            SystemProxySupport support = systemProxySupport;
+            probing = support;
+            Thread.startVirtualThread(() -> {
+                boolean capable;
+                try {
+                    capable = support.canAutoConfigure();
+                } catch (RuntimeException e) {
+                    log.warn("Could not ask whether the system proxy can be set", e);
+                    return;
+                }
+                Platform.runLater(() -> {
+                    // A test that swapped the support meanwhile wants its own.
+                    if (support != systemProxySupport) {
+                        return;
+                    }
+                    systemProxyCapable = capable;
+                    updateProxyModeWarning(proxyModeCombo.getValue());
+                });
+            });
         }
+        return systemProxyCapable;
+    }
+
+    /** Test seam, FX thread: the host verdict, or null until it has answered. */
+    Boolean systemProxyVerdict() {
         return systemProxyCapable;
     }
 

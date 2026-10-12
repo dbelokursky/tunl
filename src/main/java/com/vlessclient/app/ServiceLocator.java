@@ -255,8 +255,10 @@ public class ServiceLocator {
      * TUN mode captured the JVM's traffic anyway, which is why the gap was
      * only ever visible in one of the two modes.</p>
      *
-     * <p>The port is read per request, so a port changed in Settings is
-     * picked up.</p>
+     * <p>The port is read per request, and it is the port the running core
+     * listens on ({@code AppSettings.listenHttpPort()}): one changed in
+     * Settings while a core runs applies at the next start, where nothing
+     * listens on it yet.</p>
      */
     private static void routeAppTrafficThroughTunnel(ConfigStore configStore,
                                                      SingBoxEngine engine) {
@@ -328,8 +330,14 @@ public class ServiceLocator {
     public static void shutdown() {
         log.info("ServiceLocator shutting down");
 
-        // Before anything else: a request started after this point must not be
-        // handed the port of an engine that is about to stop.
+        // First, no subscription fetch from here on: routeDirect below lifts
+        // the guard that keeps one inside the tunnel, and the refreshes were
+        // stopped only after the core, seconds later. A cycle that went on
+        // meanwhile sent the next subscription's link, token and all, from
+        // the user's real address.
+        find(SubscriptionService.class).ifPresent(SubscriptionService::beginShutdown);
+        // Then: a request started after this point must not be handed the
+        // port of an engine that is about to stop.
         AppHttpClients.routeDirect();
 
         stopMcpServer();

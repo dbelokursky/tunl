@@ -756,6 +756,8 @@ public class ConnectionService {
         SessionPorts.forget(configStore.getDataDir());
         log.info("Disconnecting");
         engine.stop();
+        // After the stop: while the core still ran, its requests went to it.
+        configStore.getSettings().endRun();
     }
 
     /**
