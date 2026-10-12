@@ -149,6 +149,27 @@ REPACK="$(mktemp -d)"
 dpkg-deb --raw-extract "${DEB}" "${REPACK}/tree"
 sed -i -E '/^Depends:/ s/([a-z0-9][a-z0-9.+-]*)t64(,|[[:space:]]*$)/\1t64 | \1\2/g' \
     "${REPACK}/tree/DEBIAN/control"
+
+# Depends also names the oldest glibc the package runs on. jpackage writes a
+# bare "libc6", but JavaFX's libraries, inside the jar where it never looks,
+# can need a newer one than the runtime does: the linux-aarch64 build of
+# JavaFX 27 links glibc 2.38 symbols, so the arm64 package installed cleanly
+# on Debian 12 and Ubuntu 22.04 (2.36, 2.35) and the app died loading its
+# window toolkit. With the version declared, apt refuses it there instead.
+# The minimum is read from the files themselves: the highest GLIBC_x.y
+# symbol version the launcher, the runtime or a JavaFX library requires.
+command -v objdump >/dev/null \
+    || { echo "[package-linux] objdump (binutils) is needed to read the glibc the package needs" >&2; exit 1; }
+GLIBC_SCAN="$(mktemp -d)"
+unzip -qq -o "${REPACK}"/tree/opt/tunl/lib/app/vless-client-*.jar 'lib*.so' -d "${GLIBC_SCAN}"
+GLIBC_MIN="$(find "${REPACK}/tree/opt/tunl" "${GLIBC_SCAN}" -type f \
+        \( -name '*.so' -o -path '*/bin/*' \) -print0 \
+    | { xargs -0 objdump -T 2>/dev/null || true; } \
+    | grep -o 'GLIBC_[0-9][0-9.]*' | sed 's/^GLIBC_//' | sort -uV | tail -n 1)"
+rm -rf "${GLIBC_SCAN}"
+[[ "${GLIBC_MIN}" =~ ^2\.[0-9]+(\.[0-9]+)?$ ]] \
+    || { echo "[package-linux] could not read the glibc the package needs (got '${GLIBC_MIN}')" >&2; exit 1; }
+sed -i -E "/^Depends:/ s/\$/, libc6 (>= ${GLIBC_MIN})/" "${REPACK}/tree/DEBIAN/control"
 echo "[package-linux] $(grep '^Depends:' "${REPACK}/tree/DEBIAN/control")"
 
 # tunl:// links (DeepLinks): the menu entry names Tunl's URL scheme and hands
