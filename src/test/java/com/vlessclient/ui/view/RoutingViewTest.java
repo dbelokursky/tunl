@@ -1,15 +1,22 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
+import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.model.RoutingRule;
+import com.vlessclient.service.RoutingService;
 import com.vlessclient.testing.UiTest;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Label;
+import javafx.scene.control.ListView;
 import javafx.scene.control.TextArea;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
+import org.testfx.util.WaitForAsyncUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -45,6 +52,34 @@ public class RoutingViewTest extends ApplicationTest {
                     .contains("ru \u2014 \u0420\u043e\u0441\u0441\u0438\u044f");
         } finally {
             interact(() -> com.vlessclient.app.I18n.setLocale(java.util.Locale.ENGLISH));
+        }
+    }
+
+    /**
+     * The page is cached, and it read the rules once, when it was built. A
+     * rule an agent added through MCP was in effect but not on the page, and
+     * one it removed was still listed, until the app was started again.
+     */
+    @Test
+    void rulesAnAgentAddsOrRemovesShowOnThePage() throws Exception {
+        RoutingService routing = ServiceLocator.get(RoutingService.class);
+        ListView<RoutingRule> list = lookup("#rulesListView").query();
+        RoutingRule rule = new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "agent.example",
+                RoutingRule.RuleAction.DIRECT);
+        try {
+            // From another thread, as MCP's handlers change them.
+            CompletableFuture.runAsync(() -> routing.addRule(rule)).get(10, TimeUnit.SECONDS);
+            WaitForAsyncUtils.waitForFxEvents();
+            assertThat(list.getItems()).extracting(RoutingRule::getValue)
+                    .as("the rules after an agent added one").contains("agent.example");
+
+            CompletableFuture.runAsync(() -> routing.removeRule(rule.getId()))
+                    .get(10, TimeUnit.SECONDS);
+            WaitForAsyncUtils.waitForFxEvents();
+            assertThat(list.getItems()).extracting(RoutingRule::getValue)
+                    .as("the rules after an agent removed it").doesNotContain("agent.example");
+        } finally {
+            routing.removeRule(rule.getId());
         }
     }
 

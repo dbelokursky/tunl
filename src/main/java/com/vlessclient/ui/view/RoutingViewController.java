@@ -101,6 +101,28 @@ public class RoutingViewController {
         }
         updateBypassCount();
         updateEmptyState();
+        // The page is built once and kept, and agents change the rules over
+        // MCP: it listed the rules it was built with, an added one missing and
+        // a removed one still there, until the app was started again.
+        routingService.addChangeListener(() -> Platform.runLater(this::showStored));
+    }
+
+    /**
+     * Shows what is stored: the rules, the route mode and the bypass
+     * countries. The bypass list is left as it is, since the box may hold an
+     * edit not saved yet, and only this page changes it.
+     */
+    private void showStored() {
+        RoutingConfig config = routingService.getConfig();
+        loadRules();
+        if (routeAllRadio != null && routeBlockedRadio != null) {
+            // Already the stored mode, so the radios' listener saves nothing.
+            (config.getMode() == RouteMode.BLOCKED_IN_RUSSIA ? routeBlockedRadio : routeAllRadio)
+                    .setSelected(true);
+        }
+        if (bypassCountryCombo != null && bypassCountryChips != null) {
+            renderCountryChips(config.getBypassCountries());
+        }
     }
 
     /**

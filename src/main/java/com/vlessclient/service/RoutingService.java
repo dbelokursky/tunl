@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.core.JacksonException;
@@ -40,6 +41,7 @@ public class RoutingService {
     private final ObjectMapper objectMapper;
     private RoutingConfig config;
     private final PersistenceState persistence;
+    private final List<Runnable> changeListeners = new CopyOnWriteArrayList<>();
 
     public RoutingService() {
         this(resolveDataDir());
@@ -127,6 +129,7 @@ public class RoutingService {
         // fields a newer build wrote ride along (KeepsUnknownFields).
         config.setConfigVersion(RoutingConfig.CURRENT_CONFIG_VERSION);
         this.config = config;
+        changeListeners.forEach(Runnable::run);
         if (persistence.isHeld(ROUTING_FILE)) {
             log.warn("Not saving {}: it could not be opened at startup", ROUTING_FILE);
             return;
@@ -143,6 +146,21 @@ public class RoutingService {
             log.error("Failed to save routing config to {}", file, e);
             persistence.failed(ROUTING_FILE, this::retryConfig);
         }
+    }
+
+    /**
+     * Runs {@code listener} after every change to the configuration: a rule
+     * added, removed or reordered, or the whole configuration saved. It runs
+     * on the thread that made the change, under this service's lock, so it
+     * hands any work off and returns at once.
+     *
+     * <p>Rules also change from MCP's threads, and the Routing page, which is
+     * built once and kept, went on showing the rules it was built with.</p>
+     *
+     * @param listener what to run after a change
+     */
+    public void addChangeListener(Runnable listener) {
+        changeListeners.add(listener);
     }
 
     private synchronized void retryConfig() {
