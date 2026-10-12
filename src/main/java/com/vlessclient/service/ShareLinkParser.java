@@ -586,8 +586,12 @@ public class ShareLinkParser {
         // out in the plain form can hold an @ of its own, and cut at the first
         // one, its tail was stored as part of the address, or quoted by the
         // port's parse failure into the log, the import report and the MCP
-        // audit log. Base64 holds neither @ nor ?.
-        int queryStart = rest.indexOf('?');
+        // audit log. Base64 holds neither @ nor ?. The query is looked for
+        // only after an @, since such a password can hold a ? too: looked for
+        // from the start, abc?def@host had no @ before its "query" and was
+        // read as the legacy form, which refused it.
+        int firstAt = rest.indexOf('@');
+        int queryStart = firstAt < 0 ? -1 : rest.indexOf('?', firstAt);
         int atSign = rest.lastIndexOf('@', queryStart >= 0 ? queryStart : rest.length());
         if (atSign >= 0) {
             // SIP002: userinfo is base64, then @host:port
@@ -762,7 +766,7 @@ public class ShareLinkParser {
         if (hopping != null) {
             // After the colon that ends the host: a host holds no colon but
             // inside an IPv6 literal's brackets, which come before it.
-            int at = rest.indexOf(':' + hopping, rest.lastIndexOf('@') + 1) + 1;
+            int at = rest.indexOf(':' + hopping, hysteria2HostStart(rest)) + 1;
             rest = rest.substring(0, at) + HysteriaPorts.firstPort(hopping)
                     + rest.substring(at + hopping.length());
         }
@@ -856,14 +860,7 @@ public class ShareLinkParser {
      * @return the list as written, or null
      */
     private static String hoppingPortsIn(String rest) {
-        int end = rest.length();
-        for (char stop : new char[] {'/', '?'}) {
-            int at = rest.indexOf(stop, rest.lastIndexOf('@') + 1);
-            if (at >= 0 && at < end) {
-                end = at;
-            }
-        }
-        String hostPort = rest.substring(rest.lastIndexOf('@') + 1, end);
+        String hostPort = rest.substring(hysteria2HostStart(rest), hysteria2AuthorityEnd(rest));
         int colon = hostPort.lastIndexOf(':');
         if (colon < 0 || colon < hostPort.lastIndexOf(']')) {
             return null;
@@ -878,6 +875,39 @@ public class ShareLinkParser {
             throw new IllegalArgumentException("Malformed port list in Hysteria2 URI");
         }
         return ports;
+    }
+
+    /**
+     * Where the authority of a Hysteria2 link ends: at its first {@code /} or
+     * {@code ?}, as {@link URI} reads it once the ports are rewritten.
+     *
+     * @param rest the link after its scheme, up to the fragment
+     * @return the index of the path or the query, or the length of {@code rest}
+     */
+    private static int hysteria2AuthorityEnd(String rest) {
+        int end = rest.length();
+        for (char stop : new char[] {'/', '?'}) {
+            int at = rest.indexOf(stop);
+            if (at >= 0 && at < end) {
+                end = at;
+            }
+        }
+        return end;
+    }
+
+    /**
+     * Where the host of a Hysteria2 link starts: past the last {@code @}
+     * inside the authority. The last {@code @} of the whole link was taken,
+     * and it can stand in the query, inside an obfs-password; what followed it
+     * was read as the host and its ports, so {@code obfs-password=x@y:1-2}
+     * made the server hop over ports 1 and 2 and was rewritten to
+     * {@code x@y:1}, and {@code p@ss:word-1} refused the link.
+     *
+     * @param rest the link after its scheme, up to the fragment
+     * @return the index the host starts at, 0 when the link has no password
+     */
+    private static int hysteria2HostStart(String rest) {
+        return rest.lastIndexOf('@', hysteria2AuthorityEnd(rest)) + 1;
     }
 
     /** Whether a Hysteria2 link pins its server's certificate, pinSHA256 in any case. */

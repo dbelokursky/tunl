@@ -1,5 +1,9 @@
 package com.vlessclient.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.RoutingConfig;
@@ -8,6 +12,7 @@ import com.vlessclient.model.ServerConfig;
 import com.vlessclient.testing.TestServers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -445,8 +450,41 @@ class SingBoxConfigGeneratorRoutingTest {
     }
 
     /**
-     * Whatever the sections hold and however they overlap, no generated rule
-     * carries an empty matcher list: the core would match it for everything.
+     * Starts recording what the generator logs; detach it with
+     * {@link #stopRecording}.
+     */
+    private static ListAppender<ILoggingEvent> recordGeneratorLog() {
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        generatorLogger().addAppender(appender);
+        return appender;
+    }
+
+    private static void stopRecording(ListAppender<ILoggingEvent> appender) {
+        generatorLogger().detachAppender(appender);
+        appender.stop();
+    }
+
+    private static Logger generatorLogger() {
+        return (Logger) LoggerFactory.getLogger(SingBoxConfigGenerator.class);
+    }
+
+    /** The rules the generator left out for an empty matcher list, as it logged them. */
+    private static List<String> leftOutForAnEmptyList(ListAppender<ILoggingEvent> log) {
+        return log.list.stream()
+                .filter(event -> event.getLevel() == Level.ERROR)
+                .map(ILoggingEvent::getFormattedMessage)
+                .filter(message -> message.contains("list is empty"))
+                .toList();
+    }
+
+    /**
+     * Whatever the sections hold and however they overlap, no step of the
+     * generator makes a rule with an empty matcher list: the core would match
+     * it for everything. generate() leaves such a rule out before it returns,
+     * so its output cannot show that one was made, and this sweep, which read
+     * only the output, stayed green with the country rule's fix reverted. The
+     * error the generator logs for each rule it leaves out can show it.
      */
     @Test
     void noRuleEverHasAnEmptyMatcherList() throws Exception {
@@ -465,30 +503,40 @@ class SingBoxConfigGeneratorRoutingTest {
                                 RoutingRule.RuleAction.DIRECT)));
         List<List<String>> bypassLists = List.of(List.of(),
                 List.of("example.com", "10.0.0.0/8", "*.example.org"));
-        for (List<String> countries : countrySets) {
-            for (List<RoutingRule> rules : ruleSets) {
-                for (List<String> bypass : bypassLists) {
-                    for (com.vlessclient.model.RouteMode routeMode
-                            : com.vlessclient.model.RouteMode.values()) {
-                        for (com.vlessclient.model.ProxyMode mode
-                                : com.vlessclient.model.ProxyMode.values()) {
-                            RoutingConfig routingConfig = new RoutingConfig();
-                            routingConfig.setBypassCountries(countries);
-                            routingConfig.setRules(rules);
-                            routingConfig.setBypassList(bypass);
-                            routingConfig.setMode(routeMode);
-                            AppSettings settings = new AppSettings();
-                            settings.setProxyMode(mode);
+        ListAppender<ILoggingEvent> log = recordGeneratorLog();
+        try {
+            for (List<String> countries : countrySets) {
+                for (List<RoutingRule> rules : ruleSets) {
+                    for (List<String> bypass : bypassLists) {
+                        for (com.vlessclient.model.RouteMode routeMode
+                                : com.vlessclient.model.RouteMode.values()) {
+                            for (com.vlessclient.model.ProxyMode mode
+                                    : com.vlessclient.model.ProxyMode.values()) {
+                                RoutingConfig routingConfig = new RoutingConfig();
+                                routingConfig.setBypassCountries(countries);
+                                routingConfig.setRules(rules);
+                                routingConfig.setBypassList(bypass);
+                                routingConfig.setMode(routeMode);
+                                AppSettings settings = new AppSettings();
+                                settings.setProxyMode(mode);
+                                String label = countries + " " + rules.size() + " rules "
+                                        + bypass + " " + routeMode + " " + mode;
+                                log.list.clear();
 
-                            assertNoRuleHasAnEmptyMatcherList(
-                                    parse(generator.generate(createVlessServer(), settings,
-                                            routingConfig)),
-                                    countries + " " + rules.size() + " rules " + bypass + " "
-                                            + routeMode + " " + mode);
+                                JsonNode root = parse(generator.generate(createVlessServer(),
+                                        settings, routingConfig));
+
+                                assertThat(leftOutForAnEmptyList(log))
+                                        .as("%s: made with an empty list, left out", label)
+                                        .isEmpty();
+                                assertNoRuleHasAnEmptyMatcherList(root, label);
+                            }
                         }
                     }
                 }
             }
+        } finally {
+            stopRecording(log);
         }
     }
 
@@ -496,7 +544,8 @@ class SingBoxConfigGeneratorRoutingTest {
      * The last line of defence: a rule that comes out with an empty matcher
      * list is left out rather than handed to the core, which would match it
      * for everything. Rules that match everything on purpose, such as the
-     * sniff action, have no list at all and stay.
+     * sniff action, have no list at all and stay. Each rule left out is
+     * logged as the error {@link #noRuleEverHasAnEmptyMatcherList} looks for.
      */
     @Test
     void aRuleWithAnEmptyMatcherListIsLeftOut() throws Exception {
@@ -507,9 +556,15 @@ class SingBoxConfigGeneratorRoutingTest {
                  {"rule_set": ["geoip-ru"], "outbound": "direct"}]
                 """);
 
-        SingBoxConfigGenerator.dropRulesThatMatchEverything(
-                (tools.jackson.databind.node.ArrayNode) rules);
+        ListAppender<ILoggingEvent> log = recordGeneratorLog();
+        try {
+            SingBoxConfigGenerator.dropRulesThatMatchEverything(
+                    (tools.jackson.databind.node.ArrayNode) rules);
 
+            assertThat(leftOutForAnEmptyList(log)).hasSize(2);
+        } finally {
+            stopRecording(log);
+        }
         assertThat(rules).hasSize(2);
         assertThat(rules.get(0).path("action").asString()).isEqualTo("sniff");
         assertThat(rules.get(1).path("rule_set").path(0).asString()).isEqualTo("geoip-ru");

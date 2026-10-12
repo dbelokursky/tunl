@@ -3,13 +3,12 @@ package com.vlessclient.service;
 import com.vlessclient.app.I18n;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.service.outbound.CoreSettings;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * Parses a standard WireGuard {@code .conf} file into a {@link ServerConfig}.
@@ -119,11 +118,9 @@ public class WireguardConfigParser {
             // first was kept, but the endpoint routes IPv4 and IPv6 alike
             // through the peer, so the other family went into a tunnel with no
             // address for it: a dual-stack config lost IPv6, or with IPv6
-            // listed first, nearly everything.
-            server.setFlow(Arrays.stream(address.split(","))
-                    .map(String::strip)
-                    .filter(part -> !part.isEmpty())
-                    .collect(Collectors.joining(", ")));
+            // listed first, nearly everything. Each address once, since the
+            // core refuses an interface that has one twice.
+            server.setFlow(String.join(", ", CoreSettings.interfaceAddresses(address)));
         }
         server.setName(defaultName(server));
         return server;

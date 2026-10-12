@@ -95,10 +95,16 @@ jobs:
       # no toolchain line), and installing from it linked every
       # core-v…-tunlN with that release, without the crypto/tls, x509 and
       # net/url fixes upstream's build of the same tag (1.26.8) carries.
-      # go-version.sh fails the run when the version cannot be read.
+      # go-version.sh fails the run when the version cannot be read. Its
+      # output is assigned before it is written: inside echo's arguments the
+      # substitution's exit status was lost (errexit does not see it), so a
+      # failure wrote an empty version, setup-go fell back to go.mod's Go, and
+      # the run failed only after all five builds, at the go-version check.
       - name: Choose the Go toolchain
         id: go
-        run: echo "version=$(packaging/sing-box/go-version.sh sing-box)" >> "$GITHUB_OUTPUT"
+        run: |
+          version=$(packaging/sing-box/go-version.sh sing-box)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       # No cache saved from a pull request: it is visible to that pull
       # request alone, and such copies filled the 10 GB quota and pushed
