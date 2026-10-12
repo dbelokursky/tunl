@@ -70,6 +70,14 @@ hybrid one. Tunl has no such switch yet.
   `linux-amd64` and `linux-arm64` with `CGO_ENABLED=0`. It uses upstream's
   `-trimpath` and `release/LDFLAGS`, and the version string stays
   upstream's, so the app's version checks hold.
+- The Go toolchain is the one upstream's release workflow builds the same
+  tag with: `go-version.sh` reads it from the tag's
+  `.github/workflows/build.yml` (1.26.8 for 1.14.2 and 1.14.3) and fails the
+  run when that file does not name exactly one version. `go.mod` is not
+  used: it names only the oldest Go the module accepts (1.25.5), and the
+  builds up to `core-v1.14.3-tunl1` were linked with it, without the Go
+  security fixes upstream's own archives carry. Each build checks that the
+  binary records the chosen version (`go version <binary>`).
 - The build tags are what Tunl's configurations use, and nothing more. On
   macOS the core runs as administrator, so tailscale, acme, cloudflared,
   openvpn and the like stay out. The extra tag `tunl` shows in
@@ -97,8 +105,8 @@ hybrid one. Tunl has no such switch yet.
   set. Upstream's archives have the same names, so the build cache keeps them
   apart by release.
 
-To check the patch locally (Go 1.25), build the tree the workflow builds and
-run `verify.sh` on the archive.
+To check the patch locally, build the tree the workflow builds with the Go
+`go-version.sh <tree>` prints, and run `verify.sh` on the archive.
 
 ## Moving to a new sing-box version
 

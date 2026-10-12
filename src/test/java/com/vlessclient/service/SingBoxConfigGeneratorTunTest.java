@@ -345,6 +345,32 @@ class SingBoxConfigGeneratorTunTest {
         }
     }
 
+    /**
+     * The scheme of a DNS address became the server's type whatever it was:
+     * "dhcp://auto" or "http://…" made the core refuse the whole configuration,
+     * so TUN mode never started, and "system" as proxy DNS became a server
+     * named "system" that nothing could reach, so nothing resolved. Such a
+     * value is asked for as the field's default.
+     */
+    @Test
+    void tunMode_aDnsAddressTheCoreCannotUseIsAskedForAsTheDefault() throws Exception {
+        for (String address : List.of("dhcp://auto", "http://1.1.1.1/dns-query", "system",
+                "local://x")) {
+            AppSettings settings = tunSettings();
+            settings.setProxyDns(address);
+            settings.setDirectDns(address);
+
+            JsonNode servers = parse(generator.generate(createVlessServer(), settings))
+                    .get("dns").get("servers");
+
+            assertThat(servers.get(0).get("type").asString()).as(address).isEqualTo("https");
+            assertThat(servers.get(0).get("server").asString()).as(address).isEqualTo("1.1.1.1");
+            assertThat(servers.get(1).get("type").asString())
+                    .as("%s: the system resolver, Direct DNS's default", address)
+                    .isEqualTo("local");
+        }
+    }
+
     /** "8.8.8.8:53" reached the core as a name, which nothing could resolve. */
     @Test
     void tunMode_aPortWithoutASchemeIsSplitOffTheAddress() throws Exception {
@@ -516,6 +542,56 @@ class SingBoxConfigGeneratorTunTest {
         // The country bypass contributes its geosite aggregate.
         assertThat(direct).anyMatch(rule -> rule.has("rule_set")
                 && rule.get("rule_set").toString().contains("ru"));
+    }
+
+    /**
+     * A rule sending a name through the tunnel above a direct rule that also
+     * covers it: the route proxied secret.example.com, but its name was
+     * resolved by the direct resolver, which learned it. Resolution follows
+     * the route's order.
+     */
+    @Test
+    void tunMode_aNameResolvesTheWayItsTrafficGoesWhicheverRuleComesFirst() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.DOMAIN, "secret.example.com",
+                        RoutingRule.RuleAction.PROXY),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "example.com",
+                        RoutingRule.RuleAction.DIRECT)));
+
+        JsonNode dnsRules = parse(generator.generate(createVlessServer(), tunSettings(),
+                routingConfig)).get("dns").get("rules");
+
+        JsonNode first = null;
+        for (JsonNode rule : dnsRules) {
+            if (rule.path("domain").toString().contains("secret.example.com")
+                    || rule.path("domain_suffix").toString().contains("example.com")) {
+                first = rule;
+                break;
+            }
+        }
+        assertThat(first).as("a DNS rule for the name").isNotNull();
+        assertThat(first.path("domain").toString()).contains("secret.example.com");
+        assertThat(first.path("server").asString()).isEqualTo("proxy-dns");
+    }
+
+    /**
+     * The TUN device makes the core the system's resolver, and only localhost
+     * and .local went to the local network's: a router's or NAS's own names
+     * (openwrt.lan, router.home.arpa) went to the remote resolver, which
+     * answered that they do not exist, and leaked there.
+     */
+    @Test
+    void tunMode_theLansOwnNamesResolveOnTheLan() throws Exception {
+        for (RoutingConfig routingConfig : java.util.Arrays.asList(null, new RoutingConfig())) {
+            JsonNode dnsRules = parse(generator.generate(createVlessServer(), tunSettings(),
+                    routingConfig)).get("dns").get("rules");
+
+            JsonNode local = dnsRules.get(0);
+            assertThat(local.get("server").asString()).isEqualTo("local-dns");
+            assertThat(local.get("domain_suffix").valueStream().map(JsonNode::asString))
+                    .contains(".local", ".lan", ".home.arpa", ".internal");
+        }
     }
 
     /**

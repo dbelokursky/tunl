@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
+import com.vlessclient.model.ServerConfig;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
@@ -55,7 +56,50 @@ class ShareLinkParserRedactionTest {
                         "vmess://" + base64("{\"v\":\"2\",\"ps\":\"Broken\","
                                 + "\"add\":\"gateway.example\",\"port\":\"443\","
                                 + "\"id\":deadbeef-1234-4abc-8def-0123456789ab}"),
-                        List.of("deadbeef")));
+                        List.of("deadbeef")),
+                // Cut at the first @, the rest of the password was taken for
+                // host:port, and Integer.parseInt's complaint quoted its tail.
+                Arguments.of("an @ and a colon inside a Shadowsocks password, and no port",
+                        "ss://aes-256-gcm:alpha7@omega9:tail3@gateway.example#Broken",
+                        List.of("omega9", "tail3")),
+                // Integer.parseInt quotes whatever stands where the port goes.
+                Arguments.of("a Shadowsocks port that is not a number",
+                        "ss://aes-256-gcm:alpha7@gateway.example:omega9#Broken",
+                        List.of("alpha7", "omega9")),
+                // No @host: the password is where the port list would go.
+                Arguments.of("an hy2 link whose password stands where its ports go",
+                        "hy2://alpha7:omega9-tail3",
+                        List.of("alpha7", "omega9", "tail3")));
+    }
+
+    /**
+     * A password written out in the plain SIP002 form can hold an @ of its
+     * own. Cut at the first one, the link stored the password's head as the
+     * password and its tail as part of the address, which the server list
+     * shows and the log writes as a plain address; the server never connected.
+     */
+    @Test
+    void anAtSignInsideAShadowsocksPasswordStaysInThePassword() {
+        ServerConfig config = parser.parse(
+                "ss://aes-256-gcm:alpha7@omega9@gateway.example:8388/?plugin=obfs-local"
+                        + "%3Bobfs%3Dhttp#Server");
+
+        assertThat(config.getUuid()).isEqualTo("alpha7@omega9");
+        assertThat(config.getAddress()).isEqualTo("gateway.example");
+        assertThat(config.getPort()).isEqualTo(8388);
+        assertThat(config.getPlugin()).isEqualTo("obfs-local");
+    }
+
+    /** What is left where the host goes is checked, not stored as it is. */
+    @Test
+    void aShadowsocksLinkWithoutAUsableHostIsRefused() {
+        assertThatThrownBy(() -> parser.parse("ss://aes-256-gcm:alpha7@:8388#Broken"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("host");
+        assertThatThrownBy(() -> parser.parse("ss://aes-256-gcm:alpha7@gate way.example:8388"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("host")
+                .hasMessageNotContaining("alpha7");
     }
 
     @ParameterizedTest(name = "{0}")

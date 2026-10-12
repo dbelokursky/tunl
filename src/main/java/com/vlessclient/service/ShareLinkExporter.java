@@ -192,7 +192,7 @@ public class ShareLinkExporter {
         sb.append("ss://");
         sb.append(encoded);
         sb.append("@");
-        sb.append(config.getAddress());
+        sb.append(authorityHost(config.getAddress()));
         sb.append(":");
         sb.append(config.getPort());
         // The plugin goes back into the link: exporting without it produced a
@@ -208,7 +208,7 @@ public class ShareLinkExporter {
         String name = config.getName();
         if (name != null && !name.isBlank()) {
             sb.append("#");
-            sb.append(URLEncoder.encode(name, StandardCharsets.UTF_8));
+            sb.append(encodeName(name));
         }
 
         return sb.toString();
@@ -259,7 +259,7 @@ public class ShareLinkExporter {
         sb.append(scheme).append("://");
         sb.append(encodeUserInfo(userInfo));
         sb.append("@");
-        sb.append(config.getAddress());
+        sb.append(authorityHost(config.getAddress()));
         sb.append(":");
         sb.append(config.getPort());
 
@@ -273,10 +273,34 @@ public class ShareLinkExporter {
         String name = config.getName();
         if (name != null && !name.isBlank()) {
             sb.append("#");
-            sb.append(URLEncoder.encode(name, StandardCharsets.UTF_8));
+            sb.append(encodeName(name));
         }
 
         return sb.toString();
+    }
+
+    /**
+     * The address as a link's authority holds it: an IPv6 literal in
+     * brackets. Links bring one bracketed, but the form and a VMess link's
+     * {@code add} store it bare, and written as it was,
+     * {@code vless://uuid@2001:db8::1:443} read back as no link at all, in
+     * this app ("Missing UUID") and in every other.
+     */
+    private static String authorityHost(String address) {
+        return address != null && address.indexOf(':') >= 0 && !address.startsWith("[")
+                ? "[" + address + "]" : address;
+    }
+
+    /**
+     * The name as a fragment: percent-encoded, a space as {@code %20}.
+     * URLEncoder writes a form, where a space is {@code +}, and only this
+     * app's parser reads that back as a space; v2rayN, Hiddify, NekoBox and
+     * the clients built on Go's net/url keep it, so "[Sub] Germany 1" showed
+     * there as "[Sub]+Germany+1". This app still reads {@code +} as a space,
+     * for the links it wrote before.
+     */
+    private String encodeName(String name) {
+        return encode(name).replace("+", "%20");
     }
 
     private void addTlsParams(Map<String, String> params, ServerConfig config) {

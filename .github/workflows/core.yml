@@ -90,9 +90,23 @@ jobs:
           path: sing-box
           persist-credentials: false
 
+      # The Go upstream's own release workflow builds this tag with. go.mod
+      # names only the oldest Go the module accepts (1.25.5 for 1.14.x, with
+      # no toolchain line), and installing from it linked every
+      # core-v…-tunlN with that release, without the crypto/tls, x509 and
+      # net/url fixes upstream's build of the same tag (1.26.8) carries.
+      # go-version.sh fails the run when the version cannot be read.
+      - name: Choose the Go toolchain
+        id: go
+        run: echo "version=$(packaging/sing-box/go-version.sh sing-box)" >> "$GITHUB_OUTPUT"
+
+      # No cache saved from a pull request: it is visible to that pull
+      # request alone, and such copies filled the 10 GB quota and pushed
+      # main's caches out (build.yml says more).
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: sing-box/go.mod
+          go-version: ${{ steps.go.outputs.version }}
+          cache: ${{ github.event_name != 'pull_request' }}
           cache-dependency-path: sing-box/go.sum
 
       - name: Apply the patch
@@ -107,6 +121,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           TARGET: ${{ matrix.target }}
           VERSION: ${{ steps.pin.outputs.version }}
+          GO_VERSION: ${{ steps.go.outputs.version }}
         run: |
           ext=""
           if [ "$GOOS" = windows ]; then ext=.exe; fi
@@ -115,6 +130,13 @@ jobs:
           go build -v -trimpath -o "../dist/$out/sing-box$ext" -tags "$TAGS" \
             -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=${VERSION}' $(cat release/LDFLAGS) -s -w -buildid=" \
             ./cmd/sing-box
+          # The binary records the Go it was linked with; it must be the one
+          # chosen above, not one a go.mod toolchain line switched to.
+          built=$(go version "../dist/$out/sing-box$ext" | awk '{print $2}')
+          if [ "$built" != "go${GO_VERSION}" ]; then
+            echo "::error::sing-box$ext was built with $built, not go${GO_VERSION}"
+            exit 1
+          fi
           cp LICENSE "../dist/$out/"
           cd ../dist
           if [ "$GOOS" = windows ]; then

@@ -365,7 +365,7 @@ class ShareLinkMultiProtocolTest {
 
             assertThat(exported).startsWith("ss://");
             assertThat(exported).contains("@ss.example.com:8388");
-            assertThat(exported).endsWith("#SS+Export");
+            assertThat(exported).endsWith("#SS%20Export");
         }
 
         @Test

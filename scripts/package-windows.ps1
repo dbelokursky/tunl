@@ -97,6 +97,57 @@ Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -Path staging, dist
 New-Item -ItemType Directory -Force -Path staging | Out-Null
 Copy-Item $jarPath staging/
 
+# The licence files install beside the jar, as scripts/stage-licenses.sh
+# stages them for the DMG and the DEB (it says why): Tunl's LICENSE, NOTICE
+# ending with where this build's sing-box source is, sing-box's GPL-3.0
+# notice from the core's archive (bundle-singbox.ps1 put it beside the
+# binary) and the GPL-3.0 text. The MSI used to carry the GPL-3.0 core
+# with none of them.
+$props = Get-Content 'src/main/resources/singbox.properties'
+function Get-SingBoxProp([string]$Key) {
+    $value = ''
+    foreach ($line in $props) {
+        if ($line -match "^\s*$([regex]::Escape($Key))\s*=\s*(.*?)\s*$") { $value = $Matches[1] }
+    }
+    return $value
+}
+$coreVersion = Get-SingBoxProp 'singbox.version'
+$coreRelease = Get-SingBoxProp 'singbox.release'
+if (-not $coreVersion) {
+    throw '[package-windows] no singbox.version in src/main/resources/singbox.properties'
+}
+if ($coreRelease) {
+    $sourceUrl = "https://github.com/dbelokursky/tunl/releases/tag/$coreRelease"
+    $builtAs = "built by this project as $coreRelease"
+    $sourceWhat = "sing-box's source at that version and the patch"
+} else {
+    $sourceUrl = "https://github.com/SagerNet/sing-box/releases/tag/v$coreVersion"
+    $builtAs = "upstream's own build"
+    $sourceWhat = "sing-box's source at that version"
+}
+$coreNotices = @(Get-ChildItem -Path 'target/classes/native' -Filter 'LICENSE' -File -Recurse -ErrorAction SilentlyContinue)
+if ($coreNotices.Count -ne 1) {
+    throw ("[package-windows] expected one target/classes/native/*/LICENSE from bundle-singbox, " +
+        "found $($coreNotices.Count); run '.\mvnw.cmd clean package'")
+}
+Copy-Item 'LICENSE' 'staging/LICENSE'
+Copy-Item $coreNotices[0].FullName 'staging/sing-box-LICENSE'
+Copy-Item 'packaging/sing-box/GPL-3.0.txt' 'staging/sing-box-GPL-3.0.txt'
+$notice = @(Get-Content 'NOTICE') + @(
+    '',
+    '--------------------------------------------------------------------------',
+    '',
+    "The sing-box in this installer is version $coreVersion,",
+    "$builtAs. It is licensed under the GPL-3.0",
+    '(sing-box-LICENSE and sing-box-GPL-3.0.txt, beside this file). Its',
+    "corresponding source, $sourceWhat, is at",
+    '',
+    "    $sourceUrl")
+# UTF-8 without the byte-order mark Windows PowerShell's Set-Content writes.
+[System.IO.File]::WriteAllLines((Join-Path $repoRoot 'staging/NOTICE'), [string[]]$notice,
+    (New-Object System.Text.UTF8Encoding($false)))
+Write-Host "[package-windows] staged LICENSE, NOTICE, sing-box-LICENSE, sing-box-GPL-3.0.txt (source: $sourceUrl)"
+
 # Per-user install: lands in %LOCALAPPDATA%\Tunl without an admin prompt
 # (where windows-msi-smoke.ps1 looks for it), matching how the app manages
 # everything else per-user.

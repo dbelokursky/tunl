@@ -38,7 +38,7 @@ docker run --rm ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} \
   -v vless-client-qa-m2:/root/.m2 \
   -v "${OUT_DIR}":/out \
   -e BRANCH="${BRANCH}" \
-  "${IMAGE}" bash -euc '
+  "${IMAGE}" bash -euo pipefail -c '
 echo "[linux-qa] container: $(uname -m), $(. /etc/os-release && echo "$PRETTY_NAME")"
 
 apt-get update -q >/dev/null
@@ -52,12 +52,19 @@ DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
 git clone -q -b "$BRANCH" /src /work && cd /work
 echo "[linux-qa] testing commit: $(git log --oneline -1)"
 
+# pipefail (above) makes a failed build fail the script: the status of the
+# pipeline used to be tail'"'"'s, so a red verify printed "BUILD FAILURE" among
+# these four lines, launched no jar and still exited 0 with "done".
 echo "[linux-qa] === ./mvnw clean verify -Psmoke ==="
 ./mvnw -B clean verify -Psmoke 2>&1 \
   | grep -E "bundled|Tests run: [0-9]{3}|coverage checks|BUILD" | tail -4
 
 echo "[linux-qa] === GUI probe under Xvfb ==="
-JAR=$(ls target/vless-client-*-SNAPSHOT.jar | head -1)
+JAR=$(ls target/vless-client-*-SNAPSHOT.jar 2>/dev/null | head -1 || true)
+if [ -z "$JAR" ]; then
+  echo "[linux-qa] the build left no target/vless-client-*.jar; nothing to launch" >&2
+  exit 1
+fi
 xvfb-run -a -s "-screen 0 1280x800x24" bash -c "
   java -Dprism.order=sw -jar \"$JAR\" > /out/app-stdout.log 2>&1 &
   APP=\$!

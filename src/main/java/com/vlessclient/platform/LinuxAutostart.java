@@ -13,7 +13,8 @@ import org.slf4j.LoggerFactory;
  * Linux autostart via the XDG autostart directory: a
  * {@code vless-client.desktop} entry in {@code ~/.config/autostart} that
  * every major desktop (GNOME, KDE, XFCE, …) launches at session start.
- * Enabling writes the file; disabling deletes it.
+ * Enabling writes the file; disabling deletes it. A desktop's own startup
+ * settings switch it off inside the file, which {@link #isEnabled()} reads.
  */
 public final class LinuxAutostart implements Autostart {
 
@@ -34,11 +35,56 @@ public final class LinuxAutostart implements Autostart {
 
     @Override
     public boolean isEnabled() {
-        return Files.isRegularFile(entryPath());
+        Path entry = entryPath();
+        if (!Files.isRegularFile(entry)) {
+            return false;
+        }
+        try {
+            return !switchedOff(Files.readAllLines(entry));
+        } catch (IOException e) {
+            // Unreadable says nothing about the switch; it exists, as before.
+            log.warn("Could not read autostart desktop entry {}", entry, e);
+            return true;
+        }
     }
 
+    /**
+     * Whether the desktop has switched the entry off. Desktops do that by
+     * editing the user's copy rather than deleting it: Cinnamon and
+     * gnome-session-properties write {@code X-GNOME-Autostart-enabled=false},
+     * XFCE and LXQt write {@code Hidden=true}. Only the file's existence was
+     * read, so the entry counted as on, and the {@link #refresh()} at every
+     * start wrote it back switched on, against the user's choice.
+     */
+    private static boolean switchedOff(List<String> lines) {
+        boolean inMainGroup = false;
+        for (String raw : lines) {
+            String line = raw.strip();
+            if (line.startsWith("[")) {
+                inMainGroup = line.equals("[Desktop Entry]");
+                continue;
+            }
+            int eq = line.indexOf('=');
+            if (!inMainGroup || eq < 0) {
+                continue;
+            }
+            // The spec allows spaces around the '='.
+            String key = line.substring(0, eq).strip();
+            String value = line.substring(eq + 1).strip();
+            if ((key.equals("Hidden") && value.equalsIgnoreCase("true"))
+                    || (key.equals("X-GNOME-Autostart-enabled")
+                    && value.equalsIgnoreCase("false"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Synchronized with refresh(), which runs off the launch thread at start:
+    // a refresh that had read "on" must not write the entry back after the
+    // user's untick has removed it.
     @Override
-    public void setEnabled(boolean enabled) throws IOException {
+    public synchronized void setEnabled(boolean enabled) throws IOException {
         if (enabled) {
             install();
         } else {
@@ -47,7 +93,7 @@ public final class LinuxAutostart implements Autostart {
     }
 
     @Override
-    public void refresh() {
+    public synchronized void refresh() {
         if (!isEnabled()) {
             return;
         }

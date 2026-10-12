@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -45,6 +46,19 @@ class LinuxTunLauncherTest {
      */
     private final List<ProcessHandle> spawned = new ArrayList<>();
 
+    /**
+     * A directory holding stand-ins for getcap and setcap, where the launcher
+     * is told libcap's tools live.
+     */
+    private static List<Path> toolsIn(Path dir) throws IOException {
+        Path tools = Files.createDirectories(dir.resolve("sbin"));
+        for (String tool : List.of("getcap", "setcap")) {
+            Path stub = Files.writeString(tools.resolve(tool), "#!/bin/sh\nexit 0\n");
+            stub.toFile().setExecutable(true, true);
+        }
+        return List.of(tools);
+    }
+
     @AfterEach
     void reapSpawnedProcesses() {
         for (ProcessHandle handle : spawned) {
@@ -63,40 +77,109 @@ class LinuxTunLauncherTest {
     void aDismissedGrantCancelsTheConnectInsteadOfPromptingAgain(@TempDir Path dir)
             throws IOException {
         Path core = Files.writeString(dir.resolve("sing-box"), "");
-        FakeRunner runner = new FakeRunner(cmd -> cmd.getFirst().equals("getcap")
+        List<Path> tools = toolsIn(dir);
+        String getcap = tools.getFirst().resolve("getcap").toString();
+        FakeRunner runner = new FakeRunner(cmd -> cmd.getFirst().equals(getcap)
                 ? new CommandRunner.Result(0, "")
                 : new CommandRunner.Result(LinuxTunLauncher.PKEXEC_DISMISSED, ""));
-        LinuxTunLauncher launcher = new LinuxTunLauncher(runner, "elevator-that-must-not-launch");
+        LinuxTunLauncher launcher =
+                new LinuxTunLauncher(runner, "elevator-that-must-not-launch", tools);
 
         assertThatThrownBy(() -> launcher.launch(core, dir.resolve("config.json"),
                 new TunLauncher.Prompt("setup", "each connect")))
                 .isInstanceOf(ElevationDeclinedException.class);
         assertThat(runner.calls).extracting(List::getFirst)
                 .as("what ran: the check and the grant, and no every-connect elevation")
-                .containsExactly("getcap", "elevator-that-must-not-launch");
+                .containsExactly(getcap, "elevator-that-must-not-launch");
+    }
+
+    /**
+     * getcap and setcap live in /usr/sbin, which a desktop user's PATH on
+     * Debian does not hold. Run by name, getcap was not found, the core read
+     * as having no capability, pkexec could not find setcap either, and every
+     * connect raised a PolicyKit prompt.
+     */
+    @Test
+    void libcapsToolsAreRunFromWhereTheyAreInstalled(@TempDir Path dir) throws IOException {
+        Path core = Files.writeString(dir.resolve("sing-box"), "");
+        List<Path> tools = toolsIn(dir);
+        FakeRunner runner = new FakeRunner(cmd -> cmd.contains("cap_net_admin+ep")
+                ? new CommandRunner.Result(LinuxTunLauncher.PKEXEC_DISMISSED, "")
+                : new CommandRunner.Result(0, ""));
+        LinuxTunLauncher launcher = new LinuxTunLauncher(runner, "pkexec", tools);
+
+        assertThatThrownBy(() -> launcher.launch(core, dir.resolve("config.json"),
+                new TunLauncher.Prompt("setup", "each connect")))
+                .isInstanceOf(ElevationDeclinedException.class);
+        assertThat(runner.calls).containsExactly(
+                List.of(tools.getFirst().resolve("getcap").toString(),
+                        core.toAbsolutePath().toString()),
+                List.of("pkexec", tools.getFirst().resolve("setcap").toString(),
+                        "cap_net_admin+ep", core.toAbsolutePath().toString()));
+    }
+
+    /** Without getcap a grant's result cannot be seen: no prompt is raised for it. */
+    @Test
+    void withoutGetcapNoGrantIsAskedFor(@TempDir Path dir) throws IOException {
+        Path core = Files.writeString(dir.resolve("sing-box"), "");
+        FakeRunner runner = new FakeRunner(cmd -> new CommandRunner.Result(0, ""));
+        LinuxTunLauncher launcher = new LinuxTunLauncher(runner, "pkexec",
+                List.of(Files.createDirectories(dir.resolve("empty"))));
+
+        assertThat(launcher.hasNetAdminCapability(core)).isFalse();
+        assertThat(runner.calls).as("commands run").isEmpty();
     }
 
     @Test
-    void capabilityCheck_readsGetcapOutput() {
+    void capabilityCheck_readsGetcapOutput(@TempDir Path dir) throws IOException {
         FakeRunner caps = new FakeRunner(cmd -> new CommandRunner.Result(0,
                 "/home/u/.local/share/vless-client/bin/sing-box cap_net_admin=ep"));
+        List<Path> tools = toolsIn(dir);
 
-        assertThat(new LinuxTunLauncher(caps, "pkexec")
+        assertThat(new LinuxTunLauncher(caps, "pkexec", tools)
                 .hasNetAdminCapability(Path.of("/home/u/.local/share/vless-client/bin/sing-box")))
                 .isTrue();
-        assertThat(caps.calls.getFirst().getFirst()).isEqualTo("getcap");
+        assertThat(caps.calls.getFirst().getFirst())
+                .isEqualTo(tools.getFirst().resolve("getcap").toString());
     }
 
     @Test
-    void capabilityCheck_falseWithoutTheCapability() {
+    void capabilityCheck_falseWithoutTheCapability(@TempDir Path dir) throws IOException {
         FakeRunner caps = new FakeRunner(cmd -> new CommandRunner.Result(0, ""));
 
-        assertThat(new LinuxTunLauncher(caps, "pkexec")
+        assertThat(new LinuxTunLauncher(caps, "pkexec", toolsIn(dir))
                 .hasNetAdminCapability(Path.of("/opt/sing-box"))).isFalse();
     }
 
+    /**
+     * An interrupt is the start being called off, at quit. It used to fail
+     * getcap and the grant, which read as "no capability", and the launch
+     * went on to the fallback: a PolicyKit prompt as the app quit.
+     */
     @Test
-    void capabilityCheck_falseWhenGetcapMissing() {
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+    void anInterruptedStartRaisesNoPrompt(@TempDir Path dir) throws IOException {
+        Path core = Files.writeString(dir.resolve("sing-box"), "");
+        Path invocations = dir.resolve("invocations.log");
+        Path elevator = Files.writeString(dir.resolve("elevator"),
+                "#!/bin/sh\necho \"$*\" >> '" + invocations + "'\n");
+        elevator.toFile().setExecutable(true, true);
+        LinuxTunLauncher launcher = new LinuxTunLauncher(
+                CommandRunner.system(Duration.ofSeconds(30)), elevator.toString());
+
+        Thread.currentThread().interrupt();
+        try {
+            assertThatThrownBy(() -> launcher.launch(core, dir.resolve("config.json"),
+                    new TunLauncher.Prompt("setup", "each connect")))
+                    .isInstanceOf(InterruptedIOException.class);
+        } finally {
+            Thread.interrupted();
+        }
+        assertThat(invocations).as("the elevator was run").doesNotExist();
+    }
+
+    @Test
+    void capabilityCheck_falseWhenGetcapMissing() throws IOException {
         CommandRunner failing = cmd -> {
             throw new IOException("getcap not found");
         };
@@ -135,7 +218,7 @@ class LinuxTunLauncherTest {
         assertThat(wrapper).contains("kill -0 " + ProcessHandle.current().pid());
         // Must trap the signals the engine actually sends (Process.destroy =
         // SIGTERM), not EXIT alone — see wrapperKillsChildOnSigterm.
-        assertThat(wrapper).contains("EXIT INT TERM");
+        assertThat(wrapper).contains("' INT TERM; ").contains("' EXIT; ");
         assertThat(wrapper).contains("rm -f '/tmp/stop'");
         // The trap has to be in place before the core starts: a SIGTERM
         // between the two killed the shell and left the core running.
@@ -203,6 +286,55 @@ class LinuxTunLauncherTest {
         assertThat(wrapper).contains("'/tmp/it'\\''s.json'");
     }
 
+    /** A core that failed reached the app as "exited with code 0". */
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs({org.junit.jupiter.api.condition.OS.MAC,
+            org.junit.jupiter.api.condition.OS.LINUX})
+    void fallbackWrapperExitsWithTheCoresCode(@TempDir Path dir) throws Exception {
+        Path core = Files.writeString(dir.resolve("core.sh"), "#!/bin/sh\nexit 7\n");
+        core.toFile().setExecutable(true, true);
+        Process sh = new ProcessBuilder("/bin/sh", "-c", LinuxTunLauncher.wrapperCommand(
+                core, dir.resolve("c.json"), dir.resolve("stop"))).redirectErrorStream(true).start();
+        spawned.add(sh.toHandle());
+
+        assertThat(sh.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        assertThat(sh.exitValue()).isEqualTo(7);
+    }
+
+    /**
+     * pkexec hands the root core none of the ids sudo does, so sing-box left
+     * its cache file root's, and every later start through the capability,
+     * as the user, failed on it with "permission denied".
+     */
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+    void theFallbacksRootCoreIsToldTheAppUsersIds(@TempDir Path dir) throws Exception {
+        Path core = Files.writeString(dir.resolve("core.sh"),
+                "#!/bin/sh\necho \"ids=$SUDO_UID:$SUDO_GID\"\n");
+        core.toFile().setExecutable(true, true);
+        Path mine = Files.createFile(dir.resolve("mine"));
+        String expected = "ids=" + Files.getAttribute(mine, "unix:uid") + ":"
+                + Files.getAttribute(mine, "unix:gid");
+
+        Process sh = new ProcessBuilder("/bin/sh", "-c", LinuxTunLauncher.wrapperCommand(
+                core, dir.resolve("c.json"), dir.resolve("stop"))).redirectErrorStream(true).start();
+        spawned.add(sh.toHandle());
+        String output = new String(sh.getInputStream().readAllBytes(),
+                java.nio.charset.StandardCharsets.UTF_8);
+
+        assertThat(sh.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        assertThat(output.strip()).isEqualTo(expected);
+    }
+
+    @Test
+    void theRealIdsAreReadFromTheStatusFile(@TempDir Path dir) throws IOException {
+        Path status = Files.writeString(dir.resolve("status"),
+                "Name:\tjava\nUid:\t1000\t1000\t1000\t1000\nGid:\t1001\t1001\t1001\t1001\n");
+
+        assertThat(LinuxTunLauncher.userIds(status)).isEqualTo("SUDO_UID=1000 SUDO_GID=1001 ");
+        assertThat(LinuxTunLauncher.userIds(dir.resolve("missing"))).isEmpty();
+    }
+
     private static String readQuietly(Path file) {
         try {
             return java.nio.file.Files.readString(file).strip();
@@ -236,20 +368,23 @@ class LinuxTunLauncherTest {
      * user cannot restrict gets no grant; the connect elevates per session.
      */
     @Test
-    void aCoreThisUserCannotRestrictIsNeverGrantedTheCapability(@TempDir Path dir) {
+    void aCoreThisUserCannotRestrictIsNeverGrantedTheCapability(@TempDir Path dir)
+            throws IOException {
         // A file system with no POSIX permissions has nothing to restrict, and
         // this launcher only ever runs on Linux.
         Assumptions.assumeTrue(
                 FileSystems.getDefault().supportedFileAttributeViews().contains("posix"));
         Path notOurs = dir.resolve("missing/sing-box");
         FakeRunner runner = new FakeRunner(cmd -> new CommandRunner.Result(0, ""));
-        LinuxTunLauncher launcher = new LinuxTunLauncher(runner, "elevator-that-must-not-launch");
+        List<Path> tools = toolsIn(dir);
+        LinuxTunLauncher launcher =
+                new LinuxTunLauncher(runner, "elevator-that-must-not-launch", tools);
 
         assertThat(LinuxTunLauncher.restrictToOwner(notOurs)).isFalse();
         assertThatThrownBy(() -> launcher.launch(notOurs, dir.resolve("config.json"),
                 new TunLauncher.Prompt("setup", "each connect")))
                 .isInstanceOf(IOException.class);
         assertThat(runner.calls).extracting(List::getFirst).doesNotContain("elevator-that-must-not-launch")
-                .allMatch("getcap"::equals);
+                .allMatch(tools.getFirst().resolve("getcap").toString()::equals);
     }
 }

@@ -72,6 +72,18 @@ try {
         throw "[windows-msi-smoke] expected one application JAR, found $($jars.Count)"
     }
 
+    # The licences install beside the jar (package-windows.ps1): the MSI
+    # used to carry the GPL-3.0 core without its licence or a pointer to
+    # its source.
+    foreach ($name in @('LICENSE', 'NOTICE', 'sing-box-LICENSE', 'sing-box-GPL-3.0.txt')) {
+        if (-not (Test-Path (Join-Path $appRoot "app\$name"))) {
+            throw "[windows-msi-smoke] installed payload is missing app\$name"
+        }
+    }
+    if (-not (Select-String -Path (Join-Path $appRoot 'app\NOTICE') -Pattern '^    https://github\.com/.+/releases/tag/' -Quiet)) {
+        throw '[windows-msi-smoke] app\NOTICE does not say where the source of the bundled sing-box is'
+    }
+
     if (-not (Select-String -Path $config -SimpleMatch "-Dapp.version=$ExpectedVersion" -Quiet)) {
         throw "[windows-msi-smoke] Tunl.cfg does not contain app.version=$ExpectedVersion"
     }

@@ -537,7 +537,11 @@ class SingBoxRealBinarySmokeTest {
                 "dns.google:53",
                 "[2001:4860:4860::8888]:53",
                 "2001:4860:4860::8888",
-                "https://[2606:4700:4700::1111]/dns-query");
+                "https://[2606:4700:4700::1111]/dns-query",
+                // Not addresses the core takes: asked for as the default.
+                "dhcp://auto",
+                "http://1.1.1.1/dns-query",
+                "system");
 
         for (String address : addresses) {
             AppSettings settings = new AppSettings();
@@ -652,6 +656,25 @@ class SingBoxRealBinarySmokeTest {
                 assertCheckPasses(new LiveSelector(config).config(),
                         "runtime-selector/" + label + "/" + mode);
             }
+        }
+    }
+
+    /**
+     * One mistyped address in the bypass list reached the core as ip_cidr,
+     * and it refused the whole configuration, so no server connected. Such a
+     * line is left out, and the configuration has to pass.
+     */
+    @Test
+    void checkAcceptsABypassListWithLinesTheCoreCannotRead() throws Exception {
+        RoutingConfig routing = new RoutingConfig();
+        routing.setBypassList(List.of("192.168.1.256", "10.0.0.0/33", "192.168.01.1",
+                "cafe::/200", "1:2:3:4:5:6:7:8:9", "dead:beef", ".", "*.", "example.com",
+                "10.0.0.0/8"));
+        for (ProxyMode mode : ProxyMode.values()) {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(mode);
+            assertCheckPasses(generator.generate(serverFor(Protocol.VLESS), settings, routing),
+                    "bad-bypass-lines/" + mode);
         }
     }
 

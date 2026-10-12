@@ -190,13 +190,12 @@ public class TrafficHistoryStore {
             return;
         }
         attached = true;
-        // The monitor publishes upload before download on each poll tick, so
-        // reading the upload property from inside the download listener pairs
-        // the two values that were measured together -- the same pairing
-        // TrafficDisplayBinder relies on for the session totals.
-        monitor.downloadSpeedProperty().addListener((obs, oldVal, newVal) ->
-                record(routedServer.get(), monitor.uploadSpeedProperty().get(),
-                        newVal.longValue()));
+        // Every sample, not every change: this used to listen to the download
+        // speed property, which fires only when the value differs, so a second
+        // with the same download figure as the one before was never recorded,
+        // its upload with it. A steady upload with nothing coming back kept
+        // its first second and lost the rest.
+        monitor.addSampleListener((up, down) -> record(routedServer.get(), up, down));
     }
 
     /**

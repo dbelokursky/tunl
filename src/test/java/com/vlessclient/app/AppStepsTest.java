@@ -1,8 +1,11 @@
 package com.vlessclient.app;
 
+import com.vlessclient.platform.Autostart;
 import com.vlessclient.service.TrayIconService;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -89,6 +92,60 @@ class AppStepsTest {
         assertThat(new VlessClientApp().shutdownSteps())
                 .as("nothing may keep the app from quitting")
                 .noneMatch(AppSteps.Step::required);
+    }
+
+    /**
+     * The login item step ran in init(), before the window: on Windows two
+     * reg.exe processes, at login of all times, and up to their whole timeout
+     * when reg hangs. The tunl links step after it was moved off for the same
+     * reason; nothing at startup waits for either.
+     */
+    @Test
+    void theLoginItemIsRefreshedWithoutHoldingTheWindowBack() throws InterruptedException {
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch refreshed = new CountDownLatch(1);
+        Autostart previous = ServiceLocator.find(Autostart.class).orElse(null);
+        ServiceLocator.register(Autostart.class, new Autostart() {
+            @Override
+            public boolean isEnabled() {
+                return true;
+            }
+
+            @Override
+            public void setEnabled(boolean enabled) {
+            }
+
+            @Override
+            public void refresh() {
+                try {
+                    release.await(10, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                refreshed.countDown();
+            }
+        });
+        try {
+            AppSteps.Step loginItem = new VlessClientApp().startupSteps().stream()
+                    .filter(step -> step.name().equals("login item"))
+                    .findFirst().orElseThrow();
+
+            loginItem.action().run();
+
+            assertThat(refreshed.getCount())
+                    .as("the step returned while the refresh was still waiting on reg")
+                    .isEqualTo(1);
+            release.countDown();
+            assertThat(refreshed.await(10, TimeUnit.SECONDS))
+                    .as("the refresh still ran").isTrue();
+        } finally {
+            release.countDown();
+            if (previous != null) {
+                ServiceLocator.register(Autostart.class, previous);
+            } else {
+                ServiceLocator.remove(Autostart.class);
+            }
+        }
     }
 
     /** With no core installed, the lookup of the engine threw, and there was no tray. */

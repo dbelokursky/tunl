@@ -121,6 +121,35 @@ class ServerBackupServiceTest {
                 .isEqualTo("rw-------");
     }
 
+    /**
+     * A backup is edited by hand as often as it is exported, and an editor
+     * that saves with a byte order mark puts one before the opening brace.
+     * The mark is not whitespace, so the file no longer opened like JSON: it
+     * was read as a list of share links and refused, "No servers could be
+     * read from the file".
+     */
+    @Test
+    void aBackupSavedWithAByteOrderMarkRestores() throws IOException {
+        store.addServer(server("Netherlands 01", Protocol.VLESS, "vless-secret-uuid"));
+        Path file = tempDir.resolve("backup.json");
+        backup.exportAll(file);
+        byte[] json = Files.readAllBytes(file);
+        byte[] marked = new byte[json.length + 3];
+        marked[0] = (byte) 0xEF;
+        marked[1] = (byte) 0xBB;
+        marked[2] = (byte) 0xBF;
+        System.arraycopy(json, 0, marked, 3, json.length);
+        Files.write(file, marked);
+
+        ConfigStore elsewhere = new ConfigStore(tempDir.resolve("other"));
+        ServerBackupService.ImportResult result =
+                new ServerBackupService(elsewhere, new ShareLinkParser()).importFile(file);
+
+        assertThat(result.added()).isEqualTo(1);
+        assertThat(elsewhere.getServers()).extracting(ServerConfig::getUuid)
+                .containsExactly("vless-secret-uuid");
+    }
+
     @Test
     void restoringOverTheSameIdsUpdatesInPlace() throws IOException {
         store.addServer(server("Netherlands 01", Protocol.VLESS, "vless-secret-uuid"));

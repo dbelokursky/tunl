@@ -27,7 +27,7 @@ public final class WireguardEndpointBuilder {
      * Builds a WireGuard endpoint (sing-box 1.11+ schema; the legacy
      * {@code wireguard} outbound was removed in 1.13). Field sources keep the
      * ServerConfig mapping the legacy outbound used: uuid → private_key,
-     * encryption → peer public_key, flow → interface address,
+     * encryption → peer public_key, flow → interface addresses,
      * tls.serverName → reserved bytes.
      *
      * @param server the server to build the endpoint from
@@ -39,9 +39,18 @@ public final class WireguardEndpointBuilder {
         endpoint.put("tag", tag);
 
         if (server.getFlow() != null && !server.getFlow().isBlank()) {
+            // Each address the interface has, comma-separated as a .conf lists
+            // them. The peer carries IPv4 and IPv6 alike (allowed_ips below),
+            // and a family without an address of its own carried nothing.
             ArrayNode address = mapper.createArrayNode();
-            address.add(CoreSettings.interfaceAddress(server.getFlow().trim()));
-            endpoint.set("address", address);
+            for (String part : server.getFlow().split(",")) {
+                if (!part.isBlank()) {
+                    address.add(CoreSettings.interfaceAddress(part.strip()));
+                }
+            }
+            if (!address.isEmpty()) {
+                endpoint.set("address", address);
+            }
         }
 
         endpoint.put("private_key", server.getUuid());

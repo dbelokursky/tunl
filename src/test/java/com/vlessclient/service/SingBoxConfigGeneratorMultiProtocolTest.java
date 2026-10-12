@@ -410,6 +410,28 @@ class SingBoxConfigGeneratorMultiProtocolTest {
         assertThat(reserved.get(2).asInt()).isEqualTo(3);
     }
 
+    /**
+     * A .conf lists an IPv4 and an IPv6 address for the interface, and both
+     * reach the core: the endpoint routes ::/0 through the peer too, and with
+     * the IPv4 address alone, IPv6 went into a tunnel with no address for it.
+     */
+    @Test
+    void wireguard_givesTheInterfaceEveryAddress() throws Exception {
+        ServerConfig server = new ServerConfig();
+        server.setProtocol(Protocol.WIREGUARD);
+        server.setAddress("wg.example.com");
+        server.setPort(51820);
+        server.setUuid("wg-private-key-base64");
+        server.setEncryption("wg-peer-public-key-base64");
+        server.setFlow("10.66.66.2/32, fd42:42::2,");
+
+        JsonNode address = wireguardEndpoint(server).get("address");
+
+        assertThat(address.size()).isEqualTo(2);
+        assertThat(address.get(0).asString()).isEqualTo("10.66.66.2/32");
+        assertThat(address.get(1).asString()).isEqualTo("fd42:42::2/128");
+    }
+
     @Test
     void wireguard_keepsProxyOutOfOutbounds_andRoutesFinalToEndpoint() throws Exception {
         ServerConfig server = new ServerConfig();
