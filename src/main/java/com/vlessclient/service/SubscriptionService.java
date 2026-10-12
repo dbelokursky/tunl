@@ -1401,6 +1401,15 @@ public class SubscriptionService {
         return null;
     }
 
+    /**
+     * Writes subscriptions.json again, with the URLs sealed or not as the
+     * settings now say, as {@link ConfigStore#rewriteServers} does for the
+     * servers. Sealing runs keychain processes: call it off the FX thread.
+     */
+    public void rewriteSubscriptions() {
+        saveSubscriptions();
+    }
+
     synchronized void saveSubscriptions() {
         if (configStore.getPersistenceState().isHeld(SUBSCRIPTIONS_FILE)) {
             log.warn("Not saving {}: it could not be opened at startup", SUBSCRIPTIONS_FILE);

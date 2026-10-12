@@ -28,6 +28,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
+import javafx.stage.WindowEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -240,7 +241,7 @@ public class MainViewController {
         accelerators.put(KeyCombination.keyCombination("Shortcut+F"), this::focusSearchField);
         accelerators.put(KeyCombination.keyCombination("Shortcut+Shift+C"),
                 this::onShortcutToggleConnection);
-        accelerators.put(KeyCombination.keyCombination("Shortcut+W"), this::onShortcutHideWindow);
+        accelerators.put(KeyCombination.keyCombination("Shortcut+W"), this::onShortcutCloseWindow);
 
         log.info("Registered {} keyboard shortcuts", accelerators.size());
     }
@@ -294,10 +295,17 @@ public class MainViewController {
         }
     }
 
-    private void onShortcutHideWindow() {
+    /**
+     * Shortcut+W closes the window as its close button does, through the
+     * window's close request: that hides it to the tray only when a tray icon
+     * can bring it back, and quits otherwise. Hidden here outright, it left
+     * the app and the tunnel running with no window and no way back to them
+     * on a desktop without a tray.
+     */
+    private void onShortcutCloseWindow() {
         if (rootNode != null && rootNode.getScene() != null
                 && rootNode.getScene().getWindow() instanceof Stage stage) {
-            stage.hide();
+            stage.fireEvent(new WindowEvent(stage, WindowEvent.WINDOW_CLOSE_REQUEST));
         }
     }
 

@@ -3,6 +3,7 @@ package com.vlessclient.ui.view;
 import java.util.Locale;
 import javafx.scene.Group;
 import javafx.scene.Node;
+import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import javafx.scene.shape.Rectangle;
@@ -111,12 +112,15 @@ public final class Flags {
                 isoCode == null ? "??" : isoCode.trim().toUpperCase(Locale.ROOT));
         text.getStyleClass().add("flag-chip-text");
         text.setStyle("-fx-font-size: " + Math.round(height * 0.62) + "px;");
-        // Centre the letters inside the chip.
-        text.setX((w - text.getLayoutBounds().getWidth()) / 2);
-        text.setY(height - (height - text.getLayoutBounds().getHeight()) / 2
-                - text.getLayoutBounds().getHeight() * 0.18);
-
-        return framed(new Group(chip, text), w, height);
+        // Centred by layout, which runs once the stylesheet has given the
+        // letters their size and weight. Placed by hand here, they were
+        // measured in the default font, and sat a few pixels left of and
+        // below the middle of the chip.
+        StackPane letters = new StackPane(text);
+        letters.setMinSize(w, height);
+        letters.setPrefSize(w, height);
+        letters.setMaxSize(w, height);
+        return framed(new Group(chip, letters), w, height);
     }
 
     private static Node horizontal(double w, double h, String top, String mid, String bottom) {

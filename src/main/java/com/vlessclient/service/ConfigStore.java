@@ -755,6 +755,16 @@ public class ConfigStore {
         writePendingServers();
     }
 
+    /**
+     * Writes servers.json again as the list is now, with its credentials
+     * sealed or not as the settings now say. Sealing happens only when the
+     * file is written, so turning the keychain on or off changed nothing on
+     * disk until some unrelated save. Never waits on the FX thread.
+     */
+    public void rewriteServers() {
+        saveServers();
+    }
+
     /** Writes the list until no change is left that a write has not taken in. */
     private void writePendingServers() {
         do {

@@ -485,6 +485,51 @@ public class LogsViewTest extends ApplicationTest {
         assertThat(diagnostics.isDisabled()).isFalse();
     }
 
+    /**
+     * Clear in the log's context menu, directly under Select all, still
+     * emptied the log at once after the toolbar's Clear had learned to ask.
+     */
+    @Test
+    void clearingTheLogFromItsContextMenuAsksFirstToo() {
+        ListView<String> list = lookup("#logListView").query();
+        ObservableList<String> source = sourceOf(list);
+        interact(() -> source.setAll(logLine(0), logLine(1)));
+        javafx.scene.control.MenuItem clear = list.getContextMenu().getItems().getLast();
+
+        Platform.runLater(clear::fire);
+        DialogPane confirm = awaitDialogAsking(I18n.get("logs.clear.confirm"));
+        interact(buttonFor(confirm, ButtonBar.ButtonData.CANCEL_CLOSE)::fire);
+        WaitForAsyncUtils.waitForFxEvents();
+
+        assertThat(source).as("the log after Cancel").hasSize(2);
+    }
+
+    /**
+     * The level filter, the toolbar's tooltips and the context menu were
+     * worded once, when the page was built, and stayed in that language after
+     * a switch.
+     */
+    @Test
+    void theFilterTheTooltipsAndTheMenuFollowALanguageSwitch() {
+        javafx.scene.control.ComboBox<?> filter = lookup("#logLevelFilter").query();
+        Button clear = lookup("#clearButton").query();
+        ListView<String> list = lookup("#logListView").query();
+        try {
+            interact(() -> I18n.setLocale(Locale.of("ru")));
+            WaitForAsyncUtils.waitForFxEvents();
+
+            assertThat(filter.getButtonCell().getText())
+                    .isEqualTo(I18n.get("logs.level.all"));
+            assertThat(clear.getTooltip().getText()).isEqualTo(I18n.get("logs.clear.tooltip"));
+            assertThat(list.getContextMenu().getItems())
+                    .extracting(javafx.scene.control.MenuItem::getText)
+                    .containsExactly(I18n.get("logs.copy"), I18n.get("logs.copy.all"),
+                            I18n.get("logs.select.all"), I18n.get("button.clear"));
+        } finally {
+            interact(() -> I18n.setLocale(Locale.ENGLISH));
+        }
+    }
+
     /** The showing dialog that asks {@code question}, once one does. */
     private DialogPane awaitDialogAsking(String question) {
         return Await.untilValue("a dialog asking: " + question, () -> {

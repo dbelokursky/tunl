@@ -162,6 +162,55 @@ class CoreSettingsTest {
     }
 
     /**
+     * A WireGuard server with no peer key, or a key the core cannot decode,
+     * was let through: the check passes it, and the core then stops at start
+     * printing the interface's settings, its private key among them, which
+     * went into the app log. The keys are read as the core reads them, 32
+     * bytes in padded standard base64; the pinned core refused the URL-safe
+     * alphabet and a key without its padding with "illegal base64 data".
+     */
+    @Test
+    void aWireGuardServerTheCoreCannotStartIsRefused() {
+        assertThat(CoreSettings.refusal(wireguard(server -> { }))).isEmpty();
+        assertThat(CoreSettings.refusal(wireguard(server -> server.setFlow("10.0.0.2"))))
+                .as("an address without its prefix, which the builder adds").isEmpty();
+
+        assertThat(CoreSettings.refusal(wireguard(server -> server.setEncryption(null))))
+                .hasValueSatisfying(refusal -> assertThat(refusal.reason())
+                        .isEqualTo(I18n.get("refusal.wireguard.peer.key")));
+        assertThat(CoreSettings.refusal(wireguard(server -> server.setEncryption("none"))))
+                .as("what the form left in the field").isPresent();
+        assertThat(CoreSettings.refusal(wireguard(server -> server.setUuid("not-a-key"))))
+                .hasValueSatisfying(refusal -> assertThat(refusal.reason())
+                        .isEqualTo(I18n.get("refusal.wireguard.private.key")));
+        assertThat(CoreSettings.refusal(wireguard(server -> server.setUuid(KEY_16_BYTES))))
+                .as("a key of 16 bytes").isPresent();
+        assertThat(CoreSettings.refusal(wireguard(server -> server.setUuid(URL_KEY_32_BYTES))))
+                .as("32 bytes in the URL-safe alphabet").isPresent();
+        assertThat(CoreSettings.refusal(wireguard(server -> server.setEncryption(
+                STANDARD_KEY_32_BYTES.substring(0, 43)))))
+                .as("32 bytes without the padding").isPresent();
+        assertThat(CoreSettings.refusal(wireguard(server -> server.setFlow(" "))))
+                .hasValueSatisfying(refusal -> assertThat(refusal.reason())
+                        .isEqualTo(I18n.get("refusal.wireguard.address")));
+    }
+
+    static ServerConfig wireguard(Consumer<ServerConfig> change) {
+        ServerConfig server = TestServers.server()
+                .id("wireguard")
+                .name("wireguard")
+                .protocol(Protocol.WIREGUARD)
+                .address("203.0.113.5")
+                .port(51820)
+                .uuid(KEY_32_BYTES)
+                .encryption(STANDARD_KEY_32_BYTES)
+                .flow("10.0.0.2/32")
+                .build();
+        change.accept(server);
+        return server;
+    }
+
+    /**
      * The pinned core's check refused " 0123abcd" with "decode short_id:
      * encoding/hex: invalid byte: U+0020", while the refusal above, which
      * strips it, let the server in: stored, and never connecting.
