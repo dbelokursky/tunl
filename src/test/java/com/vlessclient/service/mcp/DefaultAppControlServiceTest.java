@@ -73,6 +73,8 @@ class DefaultAppControlServiceTest {
         private int disconnects;
         /** The mode a core runs in, as the real service reports it; null when none runs. */
         private ProxyMode running;
+        /** The mode a core another request starts in while this connect runs; or null. */
+        private ProxyMode startedMeanwhile;
 
         RecordingConnectionService(ServerConfig server) {
             super(null, null, null, SingBoxEngine.withoutCore());
@@ -85,7 +87,12 @@ class DefaultAppControlServiceTest {
             if (failure != null) {
                 throw failure;
             }
-            return running != null ? new ConnectAttempt(Outcome.ALREADY_RUNNING, null) : attempt;
+            ConnectAttempt result =
+                    running != null ? new ConnectAttempt(Outcome.ALREADY_RUNNING, null) : attempt;
+            if (startedMeanwhile != null) {
+                running = startedMeanwhile;
+            }
+            return result;
         }
 
         @Override
@@ -222,10 +229,30 @@ class DefaultAppControlServiceTest {
         connection.attempt =
                 new ConnectionService.ConnectAttempt(ConnectionService.Outcome.ALREADY_RUNNING,
                         active);
+        connection.startedMeanwhile = ProxyMode.SYSTEM_PROXY;
         DefaultAppControlService svc = serviceWith(connection,
                 new SingBoxEngine(tempDir.resolve("sing-box")));
 
         assertThat(svc.connect(null, null, false).activeServerId()).isEqualTo("srv-1");
+    }
+
+    /**
+     * A refusal with no tunnel running, as for a core still closing from a
+     * stop, was reported to the agent as the tunnel it asked for.
+     */
+    @Test
+    void connect_aRefusalWithNoTunnelRunningIsNotAConnect() {
+        ServerConfig active = store.getServerById("srv-1").orElseThrow();
+        RecordingConnectionService connection = new RecordingConnectionService(active);
+        connection.attempt =
+                new ConnectionService.ConnectAttempt(ConnectionService.Outcome.ALREADY_RUNNING,
+                        active);
+        DefaultAppControlService svc = serviceWith(connection,
+                new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        assertThatThrownBy(() -> svc.connect(null, null, false))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining("already running");
     }
 
     @Test

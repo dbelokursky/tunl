@@ -57,6 +57,11 @@ final class StdinWatch {
      * The start of a wrapper's INT/TERM trap: stop the core and wait for it
      * to close. The caller adds its own clean-up and the {@code exit}, which
      * keeps a signal before the core starts from going on to start it.
+     *
+     * <p>What the caller adds is inside the trap's single quotes, so it must
+     * hold none: a shell-quoted path there closes the quote and splits the
+     * {@code trap} command at the first space. A path goes in through a shell
+     * variable set before the trap.</p>
      */
     static final String SIGNAL_TRAP =
             "trap 'kill ${SBPID:-$!} 2>/dev/null; wait ${SBPID:-$!} 2>/dev/null; ";

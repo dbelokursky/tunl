@@ -1946,4 +1946,182 @@ class SingBoxEngineTest {
             }
         }
     }
+
+    // ===== a stop on an interrupted thread =====
+
+    /**
+     * A quit interrupts a recovery restart or an agent's disconnect that may
+     * be stopping the core right then. The system-proxy guard ran on that
+     * thread, where an interrupt fails its platform commands at once, and the
+     * session still counted as cleaned up: nothing put the proxy back.
+     */
+    @Test
+    void aStopOnAnInterruptedThreadStillPutsTheSystemProxyBack(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+        List<String> guardCalls = new CopyOnWriteArrayList<>();
+        // The real guards fail on an interrupted thread; this one says so.
+        engine.setSystemProxyGuard((host, port) -> guardCalls.add(
+                Thread.currentThread().isInterrupted() ? "failed: interrupted" : host + ":" + port));
+        Set<Thread> monitorsBefore = Await.liveThreadsNamed(MONITOR_THREAD);
+        engine.start(SET_SYSTEM_PROXY_CONFIG, ProxyMode.SYSTEM_PROXY);
+
+        boolean stillInterrupted;
+        Thread.currentThread().interrupt();
+        try {
+            engine.stop();
+        } finally {
+            stillInterrupted = Thread.interrupted();
+        }
+
+        assertThat(guardCalls).as("the guard has run, uninterrupted, when stop() returns")
+                .containsExactly("127.0.0.1:1081");
+        assertThat(stillInterrupted).as("the interrupt is kept for the caller").isTrue();
+        assertThat(engine.isRunning()).isFalse();
+        awaitMonitorsFinished(monitorsBefore);
+        assertThat(guardCalls).as("and the monitor does not run it again")
+                .containsExactly("127.0.0.1:1081");
+    }
+
+    // ===== a stop while the launch is still at its prompt =====
+
+    /**
+     * Launches a wrapper and says that it prompts on every launch, and that
+     * ending it takes the prompt down, as osascript and pkexec do.
+     */
+    private static final class PromptingLauncher implements com.vlessclient.platform.TunLauncher {
+        private final Path wrapper;
+        private final Path stopFile;
+        private final boolean promptEndsWithLauncher;
+        final AtomicReference<Process> launched = new AtomicReference<>();
+
+        PromptingLauncher(Path wrapper, Path stopFile, boolean promptEndsWithLauncher) {
+            this.wrapper = wrapper;
+            this.stopFile = stopFile;
+            this.promptEndsWithLauncher = promptEndsWithLauncher;
+        }
+
+        @Override
+        public Launched launch(Path binary, Path configFile, Prompt prompt) throws IOException {
+            Process p = new ProcessBuilder(wrapper.toString()).redirectErrorStream(true).start();
+            launched.set(p);
+            return new Launched(p, stopFile, true);
+        }
+
+        @Override
+        public boolean promptEndsWithLauncher() {
+            return promptEndsWithLauncher;
+        }
+    }
+
+    /** A launcher at its password or PolicyKit prompt: no core, and deaf to a stop. */
+    private static Path launcherAtItsPrompt(Path tmp) throws Exception {
+        Path wrapper = tmp.resolve("prompt.sh");
+        Files.writeString(wrapper, "#!/bin/sh\nexec sleep 60\n");
+        makeExecutable(wrapper);
+        return wrapper;
+    }
+
+    /**
+     * The launcher used to be killed after the stop's grace, which took the
+     * password or PolicyKit dialog down with it. Once it no longer was, a
+     * Disconnect during the dialog left it up with no time limit, and
+     * answered later it started a root core for nothing.
+     */
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void aDisconnectAtTheEveryConnectPromptWithdrawsThePrompt(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        Path stopFile = tmp.resolve("stop.signal");
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+        PromptingLauncher launcher = new PromptingLauncher(launcherAtItsPrompt(tmp), stopFile, true);
+        engine.setTunLauncher(launcher);
+
+        engine.start(DUMMY_CONFIG, ProxyMode.TUN);
+        try {
+            engine.stop();
+
+            assertThat(launcher.launched.get().isAlive()).as("the prompt is still up").isFalse();
+            assertThat(engine.isRunning()).isFalse();
+            assertThat(engine.isStopping()).as("a connect would wait for it").isFalse();
+            assertThat(stopFile).as("the stop file, once the launcher has gone").doesNotExist();
+            awaitConnectionState(engine, ConnectionState.DISCONNECTED, AWAIT_STATE_TIMEOUT_MS);
+        } finally {
+            launcher.launched.get().destroyForcibly();
+        }
+    }
+
+    /**
+     * UAC's consent dialog outlives the launcher, and approved after a kill it
+     * started an elevated core nothing tracked. Left running, the launcher
+     * finds the stop file and ends it at once.
+     */
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void aLauncherWhosePromptOutlivesItIsNotKilledAtThePrompt(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        Path stopFile = tmp.resolve("stop.signal");
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+        PromptingLauncher launcher =
+                new PromptingLauncher(launcherAtItsPrompt(tmp), stopFile, false);
+        engine.setTunLauncher(launcher);
+
+        engine.start(DUMMY_CONFIG, ProxyMode.TUN);
+        try {
+            engine.stop();
+
+            assertThat(launcher.launched.get().isAlive()).as("the launcher is left").isTrue();
+            assertThat(engine.isStopping()).isTrue();
+            assertThat(stopFile).as("kept for the elevated side to find").exists();
+        } finally {
+            launcher.launched.get().destroyForcibly();
+        }
+    }
+
+    /**
+     * The launcher of a TUN core still closing after the stop's grace stays,
+     * whatever its prompt does: the core answered. A connect then waited for
+     * it with nothing on screen, and was refused as "already running" once
+     * the wait ran out. It waits showing Connecting now, and can be called off.
+     */
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void aConnectWaitsForATunCoreStillClosingAndShowsIt(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        Path stopFile = tmp.resolve("stop.signal");
+        Path wrapper = tmp.resolve("wrapper.sh");
+        // A core that takes eight seconds to close once told to.
+        Files.writeString(wrapper, "#!/bin/sh\n"
+                + "echo 'sing-box started'\n"
+                + "while [ ! -f '" + stopFile + "' ]; do sleep 0.1; done\n"
+                + "sleep 8\n");
+        makeExecutable(wrapper);
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+        PromptingLauncher launcher = new PromptingLauncher(wrapper, stopFile, true);
+        engine.setTunLauncher(launcher);
+
+        engine.start(DUMMY_CONFIG, ProxyMode.TUN);
+        try {
+            awaitConnectionState(engine, ConnectionState.CONNECTED, AWAIT_STATE_TIMEOUT_MS);
+            engine.stop();
+            assertThat(launcher.launched.get().isAlive())
+                    .as("a launcher whose core is up is not killed").isTrue();
+            awaitConnectionState(engine, ConnectionState.DISCONNECTED, AWAIT_STATE_TIMEOUT_MS);
+
+            assertThat(engine.awaitStopped(Duration.ofMillis(300), () -> true))
+                    .as("a wait that runs out").isFalse();
+            awaitConnectionState(engine, ConnectionState.CONNECTING, AWAIT_STATE_TIMEOUT_MS);
+            engine.connectEnded();
+            awaitConnectionState(engine, ConnectionState.DISCONNECTED, AWAIT_STATE_TIMEOUT_MS);
+
+            assertThat(engine.awaitStopped(Duration.ofSeconds(20), () -> false))
+                    .as("a wait called off").isFalse();
+            assertThat(engine.awaitStopped(Duration.ofSeconds(20), () -> true))
+                    .as("a wait the core outlasts no longer").isTrue();
+            assertThat(engine.isRunning()).isFalse();
+            assertThat(launcher.launched.get().exitValue()).as("it ended on its own").isZero();
+        } finally {
+            launcher.launched.get().destroyForcibly();
+        }
+    }
 }

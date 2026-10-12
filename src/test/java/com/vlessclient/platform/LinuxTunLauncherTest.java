@@ -5,9 +5,12 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.io.InterruptedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -15,6 +18,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -130,6 +134,118 @@ class LinuxTunLauncherTest {
         assertThat(runner.calls).as("commands run").isEmpty();
     }
 
+    /**
+     * NixOS and Guix keep libcap on the PATH alone, in none of the fixed
+     * directories: getcap was not found, the core never got the capability,
+     * every connect raised a PolicyKit prompt, and recovery, which will not
+     * raise one, never brought a dropped tunnel back.
+     */
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+    void getcapOnThePathIsFoundWhenNoneIsWhereLibcapInstallsIt(@TempDir Path dir)
+            throws IOException {
+        // A directory on this machine that only root can write to, with getcap in it.
+        Path systemDir = List.of("/usr/sbin", "/sbin", "/usr/bin", "/bin").stream()
+                .map(Path::of)
+                .filter(d -> Files.isExecutable(d.resolve("getcap")))
+                .findFirst().orElse(null);
+        Assumptions.assumeTrue(systemDir != null, "libcap's getcap is not installed");
+        Path core = Files.writeString(dir.resolve("sing-box"), "");
+        FakeRunner runner = new FakeRunner(cmd -> new CommandRunner.Result(0, ""));
+        LinuxTunLauncher launcher = new LinuxTunLauncher(runner, "pkexec",
+                List.of(Files.createDirectories(dir.resolve("empty"))), List.of(systemDir));
+
+        launcher.hasNetAdminCapability(core);
+
+        assertThat(runner.calls).extracting(List::getFirst)
+                .containsExactly(systemDir.resolve("getcap").toString());
+    }
+
+    /**
+     * setcap found on the PATH runs as root through pkexec: one in a directory
+     * anyone but root can write to is never run, whatever it is.
+     */
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs({org.junit.jupiter.api.condition.OS.MAC,
+            org.junit.jupiter.api.condition.OS.LINUX})
+    void libcapsToolsOnThePathAreNotRunWhereOthersCouldHavePlacedThem(@TempDir Path dir)
+            throws IOException {
+        Path core = Files.writeString(dir.resolve("sing-box"), "");
+        Path open = Files.createDirectories(dir.resolve("open"));
+        Files.setPosixFilePermissions(open, PosixFilePermissions.fromString("rwxrwxrwx"));
+        for (String tool : List.of("getcap", "setcap")) {
+            Path stub = Files.writeString(open.resolve(tool), "#!/bin/sh\nexit 0\n");
+            stub.toFile().setExecutable(true, true);
+        }
+        FakeRunner runner = new FakeRunner(cmd -> new CommandRunner.Result(0, "cap_net_admin"));
+        LinuxTunLauncher launcher = new LinuxTunLauncher(runner, "pkexec",
+                List.of(Files.createDirectories(dir.resolve("empty"))), List.of(open));
+
+        assertThat(launcher.hasNetAdminCapability(core)).isFalse();
+        assertThat(runner.calls).as("commands run").isEmpty();
+        assertThat(LinuxTunLauncher.onlyRootCanChange(open.resolve("setcap"))).isFalse();
+    }
+
+    /** A configuration that has the core keep its cache in {@code cache}. */
+    private static Path configKeepingCacheIn(Path dir, Path cache) throws IOException {
+        return Files.writeString(dir.resolve("config.json"),
+                "{\"experimental\":{\"cache_file\":{\"enabled\":true,\"path\":\""
+                        + cache.toAbsolutePath() + "\"}}}");
+    }
+
+    private static java.nio.file.attribute.UserPrincipal user(String name) throws IOException {
+        return FileSystems.getDefault().getUserPrincipalLookupService().lookupPrincipalByName(name);
+    }
+
+    /**
+     * The per-connect fallback's root core left its cache file root's, and
+     * every start through the capability since, as the user, failed on it
+     * with "permission denied" until the file was removed by hand.
+     */
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs({org.junit.jupiter.api.condition.OS.MAC,
+            org.junit.jupiter.api.condition.OS.LINUX})
+    void aCacheFileAnotherUserOwnsIsRemovedBeforeAStartAsTheUser(@TempDir Path dir)
+            throws IOException {
+        Path cache = Files.writeString(dir.resolve("sing-box-tun.db"), "rule-sets");
+        Path config = configKeepingCacheIn(dir, cache);
+        java.nio.file.attribute.UserPrincipal owner = Files.getOwner(cache);
+        java.nio.file.attribute.UserPrincipal someoneElse =
+                user(owner.getName().equals("root") ? "nobody" : "root");
+
+        LinuxTunLauncher.removeForeignCacheFile(config, owner);
+        assertThat(cache).as("the app user's own cache file").exists();
+
+        LinuxTunLauncher.removeForeignCacheFile(config, someoneElse);
+        assertThat(cache).as("a cache file the core could not open").doesNotExist();
+    }
+
+    /** The start through the capability does it; only root can hand a file to another user. */
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+    void aStartThroughTheCapabilityRemovesTheCacheFileARootCoreLeft(@TempDir Path dir)
+            throws Exception {
+        Path config = dir.resolve("config.json");
+        Files.writeString(config, "{}");
+        Assumptions.assumeTrue(Files.getOwner(config).getName().equals("root"),
+                "only root can give a file to another user");
+        Path cache = Files.writeString(dir.resolve("sing-box-tun.db"), "rule-sets");
+        Files.setOwner(cache, user("nobody"));
+        configKeepingCacheIn(dir, cache);
+        Path core = Files.writeString(dir.resolve("sing-box"), "#!/bin/sh\nexit 0\n");
+        core.toFile().setExecutable(true, true);
+        FakeRunner caps = new FakeRunner(cmd -> new CommandRunner.Result(0, "cap_net_admin=ep"));
+        LinuxTunLauncher launcher =
+                new LinuxTunLauncher(caps, "elevator-that-must-not-launch", toolsIn(dir));
+
+        TunLauncher.Launched launched = launcher.launch(core, config,
+                new TunLauncher.Prompt("setup", "each connect"));
+        spawned.add(launched.process().toHandle());
+
+        assertThat(launched.promptsEachLaunch()).as("the start through the capability").isFalse();
+        assertThat(cache).doesNotExist();
+    }
+
     @Test
     void capabilityCheck_readsGetcapOutput(@TempDir Path dir) throws IOException {
         FakeRunner caps = new FakeRunner(cmd -> new CommandRunner.Result(0,
@@ -213,13 +329,16 @@ class LinuxTunLauncherTest {
                 Path.of("/opt/sing-box"), Path.of("/tmp/c.json"), Path.of("/tmp/stop"));
 
         assertThat(wrapper).contains("'/opt/sing-box' run -c '/tmp/c.json'");
-        assertThat(wrapper).contains("[ ! -f '/tmp/stop' ]");
+        // The stop file goes in through a variable, never quoted inside the
+        // trap's own quotes; see aSigtermStopsTheCoreWhenTheStopPathHasASpace.
+        assertThat(wrapper).startsWith("SBSTOP='/tmp/stop'; ");
+        assertThat(wrapper).contains("[ ! -f \"$SBSTOP\" ]");
         // Parent watch: a dead app must never leak an elevated core.
         assertThat(wrapper).contains("kill -0 " + ProcessHandle.current().pid());
         // Must trap the signals the engine actually sends (Process.destroy =
         // SIGTERM), not EXIT alone — see wrapperKillsChildOnSigterm.
         assertThat(wrapper).contains("' INT TERM; ").contains("' EXIT; ");
-        assertThat(wrapper).contains("rm -f '/tmp/stop'");
+        assertThat(wrapper).contains("rm -f \"$SBSTOP\"; exit $RC");
         // The trap has to be in place before the core starts: a SIGTERM
         // between the two killed the shell and left the core running.
         assertThat(wrapper.indexOf("trap "))
@@ -273,6 +392,48 @@ class LinuxTunLauncherTest {
         // against keeps the core alive indefinitely, not for milliseconds.
         Await.until("fake core " + pid + " to be reaped, not orphaned",
                 () -> !core.isAlive(), Duration.ofSeconds(5));
+    }
+
+    /**
+     * The stop file's path, quoted inside the trap's own single quotes, split
+     * the trap at its first space, which $XDG_DATA_HOME or $HOME may hold.
+     * bash trapped the signals with an action cut short before its exit and
+     * printed an error into the core's log; dash refused the trap, and a
+     * SIGTERM killed the wrapper with the root core still running.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"/bin/sh", "/bin/bash", "/bin/dash"})
+    @org.junit.jupiter.api.condition.EnabledOnOs({org.junit.jupiter.api.condition.OS.MAC,
+            org.junit.jupiter.api.condition.OS.LINUX})
+    void aSigtermStopsTheCoreWhenTheStopPathHasASpace(String shell, @TempDir Path dir)
+            throws Exception {
+        Assumptions.assumeTrue(Files.isExecutable(Path.of(shell)), shell + " is not installed");
+        Path pidFile = dir.resolve("core.pid");
+        Path fakeCore = Files.writeString(dir.resolve("core.sh"),
+                "#!/bin/sh\necho $$ > '" + pidFile + "'\nexec sleep 60\n");
+        fakeCore.toFile().setExecutable(true, true);
+        Path stop = Files.createDirectories(dir.resolve("share dir/vless-client/run"))
+                .resolve("stop-1.signal");
+
+        Path output = dir.resolve("wrapper.out");
+        Process sh = new ProcessBuilder(shell, "-c",
+                LinuxTunLauncher.wrapperCommand(fakeCore, dir.resolve("c.json"), stop))
+                .redirectErrorStream(true).redirectOutput(output.toFile()).start();
+        spawned.add(sh.toHandle());
+        long pid = Long.parseLong(Await.untilValue("the fake core to record its pid",
+                () -> readQuietly(pidFile), text -> !text.isEmpty(), Duration.ofSeconds(5)));
+        ProcessHandle core = ProcessHandle.of(pid)
+                .orElseThrow(() -> new AssertionError("fake core " + pid + " already gone"));
+        spawned.add(core);
+
+        sh.destroy();
+
+        assertThat(sh.waitFor(10, TimeUnit.SECONDS)).as("the wrapper ends on SIGTERM").isTrue();
+        Await.until("the core to be stopped with its wrapper", () -> !core.isAlive(),
+                Duration.ofSeconds(5));
+        assertThat(Files.readString(output, StandardCharsets.UTF_8))
+                .as("what the shell said about its trap").doesNotContain("trap");
+        assertThat(sh.exitValue()).as("the trap's own exit").isEqualTo(143);
     }
 
     @Test
