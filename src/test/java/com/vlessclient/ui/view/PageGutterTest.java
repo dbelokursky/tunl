@@ -1,6 +1,7 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.ThemeCss;
+import com.vlessclient.testing.SettledLayout;
 import com.vlessclient.testing.UiTest;
 import java.util.ArrayList;
 import java.util.List;
@@ -37,7 +38,11 @@ public class PageGutterTest extends ApplicationTest {
     void noPageAddsAGutterOfItsOwn() {
         List<String> offenders = new ArrayList<>();
         for (String page : PAGES) {
-            for (Region node : load(page)) {
+            List<Region> regions = load(page);
+            // Measured once the page's layout has settled: one pass of a
+            // scene with no stage leaves skins and scroll panes half-done.
+            SettledLayout.settle(regions.get(0).getScene());
+            for (Region node : regions) {
                 // The insets a node ends up with, whether they came from a
                 // padding block in the FXML or from a stylesheet rule: asking
                 // the laid-out node covers both, where reading the FXML would

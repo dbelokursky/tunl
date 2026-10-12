@@ -21,7 +21,10 @@ import com.vlessclient.service.mcp.AppControlService;
 import com.vlessclient.service.mcp.DefaultAppControlService;
 import com.vlessclient.service.mcp.McpServerService;
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +32,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import java.util.function.DoubleConsumer;
+import java.util.stream.Stream;
 
 /**
  * Builds the real UI service graph without granting it network access.
@@ -40,12 +44,22 @@ import java.util.function.DoubleConsumer;
  */
 public final class UiTestServices {
 
+    /** Whether this JVM has emptied the test data dir yet. */
+    private static boolean dataDirEmptied;
+
     private UiTestServices() {
     }
 
     /** Replaces any previous graph with a network-free graph for a UI test. */
     public static synchronized void initialize() {
         ServiceLocator.shutdown();
+        if (!dataDirEmptied) {
+            dataDirEmptied = true;
+            String dataDir = System.getProperty("vless.data.dir");
+            if (dataDir != null) {
+                emptyTestDataDir(Path.of(dataDir));
+            }
+        }
         ServiceLocator.initialize(ServiceLocator.StartupMode.TEST);
 
         ConfigStore configStore = ServiceLocator.get(ConfigStore.class);
@@ -84,6 +98,47 @@ public final class UiTestServices {
         ServiceLocator.register(AppControlService.class, control);
         ServiceLocator.register(McpServerService.class,
                 new NoNetworkMcpServerService(configStore, control));
+    }
+
+    /**
+     * Empties the test data dir once per JVM, before the first graph is
+     * built on it.
+     *
+     * <p>Every graph is built on the same directory, and nothing emptied it:
+     * a run stopped after a test had saved a server (Ctrl-C, a cancelled CI
+     * job, the IDE's stop button) left it there, and every later run without
+     * {@code clean} failed DashboardFirstRunLinkTest's "the test data dir
+     * starts empty" and showed the other views a populated list.</p>
+     *
+     * <p>Only a directory named {@code test-data-dir*}: the property comes
+     * from surefire, and a run that did not get it from there must never
+     * empty a directory that may be someone's profile.</p>
+     *
+     * <p>Its {@code logs} folder stays: logback opened its files there when
+     * the JVM started, before any test, and deleting them under it left the
+     * appenders writing to files that no longer existed, which
+     * LogDirIsolationTest then failed to find whenever it ran after this.</p>
+     *
+     * @param dir the data dir the graphs are built on
+     * @return whether it was emptied
+     */
+    static boolean emptyTestDataDir(Path dir) {
+        Path name = dir.getFileName();
+        if (name == null || !name.toString().startsWith("test-data-dir")
+                || !Files.isDirectory(dir)) {
+            return false;
+        }
+        Path logs = dir.resolve("logs");
+        try (Stream<Path> paths = Files.walk(dir)) {
+            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+                if (!path.equals(dir) && !path.startsWith(logs)) {
+                    Files.delete(path);
+                }
+            }
+            return true;
+        } catch (IOException e) {
+            throw new UncheckedIOException("could not empty the test data dir " + dir, e);
+        }
     }
 
     /**
