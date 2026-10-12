@@ -19,12 +19,20 @@ class RoutingRuleCheckTest {
     static final List<String> REGEXES_THE_CORE_TAKES = List.of(
             "^(.+\\.)?example\\.com$", "example", "^a+b*c?$", "[a-z]{2,5}", "(?i)google",
             "\\d+\\.\\w+", "(?:a|b)", "(?P<name>a)", "(?<name>a)", "\\Qa.b\\E", "[\\]]",
-            "[(?=]", "\\++", "a}+", "\\x41", "\\pL", "\\101", "\\0101", "[[:alpha:]]");
+            "[(?=]", "\\++", "a}+", "\\x41", "\\pL", "\\101", "\\0101", "[[:alpha:]]",
+            "\\p{Lu}", "\\PL", "[\\p{Nd}]", "a{1000}", "a{1000,}", "(a{10}){100}",
+            "((a{10}){10}){10}", "(a{600}){0,1}", "a{2}?", "a*?", "\\_");
 
     static final List<String> REGEXES_THE_CORE_REFUSES = List.of(
             "(", "[a", "a{2,1}", "*a", "(?=a)", "(?!a)", "(?<=a)b", "(?<!a)b", "(?>a)",
             "a++", "a*+", "a?+", "a{2}+", "(a)\\1", "\\Z", "\\G", "\\R", "\\h", "\\e",
-            "\\X", "\\k<name>", "\\cA");
+            "\\X", "\\k<name>", "\\cA",
+            // Property names Java alone has, repeat counts over Go's 1000, a
+            // repeat of a repeat, and an escaped character outside ASCII.
+            "\\p{Lower}+\\.example", "\\p{Alpha}", "\\p{IsLatin}", "\\p{javaLowerCase}",
+            "[\\p{Space}]", "\\P{InGreek}", "^a{1,2000}$", "a{1001}", "a{1001,}",
+            "(a{100}){100}", "((a{10}){10}){11}", "(?:a{2}){501}", "(a{2,}){600}",
+            "a{2}{3}", "a*{2}", "\\™", "\\é");
 
     static final List<String> CIDRS_THE_CORE_TAKES = List.of(
             "10.0.0.0/8", "10.0.0.1", "10.0.0.1/32", "0.0.0.0/0", "2001:db8::/32",
