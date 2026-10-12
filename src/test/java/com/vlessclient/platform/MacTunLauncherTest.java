@@ -8,14 +8,18 @@ import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
@@ -67,7 +71,7 @@ class MacTunLauncherTest {
         assertThat(wrapper).doesNotContain("sudo -n");
         assertThat(wrapper).contains("[ ! -f '/tmp/stop' ]");
         assertThat(wrapper).contains("kill -0 " + ProcessHandle.current().pid());
-        assertThat(wrapper).contains("EXIT INT TERM");
+        assertThat(wrapper).contains("' INT TERM; ").contains("' EXIT; ");
         assertThat(wrapper).contains("rm -f '/tmp/stop'");
         // The trap has to be in place before the core starts: a SIGTERM
         // between the two killed the shell and left the core running.
@@ -193,6 +197,93 @@ class MacTunLauncherTest {
                 .isTrue();
         Await.until("core " + pid + " to be stopped", () -> !running.isAlive(),
                 Duration.ofSeconds(5));
+    }
+
+    /** A core that failed reached the app as "exited with code 0". */
+    @Test
+    void osascriptWrapperExitsWithTheCoresCode(@TempDir Path dir) throws Exception {
+        Path core = Files.writeString(dir.resolve("core.sh"), "#!/bin/sh\nexit 7\n");
+        core.toFile().setExecutable(true, true);
+        Process sh = new ProcessBuilder("/bin/sh", "-c", MacTunLauncher.osascriptWrapperCommand(
+                core, dir.resolve("c.json"), dir.resolve("stop"))).redirectErrorStream(true).start();
+        spawned.add(sh.toHandle());
+
+        assertThat(sh.waitFor(10, TimeUnit.SECONDS)).isTrue();
+        assertThat(sh.exitValue()).isEqualTo(7);
+    }
+
+    /** Stands in for the privileged setup, counting the checks. */
+    private static final class FakePrivileges implements MacTunLauncher.Privileges {
+        final AtomicInteger checks = new AtomicInteger();
+        final List<String> setups = new CopyOnWriteArrayList<>();
+        volatile boolean configured;
+
+        @Override
+        public boolean isConfigured(Path binary) {
+            checks.incrementAndGet();
+            return configured;
+        }
+
+        @Override
+        public void configure(Path binary, String prompt) {
+            setups.add(prompt);
+            configured = true;
+        }
+
+        @Override
+        public boolean usesLauncher() {
+            return true;
+        }
+    }
+
+    /**
+     * Each check runs sudo -n -l and hashes the ~45 MB core and its root copy,
+     * and an installed rule was checked twice on every connect, under the
+     * engine's lock.
+     */
+    @Test
+    void aSetupInPlaceIsCheckedOncePerConnect(@TempDir Path dir) {
+        FakePrivileges privileges = new FakePrivileges();
+        privileges.configured = true;
+        List<List<String>> spawned = new CopyOnWriteArrayList<>();
+        MacTunLauncher launcher = new MacTunLauncher(privileges, builder -> {
+            spawned.add(builder.command());
+            throw new IOException("not started in a test");
+        });
+
+        assertThatThrownBy(() -> launcher.launch(dir.resolve("sing-box"),
+                dir.resolve("config.json"), new TunLauncher.Prompt("setup", "each connect")))
+                .hasMessage("not started in a test");
+
+        assertThat(privileges.checks).as("checks of the setup").hasValue(1);
+        assertThat(privileges.setups).isEmpty();
+        assertThat(spawned).singleElement().asString().contains("sudo -n");
+    }
+
+    /**
+     * An interrupt is the start being called off, at quit. The sudo check read
+     * it as "not set up", and the setup or every-connect password dialog came
+     * up as the app quit.
+     */
+    @Test
+    void anInterruptedStartRaisesNoDialog(@TempDir Path dir) {
+        FakePrivileges privileges = new FakePrivileges();
+        List<List<String>> spawned = new CopyOnWriteArrayList<>();
+        MacTunLauncher launcher = new MacTunLauncher(privileges, builder -> {
+            spawned.add(builder.command());
+            throw new IOException("not started in a test");
+        });
+
+        Thread.currentThread().interrupt();
+        try {
+            assertThatThrownBy(() -> launcher.launch(dir.resolve("sing-box"),
+                    dir.resolve("config.json"), new TunLauncher.Prompt("setup", "each connect")))
+                    .isInstanceOf(InterruptedIOException.class);
+        } finally {
+            Thread.interrupted();
+        }
+        assertThat(privileges.setups).as("setup dialogs").isEmpty();
+        assertThat(spawned).as("wrappers started").isEmpty();
     }
 
     private static String readQuietly(Path file) {

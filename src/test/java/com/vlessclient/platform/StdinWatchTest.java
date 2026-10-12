@@ -105,11 +105,43 @@ class StdinWatchTest {
                 Duration.ofSeconds(5));
     }
 
+    /**
+     * The trap ended in {@code exit 0}, so a core that panicked, was killed
+     * for memory or failed to start reached the app as "exited with code 0".
+     */
+    @Test
+    void aCoreThatFailsLeavesTheWrapperItsExitCode() throws Exception {
+        Process wrapper = startAround(coreThatRuns("exit 7"));
+
+        assertThat(wrapper.waitFor(10, TimeUnit.SECONDS)).isTrue();
+        assertThat(wrapper.exitValue()).isEqualTo(7);
+    }
+
+    /**
+     * On SIGTERM the wrapper used to stop the core and leave at once, while
+     * the core could take seconds more to close: the app took the tunnel for
+     * gone with a root core still holding it.
+     */
+    @Test
+    void aSigtermToTheWrapperWaitsForTheCoreToClose() throws Exception {
+        Process wrapper = startAround(coreThatRuns(
+                "trap 'sleep 2; exit 0' TERM\nwhile :; do sleep 0.2; done"));
+        ProcessHandle core = awaitCore();
+
+        wrapper.destroy();
+
+        assertThat(wrapper.waitFor(15, TimeUnit.SECONDS))
+                .as("the wrapper ends after SIGTERM").isTrue();
+        assertThat(core.isAlive()).as("the core outlives its wrapper").isFalse();
+    }
+
     @Test
     void theTrapIsSetBeforeTheCoreStarts() {
         String script = StdinWatch.around("'/opt/sing-box' run -c '/tmp/c.json'");
 
-        assertThat(script).contains("EXIT INT TERM");
+        // The signals the engine sends, and not EXIT alone: a signal-killed
+        // shell skips an EXIT-only trap.
+        assertThat(script).contains("' INT TERM; ").contains("' EXIT; ");
         assertThat(script.indexOf("trap "))
                 .as("a signal between the two must not leave the core running")
                 .isLessThan(script.indexOf(" run -c "));
