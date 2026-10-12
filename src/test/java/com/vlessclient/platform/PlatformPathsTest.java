@@ -68,19 +68,15 @@ class PlatformPathsTest {
 
     @Test
     void platformDetect_knownOsNames() {
-        assertThat(mapOs("Mac OS X")).isEqualTo(Platform.MAC);
-        assertThat(mapOs("Windows 11")).isEqualTo(Platform.WINDOWS);
-        assertThat(mapOs("Linux")).isEqualTo(Platform.LINUX);
-        assertThat(mapOs("FreeBSD")).isEqualTo(Platform.OTHER);
-    }
+        String before = System.getProperty("os.name");
 
-    private static Platform mapOs(String osName) {
-        String prev = System.getProperty("os.name");
-        System.setProperty("os.name", osName);
-        try {
-            return Platform.detect();
-        } finally {
-            System.setProperty("os.name", prev);
-        }
+        assertThat(Platform.detect("Mac OS X")).isEqualTo(Platform.MAC);
+        assertThat(Platform.detect("Darwin")).isEqualTo(Platform.MAC);
+        assertThat(Platform.detect("Windows 11")).isEqualTo(Platform.WINDOWS);
+        assertThat(Platform.detect("Linux")).isEqualTo(Platform.LINUX);
+        assertThat(Platform.detect("FreeBSD")).isEqualTo(Platform.OTHER);
+        assertThat(System.getProperty("os.name"))
+                .as("names are tried without touching the JVM's own").isEqualTo(before);
+        assertThat(Platform.current()).isEqualTo(Platform.detect(before));
     }
 }

@@ -107,8 +107,21 @@ class ConnectionServiceTest {
         volatile java.util.function.Predicate<java.util.function.BooleanSupplier> earlierTunnel =
                 stillWanted -> true;
 
+        /**
+         * The state the real engine publishes from its process monitor, set
+         * by a test here, so the service's own listener on it runs.
+         */
+        final javafx.beans.property.ReadOnlyObjectWrapper<ConnectionState> published =
+                new javafx.beans.property.ReadOnlyObjectWrapper<>(ConnectionState.DISCONNECTED);
+
         RecordingEngine(Path binary) {
             super(binary);
+        }
+
+        @Override
+        public javafx.beans.property.ReadOnlyObjectProperty<ConnectionState>
+                connectionStateProperty() {
+            return published.getReadOnlyProperty();
         }
 
         @Override
@@ -444,6 +457,35 @@ class ConnectionServiceTest {
         });
         api.start();
         return api;
+    }
+
+    /**
+     * The engine's own report of a crash reaches recovery through the
+     * listener the service puts on the engine's state. Every other recovery
+     * test hands the state to recovery directly, so that listener, which
+     * also starts and stops the network watch and clears the start notices,
+     * never ran in a test: dropping its call to recovery left every test
+     * green and a core that crashed at night never restarted.
+     */
+    @Test
+    void aCrashTheEngineReportsIsRecoveredThroughTheServicesListener() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.getSettings().setHealthCheckAutoReconnect(true);
+        store.getSettings().setHealthCheckDelaySeconds(1);
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        try {
+            assertThat(service.connect().started()).as("the first start").isTrue();
+            engine.published.set(ConnectionState.CONNECTED);
+            engine.running = false;
+
+            engine.published.set(ConnectionState.ERROR);
+
+            Await.until("recovery to start the core again",
+                    () -> starts(engine) >= 2, Duration.ofSeconds(10));
+        } finally {
+            service.getRecoveryService().close();
+        }
     }
 
     /**

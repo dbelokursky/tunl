@@ -39,6 +39,18 @@ class StoredJsonTest {
     }
 
     @Test
+    @DisplayName("an empty, blank or null file holds no value, and is damaged, not parsed")
+    void noValueIsDamaged() throws IOException {
+        Path file = dir.resolve("settings.json");
+        for (String content : new String[] {"", "  \n\t", "null"}) {
+            Files.writeString(file, content, StandardCharsets.UTF_8);
+
+            assertThat(StoredJson.read(mapper, file)).as("'%s'", content)
+                    .isInstanceOf(StoredJson.Damaged.class);
+        }
+    }
+
+    @Test
     @DisplayName("a file that was read and is not JSON is damaged")
     void damaged() throws IOException {
         Path file = dir.resolve("servers.json");
