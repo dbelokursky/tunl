@@ -18,7 +18,9 @@ import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.CheckBox;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.DialogPane;
+import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
 import javafx.stage.Stage;
 import javafx.stage.Window;
@@ -38,11 +40,14 @@ import static org.assertj.core.api.Assertions.assertThat;
  * was picked.</p>
  */
 @UiTest
+@SuppressWarnings("unchecked")
 public class ServerFormRefusalTest extends ApplicationTest {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
     private static final String LONG_SHORT_ID = "0123456789abcdef01";
     private static final String REALITY_KEY = "WZaG00XCAiVCF2SP5fmSbKiuTbBB-lMDg_81rC8hR80";
+    private static final String WG_PRIVATE_KEY = "tSvcDcFFKiY/1dfLHXsTKZPYGLBRXpMAyxr5uNITbEk=";
+    private static final String WG_PEER_KEY = "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=";
 
     private final AtomicReference<ServerConfig> saved = new AtomicReference<>();
     private ServerFormController controller;
@@ -107,6 +112,55 @@ public class ServerFormRefusalTest extends ApplicationTest {
 
         assertThat(saved.get()).isNull();
         assertThat(existing.getTls().getRealityShortId()).isEqualTo("0123abcd");
+    }
+
+    /**
+     * A WireGuard server needs its peer's key and a local address as much as
+     * its private key, and the form asked for the private key only. Saved
+     * without the peer key, the server passed the core's check and stopped
+     * the core at start, which then printed the private key into the log.
+     */
+    @Test
+    void aWireGuardServerWithoutItsPeerKeyOrAddressIsNotSaved() {
+        ComboBox<String> peerKey = lookup("#encryptionCombo").query();
+        ComboBox<String> localAddress = lookup("#flowCombo").query();
+        interact(() -> {
+            ((ComboBox<Protocol>) lookup("#protocolCombo").query()).setValue(Protocol.WIREGUARD);
+            text("#addressField", "198.51.100.7");
+            text("#portField", "51820");
+            text("#uuidField", WG_PRIVATE_KEY);
+        });
+
+        String message = saveAndCloseTheWarning();
+
+        assertThat(message)
+                .contains(I18n.get("error.field.required", I18n.get("form.peer.public.key")))
+                .contains(I18n.get("error.field.required", I18n.get("form.local.address")));
+        assertThat(saved.get()).as("the server handed to the list").isNull();
+        assertThat(peerKey.getEditor().getStyleClass()).contains("field-error");
+        assertThat(localAddress.getEditor().getStyleClass()).contains("field-error");
+        assertThat(((Label) lookup("#encryptionLabel").query()).getText())
+                .as("the peer key's label marks it required").endsWith(" *");
+        assertThat(((Label) lookup("#flowLabel").query()).getText())
+                .as("the local address's label marks it required").endsWith(" *");
+    }
+
+    @Test
+    void aWireGuardKeyTheCoreCannotDecodeIsNotSaved() {
+        interact(() -> {
+            ((ComboBox<Protocol>) lookup("#protocolCombo").query()).setValue(Protocol.WIREGUARD);
+            text("#addressField", "198.51.100.7");
+            text("#portField", "51820");
+            text("#uuidField", "not-a-key");
+            ((ComboBox<String>) lookup("#encryptionCombo").query()).getEditor()
+                    .setText(WG_PEER_KEY);
+            ((ComboBox<String>) lookup("#flowCombo").query()).getEditor().setText("10.0.0.2/32");
+        });
+
+        String message = saveAndCloseTheWarning();
+
+        assertThat(message).contains(I18n.get("refusal.wireguard.private.key"));
+        assertThat(saved.get()).isNull();
     }
 
     private static ServerConfig realityServer(String shortId) {

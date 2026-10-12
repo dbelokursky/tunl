@@ -30,6 +30,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class ServerBackupServiceTest {
 
+    private static final String WG_PRIVATE_KEY = "tSvcDcFFKiY/1dfLHXsTKZPYGLBRXpMAyxr5uNITbEk=";
+
     @TempDir
     Path tempDir;
 
@@ -55,8 +57,11 @@ class ServerBackupServiceTest {
     @Test
     void roundTripKeepsCredentialsIdsAndWireguard() throws IOException {
         store.addServer(server("Netherlands 01", Protocol.VLESS, "vless-secret-uuid"));
-        ServerConfig wireguard = server("Finland WG", Protocol.WIREGUARD, "wg-private-key");
-        wireguard.setEncryption("wg-peer-public-key");
+        // Keys and an address the core takes: a WireGuard server without them
+        // is refused on the way in, as it would be at connect.
+        ServerConfig wireguard = server("Finland WG", Protocol.WIREGUARD, WG_PRIVATE_KEY);
+        wireguard.setEncryption("bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=");
+        wireguard.setFlow("10.0.0.2/32");
         store.addServer(wireguard);
         List<String> originalIds = store.getServers().stream().map(ServerConfig::getId).toList();
 
@@ -74,7 +79,7 @@ class ServerBackupServiceTest {
                 .extracting(ServerConfig::getId).containsExactlyElementsOf(originalIds);
         assertThat(elsewhere.getServers())
                 .extracting(ServerConfig::getUuid)
-                .containsExactly("vless-secret-uuid", "wg-private-key");
+                .containsExactly("vless-secret-uuid", WG_PRIVATE_KEY);
         assertThat(elsewhere.getServers())
                 .extracting(ServerConfig::getProtocol)
                 .contains(Protocol.WIREGUARD);

@@ -1,6 +1,7 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.ThemeCss;
+import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.testing.UiTest;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -10,6 +11,7 @@ import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.TextField;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
@@ -26,7 +28,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * save, as they do in every other dialog of the app.
  */
 @UiTest
+@SuppressWarnings("unchecked")
 public class ServerFormKeysTest extends ApplicationTest {
+
+    /** Keys as wg genkey writes them: 32 bytes in padded standard base64. */
+    private static final String PRIVATE_KEY = "tSvcDcFFKiY/1dfLHXsTKZPYGLBRXpMAyxr5uNITbEk=";
+    private static final String PEER_KEY = "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=";
 
     private final AtomicReference<ServerConfig> saved = new AtomicReference<>();
     private final AtomicBoolean cancelled = new AtomicBoolean();
@@ -73,6 +80,59 @@ public class ServerFormKeysTest extends ApplicationTest {
     }
 
     /**
+     * WireGuard's peer key and local address are typed into editable combos,
+     * which take what was typed as their value only on a commit. Enter fired
+     * Save, the default button, on the key's press, and the combo committed on
+     * its release, after the form had been read: the server was saved without
+     * the peer key and the address the user had just typed.
+     */
+    @Test
+    void enterInWireGuardsTypedFieldsSavesWhatWasTyped() {
+        ComboBox<String> peerKey = lookup("#encryptionCombo").query();
+        ComboBox<String> localAddress = lookup("#flowCombo").query();
+        interact(() -> {
+            ((ComboBox<Protocol>) lookup("#protocolCombo").query()).setValue(Protocol.WIREGUARD);
+            ((TextField) lookup("#addressField").query()).setText("198.51.100.7");
+            ((TextField) lookup("#portField").query()).setText("51820");
+            ((TextField) lookup("#uuidField").query()).setText(PRIVATE_KEY);
+            peerKey.getEditor().setText(PEER_KEY);
+            localAddress.requestFocus();
+            localAddress.getEditor().setText("10.0.0.2/32");
+        });
+
+        interact(() -> {
+            Event.fireEvent(localAddress, pressed(KeyCode.ENTER));
+            Event.fireEvent(localAddress, released(KeyCode.ENTER));
+        });
+
+        assertThat(saved.get()).as("Enter saves").isNotNull();
+        assertThat(saved.get().getEncryption()).as("the peer key").isEqualTo(PEER_KEY);
+        assertThat(saved.get().getFlow()).as("the local address").isEqualTo("10.0.0.2/32");
+    }
+
+    /** Hysteria2's obfuscation password is typed into the same kind of combo. */
+    @Test
+    void enterInHysteria2sObfuscationPasswordSavesWhatWasTyped() {
+        ComboBox<String> obfuscation = lookup("#flowCombo").query();
+        interact(() -> {
+            ((ComboBox<Protocol>) lookup("#protocolCombo").query()).setValue(Protocol.HYSTERIA2);
+            ((TextField) lookup("#addressField").query()).setText("198.51.100.7");
+            ((TextField) lookup("#portField").query()).setText("443");
+            ((TextField) lookup("#uuidField").query()).setText("secret");
+            obfuscation.requestFocus();
+            obfuscation.getEditor().setText("obfs-secret");
+        });
+
+        interact(() -> {
+            Event.fireEvent(obfuscation, pressed(KeyCode.ENTER));
+            Event.fireEvent(obfuscation, released(KeyCode.ENTER));
+        });
+
+        assertThat(saved.get()).as("Enter saves").isNotNull();
+        assertThat(saved.get().getFlow()).as("the obfuscation password").isEqualTo("obfs-secret");
+    }
+
+    /**
      * Modena restyles a default button. Save wears .primary-button, whose own
      * colours have to survive being the default.
      */
@@ -94,5 +154,9 @@ public class ServerFormKeysTest extends ApplicationTest {
 
     private static KeyEvent pressed(KeyCode code) {
         return new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, false, false, false, false);
+    }
+
+    private static KeyEvent released(KeyCode code) {
+        return new KeyEvent(KeyEvent.KEY_RELEASED, "", "", code, false, false, false, false);
     }
 }

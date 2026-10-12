@@ -289,6 +289,15 @@ public class ServerFormController {
 
     @FXML
     private void onSaveClicked() {
+        // WireGuard's peer key and local address and Hysteria2's obfuscation
+        // password are typed into editable combos, whose value takes the typed
+        // text only on a commit. Enter fires Save, the default button, on the
+        // key's press, and the combo commits on its release, after the form
+        // was read: the server was saved with what the fields held before the
+        // typing. A click on Save worked only because the combo commits when
+        // it loses focus. Non-editable combos ignore this.
+        encryptionCombo.commitValue();
+        flowCombo.commitValue();
         if (!validate()) {
             return;
         }
@@ -334,8 +343,13 @@ public class ServerFormController {
         server.setAddress(addressField.getText().trim());
         server.setPort(Integer.parseInt(portField.getText().trim()));
         server.setUuid(uuidField.getText().trim());
-        server.setEncryption(encryptionCombo.getValue());
-        server.setFlow(flowCombo.getValue());
+        // WireGuard's peer key and address are trimmed like the private key
+        // beside them: a key pasted with a space after it is one the core
+        // cannot decode.
+        boolean wireguard = protocol == Protocol.WIREGUARD;
+        server.setEncryption(wireguard ? trimmed(encryptionCombo.getValue())
+                : encryptionCombo.getValue());
+        server.setFlow(wireguard ? trimmed(flowCombo.getValue()) : flowCombo.getValue());
 
         writeTransport(transport);
         server.setTransport(transport);
@@ -431,6 +445,8 @@ public class ServerFormController {
         // text field of its own.
         encryptionCombo.setEditable(false);
         flowCombo.setEditable(false);
+        markField(encryptionCombo.getEditor(), false);
+        markField(flowCombo.getEditor(), false);
 
         // Reset the encryption combo to VMess's ciphers, the one protocol
         // that has a choice of them here.
@@ -507,10 +523,10 @@ public class ServerFormController {
                 // No Transport, no TLS
                 bindRequired(uuidLabel, "form.private.key");
                 uuidField.setPromptText(I18n.get("form.prompt.private.key"));
-                bindLabel(encryptionLabel, "form.peer.public.key");
+                bindRequired(encryptionLabel, "form.peer.public.key");
                 encryptionCombo.setItems(FXCollections.observableArrayList(""));
                 encryptionCombo.setEditable(true);
-                bindLabel(flowLabel, "form.local.address");
+                bindRequired(flowLabel, "form.local.address");
                 flowCombo.setItems(FXCollections.observableArrayList(""));
                 flowCombo.setEditable(true);
                 setNodeVisible(transportSeparator, false);
@@ -611,12 +627,31 @@ public class ServerFormController {
                     uuidLabel.getText().replace(" *", "")));
         }
 
+        if (protocolCombo.getValue() == Protocol.WIREGUARD) {
+            // As necessary as the private key, and not asked for: a server
+            // saved without its peer's key passed the core's check, stopped
+            // the core at start, and the core then printed the private key,
+            // which went into the log.
+            requireTyped(encryptionCombo, "form.peer.public.key", errors);
+            requireTyped(flowCombo, "form.local.address", errors);
+        }
+
         if (errors.isEmpty()) {
             return true;
         }
         log.warn("Validation failed: {}", errors);
         showValidationErrors(errors);
         return false;
+    }
+
+    /** Marks an editable combo and names it in {@code errors} when nothing is typed in it. */
+    private static void requireTyped(ComboBox<String> combo, String labelKey,
+                                     List<String> errors) {
+        boolean missing = isBlank(combo.getValue());
+        markField(combo.getEditor(), missing);
+        if (missing) {
+            errors.add(I18n.get("error.field.required", I18n.get(labelKey)));
+        }
     }
 
     private List<String> validatePort() {
@@ -649,6 +684,10 @@ public class ServerFormController {
 
     private static boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private static String trimmed(String value) {
+        return value == null ? null : value.trim();
     }
 
     /**

@@ -66,6 +66,10 @@ public final class CoreSettings {
 
     private static final int REALITY_KEY_BYTES = 32;
 
+    /** A WireGuard key, as {@code wg genkey} writes it: 32 bytes in padded base64. */
+    private static final int WIREGUARD_KEY_BYTES = 32;
+    private static final int WIREGUARD_KEY_CHARS = 44;
+
     /** The protocols whose servers carry a V2Ray transport block. */
     private static final Set<Protocol> TRANSPORT_PROTOCOLS =
             Set.of(Protocol.VLESS, Protocol.VMESS, Protocol.TROJAN);
@@ -330,8 +334,9 @@ public final class CoreSettings {
      * it), a VLESS flow other than Vision, an unknown uTLS fingerprint, a
      * REALITY key or short ID the core cannot decode, the QUIC transport
      * without TLS, an unknown Shadowsocks cipher, a Shadowsocks 2022 key of
-     * the wrong length, or a SIP003 plugin or plugin mode the core does not
-     * have. A setting the spelling methods correct is not a refusal.
+     * the wrong length, a SIP003 plugin or plugin mode the core does not
+     * have, or a WireGuard key it cannot decode or a WireGuard server with no
+     * local address. A setting the spelling methods correct is not a refusal.
      *
      * @param server the server to check
      * @return the refusal, or empty when the core accepts the server
@@ -371,7 +376,51 @@ public final class CoreSettings {
         if (server.getProtocol() == Protocol.HYSTERIA2) {
             return hysteria2Refusal(server);
         }
+        if (server.getProtocol() == Protocol.WIREGUARD) {
+            return wireguardRefusal(server);
+        }
         return Optional.empty();
+    }
+
+    /**
+     * Why the core would not start a WireGuard server: a private or peer key
+     * that is not 32 bytes in padded standard base64, or no local address.
+     *
+     * <p>None of them was refused. A key the core cannot decode fails its
+     * check, but a missing peer key or one of the wrong length passes it, and
+     * the core then stops at start printing the interface's settings, the
+     * private key among them, which the app log kept. A server with no local
+     * address starts and carries nothing.</p>
+     */
+    private static Optional<Refusal> wireguardRefusal(ServerConfig server) {
+        if (!isWireguardKey(server.getUuid())) {
+            // "decode private key: illegal base64 data at input byte 11"
+            return refused("WireGuard private key", "refusal.wireguard.private.key");
+        }
+        if (!isWireguardKey(server.getEncryption())) {
+            // "failed to get peer by public key: hex string does not fit the slice"
+            return refused("WireGuard peer key", "refusal.wireguard.peer.key");
+        }
+        if (server.getFlow() == null || server.getFlow().isBlank()) {
+            return refused("WireGuard local address", "refusal.wireguard.address");
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Whether {@code key} is a WireGuard key the core decodes. It reads the
+     * standard alphabet and requires the padding, which Java's decoder does
+     * not, so the length is checked first.
+     */
+    private static boolean isWireguardKey(String key) {
+        if (key == null || key.length() != WIREGUARD_KEY_CHARS) {
+            return false;
+        }
+        try {
+            return Base64.getDecoder().decode(key).length == WIREGUARD_KEY_BYTES;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     private static Optional<Refusal> hysteria2Refusal(ServerConfig server) {

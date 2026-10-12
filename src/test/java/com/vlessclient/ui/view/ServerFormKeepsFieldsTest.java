@@ -198,9 +198,14 @@ public class ServerFormKeepsFieldsTest extends ApplicationTest {
                 .tls("tokyo.example")
                 .build();
 
+        // With the peer key and the address a WireGuard server cannot do
+        // without: saved without them, it stopped the core at start.
         edit(server, () -> {
             combo("#protocolCombo").setValue(Protocol.WIREGUARD);
             text("#uuidField", "aGVsbG8gd29ybGQgaGVsbG8gd29ybGQgaGVsbG8gd28=");
+            this.<String>combo("#encryptionCombo").getEditor()
+                    .setText("cGVlciBwdWJsaWMga2V5IHBlZXIgcHVibGljIGtleSA=");
+            this.<String>combo("#flowCombo").getEditor().setText("172.16.0.2");
         });
 
         assertThat(saved.get().getTls().getServerName())

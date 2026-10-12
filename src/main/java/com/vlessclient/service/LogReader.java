@@ -34,6 +34,13 @@ public class LogReader {
     /** The escape character every ANSI sequence starts with. */
     private static final char ESC = 0x1B;
 
+    /**
+     * A WireGuard key the core prints in hex: when WireGuard fails to set up,
+     * it prints the interface's whole configuration, one setting per line.
+     */
+    private static final Pattern WIREGUARD_KEY =
+            Pattern.compile("(?i)\\b(private_key|preshared_key)=[0-9a-f]+");
+
     private final InputStream inputStream;
     private final ObservableList<String> logLines;
     private final int maxLines;
@@ -112,7 +119,7 @@ public class LogReader {
             // lower-cased every line of the session to find a line long past.
             boolean startedSeen = false;
             while ((line = reader.readLine()) != null) {
-                String logLine = stripAnsi(line);
+                String logLine = withoutKeys(stripAnsi(line));
                 handOver(logLine);
 
                 if (!startedSeen && isStartedMessage(logLine)) {
@@ -137,6 +144,24 @@ public class LogReader {
             return line;
         }
         return ANSI_ESCAPE.matcher(line).replaceAll("");
+    }
+
+    /**
+     * Removes the WireGuard keys from a line of the core's output. A WireGuard
+     * server the core could not set up, one saved without its peer's key for
+     * one, stopped it with the interface's configuration printed, the private
+     * key with it; from this list it went into the Logs view, the app log's
+     * record of why the core stopped, the saved log, the diagnostics bundle and
+     * the log agents read over MCP. Taken out here, before any of them.
+     *
+     * @param line a line of the core's output, or null
+     * @return the line with every WireGuard key replaced
+     */
+    static String withoutKeys(String line) {
+        if (line == null || line.indexOf('=') < 0) {
+            return line;
+        }
+        return WIREGUARD_KEY.matcher(line).replaceAll("$1=" + Redact.REDACTED);
     }
 
     /** Queues a line for the list, and the FX task that takes it unless one is queued. */
