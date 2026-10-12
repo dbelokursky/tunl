@@ -111,6 +111,81 @@ class SingleInstanceTest {
                 .isEqualTo("rw-------");
     }
 
+    /**
+     * The running copy let go of the directory from a shutdown hook, while
+     * its other hooks still stopped the core and wrote the traffic history:
+     * a launch right after a SIGTERM took the directory, loaded the files
+     * and then had its state overwritten by the old copy's last writes. The
+     * lock now stays until the process has ended.
+     */
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs({
+        org.junit.jupiter.api.condition.OS.MAC, org.junit.jupiter.api.condition.OS.LINUX})
+    void aCopyBeingStoppedHoldsTheDirectoryUntilItsProcessEnds() throws Exception {
+        Process running = new ProcessBuilder(probeCommand(dir, "hold"))
+                .redirectErrorStream(true).start();
+        try {
+            try (var out = new java.io.BufferedReader(new java.io.InputStreamReader(
+                    running.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                do {
+                    line = out.readLine();
+                } while (line != null && !line.strip().equals("ready"));
+                assertThat(line).as("the running copy took the directory").isNotNull();
+
+                running.destroy();
+                Thread.sleep(1_000);
+
+                assertThat(running.isAlive()).as("still in its shutdown hooks").isTrue();
+                assertThat(SingleInstance.claim(dir))
+                        .as("a launch while the old copy still writes")
+                        .isEqualTo(SingleInstance.Claim.HELD_ELSEWHERE);
+            }
+            assertThat(running.waitFor(30, TimeUnit.SECONDS)).isTrue();
+            assertThat(SingleInstance.claim(dir)).as("once it has gone")
+                    .isEqualTo(SingleInstance.Claim.CLAIMED);
+        } finally {
+            running.destroyForcibly();
+        }
+    }
+
+    /**
+     * A copy that is quitting stops answering, and its directory frees once
+     * its process ends. A launch then signalled nobody, or a copy that never
+     * showed the window, and left: a Quit from the tray followed by a launch
+     * left no Tunl running. The launch now waits for the directory.
+     */
+    @Test
+    void aLaunchWhileTheRunningCopyQuitsStartsOnceItHasGone() throws Exception {
+        SingleInstance quitting = SingleInstance.acquire(dir).orElseThrow();
+        quitting.stopListening();
+        assertThat(SingleInstance.signalRunning(dir)).as("a quitting copy answers no one")
+                .isFalse();
+        Thread.startVirtualThread(() -> {
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            quitting.close();
+        });
+
+        assertThat(SingleInstance.claimOrHandOver(dir, null, java.time.Duration.ofSeconds(10)))
+                .isEqualTo(SingleInstance.Claim.CLAIMED);
+    }
+
+    /** A copy that answers keeps the launch's request, and the launch leaves at once. */
+    @Test
+    void aLaunchHandsItselfToACopyThatAnswers() throws Exception {
+        SingleInstance running = SingleInstance.acquire(dir).orElseThrow();
+        CountDownLatch shown = new CountDownLatch(1);
+        running.onShowRequest(shown::countDown);
+
+        assertThat(SingleInstance.claimOrHandOver(dir, null, java.time.Duration.ofSeconds(10)))
+                .isEqualTo(SingleInstance.Claim.HELD_ELSEWHERE);
+        assertThat(shown.await(5, TimeUnit.SECONDS)).isTrue();
+    }
+
     @Test
     void withNoCopyRunningASignalReachesNobody() {
         assertThat(SingleInstance.signalRunning(dir)).isFalse();
@@ -118,17 +193,7 @@ class SingleInstanceTest {
 
     /** Starts a real second JVM, as a second launch of the app would be. */
     private static String launchSecondCopy(Path dataDir) throws Exception {
-        List<String> command = new ArrayList<>();
-        command.add(ProcessHandle.current().info().command().orElse("java"));
-        // The test JVM's own redirections (data, logs, core install), so the
-        // second copy never touches the developer's real profile.
-        System.getProperties().stringPropertyNames().stream()
-                .filter(name -> name.startsWith("vless."))
-                .forEach(name -> command.add("-D" + name + "=" + System.getProperty(name)));
-        command.add("-cp");
-        command.add(System.getProperty("java.class.path"));
-        command.add(SingleInstanceProbe.class.getName());
-        command.add(dataDir.toString());
+        List<String> command = probeCommand(dataDir);
         Path output = Files.createTempFile("single-instance-probe-", ".log");
         try {
             Process process = new ProcessBuilder(command)
@@ -141,6 +206,23 @@ class SingleInstanceTest {
         } finally {
             Files.deleteIfExists(output);
         }
+    }
+
+    /** The command line of a probe JVM working in {@code dataDir}. */
+    private static List<String> probeCommand(Path dataDir, String... args) {
+        List<String> command = new ArrayList<>();
+        command.add(ProcessHandle.current().info().command().orElse("java"));
+        // The test JVM's own redirections (data, logs, core install), so the
+        // second copy never touches the developer's real profile.
+        System.getProperties().stringPropertyNames().stream()
+                .filter(name -> name.startsWith("vless."))
+                .forEach(name -> command.add("-D" + name + "=" + System.getProperty(name)));
+        command.add("-cp");
+        command.add(System.getProperty("java.class.path"));
+        command.add(SingleInstanceProbe.class.getName());
+        command.add(dataDir.toString());
+        command.addAll(List.of(args));
+        return command;
     }
 
     /**

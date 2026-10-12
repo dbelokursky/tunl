@@ -89,7 +89,11 @@ public class ConnectionService {
     public enum Outcome {
         /** The core was launched. */
         STARTED,
-        /** The running core selected a different server without restarting. */
+        /**
+         * The running core took the pick without restarting: its selector
+         * switched to the server, or the automatic selection, which a pick
+         * does not change, went on as it was.
+         */
         SWITCHED,
         /** No core is installed yet, so there is nothing to launch. */
         NO_CORE,
@@ -401,6 +405,11 @@ public class ConnectionService {
             networkWatch.scheduleWithFixedDelay(this::checkNetworkQuietly,
                     period, period, TimeUnit.MILLISECONDS);
         }
+    }
+
+    /** Whether the network watch runs; for a test. */
+    synchronized boolean watchesNetwork() {
+        return networkWatch != null;
     }
 
     private synchronized void stopWatchingNetwork() {
@@ -882,27 +891,45 @@ public class ConnectionService {
                 return new ConnectAttempt(Outcome.NO_ACTIVE_SERVER, null);
             }
             AppSettings settings = configStore.getSettings();
-            ProxyMode mode = requestedMode != null ? requestedMode : settings.getProxyMode();
+            // The saved mode, which a Connect click starts in. The mode an
+            // agent's connect over MCP named stayed in requestedMode, so every
+            // later pick restarted in it however the mode was changed since.
+            ProxyMode mode = settings.getProxyMode();
             Run current = run;
-            if (isRunning() && current != null && current.mode() == mode
-                    && current.selector().accepts(generatedNow(
-                            candidates, active, settings, current.leftOut(), current.host()))
-                    && current.selector().select(OutboundTags.server(active))) {
-                if (!recovery.isWanted(request)) {
-                    return new ConnectAttempt(Outcome.CANCELLED, active);
+            if (isRunning() && current != null && current.mode() == mode) {
+                LiveSelector live = current.selector();
+                String generated = generatedNow(
+                        candidates, active, settings, current.leftOut(), current.host());
+                if (live.keepsAnyPick(generated)) {
+                    // The automatic selection holds every server whichever is
+                    // picked, so the pick changes nothing the core runs. It was
+                    // restarted all the same: every connection dropped, the TUN
+                    // device went down and came back, and on Windows each click
+                    // raised a UAC prompt.
+                    if (!recovery.isWanted(request)) {
+                        return new ConnectAttempt(Outcome.CANCELLED, active);
+                    }
+                    recovery.keptUp(request);
+                    appliedServerId = active.getId();
+                    return new ConnectAttempt(Outcome.SWITCHED, active);
                 }
-                // The core kept running, so no state change will tell recovery.
-                recovery.keptUp(request);
-                appliedServerId = active.getId();
-                // Nor tell the engine that its log so far was another server's.
-                engine.forgetRealityRefusal();
-                return new ConnectAttempt(Outcome.SWITCHED, active);
+                if (live.accepts(generated) && live.select(OutboundTags.server(active))) {
+                    if (!recovery.isWanted(request)) {
+                        return new ConnectAttempt(Outcome.CANCELLED, active);
+                    }
+                    // The core kept running, so no state change will tell recovery.
+                    recovery.keptUp(request);
+                    appliedServerId = active.getId();
+                    // Nor tell the engine that its log so far was another server's.
+                    engine.forgetRealityRefusal();
+                    return new ConnectAttempt(Outcome.SWITCHED, active);
+                }
             }
             if (!recovery.isWanted(request)) {
                 return new ConnectAttempt(Outcome.CANCELLED, active);
             }
             stopCurrent();
-            return connectInternal(requestedMode, () -> recovery.isWanted(request));
+            return connectInternal(mode, () -> recovery.isWanted(request));
         }
     }
 

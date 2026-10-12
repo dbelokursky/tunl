@@ -10,8 +10,10 @@ import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import javafx.application.ColorScheme;
 import javafx.application.Platform;
+import javafx.beans.value.ObservableValue;
 import javafx.scene.Scene;
 import javafx.scene.text.Font;
 import org.slf4j.Logger;
@@ -34,6 +36,11 @@ import org.slf4j.LoggerFactory;
  * macOS appearance changes on the JavaFX runtime this app bundles (its
  * listener never fires and its initial value is unreliable). The default, by
  * contrast, always reflects the current setting.</p>
+ *
+ * <p>Elsewhere {@code "auto"} follows that JavaFX property, which Windows and
+ * Linux desktops do report, and its changes. It read the macOS default there
+ * too, which is never dark off macOS, so "Auto" was always light and looked
+ * the same as "Light" on a dark Windows or GNOME desktop.</p>
  *
  * <p>The native title bar is not the stylesheet's to paint: JavaFX paints a
  * window's frame from its scene's color scheme, and a scene given none takes
@@ -76,8 +83,16 @@ public class ThemeManager {
     /** Last OS appearance observed by the watcher (true = dark, null = unknown). */
     private volatile Boolean lastSystemDark;
 
+    /** Where {@code "auto"} finds the OS's color scheme; it gives null on macOS. */
+    private final Supplier<ObservableValue<ColorScheme>> schemeSource;
+
+    /** The OS's color scheme, once asked for on the FX thread; null on macOS. */
+    private ObservableValue<ColorScheme> osScheme;
+    private boolean osSchemeAsked;
+
     /** A manager that follows the OS's text size. */
     public ThemeManager() {
+        this.schemeSource = ThemeManager::platformScheme;
     }
 
     /**
@@ -87,6 +102,19 @@ public class ThemeManager {
      */
     ThemeManager(double textScale) {
         this.textScale = textScale;
+        this.schemeSource = ThemeManager::platformScheme;
+    }
+
+    /**
+     * A manager at a fixed text size that reads the OS's color scheme from
+     * {@code scheme}, for tests.
+     *
+     * @param textScale the factor on base.css's font sizes
+     * @param scheme    the OS's color scheme, changed on the FX thread
+     */
+    ThemeManager(double textScale, ObservableValue<ColorScheme> scheme) {
+        this.textScale = textScale;
+        this.schemeSource = () -> scheme;
     }
 
     /**
@@ -120,10 +148,13 @@ public class ThemeManager {
      */
     public void applyTheme(Scene scene) {
         this.scene = scene;
-        boolean osDark = isSystemDarkMode();
+        boolean osDark = systemDark();
         lastSystemDark = osDark;
         setStylesheet(resolveDark(osDark));
-        ensureWatcher();
+        if (osScheme() == null) {
+            // macOS, whose appearance changes the JavaFX scheme misses.
+            ensureWatcher();
+        }
     }
 
     /**
@@ -161,7 +192,7 @@ public class ThemeManager {
      *     alone would have no rules at all
      */
     public List<String> currentStylesheets() {
-        return stylesheetsFor(resolveDark(isSystemDarkMode()));
+        return stylesheetsFor(darkNow());
     }
 
     /**
@@ -171,11 +202,62 @@ public class ThemeManager {
      * @return the scheme JavaFX is to paint the window's title bar in
      */
     public ColorScheme currentColorScheme() {
-        return colorSchemeFor(resolveDark(isSystemDarkMode()));
+        return colorSchemeFor(darkNow());
     }
 
     private boolean isAutoMode() {
         return "auto".equals(currentTheme);
+    }
+
+    /** Whether the dark theme applies now; the OS is asked in {@code "auto"} mode only. */
+    private boolean darkNow() {
+        return resolveDark(isAutoMode() && systemDark());
+    }
+
+    /**
+     * Whether the OS is in dark mode: the color scheme JavaFX reports for it,
+     * or on macOS the appearance default.
+     */
+    private boolean systemDark() {
+        ObservableValue<ColorScheme> scheme = osScheme();
+        return scheme != null ? scheme.getValue() == ColorScheme.DARK : isSystemDarkMode();
+    }
+
+    /**
+     * The OS's color scheme where JavaFX reports it, asked for once and then
+     * followed: a change re-applies {@code "auto"}. On the FX thread.
+     */
+    private ObservableValue<ColorScheme> osScheme() {
+        if (!osSchemeAsked) {
+            osSchemeAsked = true;
+            osScheme = schemeSource.get();
+            if (osScheme != null) {
+                osScheme.addListener((obs, old, now) -> followSystem(now == ColorScheme.DARK));
+            }
+        }
+        return osScheme;
+    }
+
+    /** The scheme JavaFX reports for the OS, or null on macOS or with no toolkit running. */
+    private static ObservableValue<ColorScheme> platformScheme() {
+        if (isMac()) {
+            return null;
+        }
+        try {
+            return Platform.getPreferences().colorSchemeProperty();
+        } catch (RuntimeException toolkitNotRunning) {
+            return null;
+        }
+    }
+
+    /** The OS changed its scheme; {@code "auto"} follows. On the FX thread. */
+    private void followSystem(boolean osDark) {
+        lastSystemDark = osDark;
+        if (isAutoMode()) {
+            log.info("System appearance changed to {} — updating auto theme",
+                    osDark ? "dark" : "light");
+            setStylesheet(osDark);
+        }
     }
 
     /**

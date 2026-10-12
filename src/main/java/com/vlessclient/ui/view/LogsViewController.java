@@ -10,6 +10,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -631,15 +632,41 @@ public class LogsViewController {
         if (file == null) {
             return;
         }
+        saveDiagnostics(bundle, file.toPath(), owner);
+    }
 
-        try {
-            bundle.writeTo(file.toPath());
-        } catch (IOException | RuntimeException e) {
-            log.error("Failed to write the diagnostics bundle to {}", file, e);
+    /**
+     * Writes {@code bundle} to {@code file} on a thread of its own and says
+     * how it went. Generating its configuration asks the host (on Linux a
+     * gsettings process, which may take up to 30 s) and the log tail reads up
+     * to 10 MB: written on the FX thread, the window froze until it was done.
+     * Package-private for a test.
+     */
+    void saveDiagnostics(DiagnosticsBundle bundle, Path file, Window owner) {
+        // One write at a time, into a file the next would replace under it.
+        diagnosticsButton.setDisable(true);
+        Thread.startVirtualThread(() -> {
+            Exception failure = null;
+            try {
+                bundle.writeTo(file);
+            } catch (IOException | RuntimeException e) {
+                failure = e;
+            }
+            Exception problem = failure;
+            Platform.runLater(() -> {
+                diagnosticsButton.setDisable(false);
+                reportDiagnostics(file, owner, problem);
+            });
+        });
+    }
+
+    private void reportDiagnostics(Path file, Window owner, Exception problem) {
+        if (problem != null) {
+            log.error("Failed to write the diagnostics bundle to {}", file, problem);
             Alert alert = Dialogs.alert(Alert.AlertType.ERROR);
             alert.setTitle(I18n.get("dialog.error"));
             alert.setHeaderText(I18n.get("logs.diagnostics.failed"));
-            alert.setContentText(e.getMessage());
+            alert.setContentText(problem.getMessage());
             alert.initOwner(owner);
             alert.showAndWait();
             return;
@@ -647,7 +674,7 @@ public class LogsViewController {
         Alert done = Dialogs.alert(Alert.AlertType.INFORMATION);
         done.setTitle(I18n.get("logs.diagnostics.done.title"));
         done.setHeaderText(I18n.get("logs.diagnostics.done.header"));
-        done.setContentText(I18n.get("logs.diagnostics.done.content", file.getName()));
+        done.setContentText(I18n.get("logs.diagnostics.done.content", file.getFileName()));
         done.initOwner(owner);
         done.showAndWait();
     }

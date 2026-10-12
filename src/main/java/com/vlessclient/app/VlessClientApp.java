@@ -21,6 +21,7 @@ import com.vlessclient.ui.view.SingBoxInstallerDialog;
 import java.awt.Desktop;
 import java.awt.Taskbar;
 import java.awt.Toolkit;
+import java.awt.desktop.AppReopenedListener;
 import java.awt.desktop.QuitStrategy;
 import java.io.IOException;
 import java.io.InputStream;
@@ -214,8 +215,11 @@ public class VlessClientApp extends Application {
             }
             Desktop desktop = Desktop.getDesktop();
             if (desktop.isSupported(Desktop.Action.APP_SUDDEN_TERMINATION)) {
-                desktop.enableSuddenTermination();
-                log.debug("Enabled sudden termination");
+                // Enabled, it told macOS the app may be killed at logout or
+                // shutdown with no quit event: no stop, no state saved, and
+                // the core left to the next launch's cleanup.
+                desktop.disableSuddenTermination();
+                log.debug("Disabled sudden termination");
             }
             if (desktop.isSupported(Desktop.Action.APP_QUIT_STRATEGY)) {
                 desktop.setQuitStrategy(QuitStrategy.CLOSE_ALL_WINDOWS);
@@ -365,6 +369,7 @@ public class VlessClientApp extends Application {
         // another one (SingleInstance); the window may be hidden in the tray.
         SingleInstance.current().ifPresent(instance -> instance.onShowRequest(
                 () -> Platform.runLater(() -> bringForward(primaryStage))));
+        showOnReopen(() -> Platform.runLater(() -> bringForward(primaryStage)));
 
         installTrayIcon(primaryStage);
 
@@ -386,6 +391,33 @@ public class VlessClientApp extends Application {
         }
 
         offerToReplaceLegacySudoersRule(primaryStage);
+    }
+
+    /**
+     * Shows the window when macOS asks the running app to reopen: a click on
+     * its Dock icon, or opening it again from Finder or Spotlight, which
+     * starts no second process. AWT, the delegate since it started first,
+     * had no listener for the event, so a window closed to the menu bar
+     * stayed hidden. A no-op where AWT has no such event.
+     */
+    private static void showOnReopen(Runnable show) {
+        try {
+            if (Desktop.isDesktopSupported()
+                    && Desktop.getDesktop().isSupported(Desktop.Action.APP_EVENT_REOPENED)) {
+                Desktop.getDesktop().addAppEventListener(reopenListener(show));
+            }
+        } catch (RuntimeException | LinkageError e) {
+            log.debug("No reopen events here: {}", e.getMessage());
+        }
+    }
+
+    /** What a reopen event does: {@code show}. Package-private for a test. */
+    static AppReopenedListener reopenListener(Runnable show) {
+        return event -> show.run();
+    }
+
+    private static void stopAnsweringLaunches() {
+        SingleInstance.current().ifPresent(SingleInstance::stopListening);
     }
 
     /** Shows the window over the others, from the tray or the Dock if need be. */
@@ -505,6 +537,10 @@ public class VlessClientApp extends Application {
                 // teardown, which can use its whole timeout on macOS: an
                 // update relay starts the new process as soon as this one
                 // exits, and the new one needs the port.
+                // First: a launch answered while this copy quits was shown
+                // nothing, by a window on its way out, and left; unanswered,
+                // it waits for this process to end and starts in its place.
+                AppSteps.step("single instance", VlessClientApp::stopAnsweringLaunches),
                 AppSteps.step("MCP server", ServiceLocator::stopMcpServer),
                 AppSteps.step("tray icon", this::removeTrayIcon),
                 AppSteps.step("services", this::shutdown));
@@ -633,6 +669,8 @@ public class VlessClientApp extends Application {
 
     private void shutdown() {
         log.info("Shutting down Tunl");
+        // The Cmd+Q path comes here without the steps above.
+        stopAnsweringLaunches();
         try {
             ServiceLocator.shutdown();
         } catch (Exception e) {

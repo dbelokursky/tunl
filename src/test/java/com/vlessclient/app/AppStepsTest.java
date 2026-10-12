@@ -89,6 +89,8 @@ class AppStepsTest {
                 .isNotNegative()
                 .isLessThan(names.indexOf("tray icon"));
         assertThat(names).last().isEqualTo("services");
+        assertThat(names).as("a launch is no longer answered while the app quits")
+                .first().isEqualTo("single instance");
         assertThat(new VlessClientApp().shutdownSteps())
                 .as("nothing may keep the app from quitting")
                 .noneMatch(AppSteps.Step::required);

@@ -2,6 +2,9 @@ package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.service.ConfigStore;
+import com.vlessclient.service.DiagnosticsBundle;
+import com.vlessclient.service.SingBoxConfigGenerator;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.testing.Await;
 import java.nio.file.Path;
@@ -49,6 +52,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class LogsViewTest extends ApplicationTest {
 
     private Stage stage;
+    private LogsViewController controller;
     /** The engine this test's view shows the log of. */
     private SingBoxEngine engine;
     private SingBoxEngine previousEngine;
@@ -65,6 +69,7 @@ public class LogsViewTest extends ApplicationTest {
         ServiceLocator.register(SingBoxEngine.class, engine);
         FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/LogsView.fxml"));
         Parent root = loader.load();
+        controller = loader.getController();
         stage.setScene(new Scene(root, 800, 600));
         stage.show();
         // The primary stage is shared by every test class in the fork. A class
@@ -442,6 +447,42 @@ public class LogsViewTest extends ApplicationTest {
         interact(buttonFor(again, ButtonBar.ButtonData.OK_DONE)::fire);
         WaitForAsyncUtils.waitForFxEvents();
         assertThat(source).isEmpty();
+    }
+
+    /**
+     * Writing the bundle generates the configuration, which asks the host (on
+     * Linux a gsettings process with a 30 s timeout), and reads up to 10 MB of
+     * log. It ran on the FX thread, and the window froze until it was done.
+     */
+    @Test
+    void theDiagnosticsBundleIsWrittenOffTheFxThread() throws Exception {
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        AtomicReference<Boolean> onFxThread = new AtomicReference<>();
+        DiagnosticsBundle bundle = new DiagnosticsBundle(ServiceLocator.get(ConfigStore.class),
+                new SingBoxConfigGenerator(), null) {
+            @Override
+            public void writeTo(Path file) {
+                onFxThread.set(Platform.isFxApplicationThread());
+                try {
+                    release.await(2, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        };
+        Path file = Path.of("target", "logs-view-test-diagnostics.zip");
+
+        interact(() -> controller.saveDiagnostics(bundle, file, stage));
+        Button diagnostics = lookup("#diagnosticsButton").query();
+        boolean heldWhileWriting = diagnostics.isDisabled();
+        release.countDown();
+
+        DialogPane done = awaitDialogAsking(I18n.get("logs.diagnostics.done.header"));
+        assertThat(onFxThread.get()).as("written on the FX thread").isFalse();
+        assertThat(heldWhileWriting).as("a second save waits for the first").isTrue();
+        interact(buttonFor(done, ButtonBar.ButtonData.OK_DONE)::fire);
+        WaitForAsyncUtils.waitForFxEvents();
+        assertThat(diagnostics.isDisabled()).isFalse();
     }
 
     /**

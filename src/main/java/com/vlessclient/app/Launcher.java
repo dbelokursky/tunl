@@ -2,6 +2,7 @@ package com.vlessclient.app;
 
 import com.vlessclient.platform.PlatformPaths;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Optional;
 
 /**
@@ -17,6 +18,13 @@ import java.util.Optional;
 public final class Launcher {
 
     private static final String APP_NAME = "Tunl";
+
+    /**
+     * How long a launch waits for a copy that holds the data directory and
+     * no longer answers: one that is quitting, whose teardown is given 8 s
+     * before it is halted.
+     */
+    private static final Duration QUITTING_COPY_WAIT = Duration.ofSeconds(15);
 
     private Launcher() {
     }
@@ -44,8 +52,10 @@ public final class Launcher {
         // A tunl:// link Windows or Linux started this copy with goes to the
         // running copy, if there is one, or waits for this copy's window.
         Optional<String> link = DeepLinks.fromArgs(args);
-        if (SingleInstance.claim(dataDir) == SingleInstance.Claim.HELD_ELSEWHERE) {
-            SingleInstance.signalRunning(dataDir, link.orElse(null));
+        // A copy that is quitting answers nobody; the launch waits for it
+        // to go, through its teardown budget, and starts in its place.
+        if (SingleInstance.claimOrHandOver(dataDir, link.orElse(null), QUITTING_COPY_WAIT)
+                == SingleInstance.Claim.HELD_ELSEWHERE) {
             return;
         }
         // Set here rather than with the window: a link a second launch sends

@@ -17,6 +17,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.util.HexFormat;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -55,6 +56,9 @@ final class SingleInstance {
     private static final String SHOW = "show";
     private static final String OPEN = "open";
     private static final int CONNECT_TIMEOUT_MS = 2_000;
+
+    /** How often a launch asks again for a directory a quitting copy still holds. */
+    private static final long HAND_OVER_RETRY_MS = 200;
     private static final int READ_TIMEOUT_MS = 2_000;
 
     /**
@@ -238,17 +242,56 @@ final class SingleInstance {
 
     /** Lets go of the data directory. Safe to call more than once. */
     void close() {
+        stopListening();
+        closeQuietly(lock);
+        closeQuietly(channel);
+        synchronized (SingleInstance.class) {
+            if (current == this) {
+                current = null;
+            }
+        }
+    }
+
+    /**
+     * Stops answering a second launch, and keeps the data directory. Safe to
+     * call more than once.
+     */
+    void stopListening() {
         closeQuietly(server);
         try {
             Files.deleteIfExists(portFile);
         } catch (IOException e) {
             log.debug("Could not remove {}: {}", portFile, e.getMessage());
         }
-        closeQuietly(lock);
-        closeQuietly(channel);
-        synchronized (SingleInstance.class) {
-            if (current == this) {
-                current = null;
+    }
+
+    /**
+     * Takes the data directory for this launch, or hands the launch to the
+     * copy of the app that holds it.
+     *
+     * @param dataDir  the data directory
+     * @param link     a link in Tunl's scheme to hand over, or null
+     * @param patience how long to wait for a copy that holds the directory
+     *                 and no longer answers
+     * @return {@link Claim#HELD_ELSEWHERE} when the launch is to leave
+     */
+    static Claim claimOrHandOver(Path dataDir, String link, Duration patience) {
+        // A copy that is quitting has stopped answering and holds the
+        // directory until its process ends. The launch used to signal it,
+        // find nobody, and leave: a Quit from the tray and a launch a moment
+        // later left no Tunl running, and a link clicked then was lost.
+        long deadline = System.nanoTime() + patience.toNanos();
+        while (true) {
+            Claim claim = claim(dataDir);
+            if (claim != Claim.HELD_ELSEWHERE || signalRunning(dataDir, link)
+                    || System.nanoTime() - deadline >= 0) {
+                return claim;
+            }
+            try {
+                Thread.sleep(HAND_OVER_RETRY_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return claim;
             }
         }
     }
@@ -318,10 +361,17 @@ final class SingleInstance {
         return HexFormat.of().formatHex(bytes);
     }
 
+    /**
+     * Stops answering a second launch as the process ends. The directory
+     * itself stays locked until the OS lets go of it with the process: the
+     * hook released it while the app's other hooks still stopped the core
+     * and wrote the traffic history, so a launch right after a SIGTERM
+     * loaded files the old copy then wrote over.
+     */
     private static void releaseOnExit(SingleInstance instance) {
         try {
             Runtime.getRuntime().addShutdownHook(
-                    new Thread(instance::close, "tunl-single-instance-release"));
+                    new Thread(instance::stopListening, "tunl-single-instance-release"));
         } catch (IllegalStateException | SecurityException e) {
             log.debug("The data directory is released by the OS at exit instead: {}",
                     e.getMessage());
