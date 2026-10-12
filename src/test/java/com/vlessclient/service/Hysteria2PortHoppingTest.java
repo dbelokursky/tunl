@@ -75,6 +75,42 @@ class Hysteria2PortHoppingTest {
     }
 
     /**
+     * The ports were looked for after the last @ of the whole link, which can
+     * stand in the query, inside the obfs-password. What followed it was read
+     * as the host and its ports: x@y:1-2 made the server hop over ports 1 and
+     * 2, and the password was rewritten to x@y:1; p@ss:word-1 refused the
+     * whole link as a malformed port list.
+     */
+    @Test
+    void anAtSignInTheQueryIsNotWhereTheHostStarts() {
+        ServerConfig hopping = parser.parse("hy2://pass@host.example:443/"
+                + "?obfs=salamander&obfs-password=x@y:1-2#n");
+
+        assertThat(hopping.getAddress()).isEqualTo("host.example");
+        assertThat(hopping.getPort()).isEqualTo(443);
+        assertThat(hopping.getServerPorts()).isNull();
+        assertThat(hopping.getFlow()).isEqualTo("x@y:1-2");
+
+        ServerConfig malformed = parser.parse("hy2://pass@host.example:443"
+                + "?obfs=salamander&obfs-password=p@ss:word-1#n");
+
+        assertThat(malformed.getPort()).isEqualTo(443);
+        assertThat(malformed.getServerPorts()).isNull();
+        assertThat(malformed.getFlow()).isEqualTo("p@ss:word-1");
+    }
+
+    /** Hopping still reads its list when the query holds an @ as well. */
+    @Test
+    void theListHopsBesideAnAtSignInTheQuery() {
+        ServerConfig server = parser.parse("hysteria2://secret@hy.example:443,20000-50000/"
+                + "?obfs=salamander&obfs-password=x@y:1-2#Hop");
+
+        assertThat(server.getPort()).isEqualTo(443);
+        assertThat(server.getServerPorts()).isEqualTo("443,20000-50000");
+        assertThat(server.getFlow()).isEqualTo("x@y:1-2");
+    }
+
+    /**
      * The message names the problem but not the list: where a link has no
      * host, or an @ inside its password, what stands where the ports go is
      * the password, and the message reaches the log and the import report.

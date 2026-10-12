@@ -508,12 +508,25 @@ public class ConnectionService {
 
     private ConnectAttempt connectInternal(ProxyMode modeOverride, BooleanSupplier allowed)
             throws IOException {
+        boolean started = false;
         try {
-            return startCore(modeOverride, allowed);
+            ConnectAttempt attempt = startCore(modeOverride, allowed);
+            started = attempt.outcome() == Outcome.STARTED;
+            return attempt;
         } finally {
             // A connect that waited for an earlier tunnel showed Connecting,
             // and one that failed after it without a start left it showing.
             engine.connectEnded();
+            if (!started && !engine.isRunning()) {
+                // The ports the attempt set for its run (AppSettings.listenOn)
+                // when no core came to listen on them: refused, failed or
+                // cancelled. Only a disconnect forgot them, so until the next
+                // connect or disconnect what reads the run's ports (the
+                // status an agent asks for, the port the Dashboard tells
+                // apps to use, the app's own requests) read these, and not
+                // the ones the user chose meanwhile.
+                configStore.getSettings().endRun();
+            }
         }
     }
 

@@ -16,6 +16,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class SubscriptionServiceTest {
 
+    /** A self-signed Hysteria2 server as one-click installs hand it out, before its pin. */
+    private static final String HY2_SELF_SIGNED =
+            "hy2://password@203.0.113.7:443/?sni=bing.com&insecure=1";
+
+    private static final String HY2_PIN =
+            "dc19d6633637ad39aa5aee234d7eb11c49e217e9eaef988cacb6d83442f9cab7";
+
     @TempDir
     Path tempDir;
 
@@ -106,6 +113,110 @@ class SubscriptionServiceTest {
         assertThat(parsed.servers()).hasSize(1);
         assertThat(parsed.skipped()).as("not an unreadable server either").isZero();
         assertThat(parsed.unsupportedSchemes()).isEmpty();
+    }
+
+    /**
+     * The mark can stand inside the base64 too, when a provider encodes a
+     * file saved with one. Only the body lost it, so the decoded list started
+     * with it, and its first line, a comment, was no longer one: it counted
+     * as an unreadable line, and every refresh was partial, recorded as an
+     * error and removed no withdrawn server.
+     */
+    @Test
+    void parseContent_aByteOrderMarkInsideTheBase64() {
+        String list = "﻿#profile-title: Provider\n"
+                + "vless://uuid1@server1.com:443?security=tls&type=tcp#Server1\n";
+        String body = Base64.getEncoder().encodeToString(list.getBytes(StandardCharsets.UTF_8));
+
+        SubscriptionService.ParsedContent parsed = service.parseContent(body);
+
+        assertThat(parsed.servers()).extracting(ServerConfig::getAddress)
+                .containsExactly("server1.com");
+        assertThat(parsed.skipped()).as("the comment is no unreadable server").isZero();
+    }
+
+    /**
+     * A web address on a line of its own, as a portal's page puts its sign-in
+     * link or a list ends with its support page, has a scheme like any link,
+     * so it was left out as an unsupported protocol named "https": the
+     * portal's answer read as the provider's links asking for what the app
+     * lacks, and a working list showed a link left out on its row.
+     */
+    @Test
+    void refreshSubscription_aPortalPageWithABareAddressIsNoLinks() {
+        service.setFetchedContent("vless://uuid1@server1.com:443?security=tls&type=tcp#Server1\n");
+        service.addSubscription("Sub", "https://example.com/sub");
+        Subscription sub = service.getSubscriptions().get(0);
+
+        service.setFetchedContent(
+                "Please sign in to the Wi-Fi network\nhttps://portal.example/login\n");
+        service.refreshSubscription(sub.getId());
+
+        assertThat(sub.getLastErrorKey()).isEqualTo("subscriptions.error.no.links");
+        assertThat(sub.getLeftOutLinks()).isZero();
+        assertThat(configStore.getServers()).as("nothing is removed").hasSize(1);
+    }
+
+    @Test
+    void parseContent_aBareWebAddressIsNeitherLeftOutNorUnreadable() {
+        SubscriptionService.ParsedContent parsed = service.parseContent(
+                "vless://uuid1@server1.com:443?security=tls&type=tcp#Good\n"
+                        + "https://t.me/provider\n"
+                        + "HTTP://provider.example/help\n");
+
+        assertThat(parsed.servers()).hasSize(1);
+        assertThat(parsed.skipped()).isZero();
+        assertThat(parsed.unsupportedSchemes()).isEmpty();
+    }
+
+    /**
+     * A Hysteria2 server stored from an {@code insecure=1&pinSHA256=} link
+     * before such links were refused: the pin was dropped, so what was stored
+     * is what the same link gives without its pin, verification off. The
+     * refusal is a link left out, not an unreadable line, so the next refresh
+     * of a list that also holds servers this client runs removes it like a
+     * withdrawn server, and the row names what it left out. This changes what
+     * users of such servers see, and the release notes say so.
+     */
+    @Test
+    void refreshSubscription_aServerStoredFromAPinnedLinkIsRemovedAndNamed() {
+        String working = "vless://uuid1@server1.com:443?security=tls&type=tcp#Server1\n";
+        service.setFetchedContent(working + HY2_SELF_SIGNED + "#Self-signed\n");
+        service.addSubscription("Sub", "https://example.com/sub");
+        Subscription sub = service.getSubscriptions().get(0);
+        assertThat(configStore.getServers()).as("as the pin-dropping parser stored it")
+                .extracting(server -> server.getTls().isAllowInsecure())
+                .containsExactlyInAnyOrder(false, true);
+
+        service.setFetchedContent(working + HY2_SELF_SIGNED + "&pinSHA256=" + HY2_PIN
+                + "#Self-signed\n");
+        service.refreshSubscription(sub.getId());
+
+        assertThat(sub.hasLastError()).as("a refusal is no partial refresh").isFalse();
+        assertThat(sub.getLeftOutLinks()).isEqualTo(1);
+        assertThat(sub.getLeftOutSummary()).isEqualTo("certificate pin");
+        assertThat(configStore.getServers()).extracting(ServerConfig::getAddress)
+                .containsExactly("server1.com");
+    }
+
+    /**
+     * The same server in a list that holds nothing else: like any list of
+     * only links this client cannot run, it is kept, and the row says why the
+     * refresh brought nothing.
+     */
+    @Test
+    void refreshSubscription_aListOfOnlyPinnedLinksKeepsWhatItStored() {
+        service.setFetchedContent(HY2_SELF_SIGNED + "#Self-signed\n");
+        service.addSubscription("Sub", "https://example.com/sub");
+        Subscription sub = service.getSubscriptions().get(0);
+
+        service.setFetchedContent(HY2_SELF_SIGNED + "&pinSHA256=" + HY2_PIN + "#Self-signed\n");
+        service.refreshSubscription(sub.getId());
+
+        assertThat(sub.getLastErrorKey()).isEqualTo("subscriptions.error.unsupported");
+        assertThat(sub.getLastErrorArgs()).containsExactly("certificate pin");
+        assertThat(configStore.getServers()).extracting(ServerConfig::getProtocol)
+                .containsExactly(Protocol.HYSTERIA2);
     }
 
     @Test
