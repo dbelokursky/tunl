@@ -52,7 +52,10 @@ signed and notarized (`SIGNING.md`), the cask installs an unsigned app; its
 The `PKGBUILD` is a `-bin` package: it downloads the release `.deb` for the
 build host's architecture (amd64 or arm64) and unpacks it into `$pkgdir`, so
 Arch users get exactly the artifact the release workflow built — bundled
-runtime and sing-box included. It works locally without any AUR involvement:
+runtime and sing-box included. makepkg runs none of the `.deb`'s maintainer
+scripts, so `package()` also installs what the `.deb`'s post-install script
+would: the menu entry, which registers `tunl://` links, and a `tunl` command
+on `PATH`. It works locally without any AUR involvement:
 download `PKGBUILD` from the release into an empty directory and run
 `makepkg -si`; `makepkg` fetches the `.deb` and checks its SHA-256.
 

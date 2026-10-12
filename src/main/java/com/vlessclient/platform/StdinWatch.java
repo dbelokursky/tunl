@@ -32,15 +32,38 @@ final class StdinWatch {
      * core does not hold it: a background job of a non-interactive shell gets
      * /dev/null as its own stdin.</p>
      *
+     * <p>The wrapper exits with the core's own status, and a signal to it
+     * waits for the core to close. The trap used to end in {@code exit 0}:
+     * every crash, panic and OOM kill reached the app, the log and agents as
+     * "exited with code 0"; and on SIGTERM the wrapper left at once, while
+     * the core it had just told to stop could take seconds more, so the app
+     * took the tunnel for gone and could start another beside it.</p>
+     *
      * @param start the command that runs the core, already shell-quoted
      * @return the wrapper's script, for {@code /bin/sh -c}
      */
     static String around(String start) {
-        return "trap 'kill ${SBPID:-$!} 2>/dev/null; exit 0' EXIT INT TERM; "
+        return SIGNAL_TRAP + "kill ${WATCHER:-} 2>/dev/null; exit 143' INT TERM; "
+                + EXIT_TRAP
                 + start + " & SBPID=$!; "
                 + "exec 3<&0; "
                 + "( while read -r _ <&3; do :; done; kill $SBPID 2>/dev/null ) & WATCHER=$!; "
-                + "wait $SBPID; "
-                + "kill $WATCHER 2>/dev/null";
+                + "wait $SBPID; RC=$?; "
+                + "kill $WATCHER 2>/dev/null; "
+                + "exit $RC";
     }
+
+    /**
+     * The start of a wrapper's INT/TERM trap: stop the core and wait for it
+     * to close. The caller adds its own clean-up and the {@code exit}, which
+     * keeps a signal before the core starts from going on to start it.
+     */
+    static final String SIGNAL_TRAP =
+            "trap 'kill ${SBPID:-$!} 2>/dev/null; wait ${SBPID:-$!} 2>/dev/null; ";
+
+    /**
+     * A wrapper's EXIT trap: the core goes with the shell, whatever ends it.
+     * It sets no status, so the shell's own {@code exit} stands.
+     */
+    static final String EXIT_TRAP = "trap 'kill ${SBPID:-$!} 2>/dev/null' EXIT; ";
 }

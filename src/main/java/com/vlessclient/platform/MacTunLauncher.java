@@ -1,6 +1,7 @@
 package com.vlessclient.platform;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.slf4j.Logger;
@@ -28,6 +29,57 @@ public final class MacTunLauncher implements TunLauncher {
 
     private static final Logger log = LoggerFactory.getLogger(MacTunLauncher.class);
 
+    /** What the launcher asks of the privileged setup; a seam for tests. */
+    interface Privileges {
+
+        /** {@link PrivilegeHelper#isConfigured}. */
+        boolean isConfigured(Path binary);
+
+        /** {@link PrivilegeHelper#configure}. */
+        void configure(Path binary, String prompt) throws IOException;
+
+        /** {@link PrivilegeHelper#usesLauncher}. */
+        boolean usesLauncher();
+    }
+
+    /** Starts a wrapper; a seam for tests. */
+    interface Spawner {
+
+        /** Starts {@code builder}'s command. */
+        Process start(ProcessBuilder builder) throws IOException;
+    }
+
+    private static final Privileges SYSTEM = new Privileges() {
+        @Override
+        public boolean isConfigured(Path binary) {
+            return PrivilegeHelper.isConfigured(binary);
+        }
+
+        @Override
+        public void configure(Path binary, String prompt) throws IOException {
+            PrivilegeHelper.configure(binary, prompt);
+        }
+
+        @Override
+        public boolean usesLauncher() {
+            return PrivilegeHelper.usesLauncher();
+        }
+    };
+
+    private final Privileges privileges;
+    private final Spawner spawner;
+
+    /** The launcher for this Mac. */
+    public MacTunLauncher() {
+        this(SYSTEM, ProcessBuilder::start);
+    }
+
+    /** Test seam: the privileged setup and the way wrappers are started. */
+    MacTunLauncher(Privileges privileges, Spawner spawner) {
+        this.privileges = privileges;
+        this.spawner = spawner;
+    }
+
     @Override
     public Launched launch(Path binary, Path configFile, Prompt prompt) throws IOException {
         // Owner-only and unguessable; the wrapper runs as this user (sudo
@@ -35,31 +87,49 @@ public final class MacTunLauncher implements TunLauncher {
         Path stopSignalFile = StopSignals.newStopSignalFile();
 
         // Try to install the sudoers rule on first run (one password prompt,
-        // ever). If it's already installed this is a fast no-op. A dismissed
-        // dialog is the user cancelling the connect: the every-connect prompt
-        // used to follow it at once, asking again for what was just declined.
-        if (!PrivilegeHelper.isConfigured(binary)) {
+        // ever). A dismissed dialog is the user cancelling the connect: the
+        // every-connect prompt used to follow it at once, asking again for
+        // what was just declined. The check runs sudo -n -l and hashes the
+        // ~45 MB core and its root copy, and it ran twice on every connect,
+        // under the engine's lock; it runs again only after a setup.
+        boolean withoutPrompt = privileges.isConfigured(binary);
+        abandonIfInterrupted();
+        if (!withoutPrompt) {
             try {
-                PrivilegeHelper.configure(binary, prompt.setup());
+                privileges.configure(binary, prompt.setup());
             } catch (ElevationDeclinedException declined) {
                 throw declined;
             } catch (IOException e) {
                 log.warn("Could not install sudoers NOPASSWD rule, "
                         + "falling back to osascript prompt: {}", e.getMessage());
             }
+            abandonIfInterrupted();
+            withoutPrompt = privileges.isConfigured(binary);
+            abandonIfInterrupted();
         }
 
-        boolean withoutPrompt = PrivilegeHelper.isConfigured(binary);
         Process process;
         if (!withoutPrompt) {
             process = startViaOsascriptPrompt(binary, configFile, stopSignalFile,
                     prompt.eachConnect());
-        } else if (PrivilegeHelper.usesLauncher()) {
+        } else if (privileges.usesLauncher()) {
             process = startViaLauncher(binary, configFile);
         } else {
             process = startViaSudoNoPassword(binary, configFile);
         }
         return new Launched(process, stopSignalFile, !withoutPrompt);
+    }
+
+    /**
+     * Gives the start up when its thread was interrupted: the start is being
+     * called off. The sudo check reads an interrupt as "not set up", and the
+     * launch went on to the setup or the every-connect password dialog, which
+     * then came up as the app quit.
+     */
+    private static void abandonIfInterrupted() throws InterruptedIOException {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new InterruptedIOException("the TUN start was called off");
+        }
     }
 
     /**
@@ -99,7 +169,7 @@ public final class MacTunLauncher implements TunLauncher {
         ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", shellCommand);
         pb.directory(SecureFiles.parentDirectory(binary).toFile());
         pb.redirectErrorStream(true);
-        Process process = pb.start();
+        Process process = spawner.start(pb);
         log.info("Started sing-box via the TUN launcher (no password prompt)");
         return process;
     }
@@ -134,7 +204,7 @@ public final class MacTunLauncher implements TunLauncher {
         ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", shellCommand);
         pb.directory(SecureFiles.parentDirectory(binary).toFile());
         pb.redirectErrorStream(true);
-        Process process = pb.start();
+        Process process = spawner.start(pb);
         log.info("Started sing-box via sudo -n (no password prompt)");
         return process;
     }
@@ -174,7 +244,7 @@ public final class MacTunLauncher implements TunLauncher {
                 "osascript", "-e", PrivilegeHelper.adminScript(shellCommand, prompt));
         pb.directory(SecureFiles.parentDirectory(binary).toFile());
         pb.redirectErrorStream(true);
-        Process process = pb.start();
+        Process process = spawner.start(pb);
         log.info("Started sing-box via osascript (password prompt expected)");
         return process;
     }
@@ -204,16 +274,19 @@ public final class MacTunLauncher implements TunLauncher {
         long parentPid = ProcessHandle.current().pid();
         String stopPath = shellQuote(stopSignalFile.toAbsolutePath().toString());
 
+        // Exits with the core's status and waits for the core on a signal;
+        // see StdinWatch#around.
         return String.format(
-                "trap 'kill ${SBPID:-$!} 2>/dev/null; exit 0' EXIT INT TERM; "
+                StdinWatch.SIGNAL_TRAP + "rm -f %s; exit 143' INT TERM; "
+                        + StdinWatch.EXIT_TRAP
                         + "%s & SBPID=$!; "
                         + "while kill -0 $SBPID 2>/dev/null "
                         + "&& kill -0 %d 2>/dev/null "
                         + "&& [ ! -f %s ]; do sleep 0.3; done; "
                         + "kill $SBPID 2>/dev/null; "
-                        + "wait $SBPID 2>/dev/null; "
-                        + "rm -f %s",
-                start, parentPid, stopPath, stopPath);
+                        + "wait $SBPID 2>/dev/null; RC=$?; "
+                        + "rm -f %s; exit $RC",
+                stopPath, start, parentPid, stopPath, stopPath);
     }
 
     /**

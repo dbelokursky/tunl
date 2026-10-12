@@ -44,6 +44,70 @@ class SubscriptionServiceTest {
         assertThat(servers.get(1).getAddress()).isEqualTo("server2.com");
     }
 
+    /**
+     * A list served from a file saved with a byte order mark starts with it,
+     * and trimming the body kept it: the base64 check failed on it, and the
+     * blob was read as one unreadable line. The first refresh imported
+     * nothing, and every later one said the subscription had no links.
+     */
+    @Test
+    void parseContent_aBase64BodySavedWithAByteOrderMark() {
+        String links = "vless://uuid1@server1.com:443?security=tls&type=tcp#Server1\n"
+                + "vless://uuid2@server2.com:443?security=tls&type=tcp#Server2\n";
+        String body = "\uFEFF"
+                + Base64.getEncoder().encodeToString(links.getBytes(StandardCharsets.UTF_8));
+
+        SubscriptionService.ParsedContent parsed = service.parseContent(body);
+
+        assertThat(parsed.servers()).extracting(ServerConfig::getAddress)
+                .containsExactly("server1.com", "server2.com");
+        assertThat(parsed.skipped()).isZero();
+    }
+
+    /**
+     * A captive portal answers the hourly refresh with its login page, whose
+     * lines quote addresses: {@code <html xmlns="http://…">},
+     * {@code <link href="https://…">}. Each was read as a link in a protocol
+     * this app lacks, so the row said the provider's links ask for what the
+     * app does not support, instead of pointing at the portal.
+     */
+    @Test
+    void refreshSubscription_aCaptivePortalPageIsNoLinksNotUnsupportedProtocols() {
+        service.setFetchedContent("vless://uuid1@server1.com:443?security=tls&type=tcp#Server1\n");
+        service.addSubscription("Sub", "https://example.com/sub");
+        Subscription sub = service.getSubscriptions().get(0);
+
+        service.setFetchedContent("""
+                <!DOCTYPE html>
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                <head><title>Wi-Fi login</title>
+                <link rel="stylesheet" href="https://portal.example/style.css"></head>
+                <body><a href="https://portal.example/login">Sign in to continue</a></body>
+                </html>
+                """);
+        service.refreshSubscription(sub.getId());
+
+        assertThat(sub.getLastErrorKey()).isEqualTo("subscriptions.error.no.links");
+        assertThat(sub.getLeftOutLinks()).isZero();
+        assertThat(configStore.getServers()).as("nothing is removed").hasSize(1);
+    }
+
+    /**
+     * A line quoting the provider's site, as some lists end with, stands for
+     * no server. Read as a link in a protocol named "support: https", it
+     * showed on the row as a link left out.
+     */
+    @Test
+    void parseContent_aLineQuotingAnAddressIsNeitherLeftOutNorUnreadable() {
+        SubscriptionService.ParsedContent parsed = service.parseContent(
+                "vless://uuid1@server1.com:443?security=tls&type=tcp#Good\n"
+                        + "Support: https://t.me/provider\n");
+
+        assertThat(parsed.servers()).hasSize(1);
+        assertThat(parsed.skipped()).as("not an unreadable server either").isZero();
+        assertThat(parsed.unsupportedSchemes()).isEmpty();
+    }
+
     @Test
     void parseContent_plainTextLinks() {
         String content = "vless://uuid1@server1.com:443?security=tls&type=tcp#Server1\n"

@@ -207,8 +207,10 @@ public class SingBoxConfigGenerator {
 
         root.set("log", buildLog(settings));
 
+        // Built first: the DNS rules follow the route's, in their order.
+        ObjectNode configuredRoute = routingConfig != null ? buildRoute(routingConfig) : null;
         if (settings.getProxyMode() == ProxyMode.TUN) {
-            root.set("dns", buildDns(settings, routingConfig, tunIpv6));
+            root.set("dns", buildDns(settings, configuredRoute, tunIpv6));
         }
 
         root.set("inbounds", buildInbounds(settings, tunIpv6, host));
@@ -219,7 +221,7 @@ public class SingBoxConfigGenerator {
         // proxy group references it, exactly like an outbound member — a
         // selector may point at an endpoint (verified against the real core).
         List<ServerConfig> members = groupMembers(candidates, active,
-                settings.getServerSelection());
+                settings.getServerSelection(), host);
         ArrayNode endpoints = mapper.createArrayNode();
         for (ServerConfig member : members) {
             if (member.getProtocol() == Protocol.WIREGUARD) {
@@ -231,10 +233,10 @@ public class SingBoxConfigGenerator {
         }
         root.set("outbounds", buildOutbounds(members, settings.getServerSelection(), active));
 
-        if (routingConfig != null) {
-            ObjectNode route = buildRoute(routingConfig);
+        if (configuredRoute != null) {
+            ObjectNode route = configuredRoute;
             ensureTunRouteEssentials(route, settings);
-            resolveNamesBeforeIpRules(root, route, settings, routingConfig);
+            resolveNamesBeforeIpRules(root, route, settings);
             root.set("route", route);
         } else if (settings.getProxyMode() == ProxyMode.TUN) {
             // sing-box 1.13 needs a route block with default_domain_resolver
@@ -263,6 +265,11 @@ public class SingBoxConfigGenerator {
             rules = route.putArray("rules");
         }
         rules.insert(0, buildProbeRule());
+        // Over the finished lists, whichever step made a rule.
+        dropRulesThatMatchEverything(rules);
+        if (root.path("dns").path("rules") instanceof ArrayNode dnsRules) {
+            dropRulesThatMatchEverything(dnsRules);
+        }
 
         root.set("experimental", buildExperimental(settings));
 
@@ -285,19 +292,35 @@ public class SingBoxConfigGenerator {
         return log;
     }
 
-    private ObjectNode buildDns(AppSettings settings, RoutingConfig routingConfig,
-                                boolean tunIpv6) {
+    private ObjectNode buildDns(AppSettings settings, ObjectNode route, boolean tunIpv6) {
+        // The fields and MCP store any text, and its scheme became the server's
+        // type: "dhcp://auto" or "http://..." made the core refuse the whole
+        // configuration, so TUN mode never started, and "system" as proxy DNS
+        // became a server named "system" that nothing could reach. Such a
+        // value is asked for as the field's default, as the DNS strategy is.
+        String proxyAddress = settings.getProxyDns();
+        if (!isCoreDnsAddress(proxyAddress)) {
+            log.warn("Proxy DNS {} is not an address the core takes; using {}",
+                    proxyAddress, DEFAULT_PROXY_DNS);
+            proxyAddress = DEFAULT_PROXY_DNS;
+        }
         ObjectNode proxyDns = mapper.createObjectNode();
         proxyDns.put("tag", DnsTags.PROXY);
-        populateDnsServerAddress(proxyDns, settings.getProxyDns());
+        populateDnsServerAddress(proxyDns, proxyAddress);
         proxyDns.put("detour", OutboundTags.PROXY);
 
         ArrayNode servers = mapper.createArrayNode();
         servers.add(proxyDns);
 
+        boolean systemDirect = isSystemDns(settings.getDirectDns());
+        if (!systemDirect && !isCoreDnsAddress(settings.getDirectDns())) {
+            log.warn("Direct DNS {} is not an address the core takes; using the system's",
+                    settings.getDirectDns());
+            systemDirect = true;
+        }
         ObjectNode directDns = mapper.createObjectNode();
         directDns.put("tag", DnsTags.DIRECT);
-        if (isSystemDns(settings.getDirectDns())) {
+        if (systemDirect) {
             // The OS resolver: the network's own, from the address the direct
             // connection leaves anyway.
             directDns.put("type", "local");
@@ -320,9 +343,8 @@ public class SingBoxConfigGenerator {
         }
         servers.add(directDns);
 
-        // Local resolver (OS/mDNS). Used only for localhost and *.local so
-        // those names resolve on the LAN instead of being sent to the remote
-        // DoH server, which cannot answer link-local mDNS queries.
+        // Local resolver (OS/mDNS), for localhost, *.local and the names the
+        // LAN's own router serves, which the remote DoH server cannot answer.
         ObjectNode localDns = mapper.createObjectNode();
         localDns.put("tag", DnsTags.LOCAL);
         localDns.put("type", "local");
@@ -331,36 +353,30 @@ public class SingBoxConfigGenerator {
         ObjectNode dns = mapper.createObjectNode();
         dns.set("servers", servers);
 
-        // Resolve localhost / *.local via the local resolver; everything else
-        // falls through to dns.final (proxy DNS).
+        // Local names first, in every mode. The LAN's suffixes were added only
+        // where system-proxy mode resolves names before its IP rules, so in
+        // TUN mode, where the core is the system's resolver, openwrt.lan or
+        // router.home.arpa went to the remote resolver: it answered that they
+        // do not exist, and learned them.
         ObjectNode localRule = mapper.createObjectNode();
-        ArrayNode localDomains = mapper.createArrayNode();
-        localDomains.add("localhost");
-        localRule.set("domain", localDomains);
-        ArrayNode localSuffixes = mapper.createArrayNode();
-        localSuffixes.add(".local");
-        localRule.set("domain_suffix", localSuffixes);
+        localRule.putArray("domain").add("localhost");
+        ArrayNode localSuffixes = localRule.putArray("domain_suffix");
+        LOCAL_NAME_SUFFIXES.forEach(localSuffixes::add);
         localRule.put("server", DnsTags.LOCAL);
         ArrayNode dnsRules = mapper.createArrayNode();
         dnsRules.add(localRule);
-        directDnsRules(routingConfig).forEach(dnsRules::add);
-        boolean blockedOnly = routingConfig != null
-                && routingConfig.getMode() == RouteMode.BLOCKED_IN_RUSSIA;
-        if (blockedOnly) {
-            // A blocked name gets the address of a stub page from the
-            // provider's resolver, so it resolves through the tunnel.
-            ObjectNode blockedNames = mapper.createObjectNode();
-            blockedNames.putArray("rule_set").add(BLOCKED_IN_RUSSIA_LISTS.getFirst());
-            blockedNames.put("server", DnsTags.PROXY);
-            dnsRules.add(blockedNames);
+        if (route != null) {
+            routeDnsRules(route).forEach(dnsRules::add);
         }
         dns.set("rules", dnsRules);
 
         // In sing-box 1.13 the dns.rules[].outbound match-all form and
-        // the string address shortcut were removed. Use dns.final to route
-        // all queries through the proxy DNS by default, and directly when
-        // only the blocked lists go through the tunnel.
-        dns.put("final", blockedOnly ? DnsTags.DIRECT : DnsTags.PROXY);
+        // the string address shortcut were removed. dns.final resolves what
+        // no rule names the way route.final sends its traffic: through the
+        // proxy DNS, or directly when only the blocked lists use the tunnel.
+        boolean finalDirect = route != null
+                && OutboundTags.DIRECT.equals(route.path("final").asString());
+        dns.put("final", finalDirect ? DnsTags.DIRECT : DnsTags.PROXY);
 
         // A TUN device without an IPv6 address routes IPv4 alone, and the core
         // drops AAAA answers only for ipv4_only: any other strategy handed the
@@ -379,69 +395,58 @@ public class SingBoxConfigGenerator {
     private static final List<String> DNS_NAME_MATCHERS =
             List.of("domain", "domain_suffix", "domain_keyword", "domain_regex");
 
+    /** The names the LAN's own resolver answers: mDNS, and the suffixes routers serve. */
+    private static final List<String> LOCAL_NAME_SUFFIXES =
+            List.of(".local", ".lan", ".home.arpa", ".internal");
+
     /**
-     * DNS rules that send the names of direct-routed traffic to
-     * {@code direct-dns}.
+     * DNS rules that resolve each name the way the route sends its traffic,
+     * in the route's own order: a rule that sends names through the tunnel
+     * gets {@code proxy-dns}, one that sends them direct {@code direct-dns}.
      *
      * <p>The direct DNS server was declared and never referenced: every query
      * fell through to {@code dns.final}, so a domain the user routes around
      * the tunnel was still resolved through the proxy resolver — the remote
      * side saw the query, and a geo-aware answer came back for the wrong
-     * location. The Settings field for it changed nothing. These rules mirror
-     * the route rules that go direct (the bypass list, custom direct rules,
-     * the country bypass), so resolution follows the same split as the
-     * traffic. IP-based rules have no DNS counterpart: a query carries a name,
-     * not an address, and the rule-set tags referenced here are the same ones
-     * {@link #buildRoute} declares.</p>
+     * location. The Settings field for it changed nothing.</p>
+     *
+     * <p>The rules that fixed it took every direct rule first and the blocked
+     * list after them, and no rule of the user's that sent names through the
+     * tunnel: so where the route proxied a name, a rule further down could
+     * still resolve it directly. The country bypass covers every .ru name, so
+     * a blocked .ru site got the provider's stub address, and the tunnel
+     * dialled that; a site the user sent through the tunnel in the
+     * blocked-only mode was resolved by the provider. Mirrored in order, a
+     * name resolves as the first rule that names it routes it.</p>
+     *
+     * <p>IP-based rules have no counterpart: a query carries a name, not an
+     * address. Rules that reject are left to the rules below them. The
+     * rule-set tags referenced are ones {@link #buildRoute} declares.</p>
      */
-    private List<ObjectNode> directDnsRules(RoutingConfig routingConfig) {
+    private List<ObjectNode> routeDnsRules(ObjectNode route) {
         List<ObjectNode> out = new ArrayList<>();
-        if (routingConfig == null) {
-            return out;
-        }
-
-        ObjectNode bypass = buildBypassRule(routingConfig.getBypassList());
-        if (bypass != null) {
-            ObjectNode rule = copyNameMatchers(bypass);
+        // Its names have a DNS rule of their own, first, to the local resolver.
+        ObjectNode localNames = buildLocalDomainDirectRule();
+        for (JsonNode routeRule : route.path("rules")) {
+            String outbound = routeRule.path("outbound").asString();
+            String server = OutboundTags.PROXY.equals(outbound) ? DnsTags.PROXY
+                    : OutboundTags.DIRECT.equals(outbound) ? DnsTags.DIRECT
+                    : null;
+            if (server == null || routeRule.equals(localNames)) {
+                continue;
+            }
+            ObjectNode rule = copyNameMatchers((ObjectNode) routeRule);
+            ArrayNode nameLists = mapper.createArrayNode();
+            for (JsonNode tag : routeRule.path("rule_set")) {
+                if (tag.asString().startsWith("geosite-")) {
+                    nameLists.add(tag.asString());
+                }
+            }
+            if (!nameLists.isEmpty()) {
+                rule.set("rule_set", nameLists);
+            }
             if (!rule.isEmpty()) {
-                rule.put("server", DnsTags.DIRECT);
-                out.add(rule);
-            }
-        }
-
-        List<RoutingRule> customRules = routingConfig.getRules();
-        if (customRules != null) {
-            for (RoutingRule custom : customRules) {
-                if (custom.getAction() != RoutingRule.RuleAction.DIRECT || unusable(custom)) {
-                    continue;
-                }
-                ObjectNode routeRule = buildCustomRule(custom, new LinkedHashSet<>());
-                ObjectNode rule = copyNameMatchers(routeRule);
-                if (custom.getType() == RoutingRule.RuleType.GEOSITE) {
-                    rule.set("rule_set", routeRule.get("rule_set"));
-                }
-                if (!rule.isEmpty()) {
-                    rule.put("server", DnsTags.DIRECT);
-                    out.add(rule);
-                }
-            }
-        }
-
-        List<String> countries = routingConfig.getBypassCountries();
-        if (countries != null && !countries.isEmpty()) {
-            Set<String> geositeTags = new LinkedHashSet<>();
-            for (String country : countries) {
-                String tag = geositeTagFor(country);
-                if (tag != null) {
-                    geositeTags.add(tag);
-                }
-            }
-            if (!geositeTags.isEmpty()) {
-                ObjectNode rule = mapper.createObjectNode();
-                ArrayNode refs = mapper.createArrayNode();
-                geositeTags.forEach(refs::add);
-                rule.set("rule_set", refs);
-                rule.put("server", DnsTags.DIRECT);
+                rule.put("server", server);
                 out.add(rule);
             }
         }
@@ -580,15 +585,21 @@ public class SingBoxConfigGenerator {
      * such rule gives them an address, and rules above it still match by name
      * without one. It names no server, so the DNS rules pick one: the system
      * resolver for LAN names, proxy DNS for the rest, so a name bound for the
-     * tunnel is not asked of the local network. The direct outbound still
-     * resolves a name itself, so bypassed traffic keeps a nearby CDN node.
+     * tunnel is not asked of the local network.
+     *
+     * <p>The lookup is not free. Every outbound below it dials the address it
+     * found, not the name: this said the direct outbound still resolved names
+     * itself, but the core hands each outbound the looked-up addresses, so the
+     * proxy server receives a bare IP, and routing by domain on the server
+     * (to WARP, say) no longer matches. Each new name also costs a DNS round
+     * trip through the tunnel before the connection starts.</p>
      *
      * <p>A name the chosen resolver cannot answer is dropped at that rule; it
      * used to reach the proxy, which could not resolve it either. TUN mode
      * needs none of this: its connections carry an address already.</p>
      */
     private void resolveNamesBeforeIpRules(ObjectNode root, ObjectNode route,
-                                           AppSettings settings, RoutingConfig routingConfig) {
+                                           AppSettings settings) {
         if (settings.getProxyMode() == ProxyMode.TUN) {
             return;
         }
@@ -604,17 +615,8 @@ public class SingBoxConfigGenerator {
         // sends private addresses direct.
         rules.insert(first + 1, buildPrivateIpDirectRule());
 
-        ArrayNode lanSuffixes = mapper.createArrayNode();
-        lanSuffixes.add(".lan");
-        lanSuffixes.add(".home.arpa");
-        lanSuffixes.add(".internal");
-        ObjectNode lanNames = mapper.createObjectNode();
-        lanNames.set("domain_suffix", lanSuffixes);
-        lanNames.put("server", DnsTags.LOCAL);
         // No TUN device in this mode, so none with an IPv6 address either.
-        ObjectNode dns = buildDns(settings, routingConfig, false);
-        ((ArrayNode) dns.get("rules")).insert(1, lanNames);
-        root.set("dns", dns);
+        root.set("dns", buildDns(settings, route, false));
         // The core demands one once a dns block exists, and the OS resolver
         // keeps the proxy server's own name off the proxy.
         route.put("default_domain_resolver", DnsTags.LOCAL);
@@ -753,6 +755,30 @@ public class SingBoxConfigGenerator {
         }
     }
 
+    /** Proxy DNS as Settings has it by default. */
+    private static final String DEFAULT_PROXY_DNS = "https://1.1.1.1/dns-query";
+
+    /** The DNS server types the core takes as a URL scheme; an address without one is udp. */
+    private static final Set<String> DNS_SCHEMES =
+            Set.of("udp", "tcp", "tls", "https", "h3", "quic");
+
+    /**
+     * Whether the core can use a DNS address as {@link #populateDnsServerAddress}
+     * writes it: one of the core's own schemes, or none, which reads as udp;
+     * blank stands for the default. The {@link AppSettings#SYSTEM_DNS} word is
+     * not an address: only Direct DNS takes it, and asks for it before this.
+     */
+    static boolean isCoreDnsAddress(String address) {
+        if (address == null || address.isBlank()) {
+            return true;
+        }
+        int scheme = address.indexOf("://");
+        return scheme < 0
+                ? !isSystemDns(address)
+                : DNS_SCHEMES.contains(
+                        address.substring(0, scheme).strip().toLowerCase(java.util.Locale.ROOT));
+    }
+
     /** Whether a DNS setting names the OS resolver, {@link AppSettings#SYSTEM_DNS}. */
     static boolean isSystemDns(String address) {
         return address != null && AppSettings.SYSTEM_DNS.equalsIgnoreCase(address.trim());
@@ -797,7 +823,7 @@ public class SingBoxConfigGenerator {
      * @return facts not yet asked
      */
     public HostFacts hostFacts() {
-        return new HostFacts(ipv6Uplink, systemProxySupport);
+        return new HostFacts(ipv6Uplink, systemProxySupport, ranking);
     }
 
     /**
@@ -988,7 +1014,7 @@ public class SingBoxConfigGenerator {
      * it.</p>
      */
     private List<ServerConfig> groupMembers(List<ServerConfig> candidates, ServerConfig active,
-                                            ServerSelection selection) {
+                                            ServerSelection selection, HostFacts host) {
         if (candidates == null) {
             return List.of(active);
         }
@@ -1003,7 +1029,7 @@ public class SingBoxConfigGenerator {
         byId.putIfAbsent(active.getId(), active);
         List<ServerConfig> all = byId.isEmpty() ? List.of(active) : List.copyOf(byId.values());
         return selection != null && selection.isAutomatic() && all.size() > MAX_AUTOMATIC_MEMBERS
-                ? fastest(all, active)
+                ? fastest(all, active, host)
                 : all;
     }
 
@@ -1012,12 +1038,15 @@ public class SingBoxConfigGenerator {
      * fastest, then those not measured yet in the list's order, then those
      * that did not answer, and the picked server among them. The core probed
      * every server every three minutes: with 500, about 100 MB an hour.
+     * Measured as the run first asked ({@link HostFacts#lastLatency}), so
+     * generating again for the running core picks the same servers.
      */
-    private List<ServerConfig> fastest(List<ServerConfig> all, ServerConfig active) {
+    private List<ServerConfig> fastest(List<ServerConfig> all, ServerConfig active,
+                                       HostFacts host) {
         List<ServerConfig> ranked = new ArrayList<>(all);
         // Stable: servers with equal keys keep the list's order.
         ranked.sort(java.util.Comparator.comparingLong(
-                server -> ranking.lastLatency(server.getId()).orElse(Long.MAX_VALUE - 1)));
+                server -> host.lastLatency(server.getId()).orElse(Long.MAX_VALUE - 1)));
         List<ServerConfig> members = new ArrayList<>(ranked.subList(0, MAX_AUTOMATIC_MEMBERS));
         if (!members.contains(active)) {
             members.set(MAX_AUTOMATIC_MEMBERS - 1, active);
@@ -1156,17 +1185,25 @@ public class SingBoxConfigGenerator {
             // matter how many countries are picked. geosite aggregates exist
             // only for some countries (see geositeTagFor); the rest match by
             // geoip alone, which is still useful at the IP level.
+            //
+            // Each rule names every selected country's list, whether or not a
+            // custom rule declared it first: the shared set only decides what
+            // route.rule_set declares. The rule's own list was deduplicated
+            // through it, so a GEOIP rule for the same country left the geoip
+            // rule as {"rule_set": []}, which the core matches for every
+            // connection: everything below it went direct while the card said
+            // Connected.
             ArrayNode geositeRefs = mapper.createArrayNode();
             ArrayNode geoipRefs = mapper.createArrayNode();
             for (String country : countries) {
                 String geositeTag = geositeTagFor(country);
-                if (geositeTag != null && ruleSetTags.add(geositeTag)) {
+                if (geositeTag != null) {
+                    ruleSetTags.add(geositeTag);
                     geositeRefs.add(geositeTag);
                 }
                 String geoipTag = "geoip-" + country;
-                if (ruleSetTags.add(geoipTag)) {
-                    geoipRefs.add(geoipTag);
-                }
+                ruleSetTags.add(geoipTag);
+                geoipRefs.add(geoipTag);
             }
 
             if (!geositeRefs.isEmpty()) {
@@ -1176,10 +1213,12 @@ public class SingBoxConfigGenerator {
                 rules.add(geositeRule);
             }
 
-            ObjectNode geoipRule = mapper.createObjectNode();
-            geoipRule.set("rule_set", geoipRefs);
-            geoipRule.put("outbound", OutboundTags.DIRECT);
-            rules.add(geoipRule);
+            if (!geoipRefs.isEmpty()) {
+                ObjectNode geoipRule = mapper.createObjectNode();
+                geoipRule.set("rule_set", geoipRefs);
+                geoipRule.put("outbound", OutboundTags.DIRECT);
+                rules.add(geoipRule);
+            }
 
             // The dedicated ip_is_private rule lives in the universal
             // LAN-bypass block below; not duplicated here.
@@ -1316,6 +1355,11 @@ public class SingBoxConfigGenerator {
         for (String raw : bypassList) {
             BypassPatternParser.Parsed parsed = BypassPatternParser.parse(raw);
             if (parsed == null) {
+                // An address the core cannot read made it refuse the whole
+                // configuration, so one mistyped line stopped every server
+                // from connecting. Left out, like an unusable custom rule.
+                BypassPatternParser.problem(raw).ifPresent(reason ->
+                        log.warn("Leaving out bypass entry {}: {}", raw, reason));
                 continue;
             }
             switch (parsed.kind()) {
@@ -1355,12 +1399,44 @@ public class SingBoxConfigGenerator {
     }
 
     /**
+     * Leaves out every rule that carries an empty matcher list. The core reads
+     * an empty list as no condition at all, so such a rule matches every
+     * connection, or every query: a country bypass whose geoip list a GEOIP
+     * rule had already named came out as {@code {"rule_set": [], "outbound":
+     * "direct"}}, and everything below it went direct, from the user's own
+     * address, while the card said Connected. No rule here is meant to have an
+     * empty list, so one that does is a bug, and leaving it out keeps what it
+     * would have caught in the tunnel. A rule meant to match everything, such
+     * as the sniff action, has no list at all.
+     *
+     * @param rules route or DNS rules, changed in place
+     */
+    static void dropRulesThatMatchEverything(ArrayNode rules) {
+        for (int i = rules.size() - 1; i >= 0; i--) {
+            JsonNode rule = rules.get(i);
+            for (java.util.Map.Entry<String, JsonNode> field : rule.properties()) {
+                if (field.getValue().isArray() && field.getValue().isEmpty()) {
+                    log.error("Leaving out a rule whose {} list is empty, which would "
+                            + "match everything: {}", field.getKey(), rule);
+                    rules.remove(i);
+                    break;
+                }
+            }
+        }
+    }
+
+    /**
      * Whether a stored rule is one the core would refuse. Such a rule stopped
      * every server from connecting until it was found and deleted; the
      * Routing screen and MCP no longer store one, and one stored before is
      * left out of the configuration, with a warning in the log.
      */
     private static boolean unusable(RoutingRule rule) {
+        if (rule.getType() == null || rule.getAction() == null) {
+            // It threw a NullPointerException below, and every connect failed.
+            log.warn("Leaving out routing rule {}: it has no type or no action", rule.getId());
+            return true;
+        }
         Optional<String> problem = RoutingRuleCheck.problem(rule.getType(), rule.getValue());
         problem.ifPresent(reason -> log.warn("Leaving out routing rule {} ({}): {}",
                 rule.getId(), rule.getType(), reason));
@@ -1370,20 +1446,25 @@ public class SingBoxConfigGenerator {
     private ObjectNode buildCustomRule(RoutingRule rule, Set<String> ruleSetTags) {
         ObjectNode ruleNode = mapper.createObjectNode();
 
+        // Names as the core compares them, the bypass list's way: it
+        // lower-cases the connection's name and not the rule's, and SNI and
+        // DNS carry punycode, so "Gosuslugi.ru" or any .рф name typed into a
+        // rule showed in the list and matched nothing. A regex stays as typed:
+        // lower case would turn \D, \S or \W into their opposites.
         switch (rule.getType()) {
             case DOMAIN -> {
                 ArrayNode values = mapper.createArrayNode();
-                values.add(rule.getValue());
+                values.add(BypassPatternParser.coreName(rule.getValue()));
                 ruleNode.set("domain", values);
             }
             case DOMAIN_SUFFIX -> {
                 ArrayNode values = mapper.createArrayNode();
-                values.add(rule.getValue());
+                values.add(BypassPatternParser.coreName(rule.getValue()));
                 ruleNode.set("domain_suffix", values);
             }
             case DOMAIN_KEYWORD -> {
                 ArrayNode values = mapper.createArrayNode();
-                values.add(rule.getValue());
+                values.add(BypassPatternParser.coreName(rule.getValue()));
                 ruleNode.set("domain_keyword", values);
             }
             case DOMAIN_REGEX -> {
