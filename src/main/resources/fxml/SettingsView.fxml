@@ -35,12 +35,12 @@
         <Label fx:id="appearanceLabel" text="Appearance" styleClass="form-section-title"/>
 
         <HBox spacing="12" alignment="CENTER_LEFT">
-            <Label fx:id="themeLabel" text="Theme" styleClass="form-label" prefWidth="210"/>
+            <Label fx:id="themeLabel" text="Theme" styleClass="form-label, settings-gutter"/>
             <ComboBox fx:id="themeCombo" styleClass="form-field" prefWidth="300"/>
         </HBox>
 
         <HBox spacing="12" alignment="CENTER_LEFT">
-            <Label fx:id="languageLabel" text="Language" styleClass="form-label" prefWidth="210"/>
+            <Label fx:id="languageLabel" text="Language" styleClass="form-label, settings-gutter"/>
             <ComboBox fx:id="languageCombo" styleClass="form-field" prefWidth="300"/>
         </HBox>
     </VBox>
@@ -58,13 +58,14 @@
         <Label fx:id="proxyPortsLabel" text="Proxy Ports" styleClass="form-label"/>
 
         <HBox spacing="12" alignment="CENTER_LEFT">
-            <Label fx:id="socksPortLabel" text="SOCKS Port" styleClass="form-label" prefWidth="210"/>
+            <Label fx:id="socksPortLabel" text="SOCKS Port"
+                   styleClass="form-label, settings-gutter"/>
             <TextField fx:id="socksPortField" styleClass="form-field" prefWidth="110"
                        promptText="1080"/>
         </HBox>
 
         <HBox spacing="12" alignment="CENTER_LEFT">
-            <Label fx:id="httpPortLabel" text="HTTP Port" styleClass="form-label" prefWidth="210"/>
+            <Label fx:id="httpPortLabel" text="HTTP Port" styleClass="form-label, settings-gutter"/>
             <TextField fx:id="httpPortField" styleClass="form-field" prefWidth="110"
                        promptText="1081"/>
         </HBox>
@@ -72,8 +73,8 @@
         <Separator styleClass="sidebar-separator"/>
 
         <HBox spacing="12" alignment="CENTER_LEFT">
-            <Label fx:id="coreLogLevelLabel" text="Core log level" styleClass="form-label"
-                   prefWidth="210"/>
+            <Label fx:id="coreLogLevelLabel" text="Core log level"
+                   styleClass="form-label, settings-gutter"/>
             <ComboBox fx:id="coreLogLevelCombo" styleClass="form-field" prefWidth="300"/>
         </HBox>
 
@@ -83,7 +84,8 @@
         <Separator styleClass="sidebar-separator"/>
 
         <HBox spacing="12" alignment="CENTER_LEFT">
-            <Label fx:id="proxyModeLabel" text="Proxy Mode" styleClass="form-label" prefWidth="210"/>
+            <Label fx:id="proxyModeLabel" text="Proxy Mode"
+                   styleClass="form-label, settings-gutter"/>
             <ComboBox fx:id="proxyModeCombo" styleClass="form-field" prefWidth="300"/>
         </HBox>
 
@@ -105,7 +107,7 @@
 
         <HBox spacing="12" alignment="CENTER_LEFT">
             <Label fx:id="healthCheckIntervalLabel" text="Check interval (sec)"
-                   styleClass="form-label" prefWidth="210"/>
+                   styleClass="form-label, settings-gutter"/>
             <TextField fx:id="healthCheckIntervalField" styleClass="form-field" prefWidth="110"
                        promptText="5"/>
         </HBox>
@@ -115,7 +117,7 @@
                  that outgrows the 210 gutter, needing about 243px under the
                  DejaVu Sans the Linux CI renders it in. -->
             <Label fx:id="healthCheckReconnectDelayLabel" text="Reconnect delay (sec)"
-                   styleClass="form-label" prefWidth="210" wrapText="true"/>
+                   styleClass="form-label, settings-gutter" wrapText="true"/>
             <TextField fx:id="healthCheckReconnectDelayField" styleClass="form-field" prefWidth="110"
                        promptText="10"/>
         </HBox>
@@ -126,33 +128,34 @@
         <Label fx:id="advancedLabel" text="Advanced" styleClass="form-section-title"/>
 
         <HBox spacing="12" alignment="CENTER_LEFT">
-            <Label fx:id="proxyDnsLabel" text="Proxy DNS" styleClass="form-label" prefWidth="210"/>
+            <Label fx:id="proxyDnsLabel" text="Proxy DNS" styleClass="form-label, settings-gutter"/>
             <TextField fx:id="proxyDnsField" styleClass="form-field" prefWidth="300"
                        promptText="https://1.1.1.1/dns-query"/>
         </HBox>
 
         <HBox spacing="12" alignment="CENTER_LEFT">
-            <Label fx:id="directDnsLabel" text="Direct DNS" styleClass="form-label" prefWidth="210"/>
+            <Label fx:id="directDnsLabel" text="Direct DNS"
+                   styleClass="form-label, settings-gutter"/>
             <TextField fx:id="directDnsField" styleClass="form-field" prefWidth="300"
                        promptText="system"/>
         </HBox>
 
         <HBox spacing="12" alignment="CENTER_LEFT">
-            <Label fx:id="dnsStrategyLabel" text="DNS Strategy" styleClass="form-label"
-                   prefWidth="210"/>
+            <Label fx:id="dnsStrategyLabel" text="DNS Strategy"
+                   styleClass="form-label, settings-gutter"/>
             <ComboBox fx:id="dnsStrategyCombo" styleClass="form-field" prefWidth="300"/>
         </HBox>
 
         <HBox spacing="12" alignment="CENTER_LEFT">
             <Label fx:id="tunInterfaceNameLabel" text="TUN Interface Name"
-                   styleClass="form-label" prefWidth="210"/>
+                   styleClass="form-label, settings-gutter"/>
             <TextField fx:id="tunInterfaceNameField" styleClass="form-field" prefWidth="300"
                        promptText="utun99"/>
         </HBox>
 
         <HBox spacing="12" alignment="CENTER_LEFT">
             <Label fx:id="tunIpv4Label" text="TUN IPv4 Address"
-                   styleClass="form-label" prefWidth="210"/>
+                   styleClass="form-label, settings-gutter"/>
             <TextField fx:id="tunIpv4Field" styleClass="form-field" prefWidth="300"
                        promptText="172.19.0.1/30"/>
         </HBox>
@@ -175,12 +178,16 @@
                visible="false" managed="false"
                text="The system keychain is not available here, so credentials are saved in files only your account can read."/>
 
+        <!-- The ID gives way when the row is short of room, at a narrow
+             window or a larger text size: the label and the button keep
+             their own widths. All three used to shrink together, so at 125%
+             in Russian the label and "Сбросить…" were cut as well. -->
         <HBox spacing="10" alignment="CENTER_LEFT">
-            <Label fx:id="deviceIdLabel" text="Device ID for subscriptions" styleClass="form-label"
-                   prefWidth="210"/>
+            <Label fx:id="deviceIdLabel" text="Device ID for subscriptions"
+                   styleClass="form-label, settings-gutter" minWidth="-Infinity"/>
             <Label fx:id="deviceIdValue" text="" styleClass="stats-value"/>
             <Button fx:id="deviceIdResetButton" text="Reset…" styleClass="secondary-button"
-                    onAction="#onResetDeviceId"/>
+                    minWidth="-Infinity" onAction="#onResetDeviceId"/>
         </HBox>
         <Label fx:id="deviceIdHint" styleClass="hint-label" wrapText="true" maxWidth="520"
                text="Sent to subscription providers."/>
@@ -199,11 +206,10 @@
             <!-- 210 and 110: the label gutter and the numeric-field width
                  every other label+field row in this view uses. At 120/120
                  this row's field started 90px left of all of them. -->
-            <Label fx:id="mcpPortLabel" text="Port" styleClass="form-label" prefWidth="210"/>
+            <Label fx:id="mcpPortLabel" text="Port" styleClass="form-label, settings-gutter"/>
             <TextField fx:id="mcpPortField" styleClass="form-field" prefWidth="110"
                        promptText="55555"/>
-            <Label fx:id="mcpStatusLabel" text="" styleClass="stats-value"
-                   style="-fx-font-size: 12px;"/>
+            <Label fx:id="mcpStatusLabel" text="" styleClass="stats-value, settings-status"/>
         </HBox>
 
         <CheckBox fx:id="mcpAllowMutationsCheck"
@@ -237,13 +243,13 @@
                styleClass="form-section-title"/>
 
         <HBox spacing="12" alignment="CENTER_LEFT">
-            <Label fx:id="trafficHistoryRecordedLabel" text="Recorded" styleClass="form-label"
-                   prefWidth="210"/>
+            <Label fx:id="trafficHistoryRecordedLabel" text="Recorded"
+                   styleClass="form-label, settings-gutter"/>
             <!-- Wraps rather than ellipsizes: a Russian date beside the
                  210 gutter is the widest thing in the card at the 500px
                  ViewFitTest pins. -->
-            <Label fx:id="trafficHistorySummary" styleClass="stats-value"
-                   style="-fx-font-size: 13px;" wrapText="true"
+            <Label fx:id="trafficHistorySummary" styleClass="stats-value, settings-value"
+                   wrapText="true"
                    maxWidth="Infinity" HBox.hgrow="ALWAYS"/>
         </HBox>
 
@@ -263,16 +269,16 @@
         <Label fx:id="aboutLabel" text="About" styleClass="form-section-title"/>
 
         <HBox spacing="12" alignment="CENTER_LEFT">
-            <Label fx:id="appVersionLabel" text="App Version" styleClass="form-label" prefWidth="210"/>
-            <Label fx:id="appVersionValue" text="1.0.0" styleClass="stats-value"
-                   style="-fx-font-size: 13px;"/>
+            <Label fx:id="appVersionLabel" text="App Version"
+                   styleClass="form-label, settings-gutter"/>
+            <Label fx:id="appVersionValue" text="1.0.0" styleClass="stats-value, settings-value"/>
         </HBox>
 
         <HBox spacing="12" alignment="CENTER_LEFT">
-            <Label fx:id="singboxVersionLabel" text="sing-box Version" styleClass="form-label"
-                   prefWidth="210"/>
-            <Label fx:id="singboxVersionValue" text="Unknown" styleClass="stats-value"
-                   style="-fx-font-size: 13px;"/>
+            <Label fx:id="singboxVersionLabel" text="sing-box Version"
+                   styleClass="form-label, settings-gutter"/>
+            <Label fx:id="singboxVersionValue" text="Unknown"
+                   styleClass="stats-value, settings-value"/>
         </HBox>
 
         <!-- Required by the country database's CC BY 4.0 licence: the

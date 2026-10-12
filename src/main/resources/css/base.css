@@ -683,6 +683,25 @@
     -fx-font-weight: bold;
 }
 
+/* The label column of Settings' rows, and the smaller values beside some of
+   them. Here rather than in SettingsView.fxml, so that they grow with the
+   OS's text size (TextScale): the gutter was prefWidth="210" there and stayed
+   210 while the labels in it grew, so at 125% "Device ID for subscriptions"
+   came out ellipsized; and the values were inline styles, which outrank
+   every stylesheet, so the versions and the MCP status stayed at 12-13px
+   beside labels grown to 15. */
+.settings-gutter {
+    -fx-pref-width: 210;
+}
+
+.stats-value.settings-value {
+    -fx-font-size: 13px;
+}
+
+.stats-value.settings-status {
+    -fx-font-size: 12px;
+}
+
 .form-field {
     -fx-background-color: -c-field-bg;
     -fx-border-color: -c-field-border;

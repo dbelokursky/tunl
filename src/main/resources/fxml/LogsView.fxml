@@ -28,10 +28,13 @@
             <Insets top="4" bottom="4"/>
         </padding>
 
-        <ComboBox fx:id="logLevelFilter" prefWidth="110" minWidth="-Infinity"
-                  styleClass="form-field"/>
+        <!-- No prefWidth: a combo box sizes itself to its widest value, and
+             the 110 it had showed "Предупреждения" as "Пре…". -->
+        <ComboBox fx:id="logLevelFilter" minWidth="-Infinity" styleClass="form-field"/>
 
-        <TextField fx:id="searchField" promptText="Search logs..." minWidth="90"
+        <!-- minWidth 60, not 90: the filter's 50 extra pixels in Russian come
+             out of this field, or the row overflows the 500px viewport. -->
+        <TextField fx:id="searchField" promptText="Search logs..." minWidth="60"
                    HBox.hgrow="ALWAYS" styleClass="form-field"/>
 
         <CheckBox fx:id="autoScrollCheckBox" text="Auto-scroll" selected="true"
