@@ -1,6 +1,7 @@
 package com.vlessclient.platform;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
@@ -26,7 +27,10 @@ interface CommandRunner {
 
     /**
      * The real implementation with the given timeout. A command still running
-     * when it expires is killed and reported as an {@link IOException}.
+     * when it expires is killed and reported as an {@link IOException}; one
+     * whose caller is interrupted is killed and reported as an
+     * {@link InterruptedIOException}, so the caller can tell a start called
+     * off from a command that failed.
      */
     static CommandRunner system(Duration timeout) {
         return command -> {
@@ -39,7 +43,10 @@ interface CommandRunner {
                 throw new IOException("Command timed out after " + timeout + ": " + command, e);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                throw new IOException("Command interrupted: " + command, e);
+                InterruptedIOException interrupted =
+                        new InterruptedIOException("Command interrupted: " + command);
+                interrupted.initCause(e);
+                throw interrupted;
             }
         };
     }

@@ -156,6 +156,14 @@ public class ConnectionService {
     private final TunnelRecoveryService recovery;
     private final ChangeListener<ConnectionState> stateListener;
     private volatile ProxyMode requestedMode;
+    /**
+     * The mode the last connect started in, or asked for: what recovery
+     * restarts in. It took the saved mode, which a change on the Dashboard or
+     * over MCP sets without touching the running core, so a dropped tunnel
+     * came back in the other mode: a UAC or administrator prompt nobody asked
+     * for, or a TUN tunnel silently turned into a system proxy.
+     */
+    private volatile ProxyMode restartMode;
     /** What the running core was started from, or null when none was. */
     private volatile Run run;
     /** The ports the last core listened on, which a restart may find in its TIME_WAIT. */
@@ -304,8 +312,11 @@ public class ConnectionService {
             return false;
         }
         // The mode recover() would restart in.
-        ProxyMode mode = requestedMode != null
-                ? requestedMode : configStore.getSettings().getProxyMode();
+        ProxyMode mode = restartMode;
+        if (mode == null) {
+            mode = requestedMode != null
+                    ? requestedMode : configStore.getSettings().getProxyMode();
+        }
         return mode == ProxyMode.TUN && engine.restartNeedsElevationPrompt();
     }
 
@@ -488,6 +499,17 @@ public class ConnectionService {
 
     private ConnectAttempt connectInternal(ProxyMode modeOverride, BooleanSupplier allowed)
             throws IOException {
+        try {
+            return startCore(modeOverride, allowed);
+        } finally {
+            // A connect that waited for an earlier tunnel showed Connecting,
+            // and one that failed after it without a start left it showing.
+            engine.connectEnded();
+        }
+    }
+
+    private ConnectAttempt startCore(ProxyMode modeOverride, BooleanSupplier allowed)
+            throws IOException {
         if (!engine.hasBinary()) {
             return new ConnectAttempt(Outcome.NO_CORE, null);
         }
@@ -514,6 +536,7 @@ public class ConnectionService {
             // would be refused anyway.
             return new ConnectAttempt(Outcome.ALREADY_RUNNING, active);
         }
+        restartMode = mode;
         log.info("Connecting to server: {} ({})", active.getName(), mode);
         engine.awaitStopped(STOP_WAIT);
         if (!allowed.getAsBoolean()) {
@@ -537,7 +560,7 @@ public class ConnectionService {
             lastCorePorts = Set.copyOf(List.of(settings.listenSocksPort(),
                     settings.listenHttpPort(), settings.listenClashApiPort(),
                     settings.listenProbePort()));
-            recordSessionHttpPort(settings);
+            recordSessionHttpPort(settings, mode);
         }
         // A control secret for this core alone. One secret lasted the whole
         // run, and while a TUN start waits for the admin prompt the watchdog
@@ -552,10 +575,13 @@ public class ConnectionService {
         // The run's own: comparing with the settings later reads the host as
         // it was now, and asks it nothing on the FX thread.
         HostFacts host = configGenerator.hostFacts();
+        // The configuration is the mode's the core starts in, which a restart
+        // may run in where the saved mode has changed since.
+        AppSettings generatedFrom = inMode(settings, mode);
         try {
             while (true) {
                 LiveSelector prepared = new LiveSelector(
-                        configGenerator.generate(members, active, settings, routing, host));
+                        configGenerator.generate(members, active, generatedFrom, routing, host));
                 Run previous = run;
                 String previousServer = appliedServerId;
                 run = new Run(prepared, mode, chosenPorts(settings), idsOf(skipped), host);
@@ -611,7 +637,7 @@ public class ConnectionService {
             return new ConnectAttempt(Outcome.ALREADY_RUNNING, active);
         }
         if (mode == ProxyMode.TUN && settings.isTunIpv6Enabled()
-                && !SingBoxConfigGenerator.tunTakesIpv6(settings, host)) {
+                && !SingBoxConfigGenerator.tunTakesIpv6(generatedFrom, host)) {
             // Said once per start: the generator runs again on every dashboard
             // update to compare, and said it each time.
             log.info("TUN IPv6 is on, but no interface holds a global IPv6 address: "
@@ -621,6 +647,26 @@ public class ConnectionService {
         publishSkipped(skipped);
         publishMoved(moved);
         return new ConnectAttempt(Outcome.STARTED, active, skipped);
+    }
+
+    private static final JsonMapper SETTINGS_COPIER = JsonMapper.builder().build();
+
+    /**
+     * {@code settings} in {@code mode}: themselves when that is their mode,
+     * otherwise a copy, so a run in another mode leaves the saved one alone.
+     * The copy keeps what is the run's and not saved: the control secret and
+     * the ports the run listens on.
+     */
+    static AppSettings inMode(AppSettings settings, ProxyMode mode) {
+        if (settings.getProxyMode() == mode) {
+            return settings;
+        }
+        AppSettings copy = SETTINGS_COPIER.convertValue(settings, AppSettings.class);
+        copy.setProxyMode(mode);
+        copy.setClashApiSecret(settings.getClashApiSecret());
+        copy.listenOn(settings.listenSocksPort(), settings.listenHttpPort(),
+                settings.listenClashApiPort(), settings.listenProbePort());
+        return copy;
     }
 
     /**
@@ -909,8 +955,11 @@ public class ConnectionService {
             if (!allowed.getAsBoolean()) {
                 return false;
             }
+            // Restarted as it ran: the saved mode applies at the next start
+            // the user makes, which is what the Dashboard and MCP promise.
+            ProxyMode mode = restartMode;
             stopCurrent();
-            return connectInternal(requestedMode, allowed).started();
+            return connectInternal(mode != null ? mode : requestedMode, allowed).started();
         }
     }
 
@@ -1057,8 +1106,8 @@ public class ConnectionService {
      * next start clears it. A run that does not set the proxy leaves nothing
      * to clear, and a start with nothing recorded skips the check.
      */
-    private void recordSessionHttpPort(AppSettings settings) {
-        if (settings.getProxyMode() == ProxyMode.SYSTEM_PROXY
+    private void recordSessionHttpPort(AppSettings settings, ProxyMode mode) {
+        if (mode == ProxyMode.SYSTEM_PROXY
                 && settings.isSystemProxyAutoConfig()) {
             SessionPorts.record(configStore.getDataDir(), settings.listenHttpPort());
         } else {

@@ -13,6 +13,8 @@ import com.vlessclient.testing.TestServers;
 import javafx.application.Platform;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import tools.jackson.databind.JsonNode;
@@ -469,6 +471,95 @@ class ConnectionServiceTest {
                     .containsSubsequence("start", "stop", "await", "start");
         } finally {
             service.getRecoveryService().close();
+        }
+    }
+
+    /**
+     * Recovery restarted in the saved mode, which the Dashboard and MCP change
+     * without touching the running core: a system-proxy tunnel that dropped
+     * after the mode was switched to TUN came back through a UAC or
+     * administrator prompt nobody asked for, and a TUN tunnel as a system
+     * proxy that apps ignoring it went around.
+     */
+    @Test
+    void recoveryRestartsInTheModeTheTunnelRanNotTheOneSavedSince() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.getSettings().setHealthCheckAutoReconnect(true);
+        store.getSettings().setHealthCheckDelaySeconds(1);
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        try {
+            assertThat(service.connect().started()).isTrue();
+            store.getSettings().setProxyMode(ProxyMode.TUN);
+            engine.running = false;
+
+            service.getRecoveryService().onConnectionState(ConnectionState.ERROR);
+
+            Await.until("recovery to start the core again",
+                    () -> starts(engine) >= 2, Duration.ofSeconds(10));
+            assertThat(engine.modes).containsExactly(ProxyMode.SYSTEM_PROXY, ProxyMode.SYSTEM_PROXY);
+            assertThat(inboundTypes(engine.configs.get(1))).doesNotContain("tun");
+            assertThat(store.getSettings().getProxyMode()).as("the saved choice")
+                    .isEqualTo(ProxyMode.TUN);
+        } finally {
+            service.getRecoveryService().close();
+        }
+    }
+
+    /** A TUN tunnel that prompts at every launch still waits for the user. */
+    @Test
+    void aSavedModeChangeDoesNotHideARestartsPrompt() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.getSettings().setProxyMode(ProxyMode.TUN);
+        RecordingEngine engine = engine();
+        engine.prompts = true;
+        ConnectionService service = service(engine);
+        try {
+            assertThat(service.connect().started()).isTrue();
+            store.getSettings().setProxyMode(ProxyMode.SYSTEM_PROXY);
+
+            assertThat(service.restartNeedsTheUser()).isTrue();
+        } finally {
+            service.getRecoveryService().close();
+        }
+    }
+
+    private static List<String> inboundTypes(String config) {
+        List<String> types = new ArrayList<>();
+        JsonMapper.builder().build().readTree(config).path("inbounds")
+                .forEach(inbound -> types.add(inbound.path("type").asString("")));
+        return types;
+    }
+
+    /**
+     * A connect that waited for an earlier run's tunnel showed Connecting,
+     * and one that then failed before its start, on a server the core cannot
+     * build, left it showing with nothing running.
+     */
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void aConnectThatFailsAfterWaitingForAnEarlierTunnelDoesNotStayConnecting()
+            throws Exception {
+        store.addServer(withShortId(server("srv-1", "Tokyo"), "0123456789abcdef01"));
+        Path recordFile = tempDir.resolve(com.vlessclient.platform.CoreRecord.FILE_NAME);
+        Process earlier = new ProcessBuilder("sleep", "1").start();
+        ConnectionService service = null;
+        try {
+            new com.vlessclient.platform.CoreRecord(recordFile).forTunnel()
+                    .write(earlier.toHandle());
+            SingBoxEngine engine = new SingBoxEngine(tempDir.resolve("sing-box"),
+                    new com.vlessclient.platform.CoreRecord(recordFile));
+            service = service(engine);
+
+            assertThatThrownBy(service::connect).isInstanceOf(ConfigRejectedException.class);
+
+            assertThat(FxExecutor.get(() -> engine.connectionStateProperty().get()))
+                    .isEqualTo(ConnectionState.DISCONNECTED);
+        } finally {
+            earlier.destroyForcibly();
+            if (service != null) {
+                service.getRecoveryService().close();
+            }
         }
     }
 

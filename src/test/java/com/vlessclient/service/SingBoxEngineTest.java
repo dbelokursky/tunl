@@ -1585,4 +1585,247 @@ class SingBoxEngineTest {
             engine.stop();
         }
     }
+
+    // ===== a stop cleans up before it returns =====
+
+    /**
+     * The system's proxy was put back on the process monitor, a daemon thread
+     * a quit does not wait for: the app exited with the proxy still pointing
+     * at the killed core (every stop is a kill on Windows), and the record of
+     * its port was already gone, so the next launch did not clear it either.
+     */
+    @Test
+    void theSystemProxyIsPutBackBeforeStopReturns(@TempDir(cleanup = CleanupMode.NEVER) Path tmp)
+            throws Exception {
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+        List<String> guardCalls = new CopyOnWriteArrayList<>();
+        engine.setSystemProxyGuard((host, port) -> guardCalls.add(host + ":" + port));
+        Set<Thread> monitorsBefore = Await.liveThreadsNamed(MONITOR_THREAD);
+
+        engine.start(SET_SYSTEM_PROXY_CONFIG, ProxyMode.SYSTEM_PROXY);
+        engine.stop();
+
+        assertThat(guardCalls).as("the guard has run when stop() returns")
+                .containsExactly("127.0.0.1:1081");
+        awaitMonitorsFinished(monitorsBefore);
+        assertThat(guardCalls).as("and the monitor does not run it again")
+                .containsExactly("127.0.0.1:1081");
+    }
+
+    /** The launcher's published config, which carries credentials, likewise. */
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void aTunSessionIsCleanedUpBeforeStopReturns(@TempDir(cleanup = CleanupMode.NEVER) Path tmp)
+            throws Exception {
+        Path stopFile = tmp.resolve("stop.signal");
+        Path wrapper = tmp.resolve("wrapper.sh");
+        Files.writeString(wrapper, "#!/bin/sh\n"
+                + "echo 'sing-box started'\n"
+                + "while [ ! -f '" + stopFile + "' ]; do sleep 0.1; done\n");
+        makeExecutable(wrapper);
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+        RecordingLauncher launcher = new RecordingLauncher(wrapper, stopFile);
+        engine.setTunLauncher(launcher);
+        Set<Thread> monitorsBefore = Await.liveThreadsNamed(MONITOR_THREAD);
+
+        engine.start(DUMMY_CONFIG, ProxyMode.TUN);
+        engine.stop();
+
+        assertThat(launcher.cleanups.get()).as("cleaned up when stop() returns").isEqualTo(1);
+        awaitMonitorsFinished(monitorsBefore);
+        assertThat(launcher.cleanups.get()).as("and only once").isEqualTo(1);
+    }
+
+    // ===== a TUN core slower to close than the stop's grace =====
+
+    /**
+     * The launcher of a TUN core still closing after the stop's grace was
+     * killed, which cannot stop a root core any sooner, and the session was
+     * forgotten with it: the next connect and the next run found nothing to
+     * wait for and started a second tunnel beside the one still closing.
+     */
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void aTunCoreStillClosingAfterTheStopIsStillWaitedFor(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        Path stopFile = tmp.resolve("stop.signal");
+        Path wrapper = tmp.resolve("wrapper.sh");
+        // A launcher whose core takes eight seconds to close once told to.
+        Files.writeString(wrapper, "#!/bin/sh\n"
+                + "echo 'sing-box started'\n"
+                + "while [ ! -f '" + stopFile + "' ]; do sleep 0.1; done\n"
+                + "sleep 8\n");
+        makeExecutable(wrapper);
+        Path recordFile = tmp.resolve(CoreRecord.FILE_NAME);
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30),
+                new CoreRecord(recordFile));
+        AtomicReference<Process> launched = new AtomicReference<>();
+        engine.setTunLauncher((binary, config, prompt) -> {
+            Process p = new ProcessBuilder(wrapper.toString()).redirectErrorStream(true).start();
+            launched.set(p);
+            return new com.vlessclient.platform.TunLauncher.Launched(p, stopFile);
+        });
+
+        engine.start(DUMMY_CONFIG, ProxyMode.TUN);
+        try {
+            engine.stop();
+
+            assertThat(launched.get().isAlive()).as("the launcher is not killed").isTrue();
+            assertThat(engine.isStopping()).as("a connect waits for it").isTrue();
+            assertThat(new CoreRecord(recordFile).forTunnel().runningCore())
+                    .as("the next run waits for it").isPresent();
+            assertThat(engine.awaitStopped(Duration.ofSeconds(20))).isTrue();
+            assertThat(launched.get().exitValue()).as("it ended on its own").isZero();
+            Await.until(() -> Files.notExists(tmp.resolve(CoreRecord.TUNNEL_FILE_NAME)),
+                    Duration.ofSeconds(10));
+        } finally {
+            launched.get().destroyForcibly();
+        }
+    }
+
+    // ===== a start called off as it launches =====
+
+    /**
+     * An interrupt that came while the launcher ran was not looked at: the
+     * start returned with its core running, and at quit nothing was left to
+     * stop it.
+     */
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void aStartInterruptedDuringTheLaunchLeavesNothingRunning(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        Path stopFile = tmp.resolve("stop.signal");
+        Path wrapper = tmp.resolve("wrapper.sh");
+        Files.writeString(wrapper, "#!/bin/sh\n"
+                + "echo 'sing-box started'\n"
+                + "while [ ! -f '" + stopFile + "' ]; do sleep 0.1; done\n");
+        makeExecutable(wrapper);
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+        AtomicReference<Process> launched = new AtomicReference<>();
+        engine.setTunLauncher((binary, config, prompt) -> {
+            Process p = new ProcessBuilder(wrapper.toString()).redirectErrorStream(true).start();
+            launched.set(p);
+            // The quit's interrupt, landing while the launcher runs.
+            Thread.currentThread().interrupt();
+            return new com.vlessclient.platform.TunLauncher.Launched(p, stopFile);
+        });
+        AtomicReference<Exception> failure = new AtomicReference<>();
+        AtomicBoolean stillInterrupted = new AtomicBoolean();
+        Thread starter = new Thread(() -> {
+            try {
+                engine.start(DUMMY_CONFIG, ProxyMode.TUN);
+            } catch (Exception e) {
+                failure.set(e);
+            }
+            stillInterrupted.set(Thread.currentThread().isInterrupted());
+        }, "start-to-interrupt");
+
+        starter.start();
+        starter.join(Duration.ofSeconds(20));
+        try {
+            assertThat(failure.get()).isInstanceOf(InterruptedIOException.class);
+            assertThat(engine.isRunning()).as("a core is left running").isFalse();
+            assertThat(launched.get().isAlive()).isFalse();
+            assertThat(stillInterrupted.get()).as("the interrupt is kept for the caller").isTrue();
+            awaitConnectionState(engine, ConnectionState.DISCONNECTED, AWAIT_STATE_TIMEOUT_MS);
+        } finally {
+            launched.get().destroyForcibly();
+        }
+    }
+
+    // ===== the quit closes the engine =====
+
+    /**
+     * The quit stopped the core only when one was running as it looked. A
+     * Connect clicked a moment earlier was still checking its configuration,
+     * so nothing was stopped, and its core outlived the app.
+     */
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void closeCallsOffAStartUnderWayAndRefusesAnyAfterIt(
+            @TempDir(cleanup = CleanupMode.NEVER) Path tmp) throws Exception {
+        Path checking = tmp.resolve("checking");
+        Path fake = writeScript(tmp, "sing-box",
+                "#!/bin/sh\n"
+                + "if [ \"$1\" = check ]; then touch '" + checking + "'; exec sleep 30; fi\n"
+                + "echo 'sing-box started'\n"
+                + "sleep 30\n");
+        SingBoxEngine engine = new SingBoxEngine(fake);
+        AtomicReference<Exception> failure = new AtomicReference<>();
+        Thread starter = new Thread(() -> {
+            try {
+                engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY);
+            } catch (Exception e) {
+                failure.set(e);
+            }
+        }, "connect-before-quit");
+        starter.start();
+        Await.until("the check to run", () -> Files.exists(checking), Duration.ofSeconds(10));
+
+        engine.close();
+        starter.join(Duration.ofSeconds(10));
+
+        assertThat(starter.isAlive()).isFalse();
+        assertThat(engine.isRunning()).as("a core outlives the quit").isFalse();
+        assertThat(failure.get()).isInstanceOf(InterruptedIOException.class);
+        assertThatThrownBy(() -> engine.start(DUMMY_CONFIG, ProxyMode.SYSTEM_PROXY))
+                .isInstanceOf(InterruptedIOException.class);
+        assertThat(engine.isRunning()).as("a start after the quit").isFalse();
+    }
+
+    /** A launch that does not heed the interrupt is waited for, and its core stopped. */
+    @EnabledOnOs({OS.MAC, OS.LINUX})
+    @Test
+    void closeStopsTheCoreOfAStartAlreadyLaunching(@TempDir(cleanup = CleanupMode.NEVER) Path tmp)
+            throws Exception {
+        Path stopFile = tmp.resolve("stop.signal");
+        Path wrapper = tmp.resolve("wrapper.sh");
+        Files.writeString(wrapper, "#!/bin/sh\n"
+                + "echo 'sing-box started'\n"
+                + "while [ ! -f '" + stopFile + "' ]; do sleep 0.1; done\n");
+        makeExecutable(wrapper);
+        SingBoxEngine engine = new SingBoxEngine(createFakeSingBox(tmp, "sing-box", 30));
+        CountDownLatch launching = new CountDownLatch(1);
+        AtomicReference<Process> launched = new AtomicReference<>();
+        engine.setTunLauncher((binary, config, prompt) -> {
+            launching.countDown();
+            // A launch the interrupt cannot cut short, as ProcessBuilder.start.
+            long until = System.nanoTime() + Duration.ofMillis(700).toNanos();
+            boolean interrupted = false;
+            while (System.nanoTime() < until) {
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    interrupted = true;
+                }
+            }
+            Process p = new ProcessBuilder(wrapper.toString()).redirectErrorStream(true).start();
+            launched.set(p);
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+            return new com.vlessclient.platform.TunLauncher.Launched(p, stopFile);
+        });
+        Thread starter = new Thread(() -> {
+            try {
+                engine.start(DUMMY_CONFIG, ProxyMode.TUN);
+            } catch (Exception expected) {
+                // called off by the close
+            }
+        }, "connect-before-quit");
+        starter.start();
+        assertThat(launching.await(10, TimeUnit.SECONDS)).isTrue();
+
+        engine.close();
+        starter.join(Duration.ofSeconds(10));
+        try {
+            assertThat(launched.get()).as("the launch went ahead").isNotNull();
+            assertThat(launched.get().isAlive()).as("its core outlives the quit").isFalse();
+            assertThat(engine.isRunning()).isFalse();
+        } finally {
+            if (launched.get() != null) {
+                launched.get().destroyForcibly();
+            }
+        }
+    }
 }
