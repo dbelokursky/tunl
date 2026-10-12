@@ -3,6 +3,8 @@ package com.vlessclient.service;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
+import java.net.URI;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -72,7 +74,7 @@ class ShareLinkExporterTest {
         assertThat(uri).contains("fp=chrome");
         assertThat(uri).contains("path=%2Fws");
         assertThat(uri).contains("host=cdn.example.com");
-        assertThat(uri).endsWith("#WS+TLS");
+        assertThat(uri).endsWith("#WS%20TLS");
     }
 
     @Test
@@ -198,6 +200,77 @@ class ShareLinkExporterTest {
 
         String uri = exporter.export(config);
 
-        assertThat(uri).endsWith("#My+Server+%26+Proxy");
+        assertThat(uri).endsWith("#My%20Server%20%26%20Proxy");
+    }
+
+    /**
+     * A space in the name went out as '+', form encoding, which only this
+     * app's own parser reads back as a space: v2rayN, Hiddify, NekoBox and
+     * the clients built on Go's net/url percent-decode a fragment and keep
+     * the '+', so "[Sub] Germany 1" showed there as "[Sub]+Germany+1". The
+     * fragment is read here the way they read it.
+     */
+    @Test
+    void theNameReadsBackTheSameInOtherClients() {
+        for (Protocol protocol : List.of(Protocol.VLESS, Protocol.TROJAN,
+                Protocol.HYSTERIA2, Protocol.SHADOWSOCKS)) {
+            ServerConfig config = server(protocol, "host.example");
+            config.setName("[Sub] Germany 1+2 & 100%");
+
+            String link = exporter.export(config);
+
+            assertThat(URI.create(link).getFragment()).as(link)
+                    .isEqualTo("[Sub] Germany 1+2 & 100%");
+            assertThat(new ShareLinkParser().parse(link).getName()).as(link)
+                    .isEqualTo("[Sub] Germany 1+2 & 100%");
+        }
+    }
+
+    /**
+     * An address typed into the form, or a VMess link's "add", is stored
+     * without brackets, and the export wrote it as it was:
+     * {@code vless://uuid@2001:db8::1:443}, which no client reads, this one
+     * included ("Missing UUID in VLESS URI").
+     */
+    @Test
+    void aBareIpv6AddressIsBracketedSoTheLinkReadsBack() {
+        for (Protocol protocol : List.of(Protocol.VLESS, Protocol.TROJAN,
+                Protocol.HYSTERIA2, Protocol.SHADOWSOCKS)) {
+            ServerConfig config = server(protocol, "2001:db8::1");
+
+            String link = exporter.export(config);
+            ServerConfig back = new ShareLinkParser().parse(link);
+
+            assertThat(link).as(protocol.name()).contains("@[2001:db8::1]:8443");
+            assertThat(back.getAddress()).as(link).isEqualTo("[2001:db8::1]");
+            assertThat(back.getPort()).as(link).isEqualTo(8443);
+            assertThat(back.getUuid()).as(link).isEqualTo("secret-credential");
+        }
+    }
+
+    /** An address already in brackets, as links bring it, keeps one pair. */
+    @Test
+    void aBracketedIpv6AddressKeepsOnePairOfBrackets() {
+        for (Protocol protocol : List.of(Protocol.VLESS, Protocol.SHADOWSOCKS)) {
+            String link = exporter.export(server(protocol, "[2001:db8::1]"));
+
+            assertThat(link).as(protocol.name()).contains("@[2001:db8::1]:8443")
+                    .doesNotContain("[[");
+        }
+    }
+
+    private static ServerConfig server(Protocol protocol, String address) {
+        ServerConfig config = new ServerConfig();
+        config.setProtocol(protocol);
+        config.setUuid("secret-credential");
+        config.setAddress(address);
+        config.setPort(8443);
+        config.setName("Server");
+        if (protocol == Protocol.SHADOWSOCKS) {
+            config.setEncryption("aes-256-gcm");
+        } else {
+            config.getTls().setEnabled(true);
+        }
+        return config;
     }
 }

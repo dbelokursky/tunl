@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.vlessclient.model.Protocol;
+import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TransportType;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
@@ -119,6 +120,48 @@ class ShareLinkUnrunnableFeatureTest {
         }
     }
 
+    /**
+     * What a one-click Hysteria2 install hands out for its self-signed
+     * certificate: verification off, and the certificate's SHA-256 pinned in
+     * its place, which is what makes insecure=1 safe in the official client.
+     * The core pins a public key, not a certificate, and the one cannot be
+     * worked out from the other, so the pin was dropped and the link stored as
+     * plain insecure=1: any certificate was taken, and whoever sat on the path
+     * could read the password and every byte of the tunnel.
+     */
+    @Test
+    void aHysteria2LinkThatPinsItsCertificateInsteadOfCheckingItIsRefused() {
+        String pin = "dc19d6633637ad39aa5aee234d7eb11c49e217e9eaef988cacb6d83442f9cab7";
+        List<String> links = List.of(
+                "hysteria2://password@203.0.113.7:443/?sni=bing.com&insecure=1&pinSHA256="
+                        + pin + "#P",
+                "hy2://password@203.0.113.7:443?insecure=1&pinsha256=" + pin.toUpperCase()
+                        + "&obfs=salamander&obfs-password=secret#P");
+        for (String link : links) {
+            assertThatThrownBy(() -> parser.parse(link)).as(link)
+                    .isInstanceOfSatisfying(ShareLinkParser.UnsupportedFeatureException.class,
+                            e -> assertThat(e.feature()).isEqualTo("certificate pin"));
+        }
+    }
+
+    /**
+     * Beside verification the pin only narrows which certificate the
+     * authorities vouch for is taken; without it the server is still
+     * verified, so such a link still imports. Without a pin, insecure=1 is
+     * what the link asks for, and the server list marks it.
+     */
+    @Test
+    void aHysteria2LinkThatStillChecksItsCertificateImports() {
+        ServerConfig pinnedAndVerified = parser.parse("hysteria2://password@hy.example:443"
+                + "/?sni=hy.example&pinSHA256=dc19d6633637ad39aa5aee234d7eb11c49e217e9#P");
+        assertThat(pinnedAndVerified.getTls().isEnabled()).isTrue();
+        assertThat(pinnedAndVerified.getTls().isAllowInsecure()).isFalse();
+
+        ServerConfig insecure = parser.parse(
+                "hysteria2://password@hy.example:443/?sni=hy.example&insecure=1&pinSHA256=#P");
+        assertThat(insecure.getTls().isAllowInsecure()).isTrue();
+    }
+
     /** The import report shows the reason; the feature stays English, for the log. */
     @Test
     void theReasonIsWordedInTheLanguageOfTheUi() {
@@ -129,7 +172,9 @@ class ShareLinkUnrunnableFeatureTest {
                     "vless://" + UUID + "@vless.example:443?encryption=mlkem768x25519plus.native"
                             + ".0rtt.KEY&security=tls#E",
                     "vless://" + UUID + "@vless.example:80?type=tcp&headerType=http#V",
-                    "ss://" + userInfo() + "@ss.example:443?type=ws&security=tls#W");
+                    "ss://" + userInfo() + "@ss.example:443?type=ws&security=tls#W",
+                    "trojan://password@trojan.example:443?security=xtls#X",
+                    "hy2://password@hy.example:443?insecure=1&pinSHA256=AB:CD#P");
             for (String link : links) {
                 assertThatThrownBy(() -> parser.parse(link)).as(link)
                         .isInstanceOfSatisfying(ShareLinkParser.UnsupportedFeatureException.class,

@@ -74,12 +74,17 @@ class Hysteria2PortHoppingTest {
         assertThat(server.getServerPorts()).isNull();
     }
 
+    /**
+     * The message names the problem but not the list: where a link has no
+     * host, or an @ inside its password, what stands where the ports go is
+     * the password, and the message reaches the log and the import report.
+     */
     @Test
     void aPortListOutOfRangeIsRefusedAtTheDoor() {
         assertThatThrownBy(() -> parser.parse(
                 "hysteria2://secret@hy.example:443,70000-80000/?sni=hy.example#X"))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("70000-80000");
+                .hasMessage("Malformed port list in Hysteria2 URI");
         assertThatThrownBy(() -> parser.parse(
                 "hysteria2://secret@hy.example:443?mport=9-3&sni=hy.example#Y"))
                 .isInstanceOf(IllegalArgumentException.class);
