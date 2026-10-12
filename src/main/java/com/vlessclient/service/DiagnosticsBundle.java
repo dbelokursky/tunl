@@ -9,10 +9,12 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -48,7 +50,8 @@ import tools.jackson.databind.node.ObjectNode;
  * every URL, every name a server goes by and every public IP address
  * redacted, the sing-box configuration this build would generate
  * right now with every secret value replaced, and {@code settings.json} /
- * {@code routing.json} with their URLs redacted, when they exist. It
+ * {@code routing.json} with their URLs redacted, and the settings' device id
+ * too, when they exist. It
  * deliberately does <em>not</em> hold {@code servers.json},
  * {@code subscriptions.json}, the MCP token file or anything from the OS
  * keychain.</p>
@@ -67,6 +70,10 @@ public class DiagnosticsBundle {
     /** Enough log to see how the app got here, small enough to attach. */
     private static final int LOG_TAIL_LINES = 2000;
 
+    /** A log rolled over, as logback.xml names it: {@code tunl.<date>.<index>.log}. */
+    private static final Pattern ROLLED_LOG =
+            Pattern.compile("tunl\\.(\\d{4}-\\d{2}-\\d{2})\\.(\\d{1,9})\\.log");
+
     /** Stand-in for a value stripped out of the generated configuration. */
     private static final String REDACTED = Redact.REDACTED;
 
@@ -82,6 +89,13 @@ public class DiagnosticsBundle {
 
     /** Any field whose name contains one of these is a secret too. */
     private static final List<String> SECRET_FRAGMENTS = List.of("token", "secret", "password");
+
+    /**
+     * Fields of {@code settings.json} that name the install to somebody else:
+     * the device id, which every subscription provider is sent as
+     * {@code x-hwid} and keeps with the account to count its devices.
+     */
+    private static final Set<String> SETTINGS_IDENTIFYING = Set.of("device_id");
 
     /**
      * Field names that identify the user's server without authenticating to
@@ -183,7 +197,51 @@ public class DiagnosticsBundle {
         }
         // Lenient decoding: a stray invalid byte must not cost the report this file.
         String content = new String(Files.readAllBytes(source), StandardCharsets.UTF_8);
+        if (SETTINGS_ENTRY.equals(name)) {
+            content = redactedSettings(content);
+        }
         write(zip, name, Redact.urlsIn(content));
+    }
+
+    /**
+     * {@code settings.json} without the values that name the install: the
+     * device id, and a string under any name a secret goes by, should a later
+     * version keep one there. The device id went into the bundle as it was,
+     * and the provider's panel lists it with the account, so a report
+     * attached to a public issue named the subscription it came from.
+     */
+    private String redactedSettings(String content) {
+        try {
+            JsonNode root = objectMapper.readTree(content);
+            redactSettingsValues(root);
+            return objectMapper.writeValueAsString(root) + "\n";
+        } catch (JacksonException e) {
+            // As with the configuration: a file that cannot be redacted
+            // must not ship.
+            log.warn("Could not redact settings.json for diagnostics: {}", e.getMessage());
+            return "{\n  \"note\": \"settings.json could not be redacted; omitted\"\n}\n";
+        }
+    }
+
+    private static void redactSettingsValues(JsonNode node) {
+        if (node instanceof ObjectNode object) {
+            for (String name : List.copyOf(object.propertyNames())) {
+                JsonNode value = object.get(name);
+                if (value == null || value.isNull()) {
+                    continue;
+                }
+                if (SETTINGS_IDENTIFYING.contains(name)
+                        || value.isString() && isSecretField(name)) {
+                    object.put(name, REDACTED);
+                } else {
+                    redactSettingsValues(value);
+                }
+            }
+        } else if (node instanceof ArrayNode array) {
+            for (JsonNode child : array) {
+                redactSettingsValues(child);
+            }
+        }
     }
 
     /**
@@ -227,29 +285,79 @@ public class DiagnosticsBundle {
      * address are redacted too: an unexpected exit leaves the core's last
      * lines in the log, and the core quotes the server it dialed, the address
      * that name resolved to and the SNI a certificate did not match.
+     *
+     * <p>The log rolls over at midnight and at 10 MB, and the active file
+     * starts empty again. The tail took that file alone, so a bundle saved
+     * just after held a few idle lines and none of the failure it was saved
+     * for; the files rolled over now fill the rest, newest first.</p>
      */
     private String logTail() {
         Path file = logsDir.resolve(LOG_ENTRY);
         if (!Files.isRegularFile(file)) {
             return "(no log file at " + file.getFileName() + ")\n";
         }
-        Deque<String> tail = new ArrayDeque<>(LOG_TAIL_LINES);
-        try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                if (tail.size() == LOG_TAIL_LINES) {
-                    tail.removeFirst();
-                }
-                tail.addLast(line);
-            }
+        Deque<String> tail;
+        try {
+            tail = lastLines(file, LOG_TAIL_LINES);
         } catch (IOException e) {
             return "(could not read the log file: " + e.getMessage() + ")\n";
         }
-        // Only the lines kept: the log runs to 10 MB, and this runs on the UI thread.
+        for (Path rolled : rolledLogsNewestFirst()) {
+            if (tail.size() >= LOG_TAIL_LINES) {
+                break;
+            }
+            try {
+                Deque<String> earlier = lastLines(rolled, LOG_TAIL_LINES - tail.size());
+                earlier.descendingIterator().forEachRemaining(tail::addFirst);
+            } catch (IOException e) {
+                log.debug("Could not read {} for diagnostics: {}",
+                        rolled.getFileName(), e.getMessage());
+                break;
+            }
+        }
+        // Only the lines kept: each log file runs to 10 MB.
         UnaryOperator<String> serverNames = serverNameRedactor();
         return tail.stream()
                 .map(line -> Redact.publicIpsIn(serverNames.apply(Redact.urlsIn(line))))
                 .collect(Collectors.joining("\n", "", "\n"));
+    }
+
+    /** The last {@code count} lines of {@code file}, read through once. */
+    private static Deque<String> lastLines(Path file, int count) throws IOException {
+        Deque<String> tail = new ArrayDeque<>(count);
+        try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (tail.size() == count) {
+                    tail.removeFirst();
+                }
+                tail.addLast(line);
+            }
+        }
+        return tail;
+    }
+
+    /** The log files rolled over, the newest first: by date, then by index. */
+    private List<Path> rolledLogsNewestFirst() {
+        record Rolled(Path path, String date, int index) {
+        }
+
+        List<Rolled> rolled = new ArrayList<>();
+        try (DirectoryStream<Path> files = Files.newDirectoryStream(logsDir, "tunl.*.log")) {
+            for (Path path : files) {
+                Matcher name = ROLLED_LOG.matcher(path.getFileName().toString());
+                if (name.matches()) {
+                    rolled.add(new Rolled(path, name.group(1), Integer.parseInt(name.group(2))));
+                }
+            }
+        } catch (IOException e) {
+            log.debug("Could not list the rolled logs for diagnostics: {}", e.getMessage());
+        }
+        return rolled.stream()
+                .sorted(Comparator.comparing(Rolled::date).thenComparingInt(Rolled::index)
+                        .reversed())
+                .map(Rolled::path)
+                .toList();
     }
 
     /**

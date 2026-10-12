@@ -243,6 +243,39 @@ class DiagnosticsBundleTest {
                 .contains("https://intranet.example/");
     }
 
+    /**
+     * The install's device id is what every subscription provider is sent as
+     * x-hwid, and their panels keep it with the account to count its devices.
+     * settings.json went into the bundle with it, so a report attached to a
+     * public issue named the subscription it came from.
+     */
+    @Test
+    void theCopiedSettingsNameNoDeviceTheProvidersKnow() throws IOException {
+        String deviceId = store.deviceId();
+        assertThat(Files.readString(store.getDataDir().resolve("settings.json")))
+                .as("saved as it was drawn").contains(deviceId);
+
+        String settings = unzip(write()).get("settings.json");
+
+        assertThat(settings)
+                .doesNotContain(deviceId)
+                .contains("\"device_id\" : \"<redacted>\"")
+                .contains("\"proxy_mode\" : \"system_proxy\"")
+                .contains("\"store_secrets_securely\" : true");
+    }
+
+    /** Redaction is why the file may go, so one that cannot be read is left out. */
+    @Test
+    void settingsThatAreNotJsonAreLeftOut() throws IOException {
+        Files.writeString(store.getDataDir().resolve("settings.json"),
+                "{\"device_id\": \"410c8d6b-47be-4c6d-a4ff-c19667d43561\",",
+                StandardCharsets.UTF_8);
+
+        String settings = unzip(write()).get("settings.json");
+
+        assertThat(settings).doesNotContain("410c8d6b").contains("omitted");
+    }
+
     @Test
     void theLogTailIsRedactedAndCapped() throws IOException {
         String filler = IntStream.range(0, 2500)
@@ -261,6 +294,54 @@ class DiagnosticsBundleTest {
         assertThat(lines).hasSize(2000);
         assertThat(lines.get(0)).isEqualTo("line 501");
         assertThat(lines.get(lines.size() - 1)).startsWith("Refreshing ");
+    }
+
+    /**
+     * The log rolls over at midnight and at 10 MB, and the active file starts
+     * empty again. The tail read only that file, so a bundle saved just after
+     * a rollover held a few idle lines and none of the failure it was saved for.
+     */
+    @Test
+    void theLogTailReachesBackIntoTheFilesRolledOver() throws IOException {
+        Files.writeString(logsDir.resolve("tunl.2026-10-10.0.log"),
+                "oldest\n", StandardCharsets.UTF_8);
+        // Index 9 before 10: the files sort by number, not by name.
+        Files.writeString(logsDir.resolve("tunl.2026-10-11.9.log"), IntStream.range(0, 600)
+                .mapToObj(i -> "earlier " + i)
+                .collect(Collectors.joining("\n", "", "\n")), StandardCharsets.UTF_8);
+        Files.writeString(logsDir.resolve("tunl.2026-10-11.10.log"), IntStream.range(0, 1500)
+                .mapToObj(i -> "failure " + i)
+                .collect(Collectors.joining("\n", "", "\n"))
+                + "Refreshing https://provider.example/sub/rolled-account-token\n",
+                StandardCharsets.UTF_8);
+        Files.writeString(logsDir.resolve("tunl.log"),
+                "after midnight 1\nafter midnight 2\n", StandardCharsets.UTF_8);
+
+        List<String> lines = unzip(write()).get("tunl.log").lines().toList();
+
+        assertThat(lines).hasSize(2000).doesNotContain("oldest");
+        assertThat(lines.get(0)).isEqualTo("earlier 103");
+        assertThat(lines.get(496)).isEqualTo("earlier 599");
+        assertThat(lines.get(497)).isEqualTo("failure 0");
+        assertThat(lines.get(1997)).startsWith("Refreshing https://provider.example/")
+                .doesNotContain("rolled-account-token");
+        assertThat(lines.subList(1998, 2000))
+                .containsExactly("after midnight 1", "after midnight 2");
+    }
+
+    /** With more than enough in the active file, the rolled ones are not read. */
+    @Test
+    void aFullActiveLogNeedsNoRolledFile() throws IOException {
+        Files.writeString(logsDir.resolve("tunl.2026-10-11.0.log"),
+                "rolled\n", StandardCharsets.UTF_8);
+        Files.writeString(logsDir.resolve("tunl.log"), IntStream.range(0, 2100)
+                .mapToObj(i -> "line " + i)
+                .collect(Collectors.joining("\n", "", "\n")), StandardCharsets.UTF_8);
+
+        List<String> lines = unzip(write()).get("tunl.log").lines().toList();
+
+        assertThat(lines).hasSize(2000).doesNotContain("rolled");
+        assertThat(lines.get(0)).isEqualTo("line 100");
     }
 
     /**
