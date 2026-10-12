@@ -130,6 +130,7 @@ vX.Y.Z — concise release title
 - Windows 10/11 x64: `tunl_X.Y.Z.msi`
 - Debian/Ubuntu amd64: `tunl_X.Y.Z_amd64.deb`
 - Debian/Ubuntu arm64: `tunl_X.Y.Z_arm64.deb`
+- Bundled core: sing-box <version>, GPL-3.0, built as `core-v<version>-tunl<N>` (the `singbox.release` of the tagged commit); its release holds the corresponding source
 ```
 
 The version comes wholly from the tag (`pom.xml` stays `-SNAPSHOT`). To fix notes
