@@ -244,17 +244,23 @@ public final class LinuxTunLauncher implements TunLauncher {
         // "permission denied" until the file was removed by hand. It exits
         // with the core's status and waits for the core on a signal; see
         // StdinWatch#around.
+        // The stop file is named through SBSTOP: written into the trap, its
+        // quoted path closed the trap's own quotes, and a space in it
+        // ($XDG_DATA_HOME or $HOME) split the trap command. dash refused the
+        // whole trap, and a SIGTERM then killed the shell with the root core
+        // still running.
         return String.format(
-                StdinWatch.SIGNAL_TRAP + "rm -f %s; exit 143' INT TERM; "
+                "SBSTOP=%s; "
+                        + StdinWatch.SIGNAL_TRAP + "rm -f \"$SBSTOP\"; exit 143' INT TERM; "
                         + StdinWatch.EXIT_TRAP
                         + "%s%s run -c %s & SBPID=$!; "
                         + "while kill -0 $SBPID 2>/dev/null "
                         + "&& kill -0 %d 2>/dev/null "
-                        + "&& [ ! -f %s ]; do sleep 0.3; done; "
+                        + "&& [ ! -f \"$SBSTOP\" ]; do sleep 0.3; done; "
                         + "kill $SBPID 2>/dev/null; "
                         + "wait $SBPID 2>/dev/null; RC=$?; "
-                        + "rm -f %s; exit $RC",
-                stopPath, appUserIds(), singBoxCmd, configPath, parentPid, stopPath, stopPath);
+                        + "rm -f \"$SBSTOP\"; exit $RC",
+                stopPath, appUserIds(), singBoxCmd, configPath, parentPid);
     }
 
     /**

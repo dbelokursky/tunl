@@ -5,9 +5,12 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.io.InterruptedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -15,6 +18,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -213,13 +217,16 @@ class LinuxTunLauncherTest {
                 Path.of("/opt/sing-box"), Path.of("/tmp/c.json"), Path.of("/tmp/stop"));
 
         assertThat(wrapper).contains("'/opt/sing-box' run -c '/tmp/c.json'");
-        assertThat(wrapper).contains("[ ! -f '/tmp/stop' ]");
+        // The stop file goes in through a variable, never quoted inside the
+        // trap's own quotes; see aSigtermStopsTheCoreWhenTheStopPathHasASpace.
+        assertThat(wrapper).startsWith("SBSTOP='/tmp/stop'; ");
+        assertThat(wrapper).contains("[ ! -f \"$SBSTOP\" ]");
         // Parent watch: a dead app must never leak an elevated core.
         assertThat(wrapper).contains("kill -0 " + ProcessHandle.current().pid());
         // Must trap the signals the engine actually sends (Process.destroy =
         // SIGTERM), not EXIT alone — see wrapperKillsChildOnSigterm.
         assertThat(wrapper).contains("' INT TERM; ").contains("' EXIT; ");
-        assertThat(wrapper).contains("rm -f '/tmp/stop'");
+        assertThat(wrapper).contains("rm -f \"$SBSTOP\"; exit $RC");
         // The trap has to be in place before the core starts: a SIGTERM
         // between the two killed the shell and left the core running.
         assertThat(wrapper.indexOf("trap "))
@@ -273,6 +280,48 @@ class LinuxTunLauncherTest {
         // against keeps the core alive indefinitely, not for milliseconds.
         Await.until("fake core " + pid + " to be reaped, not orphaned",
                 () -> !core.isAlive(), Duration.ofSeconds(5));
+    }
+
+    /**
+     * The stop file's path, quoted inside the trap's own single quotes, split
+     * the trap at its first space, which $XDG_DATA_HOME or $HOME may hold.
+     * bash trapped the signals with an action cut short before its exit and
+     * printed an error into the core's log; dash refused the trap, and a
+     * SIGTERM killed the wrapper with the root core still running.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"/bin/sh", "/bin/bash", "/bin/dash"})
+    @org.junit.jupiter.api.condition.EnabledOnOs({org.junit.jupiter.api.condition.OS.MAC,
+            org.junit.jupiter.api.condition.OS.LINUX})
+    void aSigtermStopsTheCoreWhenTheStopPathHasASpace(String shell, @TempDir Path dir)
+            throws Exception {
+        Assumptions.assumeTrue(Files.isExecutable(Path.of(shell)), shell + " is not installed");
+        Path pidFile = dir.resolve("core.pid");
+        Path fakeCore = Files.writeString(dir.resolve("core.sh"),
+                "#!/bin/sh\necho $$ > '" + pidFile + "'\nexec sleep 60\n");
+        fakeCore.toFile().setExecutable(true, true);
+        Path stop = Files.createDirectories(dir.resolve("share dir/vless-client/run"))
+                .resolve("stop-1.signal");
+
+        Path output = dir.resolve("wrapper.out");
+        Process sh = new ProcessBuilder(shell, "-c",
+                LinuxTunLauncher.wrapperCommand(fakeCore, dir.resolve("c.json"), stop))
+                .redirectErrorStream(true).redirectOutput(output.toFile()).start();
+        spawned.add(sh.toHandle());
+        long pid = Long.parseLong(Await.untilValue("the fake core to record its pid",
+                () -> readQuietly(pidFile), text -> !text.isEmpty(), Duration.ofSeconds(5)));
+        ProcessHandle core = ProcessHandle.of(pid)
+                .orElseThrow(() -> new AssertionError("fake core " + pid + " already gone"));
+        spawned.add(core);
+
+        sh.destroy();
+
+        assertThat(sh.waitFor(10, TimeUnit.SECONDS)).as("the wrapper ends on SIGTERM").isTrue();
+        Await.until("the core to be stopped with its wrapper", () -> !core.isAlive(),
+                Duration.ofSeconds(5));
+        assertThat(Files.readString(output, StandardCharsets.UTF_8))
+                .as("what the shell said about its trap").doesNotContain("trap");
+        assertThat(sh.exitValue()).as("the trap's own exit").isEqualTo(143);
     }
 
     @Test

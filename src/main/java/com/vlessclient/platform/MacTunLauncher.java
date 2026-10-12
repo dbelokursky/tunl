@@ -275,18 +275,24 @@ public final class MacTunLauncher implements TunLauncher {
         String stopPath = shellQuote(stopSignalFile.toAbsolutePath().toString());
 
         // Exits with the core's status and waits for the core on a signal;
-        // see StdinWatch#around.
+        // see StdinWatch#around. The stop file is named through SBSTOP:
+        // written into the trap, its quoted path closed the trap's own quotes,
+        // and the space in "Application Support" split the trap command on
+        // every connect. bash then trapped the signals with an action cut
+        // short before its exit, and dash refused the trap, so a SIGTERM
+        // killed the shell with the root core still running.
         return String.format(
-                StdinWatch.SIGNAL_TRAP + "rm -f %s; exit 143' INT TERM; "
+                "SBSTOP=%s; "
+                        + StdinWatch.SIGNAL_TRAP + "rm -f \"$SBSTOP\"; exit 143' INT TERM; "
                         + StdinWatch.EXIT_TRAP
                         + "%s & SBPID=$!; "
                         + "while kill -0 $SBPID 2>/dev/null "
                         + "&& kill -0 %d 2>/dev/null "
-                        + "&& [ ! -f %s ]; do sleep 0.3; done; "
+                        + "&& [ ! -f \"$SBSTOP\" ]; do sleep 0.3; done; "
                         + "kill $SBPID 2>/dev/null; "
                         + "wait $SBPID 2>/dev/null; RC=$?; "
-                        + "rm -f %s; exit $RC",
-                stopPath, start, parentPid, stopPath, stopPath);
+                        + "rm -f \"$SBSTOP\"; exit $RC",
+                stopPath, start, parentPid);
     }
 
     /**
