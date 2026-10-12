@@ -162,9 +162,17 @@ class ConnectionServiceTest {
             return prompts;
         }
 
+        /** Runs while a connect waits for the core being stopped, as a Disconnect might. */
+        volatile Runnable whileAwaited;
+
         @Override
-        public boolean awaitStopped(Duration timeout) {
+        public boolean awaitStopped(Duration timeout,
+                                    java.util.function.BooleanSupplier stillWanted) {
             calls.add("await");
+            Runnable during = whileAwaited;
+            if (during != null) {
+                during.run();
+            }
             if (stopFinishesWhileAwaited) {
                 running = false;
                 stopping = false;
@@ -1673,6 +1681,48 @@ class ConnectionServiceTest {
 
         assertThat(attempt.started()).isTrue();
         assertThat(engine.calls).containsExactly("await", "start");
+    }
+
+    /**
+     * A TUN core can outlast its stop's grace, and the stop returns with the
+     * launcher still running. The next connect waited for it with nothing on
+     * screen, and then its start was refused as "already running", which the
+     * Dashboard and the tray only logged and an agent was told was a connect:
+     * the click did nothing, and the tunnel stayed wanted and down.
+     */
+    @Test
+    void aCoreStillClosingAfterTheWaitIsReportedNotTakenForRunning() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        RecordingEngine engine = engine();
+        engine.running = true;
+        engine.stopping = true;
+        // As the real engine does while the old core is alive.
+        engine.refuseAsAlreadyRunning = true;
+        ConnectionService service = service(engine);
+
+        assertThatThrownBy(service::connect)
+                .isInstanceOf(IOException.class)
+                .hasMessage(com.vlessclient.app.I18n.get("engine.stop.still.closing"));
+        assertThat(engine.calls).as("waited for it, and started nothing beside it")
+                .containsExactly("await");
+    }
+
+    /** A Disconnect while a connect waits for the closing core calls the connect off. */
+    @Test
+    void aDisconnectWhileWaitingForTheClosingCoreCancelsTheConnect() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        RecordingEngine engine = engine();
+        engine.running = true;
+        engine.stopping = true;
+        engine.refuseAsAlreadyRunning = true;
+        ConnectionService service = service(engine);
+        // A Disconnect withdraws the request before it takes the lock.
+        engine.whileAwaited = () -> service.getRecoveryService().cancel();
+
+        ConnectionService.ConnectAttempt attempt = service.connect();
+
+        assertThat(attempt.outcome()).isEqualTo(ConnectionService.Outcome.CANCELLED);
+        assertThat(engine.calls).containsExactly("await");
     }
 
     @Test
