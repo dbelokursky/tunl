@@ -576,7 +576,12 @@ public class TrayIconService {
     /** Connects or disconnects, off the FX thread; package-private for a test. */
     void toggleConnection() {
         try {
-            if (connectionService.isRunning()) {
+            // Decided by the state the label shows, as the Dashboard's button
+            // is. A start shows Connecting with no process yet (a wait for an
+            // earlier tunnel, the setup prompt), and a "Disconnect" clicked
+            // then started a second connect: the tunnel came up anyway.
+            ConnectionState state = currentState();
+            if (state == ConnectionState.CONNECTED || state == ConnectionState.CONNECTING) {
                 connectionService.disconnect();
                 return;
             }

@@ -346,18 +346,23 @@ public class ServiceLocator {
         // Stop the engine early — right after MCP so no in-flight agent connect
         // survives it — and before the slow steps below. An in-flight
         // subscription refresh can hold stopAutoRefresh for its grace window,
-        // and the Cmd+Q watchdog halts the JVM after 2s; halt() runs no
+        // and the Cmd+Q watchdog halts the JVM at its deadline; halt() runs no
         // shutdown hooks, so a core still running at that point is orphaned,
         // keeping the SOCKS/HTTP ports and the OS proxy registration.
+        //
+        // Closed whether or not a core runs as this looks: a Connect clicked
+        // a moment before Quit has no core yet, and the one it launched after
+        // this check outlived the app. Closing waits for that start, stops
+        // its core, and refuses any start after it.
         try {
             Object engine = services.get(SingBoxEngine.class);
-            if (engine instanceof SingBoxEngine singBoxEngine && singBoxEngine.isRunning()) {
+            if (engine instanceof SingBoxEngine singBoxEngine) {
                 log.info("Stopping sing-box engine");
-                singBoxEngine.stop();
-                // Stopped, the core put the system's proxy back (the engine
-                // clears it itself where the stop is a kill): nothing is left
-                // for the next start to look for.
-                if (services.get(ConfigStore.class) instanceof ConfigStore store) {
+                // Stopped, the core's session is cleaned up before close()
+                // returns, the system's proxy put back included: nothing is
+                // left for the next start to look for.
+                if (singBoxEngine.close()
+                        && services.get(ConfigStore.class) instanceof ConfigStore store) {
                     SessionPorts.forget(store.getDataDir());
                 }
             }

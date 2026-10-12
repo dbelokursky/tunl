@@ -225,8 +225,11 @@ public class VlessClientApp extends Application {
                 desktop.setQuitHandler((event, response) -> {
                     log.info("Desktop quit handler fired — terminating");
                     // Don't let shutdown block us forever: kick a watchdog
-                    // that force-halts after 2 seconds no matter what.
-                    runAfter(2000, "vless-quit-killer", forceKill);
+                    // that force-halts no matter what. It gets the teardown's
+                    // budget: at 2 seconds it halted a stop that was still
+                    // waiting for the core, before the system's proxy was put
+                    // back or a TUN session's config removed.
+                    runAfter(TEARDOWN_BUDGET_MS, "vless-quit-killer", forceKill);
 
                     try {
                         shutdown();
