@@ -14,6 +14,8 @@ import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.TextField;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.Test;
@@ -211,6 +213,92 @@ public class ServerFormKeepsFieldsTest extends ApplicationTest {
         assertThat(saved.get().getTls().getServerName())
                 .as("an SNI read as WireGuard's reserved bytes").isNull();
         assertThat(saved.get().getTransport().getHeaders()).isEmpty();
+    }
+
+    /**
+     * Each protocol the combo passed through wrote its own defaults into the
+     * shared fields: Hysteria2 emptied Flow, so a VLESS REALITY server looked
+     * at as Hysteria2 and put back to VLESS was saved without Vision, and a
+     * server that requires it refused every connection.
+     */
+    @Test
+    void lookingThroughTheProtocolsKeepsTheVisionFlow() {
+        ServerConfig server = TestServers.vless("Tokyo")
+                .reality("tokyo.example", REALITY_KEY, "0123abcd")
+                .flow("xtls-rprx-vision")
+                .build();
+
+        edit(server, () -> stepThrough(Protocol.VMESS, Protocol.TROJAN, Protocol.SHADOWSOCKS,
+                Protocol.HYSTERIA2, Protocol.SHADOWSOCKS, Protocol.TROJAN, Protocol.VMESS,
+                Protocol.VLESS));
+
+        assertThat(saved.get().getFlow()).isEqualTo("xtls-rprx-vision");
+    }
+
+    /**
+     * Hysteria2 ticked TLS and nothing unticked it on the way back, and
+     * VMess's own cipher was reset to auto: a VMess server without TLS was
+     * saved with TLS on, and every connect failed the handshake.
+     */
+    @Test
+    void lookingThroughTheProtocolsKeepsVmessWithoutTlsAndItsCipher() {
+        ServerConfig server = TestServers.vless("Tokyo").protocol(Protocol.VMESS)
+                .encryption("aes-128-gcm")
+                .build();
+
+        edit(server, () -> stepThrough(Protocol.TROJAN, Protocol.SHADOWSOCKS, Protocol.HYSTERIA2,
+                Protocol.WIREGUARD, Protocol.HYSTERIA2, Protocol.SHADOWSOCKS, Protocol.TROJAN,
+                Protocol.VMESS));
+
+        assertThat(saved.get().getTls().isEnabled()).as("TLS").isFalse();
+        assertThat(saved.get().getEncryption()).as("the cipher").isEqualTo("aes-128-gcm");
+    }
+
+    /**
+     * Protocol is the field the form opens on, and Down on it switched the
+     * protocol, rewriting the form, at each press. It now opens the list, as
+     * every other choice that acts at once does.
+     */
+    @Test
+    void downOnTheClosedProtocolComboOpensItsList() {
+        ComboBox<Protocol> protocol = combo("#protocolCombo");
+        interact(protocol::requestFocus);
+
+        interact(() -> protocol.fireEvent(new KeyEvent(KeyEvent.KEY_PRESSED, "", "",
+                KeyCode.DOWN, false, false, false, false)));
+        try {
+            assertThat(protocol.getValue()).isEqualTo(Protocol.VLESS);
+            assertThat(protocol.isShowing()).as("Down opens the list").isTrue();
+        } finally {
+            interact(protocol::hide);
+        }
+    }
+
+    /**
+     * The name is optional, and a server saved without one showed as a blank
+     * row, a delete prompt that asked about "" and a Dashboard ready to
+     * connect to nothing. It is named by its address, as an imported one is.
+     */
+    @Test
+    void aServerSavedWithoutANameIsNamedByItsAddress() {
+        interact(() -> {
+            text("#nameField", "  ");
+            text("#addressField", "198.51.100.7");
+            text("#portField", "443");
+            text("#uuidField", "11111111-2222-3333-4444-555555555555");
+        });
+
+        interact(this::save);
+
+        assertThat(saved.get()).as("the form saved").isNotNull();
+        assertThat(saved.get().getName()).isEqualTo("198.51.100.7:443");
+    }
+
+    private void stepThrough(Protocol... protocols) {
+        ComboBox<Protocol> combo = combo("#protocolCombo");
+        for (Protocol protocol : protocols) {
+            combo.setValue(protocol);
+        }
     }
 
     /** Loads {@code server}, makes {@code change}, and saves. */

@@ -11,7 +11,9 @@ import com.vlessclient.model.TransportType;
 import com.vlessclient.service.SubscriptionService;
 import com.vlessclient.service.outbound.CoreSettings;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 import javafx.beans.binding.Bindings;
 import javafx.collections.FXCollections;
@@ -138,6 +140,29 @@ public class ServerFormController {
     private Runnable onCancel;
 
     /**
+     * What the two shared fields held for each protocol when the form left
+     * it, put back when the form comes back to it. Each protocol writes its
+     * own defaults into them, and the defaults stayed: a VLESS server looked
+     * at as Hysteria2 and put back lost its Vision flow, and VMess's cipher
+     * went back to auto.
+     */
+    private final Map<Protocol, SharedFields> leftWith = new EnumMap<>(Protocol.class);
+
+    /** The protocol the fields are laid out for. */
+    private Protocol shownProtocol;
+
+    /**
+     * TLS as it was ticked before Hysteria2, which has it always on, ticked
+     * it. Leaving Hysteria2 left the box ticked, and a VMess server without
+     * TLS that had been looked at as Hysteria2 was saved with it on.
+     */
+    private boolean tlsBeforeHysteria2;
+
+    /** Encryption and flow, which mean something different for each protocol. */
+    private record SharedFields(String encryption, String flow) {
+    }
+
+    /**
      * Populates the protocol, encryption, flow, and transport combos with
      * their defaults and wires the listeners that reveal the transport, TLS,
      * and Reality fields as the relevant options are toggled.
@@ -155,6 +180,11 @@ public class ServerFormController {
 
         flowCombo.setItems(FXCollections.observableArrayList("", "xtls-rprx-vision"));
         flowCombo.setValue("");
+
+        // As committed rather than per value: Down on the closed combo, the
+        // field the form opens on, switched the protocol at each press.
+        ComboCommits.committed(protocolCombo).addListener((obs, oldVal, newVal) ->
+                showProtocol(newVal));
 
         // QUIC was in the model and the README but not here; HTTP/2 takes
         // the same path and host as WebSocket, which the form only offered
@@ -220,6 +250,8 @@ public class ServerFormController {
         Protocol protocol = server.getProtocol() != null ? server.getProtocol() : Protocol.VLESS;
         protocolCombo.setValue(protocol);
         updateFieldsForProtocol(protocol);
+        // What the blank form held is not this server's.
+        leftWith.clear();
 
         nameField.setText(server.getName() != null ? server.getName() : "");
         addressField.setText(server.getAddress() != null ? server.getAddress() : "");
@@ -258,6 +290,7 @@ public class ServerFormController {
             // always on. A server stored with TLS off unticked it, locked, and
             // a save then dropped its server name.
             tlsEnabledCheck.setSelected(tls.isEnabled() || protocol == Protocol.HYSTERIA2);
+            tlsBeforeHysteria2 = tls.isEnabled();
             sniField.setText(tls.getServerName() != null ? tls.getServerName() : "");
             alpnField.setText(tls.getAlpn() != null ? tls.getAlpn() : "");
             fingerprintField.setText(tls.getFingerprint() != null ? tls.getFingerprint() : "");
@@ -278,12 +311,26 @@ public class ServerFormController {
         this.onCancel = onCancel;
     }
 
-    @FXML
-    private void onProtocolChanged() {
-        Protocol selected = protocolCombo.getValue();
-        if (selected != null) {
-            log.debug("Protocol changed to: {}", selected);
-            updateFieldsForProtocol(selected);
+    /**
+     * Lays the form out for {@code selected}, with what its shared fields held
+     * when the form last left it.
+     */
+    private void showProtocol(Protocol selected) {
+        if (selected == null || selected == shownProtocol) {
+            return;
+        }
+        log.debug("Protocol changed to: {}", selected);
+        encryptionCombo.commitValue();
+        flowCombo.commitValue();
+        if (shownProtocol != null) {
+            leftWith.put(shownProtocol,
+                    new SharedFields(encryptionCombo.getValue(), flowCombo.getValue()));
+        }
+        updateFieldsForProtocol(selected);
+        SharedFields kept = leftWith.get(selected);
+        if (kept != null) {
+            encryptionCombo.setValue(kept.encryption());
+            flowCombo.setValue(kept.flow());
         }
     }
 
@@ -338,10 +385,17 @@ public class ServerFormController {
                 ? server.getTransport() : new TransportConfig();
         final TlsConfig tls = sameProtocol && server.getTls() != null
                 ? server.getTls() : new TlsConfig();
-        server.setName(nameField.getText().trim());
         server.setProtocol(protocol);
         server.setAddress(addressField.getText().trim());
         server.setPort(Integer.parseInt(portField.getText().trim()));
+        // Named by its address when the optional name is left empty, as an
+        // imported server is: saved as "", it showed as a blank row, and the
+        // delete prompt and the Dashboard named nothing.
+        String name = nameField.getText().trim();
+        server.setName(!name.isEmpty() ? name
+                : server.getAddress().contains(":")
+                        ? "[" + server.getAddress() + "]:" + server.getPort()
+                        : server.getAddress() + ":" + server.getPort());
         server.setUuid(uuidField.getText().trim());
         // WireGuard's peer key and address are trimmed like the private key
         // beside them: a key pasted with a space after it is one the core
@@ -422,6 +476,8 @@ public class ServerFormController {
     }
 
     private void updateFieldsForProtocol(Protocol protocol) {
+        final Protocol leaving = shownProtocol;
+        shownProtocol = protocol;
         // Reset all labels and visibility to defaults
         setNodeVisible(encryptionFlowBox, true);
         setNodeVisible(encryptionBox, true);
@@ -508,6 +564,10 @@ public class ServerFormController {
                 bindRequired(uuidLabel, "form.password");
                 uuidField.setPromptText(I18n.get("form.prompt.password"));
                 setNodeVisible(encryptionBox, false);
+                // The hidden field is the obfuscation type here, and a VMess
+                // cipher left in it was refused as "auto obfuscation", with no
+                // field on the form to change it. None is salamander.
+                encryptionCombo.setValue("none");
                 bindLabel(flowLabel, "form.obfuscation.password");
                 flowCombo.setItems(FXCollections.observableArrayList(""));
                 flowCombo.setEditable(true);
@@ -515,6 +575,9 @@ public class ServerFormController {
                 setNodeVisible(transportSection, false);
                 setNodeVisible(realitySection, false);
                 // TLS visible but force enabled
+                if (leaving != Protocol.HYSTERIA2) {
+                    tlsBeforeHysteria2 = tlsEnabledCheck.isSelected();
+                }
                 tlsEnabledCheck.setSelected(true);
                 tlsEnabledCheck.setDisable(true);
             }
@@ -537,8 +600,12 @@ public class ServerFormController {
             default -> throw new IllegalStateException("Unhandled protocol: " + protocol);
         }
 
-        // Restore TLS checkbox for non-Hysteria2 protocols
+        // Restore TLS checkbox for non-Hysteria2 protocols, ticked as it was
+        // before Hysteria2 ticked it.
         if (protocol != Protocol.HYSTERIA2) {
+            if (leaving == Protocol.HYSTERIA2) {
+                tlsEnabledCheck.setSelected(tlsBeforeHysteria2);
+            }
             tlsEnabledCheck.setDisable(false);
         }
         // Whether REALITY is on offer goes with the protocol.

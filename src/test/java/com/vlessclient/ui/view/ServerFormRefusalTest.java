@@ -184,6 +184,33 @@ public class ServerFormRefusalTest extends ApplicationTest {
      * fired through the queue: the warning is shown with showAndWait, which
      * would keep {@code interact} waiting for the very dialog this closes.
      */
+    /**
+     * Hysteria2 keeps its obfuscation type where VMess keeps its cipher, in a
+     * field its form hides. A new server picked as VMess first and then as
+     * Hysteria2 kept VMess's auto as that type, and Save was refused with "The
+     * VPN core does not support the auto obfuscation", which nothing on the
+     * form could change.
+     */
+    @Test
+    void aHysteria2ServerPickedAfterVmessIsSavedWithItsOwnObfuscation() {
+        ComboBox<Protocol> protocol = lookup("#protocolCombo").query();
+        interact(() -> {
+            protocol.setValue(Protocol.VMESS);
+            protocol.setValue(Protocol.HYSTERIA2);
+            text("#addressField", "198.51.100.7");
+            text("#portField", "443");
+            text("#uuidField", "secret");
+            ((ComboBox<String>) lookup("#flowCombo").query()).getEditor().setText("obfs-secret");
+        });
+
+        Button save = lookup("#saveButton").query();
+        Platform.runLater(save::fire);
+        Await.until("the server to be saved", () -> saved.get() != null, TIMEOUT);
+
+        assertThat(saved.get().getFlow()).isEqualTo("obfs-secret");
+        assertThat(saved.get().getEncryption()).as("the obfuscation type").isNotEqualTo("auto");
+    }
+
     private String saveAndCloseTheWarning() {
         Button save = lookup("#saveButton").query();
         Platform.runLater(save::fire);
