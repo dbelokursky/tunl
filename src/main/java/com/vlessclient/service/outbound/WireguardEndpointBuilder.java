@@ -42,11 +42,10 @@ public final class WireguardEndpointBuilder {
             // Each address the interface has, comma-separated as a .conf lists
             // them. The peer carries IPv4 and IPv6 alike (allowed_ips below),
             // and a family without an address of its own carried nothing.
+            // Each once: the core refuses an address listed twice.
             ArrayNode address = mapper.createArrayNode();
-            for (String part : server.getFlow().split(",")) {
-                if (!part.isBlank()) {
-                    address.add(CoreSettings.interfaceAddress(part.strip()));
-                }
+            for (String part : CoreSettings.interfaceAddresses(server.getFlow())) {
+                address.add(CoreSettings.interfaceAddress(part));
             }
             if (!address.isEmpty()) {
                 endpoint.set("address", address);

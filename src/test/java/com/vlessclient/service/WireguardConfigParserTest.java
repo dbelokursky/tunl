@@ -63,6 +63,30 @@ class WireguardConfigParserTest {
     }
 
     /**
+     * The core refuses an interface that has one address twice, whatever its
+     * prefix or spelling ("duplicate address"), and every endpoint of a group
+     * goes into one config, so one such server stopped every connect. Read
+     * line by line, a config that repeats its Address line, or lists an
+     * address twice on one, handed the core the same address twice; the
+     * first spelling of each is kept.
+     */
+    @Test
+    void keepsEachAddressOnce() {
+        ServerConfig repeatedLine = parser.parse(TYPICAL.replace(
+                "Address = 10.66.66.2/32, fd42:42::2/128",
+                "Address = 10.0.0.2/32\nAddress = 10.0.0.2/32"));
+
+        assertThat(repeatedLine.getFlow()).isEqualTo("10.0.0.2/32");
+
+        ServerConfig respelled = parser.parse(TYPICAL.replace(
+                "Address = 10.66.66.2/32, fd42:42::2/128",
+                "Address = 10.0.0.2/32, fd42:42::2/128, 10.0.0.2/24\n"
+                        + "Address = FD42:42:0:0::2, 10.0.0.2"));
+
+        assertThat(respelled.getFlow()).isEqualTo("10.0.0.2/32, fd42:42::2/128");
+    }
+
+    /**
      * wg-quick and the WireGuard apps end a line at its first #. Kept, a
      * comment after the private key went to the core as part of the key,
      * which then refused every connect; one after [Peer] hid the section,
