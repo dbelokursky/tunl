@@ -6,6 +6,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -21,6 +23,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * still looks fine to the user who pasted it.</p>
  */
 class ShareLinkSilentDefaultsTest {
+
+    private static final String UUID = "b831381d-6324-4d53-ad4f-8cda48b30811";
 
     private final ShareLinkParser parser = new ShareLinkParser();
 
@@ -78,5 +82,86 @@ class ShareLinkSilentDefaultsTest {
         assertThatThrownBy(() -> parser.parse(vmess("kcp")))
                 .isInstanceOfSatisfying(ShareLinkParser.UnsupportedFeatureException.class,
                         e -> assertThat(e.feature()).isEqualTo("transport kcp"));
+    }
+
+    /**
+     * Only "tls" and "reality", spelled exactly so, turned TLS on. TLS in
+     * capitals, an empty security= on a Trojan link, which means TLS like no
+     * security= at all, and a value with spaces around it all read as none:
+     * the server dialled its TLS port in the clear and sent the Trojan
+     * password, or the VLESS UUID, as its first bytes.
+     */
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {
+        "trojan://secretpw@host.example:443?security=TLS&sni=host.example#t",
+        "trojan://secretpw@host.example:443?security=&sni=host.example#t",
+        "trojan://secretpw@host.example:443?security=%20tls%20&sni=host.example#t",
+        "vless://" + UUID + "@host.example:443?security=TLS&sni=host.example#t",
+        "vless://" + UUID + "@host.example:443?security=Tls&sni=host.example#t"
+    })
+    @DisplayName("security=tls in any spelling keeps TLS on")
+    void tlsInAnySpellingKeepsTlsOn(String link) {
+        ServerConfig config = parser.parseForImport(link);
+
+        assertThat(config.getTls().isEnabled()).as("TLS").isTrue();
+        assertThat(config.getTls().isReality()).as("REALITY").isFalse();
+    }
+
+    @Test
+    @DisplayName("security=Reality is REALITY")
+    void realityInAnotherCaseIsReality() {
+        ServerConfig config = parser.parseForImport("vless://" + UUID + "@host.example:443"
+                + "?security=Reality&sni=www.example.org&fp=chrome"
+                + "&pbk=WZaG00XCAiVCF2SP5fmSbKiuTbBB-lMDg_81rC8hR80&sid=0123abcd#r");
+
+        assertThat(config.getTls().isEnabled()).isTrue();
+        assertThat(config.getTls().isReality()).isTrue();
+    }
+
+    /**
+     * A VLESS link without TLS is legitimate, behind a CDN say, and VLESS
+     * means none when the link names none; an empty value names none too.
+     */
+    @Test
+    @DisplayName("an empty security= on a VLESS link is the VLESS default, none")
+    void anEmptySecurityOnAVlessLinkIsNone() {
+        ServerConfig config = parser.parseForImport(
+                "vless://" + UUID + "@host.example:80?security=&type=ws&path=%2F#v");
+
+        assertThat(config.getTls().isEnabled()).isFalse();
+    }
+
+    /**
+     * Legacy XTLS, which Xray dropped and the core never had, read as no TLS
+     * at all, and so did any word the app does not know. Neither may turn a
+     * link that asks for protection into one that sends its credential in
+     * the clear: the link is refused, and says what it asked for.
+     */
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {
+        "trojan://secretpw@host.example:443?security=xtls&sni=host.example#t",
+        "vless://" + UUID + "@host.example:443?security=XTLS&flow=xtls-rprx-direct#t"
+    })
+    @DisplayName("a security layer the core lacks is refused, not read as none")
+    void aSecurityLayerTheCoreLacksIsRefused(String link) {
+        assertThatThrownBy(() -> parser.parse(link))
+                .isInstanceOfSatisfying(ShareLinkParser.UnsupportedFeatureException.class,
+                        e -> assertThat(e.feature()).isEqualTo("security xtls"));
+    }
+
+    /**
+     * v2rayN writes "net":"" for TCP and reads it back as TCP, and an empty
+     * type= is the same. Both were refused as a transport named "", reported
+     * as "the  transport", and a plain TCP server went missing.
+     */
+    @Test
+    @DisplayName("an empty transport is TCP")
+    void anEmptyTransportIsTcp() {
+        assertThat(parser.parse(vmess("")).getTransport().getType())
+                .isEqualTo(TransportType.TCP);
+        assertThat(parser.parse("vless://" + UUID + "@host.example:443?type=&security=tls#v")
+                .getTransport().getType()).isEqualTo(TransportType.TCP);
+        assertThat(parser.parse("trojan://secretpw@host.example:443?type=#t")
+                .getTransport().getType()).isEqualTo(TransportType.TCP);
     }
 }
