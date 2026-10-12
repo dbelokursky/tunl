@@ -88,16 +88,24 @@ fi
 # refuses it for the glibc its Depends names (the arm64 build of JavaFX needs
 # a newer one than Debian 12 and Ubuntu 22.04 have); installing and then
 # failing to load is what this rules out. The build host's release and the
-# newest Debian must always install it.
+# newest Debian must always install it, and so must every release for amd64:
+# the refusal used to pass whatever the architecture, so an amd64 build whose
+# derived glibc minimum rose past Debian 12's would have dropped the oldest
+# releases the README supports with this check still green.
+ARCH="$(dpkg-deb -f "${DEB}" Architecture)"
 for image in debian:12 debian:13 ubuntu:22.04 ubuntu:24.04; do
     echo "[deb-older] ${image}: installing ${NAME}"
     status=0
     docker run --rm -v "${DIR}:/dist:ro" "${image}" bash -c "${CHECK}" _ "${NAME}" || status=$?
-    case "${status}:${image}" in
+    case "${status}:${ARCH}:${image}" in
         0:*)
             echo "[deb-older] ${image}: installed, libraries resolve" ;;
-        3:debian:12 | 3:ubuntu:22.04)
+        3:arm64:debian:12 | 3:arm64:ubuntu:22.04)
             echo "[deb-older] ${image}: refused for the glibc ${NAME} declares, as it should be" ;;
+        3:*)
+            echo "[deb-older] ${image}: refused ${NAME} (${ARCH}) for the glibc it declares," \
+                "but ${ARCH} supports this release" >&2
+            exit 1 ;;
         *)
             echo "[deb-older] ${image}: ${NAME} does not install or its libraries do not resolve" >&2
             exit 1 ;;

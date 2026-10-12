@@ -72,14 +72,18 @@ jobs:
       # once failed main on a download from Central. restore-keys take the
       # newest repository of the same OS and arch instead. The wrapper's
       # Maven too: mvnw fetched it from Central on every leg, with no retry.
-      # release.yml restores the same paths under the same key.
+      # The key hashes the wrapper's properties with the poms: keyed on the
+      # poms alone, a Maven bump got an exact hit without the new
+      # distribution, so main never saved one and every leg fetched it until
+      # the poms next changed. release.yml restores the same paths under the
+      # same key.
       - id: maven-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             ~/.m2/repository
             ~/.m2/wrapper
-          key: maven-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml') }}
+          key: maven-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
           restore-keys: maven-${{ runner.os }}-${{ runner.arch }}-
       # The sing-box tarballs are fetched at generate-resources on every build
       # (bundle-core-* profiles), so cache them per OS/arch. singbox.properties

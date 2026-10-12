@@ -15,8 +15,12 @@
 # after the release assets are built; the committed template carries a 0.0.0
 # version and all-zero checksum placeholders.
 #
-# The app is Apache-2.0 (LICENSE in the repository). The sing-box binary
-# bundled inside the .deb is GPL-3.0; see NOTICE.
+# The app is Apache-2.0 (LICENSE in the repository), but the package also
+# ships the GPL-3.0-or-later sing-box binary, a Java runtime and OpenJFX
+# (GPL-2.0 with the Classpath exception), SLF4J (MIT) and Logback (EPL-1.0 or
+# LGPL-2.1), so license names them all, as the .deb's copyright file does;
+# NOTICE says which is which. It used to say Apache-2.0 alone, which made a
+# licence scanner read the GPL binaries in it as Apache-2.0 too.
 
 pkgname=tunl-bin
 pkgver=0.0.0
@@ -24,7 +28,8 @@ pkgrel=1
 pkgdesc="Tunl — desktop multi-protocol proxy client wrapping sing-box with a JavaFX GUI (binary release)"
 arch=('x86_64' 'aarch64')
 url="https://github.com/dbelokursky/tunl"
-license=('Apache-2.0')
+license=('Apache-2.0' 'GPL-3.0-or-later' 'GPL-2.0-only WITH Classpath-exception-2.0' 'MIT'
+         'EPL-1.0 OR LGPL-2.1-only')
 # The JRE and sing-box ship inside the .deb, so no java or sing-box deps. The
 # JavaFX GUI links GTK3 at runtime; hicolor-icon-theme owns the icon theme dirs
 # the bundled .desktop entry integrates into; libsecret brings secret-tool,
