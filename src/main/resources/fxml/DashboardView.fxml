@@ -300,8 +300,10 @@
             <Label fx:id="healthSummaryLabel" text="—" styleClass="latency-result"/>
             <Button fx:id="addTargetButton" styleClass="secondary-button"
                     minWidth="40" onAction="#onAddTargetClicked"/>
+            <!-- Its own width, as measured: a hand-picked 140 fit "Re-check"
+                 and cut "Проверить снова" to "Проверить сн…". -->
             <Button fx:id="recheckButton" text="Re-check" styleClass="secondary-button"
-                    prefWidth="140" minWidth="-Infinity" onAction="#onRecheckClicked"/>
+                    minWidth="-Infinity" onAction="#onRecheckClicked"/>
         </HBox>
 
         <VBox fx:id="serviceStatusList" spacing="6"/>

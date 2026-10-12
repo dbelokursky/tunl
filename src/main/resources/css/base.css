@@ -12,7 +12,10 @@
 /* ===== Root & Global ===== */
 .root-pane {
     -fx-background-color: -c-window-bg;
-    -fx-font-family: "System", "SF Pro Text", "Helvetica Neue", "Segoe UI";
+    /* One family: JavaFX keeps the first of a list and drops the rest, so the
+       "SF Pro Text", "Helvetica Neue", "Segoe UI" written after it here were
+       never used. */
+    -fx-font-family: "System";
     -fx-font-size: 13px;
 }
 
@@ -155,8 +158,6 @@
     -fx-font-size: 11px;
     -fx-font-weight: bold;
     -fx-text-fill: -c-text-secondary;
-    -fx-text-transform: uppercase;
-    -fx-letter-spacing: 0.6;
     /* Top only. The 2 on the left used to push the header off the column it
        heads — inside the health card it sat 2px right of the status dots
        under it, and in Settings 2px right of every other label. */
@@ -264,8 +265,6 @@
     -fx-font-size: 11px;
     -fx-text-fill: -c-text-secondary;
     -fx-font-weight: bold;
-    -fx-text-transform: uppercase;
-    -fx-letter-spacing: 0.5;
 }
 
 .stats-value {
@@ -618,10 +617,24 @@
     -fx-padding: 2 9;
 }
 
-/* Monospace, terminal-like textarea for editing host/CIDR lists. */
+/* Monospace, terminal-like textarea for editing host/CIDR lists.
+   monospace alone, here and on the log and the install command: JavaFX keeps
+   the first family of a list and drops the rest, so "Menlo", "Monaco",
+   "Courier New", monospace was Menlo alone, and Windows and Linux, which have
+   no Menlo, drew these in the proportional System font. */
 .code-area {
-    -fx-font-family: "Menlo", "Monaco", "Courier New", monospace;
+    -fx-font-family: monospace;
     -fx-font-size: 12.5px;
+}
+
+/* Menlo on a Mac, the face the monospace rules were written for: JavaFX draws
+   monospace in Courier New there. MainViewController puts .os-mac on the
+   window's root on a Mac. Every rule set in monospace has its line here
+   (StylesheetDeclarationsTest). */
+.os-mac .code-area,
+.os-mac .log-list-view .list-cell,
+.os-mac .singbox-missing-banner .banner-command {
+    -fx-font-family: "Menlo";
 }
 
 .code-area .content {
@@ -681,6 +694,25 @@
     -fx-font-size: 12px;
     -fx-text-fill: -c-text-form-label;
     -fx-font-weight: bold;
+}
+
+/* The label column of Settings' rows, and the smaller values beside some of
+   them. Here rather than in SettingsView.fxml, so that they grow with the
+   OS's text size (TextScale): the gutter was prefWidth="210" there and stayed
+   210 while the labels in it grew, so at 125% "Device ID for subscriptions"
+   came out ellipsized; and the values were inline styles, which outrank
+   every stylesheet, so the versions and the MCP status stayed at 12-13px
+   beside labels grown to 15. */
+.settings-gutter {
+    -fx-pref-width: 210;
+}
+
+.stats-value.settings-value {
+    -fx-font-size: 13px;
+}
+
+.stats-value.settings-status {
+    -fx-font-size: 12px;
 }
 
 .form-field {
@@ -968,7 +1000,9 @@
     -fx-font-size: 16px;
     -fx-font-weight: bold;
     -fx-text-fill: -c-text-secondary;
-    -fx-font-family: "SF Pro Display", "Helvetica Neue", "System";
+    /* Only the first family of a list counts in JavaFX; where SF Pro Display
+       is missing, this is System, as it always was. */
+    -fx-font-family: "SF Pro Display";
 }
 
 /* Colour is the liveness cue the retired traffic chart used to carry: a
@@ -1065,7 +1099,7 @@
 
 .log-list-view .list-cell {
     -fx-background-color: transparent;
-    -fx-font-family: "Menlo", "Monaco", "Courier New", monospace;
+    -fx-font-family: monospace;
     -fx-font-size: 12px;
     -fx-text-fill: -c-text-body;
     -fx-padding: 2 8;
@@ -1075,14 +1109,12 @@
     -fx-background-color: -c-log-selection;
 }
 
-/* ===== Syntax-highlighted log segments (TextFlow) ===== */
+/* ===== Syntax-highlighted log segments (TextFlow) =====
+   The segments take their font from the cell above. A Text node has no
+   .text class, and these carry only their segment's (.log-ts and the rest),
+   so the .log-line-flow .text rule that named their font never matched. */
 .log-line-flow {
     -fx-line-spacing: 1;
-}
-
-.log-line-flow .text {
-    -fx-font-family: "Menlo", "Monaco", "Courier New", monospace;
-    -fx-font-size: 12px;
 }
 
 .log-ts         { -fx-fill: -c-text-disabled; }
@@ -1270,7 +1302,7 @@
 }
 
 .singbox-missing-banner .banner-command {
-    -fx-font-family: 'Menlo', 'Monaco', monospace;
+    -fx-font-family: monospace;
     -fx-font-size: 12px;
     -fx-text-fill: -c-banner-code-text;
     -fx-background-color: -c-banner-code-bg;

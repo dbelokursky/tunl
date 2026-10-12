@@ -28,10 +28,16 @@
             <Insets top="4" bottom="4"/>
         </padding>
 
-        <ComboBox fx:id="logLevelFilter" prefWidth="110" minWidth="-Infinity"
-                  styleClass="form-field"/>
+        <!-- No prefWidth: a combo box sizes itself to its widest value, and
+             the 110 it had showed "Предупреждения" as "Пре…". -->
+        <ComboBox fx:id="logLevelFilter" minWidth="-Infinity" styleClass="form-field"/>
 
-        <TextField fx:id="searchField" promptText="Search logs..." minWidth="90"
+        <!-- minWidth 40, not 90: the filter's extra width in Russian comes
+             out of this field, or the row overflows the 500px viewport. 60
+             was enough with this machine's fonts and 9px short with the
+             Linux CI runners' wider ones (ViewFitTest); the field grows back
+             in any wider window. -->
+        <TextField fx:id="searchField" promptText="Search logs..." minWidth="40"
                    HBox.hgrow="ALWAYS" styleClass="form-field"/>
 
         <CheckBox fx:id="autoScrollCheckBox" text="Auto-scroll" selected="true"
@@ -50,6 +56,11 @@
                 onAction="#onClearClicked"/>
     </HBox>
 
-    <!-- Log Lines -->
-    <ListView fx:id="logListView" styleClass="log-list-view" VBox.vgrow="ALWAYS"/>
+    <!-- Log Lines. prefHeight is a floor, not a size: vgrow fills any taller
+         window. Left at ListView's own 400, which it asks whatever it holds,
+         it made the page taller than the 820x500 window, since
+         ContentScrollPane keeps a page at its preferred height: the page
+         scrolled under a second bar and the newest line sat below the fold. -->
+    <ListView fx:id="logListView" styleClass="log-list-view" VBox.vgrow="ALWAYS"
+              prefHeight="120"/>
 </VBox>

@@ -59,7 +59,8 @@ public class DialogsTest extends ApplicationTest {
     /**
      * Every dialog the app builds goes through {@link Dialogs}: an alert made
      * with {@code new Alert(…)}, or a dialog whose stock buttons are never
-     * worded, speaks English again in the Russian UI.
+     * worded, speaks English again in the Russian UI, and opens under a title
+     * bar in the platform's colours rather than the theme's.
      */
     @Test
     void theAppBuildsItsDialogsThroughDialogs() throws IOException {
@@ -77,6 +78,14 @@ public class DialogsTest extends ApplicationTest {
                 if (source.contains("getButtonTypes().addAll(ButtonType.OK")
                         && !source.contains("Dialogs.localizeButtons(")) {
                     offenders.add(name + ": a Dialog with stock buttons left unworded");
+                }
+                // localizeButtons dresses the frame too. The Add rule, Import
+                // link, Add subscription and Add service dialogs were built
+                // with new Dialog and never dressed, so in the dark theme
+                // each came up under a white title bar.
+                if ((source.contains("new Dialog<") || source.contains("extends Dialog<"))
+                        && !source.contains("Dialogs.localizeButtons(")) {
+                    offenders.add(name + ": a Dialog that never goes through Dialogs");
                 }
             }
         }

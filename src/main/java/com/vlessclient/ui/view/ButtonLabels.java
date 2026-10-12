@@ -33,8 +33,9 @@ import javafx.util.Duration;
  * used to live alongside it, for a pair that read together while standing a
  * row apart — the Updates block's two buttons. They share a row now, where
  * natural widths read correctly, and the shared pin went with the layout that
- * needed it. {@code recheckButton} keeps its {@code prefWidth="140"} as the
- * last hand-picked number, and could be measured like everything else here.</p>
+ * needed it. {@code recheckButton} kept a {@code prefWidth="140"} as the last
+ * hand-picked number, which cut its Russian label; it takes its own width now,
+ * since its label never swaps.</p>
  */
 final class ButtonLabels {
 

@@ -47,8 +47,10 @@
                 onAction="#onMeasureClicked"/>
     </HBox>
 
-    <!-- Server List -->
-    <ListView fx:id="serverListView" styleClass="server-list" VBox.vgrow="ALWAYS"/>
+    <!-- Server List. prefHeight="120" for the reason LogsView gives: at
+         ListView's own 400 the page overflowed the 820x500 window. -->
+    <ListView fx:id="serverListView" styleClass="server-list" VBox.vgrow="ALWAYS"
+              prefHeight="120"/>
 
     <!-- Empty state hint -->
     <VBox fx:id="emptyState" styleClass="empty-state" spacing="8" alignment="CENTER"

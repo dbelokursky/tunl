@@ -2,11 +2,17 @@ package com.vlessclient.ui.view;
 
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ThemeCss;
+import com.vlessclient.service.TextScale;
 import com.vlessclient.testing.SettledLayout;
 import com.vlessclient.testing.UiTest;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.logging.Handler;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
@@ -15,7 +21,9 @@ import javafx.scene.Group;
 import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Labeled;
+import javafx.scene.control.ListCell;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.layout.Region;
 import org.junit.jupiter.api.AfterEach;
@@ -84,6 +92,9 @@ public class ControlSizingTest extends ApplicationTest {
 
     private double width;
     private double height;
+
+    /** TextScale's stylesheet for a larger OS text size, or null at the usual size. */
+    private String textScaleSheet;
     private final List<String> cssWarnings = new ArrayList<>();
     private final Logger cssLogger = Logger.getLogger("");
     private final Handler cssWarningCollector = new Handler() {
@@ -147,6 +158,60 @@ public class ControlSizingTest extends ApplicationTest {
                 .isEmpty();
     }
 
+
+    /**
+     * Settings at a larger OS text size: Windows' 125% and 150%. TextScale
+     * scales what base.css sizes and nothing an FXML or an inline style
+     * writes. The label gutter was {@code prefWidth="210"} in the FXML, so at
+     * 125% "Device ID for subscriptions" came out ellipsized, and three more
+     * labels in Russian. Four values carried an inline font size, which
+     * outranks every stylesheet: the app and sing-box versions, the MCP status
+     * and the traffic history summary stayed at 12-13px beside labels grown
+     * to 15 and more.
+     */
+    @Test
+    void settingsFollowALargerTextSize() throws IOException {
+        String baseCss;
+        try (InputStream in = getClass().getResourceAsStream("/css/base.css")) {
+            baseCss = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        List<String> values = List.of("#appVersionValue", "#singboxVersionValue",
+                "#mcpStatusLabel", "#trafficHistorySummary");
+        List<String> wrong = new ArrayList<>();
+        Map<String, Double> usual = new HashMap<>();
+        for (double factor : new double[] {1.0, 1.25, 1.5}) {
+            textScaleSheet = factor == 1.0 ? null
+                    : TextScale.dataUrl(TextScale.scaledRules(baseCss, factor));
+            for (Locale locale : List.of(Locale.ENGLISH, Locale.of("ru"))) {
+                interact(() -> I18n.setLocale(locale));
+                Scene scene = load("SettingsView");
+                interact(() -> {
+                    dress(scene, "light");
+                    List<String> clipped = new ArrayList<>();
+                    collectClipped("SettingsView@" + factor, "light", locale, scene.getRoot(),
+                            clipped);
+                    // The one thing meant to give way: a 36-character ID,
+                    // ellipsized at a narrow window at the usual size too, so
+                    // that the label and the Reset button beside it never are.
+                    clipped.removeIf(line -> line.contains(" #deviceIdValue "));
+                    wrong.addAll(clipped);
+                    for (String id : values) {
+                        double size = ((Labeled) scene.lookup(id)).getFont().getSize();
+                        usual.putIfAbsent(id, size);
+                        if (Math.abs(size - usual.get(id) * factor) > 0.05) {
+                            wrong.add("SettingsView@%s %s is drawn at %.1fpx, not %.1f".formatted(
+                                    factor, id, size, usual.get(id) * factor));
+                        }
+                    }
+                });
+            }
+        }
+        textScaleSheet = null;
+
+        assertThat(wrong)
+                .withFailMessage("Settings at a larger text size:%n  %s", String.join("\n  ", wrong))
+                .isEmpty();
+    }
 
     /**
      * Every ordinary control is one height, whatever kind of control it is and
@@ -252,6 +317,47 @@ public class ControlSizingTest extends ApplicationTest {
                         labeled.getWidth(), needed));
             }
         }
+        for (Node node : root.lookupAll("*")) {
+            if (node instanceof ComboBox<?> combo && !combo.isEditable() && isOnScreen(node)) {
+                collectClippedValues(view, theme, locale, combo, clipped);
+            }
+        }
+    }
+
+    /**
+     * Every value a closed ComboBox can show, not only the one it holds at
+     * load. The Logs level filter, pinned at 110, showed "Все" here and passed,
+     * while "Предупреждения" came out as "Пре…" the moment Warnings was picked.
+     *
+     * <p>The button cell is the skin's own, and {@code updateIndex} is how the
+     * skin itself puts a value in it, so each value is drawn exactly as the
+     * box draws it, without selecting anything a controller listens to.</p>
+     */
+    private static void collectClippedValues(String view, String theme, Locale locale,
+                                             ComboBox<?> combo, List<String> clipped) {
+        ListCell<?> cell = null;
+        for (Node child : combo.getChildrenUnmodifiable()) {
+            if (child instanceof ListCell<?> buttonCell && child.isManaged()) {
+                cell = buttonCell;
+            }
+        }
+        if (cell == null || cell.getWidth() <= 0 || cell.textProperty().isBound()) {
+            return;
+        }
+        int shown = cell.getIndex();
+        for (int i = 0; i < combo.getItems().size(); i++) {
+            cell.updateIndex(i);
+            String text = cell.getText();
+            if (text == null || text.isBlank()) {
+                continue;
+            }
+            double needed = naturalWidth(cell);
+            if (needed > cell.getWidth() + SLACK) {
+                clipped.add("%s/%s/%s %s value \"%s\": has %.1f, needs %.1f".formatted(
+                        view, theme, locale, describe(combo), text, cell.getWidth(), needed));
+            }
+        }
+        cell.updateIndex(shown);
     }
 
     /**
@@ -324,6 +430,10 @@ public class ControlSizingTest extends ApplicationTest {
      */
     private void dress(Scene scene, String theme) {
         scene.getStylesheets().setAll(ThemeCss.of(theme));
+        if (textScaleSheet != null) {
+            // Last, where ThemeManager puts it.
+            scene.getStylesheets().add(textScaleSheet);
+        }
         scene.getRoot().resize(width, height);
         scene.getRoot().applyCss();
         scene.getRoot().layout();
@@ -369,11 +479,18 @@ public class ControlSizingTest extends ApplicationTest {
                 // The install banner only shows on a machine with no sing-box,
                 // so whether it is covered would otherwise depend on the
                 // machine running the tests — it is up on CI and down here.
-                // Show it everywhere: it is a state the app really has.
-                Node banner = root.lookup("#singBoxMissingBanner");
-                if (banner != null) {
-                    banner.setVisible(true);
-                    banner.setManaged(true);
+                // Show it everywhere: it is a state the app really has. The
+                // health card and its reconnect banner too: they show only
+                // while connected, and hidden here they hid recheckButton,
+                // which a hand-picked 140 cut to "Проверить сн…" on every
+                // connected session in Russian.
+                for (String hidden : List.of(
+                        "#singBoxMissingBanner", "#healthCard", "#reconnectBanner")) {
+                    Node banner = root.lookup(hidden);
+                    if (banner != null) {
+                        banner.setVisible(true);
+                        banner.setManaged(true);
+                    }
                 }
                 dress(scene, "light");
                 holder[0] = scene;
