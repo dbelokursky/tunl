@@ -144,9 +144,11 @@ public class DashboardViewController implements ViewShownAware {
     /**
      * Host capability behind the SYSTEM_PROXY warning. A field so a test can
      * force either verdict; on macOS/Windows the real one is always true, so
-     * the warning is Linux-only in practice.
+     * the warning is Linux-only in practice. The service graph's, so the
+     * test graph's fixed answer replaces the host's.
      */
-    private SystemProxySupport systemProxySupport = SystemProxySupport.current();
+    private SystemProxySupport systemProxySupport = ServiceLocator
+            .find(SystemProxySupport.class).orElseGet(SystemProxySupport::current);
 
     /** Cached: probing shells out to {@code gsettings}, and a host cannot
      * grow a proxy store while the app runs. Null until the probe answers.
@@ -764,7 +766,13 @@ public class DashboardViewController implements ViewShownAware {
                         return;
                     }
                     systemProxyCapable = capable;
-                    updateProxyModeWarning(proxyModeCombo.getValue());
+                    // Pending showed no warning, and neither does a yes: only
+                    // a no has anything to change. Redrawing the line on a yes
+                    // too took it from whoever had set it last, at whatever
+                    // moment the process returned.
+                    if (!capable) {
+                        updateProxyModeWarning(proxyModeCombo.getValue());
+                    }
                 });
             });
         }

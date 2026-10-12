@@ -7,6 +7,7 @@ import com.vlessclient.platform.PlatformPaths;
 import com.vlessclient.platform.PowerState;
 import com.vlessclient.platform.SecretSealer;
 import com.vlessclient.platform.SecretSealers;
+import com.vlessclient.platform.SystemProxySupport;
 import com.vlessclient.service.AppHttpClients;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
@@ -192,6 +193,15 @@ public class ServiceLocator {
         PowerState power = mode == StartupMode.TEST
                 ? PowerState.ALWAYS_AWAKE : PowerState.current();
         register(PowerState.class, power);
+
+        // Whether the OS proxy store can be set, which the dashboard asks: on
+        // Linux a gsettings process. The test graph never asks the host. Its
+        // answer landed whenever the process returned, and a no (no GNOME
+        // schema, as on the Linux runners) revealed a warning that grew the
+        // dashboard under a UI test already measuring it.
+        SystemProxySupport proxySupport = mode == StartupMode.TEST
+                ? () -> true : SystemProxySupport.current();
+        register(SystemProxySupport.class, proxySupport);
 
         // The one owner of the connect flow: the dashboard, the tray and the MCP
         // facade all drive the tunnel through it, so the three no longer carry
