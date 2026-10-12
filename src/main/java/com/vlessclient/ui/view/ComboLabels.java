@@ -4,6 +4,7 @@ import com.vlessclient.app.I18n;
 import java.util.Locale;
 import java.util.function.Function;
 import javafx.beans.value.ChangeListener;
+import javafx.beans.value.ObservableValue;
 import javafx.beans.value.WeakChangeListener;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.ListCell;
@@ -24,6 +25,12 @@ final class ComboLabels {
     /** Where a combo keeps its locale listener, which the locale holds only weakly. */
     private static final Object LISTENER = new Object();
 
+    /** Marks a combo whose language changed while it was off screen. */
+    private static final Object STALE = new Object();
+
+    /** Where a combo keeps the binding that says whether it is on screen. */
+    private static final Object ON_SCREEN = new Object();
+
     private ComboLabels() {
     }
 
@@ -43,8 +50,27 @@ final class ComboLabels {
             combo.setButtonCell(new Labelled<>(label));
         };
         draw.run();
+        // Redrawn only while on screen (OnScreen). A combo of a view cached
+        // off-screen, of a window hidden to the tray, or of one discarded and
+        // not yet collected got new cells styled away from the stylesheets
+        // that define their colours, and JavaFX logged a CSS warning for each
+        // (modena's -fx-text-base-color, base.css's -c-text). Such a combo
+        // is redrawn when it comes on screen again.
+        ObservableValue<Boolean> onScreen = OnScreen.of(combo);
+        ChangeListener<Locale> redraw = (obs, oldLocale, newLocale) -> {
+            if (Boolean.TRUE.equals(onScreen.getValue())) {
+                draw.run();
+            } else {
+                combo.getProperties().put(STALE, Boolean.TRUE);
+            }
+        };
+        onScreen.addListener((obs, was, is) -> {
+            if (Boolean.TRUE.equals(is) && combo.getProperties().remove(STALE) != null) {
+                draw.run();
+            }
+        });
+        combo.getProperties().put(ON_SCREEN, onScreen);
         // The locale outlives every view, and must not keep a discarded one.
-        ChangeListener<Locale> redraw = (obs, oldLocale, newLocale) -> draw.run();
         combo.getProperties().put(LISTENER, redraw);
         I18n.localeProperty().addListener(new WeakChangeListener<>(redraw));
     }
