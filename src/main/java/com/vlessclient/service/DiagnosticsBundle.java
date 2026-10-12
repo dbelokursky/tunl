@@ -345,7 +345,7 @@ public class DiagnosticsBundle {
         List<Rolled> rolled = new ArrayList<>();
         try (DirectoryStream<Path> files = Files.newDirectoryStream(logsDir, "tunl.*.log")) {
             for (Path path : files) {
-                Matcher name = ROLLED_LOG.matcher(path.getFileName().toString());
+                Matcher name = ROLLED_LOG.matcher(String.valueOf(path.getFileName()));
                 if (name.matches()) {
                     rolled.add(new Rolled(path, name.group(1), Integer.parseInt(name.group(2))));
                 }
