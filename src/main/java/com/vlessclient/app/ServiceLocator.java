@@ -330,8 +330,14 @@ public class ServiceLocator {
     public static void shutdown() {
         log.info("ServiceLocator shutting down");
 
-        // Before anything else: a request started after this point must not be
-        // handed the port of an engine that is about to stop.
+        // First, no subscription fetch from here on: routeDirect below lifts
+        // the guard that keeps one inside the tunnel, and the refreshes were
+        // stopped only after the core, seconds later. A cycle that went on
+        // meanwhile sent the next subscription's link, token and all, from
+        // the user's real address.
+        find(SubscriptionService.class).ifPresent(SubscriptionService::beginShutdown);
+        // Then: a request started after this point must not be handed the
+        // port of an engine that is about to stop.
         AppHttpClients.routeDirect();
 
         stopMcpServer();

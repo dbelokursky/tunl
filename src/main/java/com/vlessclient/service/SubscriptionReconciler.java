@@ -28,8 +28,21 @@ final class SubscriptionReconciler {
     private record NamedEndpoint(Endpoint endpoint, String name) {
     }
 
-    static Batch reconcile(List<ServerConfig> existing, List<ServerConfig> fetched,
-                           boolean allowRemovals) {
+    /**
+     * Matches what a refresh fetched against what the subscription has.
+     *
+     * @param existing      the subscription's stored servers
+     * @param strays        stored servers of a subscription that no longer
+     *                      exists, which a fetched server may take back but
+     *                      which are never removed
+     * @param fetched       the servers the provider sent
+     * @param allowRemovals whether a server of {@code existing} the provider
+     *                      no longer sends is removed
+     * @return the servers to store, the ids to remove, and the subscription's
+     *     ids after it
+     */
+    static Batch reconcile(List<ServerConfig> existing, List<ServerConfig> strays,
+                           List<ServerConfig> fetched, boolean allowRemovals) {
         // Identity contains every connection field, including credentials, but
         // not local state or display names. JsonNode equality also ignores map
         // ordering (for example HTTP headers). Never log these keys: they contain secrets.
@@ -41,16 +54,14 @@ final class SubscriptionReconciler {
         List<ServerConfig> unmatchedOld = new ArrayList<>(existing);
         List<ServerConfig> unmatchedNew = new ArrayList<>(upserts);
 
-        matchUnique(unmatchedOld, unmatchedNew, SubscriptionReconciler::identity);
-        // Credential rotation can change the exact identity. A unique provider
-        // label on the same endpoint is the next strongest correspondence.
-        matchUnique(unmatchedOld, unmatchedNew, server ->
-                server.getName() == null || server.getName().isBlank() ? null
-                        : new NamedEndpoint(endpoint(server), server.getName()));
-        matchUnique(unmatchedOld, unmatchedNew, SubscriptionReconciler::withoutCredentials);
-        // Preserve the legacy single-profile rename/reconfiguration behavior,
-        // but never choose arbitrarily among several variants on one endpoint.
-        matchUnique(unmatchedOld, unmatchedNew, SubscriptionReconciler::endpoint);
+        matchAll(unmatchedOld, unmatchedNew);
+        // Then, for what the subscription's own servers did not account for,
+        // a server a deleted subscription left behind: a restored backup
+        // keeps each server's subscription stamp but not the subscription,
+        // and the subscription added again matched none of them, so every
+        // server was added a second time and the restored copies belonged to
+        // nothing. After its own, so a stray cannot take a match from them.
+        matchAll(new ArrayList<>(strays), unmatchedNew);
 
         List<String> ids = new ArrayList<>(upserts.stream().map(ServerConfig::getId).toList());
         List<String> removals = new ArrayList<>();
@@ -62,6 +73,20 @@ final class SubscriptionReconciler {
             }
         }
         return new Batch(upserts, removals, ids);
+    }
+
+    private static void matchAll(List<ServerConfig> unmatchedOld,
+                                 List<ServerConfig> unmatchedNew) {
+        matchUnique(unmatchedOld, unmatchedNew, SubscriptionReconciler::identity);
+        // Credential rotation can change the exact identity. A unique provider
+        // label on the same endpoint is the next strongest correspondence.
+        matchUnique(unmatchedOld, unmatchedNew, server ->
+                server.getName() == null || server.getName().isBlank() ? null
+                        : new NamedEndpoint(endpoint(server), server.getName()));
+        matchUnique(unmatchedOld, unmatchedNew, SubscriptionReconciler::withoutCredentials);
+        // Preserve the legacy single-profile rename/reconfiguration behavior,
+        // but never choose arbitrarily among several variants on one endpoint.
+        matchUnique(unmatchedOld, unmatchedNew, SubscriptionReconciler::endpoint);
     }
 
     private static <K> void matchUnique(List<ServerConfig> oldServers,
@@ -76,8 +101,10 @@ final class SubscriptionReconciler {
             }
             ServerConfig incoming = entry.getValue().getFirst();
             ServerConfig previous = old.getFirst();
+            // The id only: whether it is picked is the store's to say when the
+            // batch lands (ConfigStore.applyServerBatch), not what it said
+            // when the members were read, before the fetch.
             incoming.setId(previous.getId());
-            incoming.setActive(previous.isActive());
             oldServers.remove(previous);
             newServers.remove(incoming);
         }
