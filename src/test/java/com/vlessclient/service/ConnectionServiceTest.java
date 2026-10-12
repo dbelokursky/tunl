@@ -968,6 +968,71 @@ class ConnectionServiceTest {
                 .isEqualTo(base + 3);
     }
 
+    /**
+     * A start that runs no core leaves no ports of a run behind. Only a
+     * disconnect forgot them, so after a start the core refused, one that
+     * failed, or one whose administrator prompt was dismissed, the status an
+     * agent asks for and the port the Dashboard tells apps to use named the
+     * ports of that start, nothing listening on them, and not the ones the
+     * user chose after it.
+     */
+    @Test
+    void aStartTheCoreRefusesLeavesTheChosenPorts() throws Exception {
+        RecordingEngine refusing = engine();
+        refusing.refuseWith = config -> "decode config: unknown field \"bogus\"";
+        ConnectionService service = service(refusing);
+
+        assertChosenPortsReadAfter(() -> assertThatThrownBy(service::connect)
+                .isInstanceOf(ConfigRejectedException.class));
+    }
+
+    @Test
+    void aStartThatFailsLeavesTheChosenPorts() throws Exception {
+        RecordingEngine failing = engine();
+        failing.failStartWith = new IOException("cannot run the core");
+        ConnectionService service = service(failing);
+
+        assertChosenPortsReadAfter(() -> assertThatThrownBy(service::connect)
+                .isInstanceOf(IOException.class));
+    }
+
+    @Test
+    void aStartWhosePromptIsDismissedLeavesTheChosenPorts() throws Exception {
+        ConnectionService service = service(new SingBoxEngine(tempDir.resolve("sing-box")) {
+            @Override
+            public void start(String configJson, ProxyMode proxyMode) throws IOException {
+                throw new com.vlessclient.platform.ElevationDeclinedException(
+                        "the administrator prompt was dismissed");
+            }
+        });
+
+        assertChosenPortsReadAfter(() -> assertThat(service.connect(ProxyMode.TUN).outcome())
+                .isEqualTo(ConnectionService.Outcome.CANCELLED));
+    }
+
+    /** A start of no core, then other ports chosen: those are the ones read. */
+    private void assertChosenPortsReadAfter(ThrowingRunnable startOfNoCore) throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        int base = freeBlockOf(6);
+        store.getSettings().setSocksPort(base);
+        store.getSettings().setHttpPort(base + 1);
+        store.getSettings().setClashApiPort(base + 2);
+
+        startOfNoCore.run();
+        store.getSettings().setSocksPort(base + 3);
+        store.getSettings().setHttpPort(base + 4);
+        store.getSettings().setClashApiPort(base + 5);
+
+        assertThat(store.getSettings().listenSocksPort()).isEqualTo(base + 3);
+        assertThat(store.getSettings().listenHttpPort()).isEqualTo(base + 4);
+        assertThat(store.getSettings().listenClashApiPort()).isEqualTo(base + 5);
+    }
+
+    @FunctionalInterface
+    private interface ThrowingRunnable {
+        void run() throws Exception;
+    }
+
     @Test
     void aSessionThatLeavesTheSystemsProxyAloneIsNotRecorded() throws Exception {
         store.addServer(server("srv-1", "Tokyo"));
