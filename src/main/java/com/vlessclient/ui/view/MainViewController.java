@@ -78,6 +78,13 @@ public class MainViewController {
         bindPersistenceBanner();
         showDashboard();
 
+        // base.css sets the log and the bypass list in monospace, which
+        // JavaFX draws in Courier New on a Mac; under this class it names
+        // Menlo there, as it always meant to.
+        if (rootNode != null && com.vlessclient.platform.Platform.current().isMac()) {
+            rootNode.getStyleClass().add("os-mac");
+        }
+
         if (rootNode != null) {
             rootNode.sceneProperty().addListener((obs, oldScene, newScene) -> {
                 if (newScene != null && !acceleratorsRegistered) {
