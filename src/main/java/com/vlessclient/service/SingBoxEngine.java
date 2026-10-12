@@ -91,7 +91,7 @@ public class SingBoxEngine {
     private final ReadOnlyBooleanWrapper realityRefused = new ReadOnlyBooleanWrapper();
 
     /**
-     * Serializes the process lifecycle. start(), stop() and forceStop() run
+     * Serializes the process lifecycle. start(), stop() and close() run
      * their whole body under this monitor so the check-and-launch in start()
      * is atomic. Three threads call start()/stop() — the dashboard's virtual
      * thread, the tray's FX thread and the MCP worker — and an unguarded
@@ -106,7 +106,7 @@ public class SingBoxEngine {
      */
     private final Object lifecycle = new Object();
 
-    // Written by start()/stop()/forceStop() while holding `lifecycle` and read
+    // Written by start()/stop()/close() while holding `lifecycle` and read
     // from the monitor/watchdog daemon threads. `process` is volatile so those
     // threads (and the lock-free isRunning()) see the current session's process
     // or its absence; the rest are captured into locals under the lock before
@@ -158,6 +158,30 @@ public class SingBoxEngine {
     private volatile boolean exitDeclined;
 
     /**
+     * Set once the app quits ({@link #close()}, the shutdown hook): no core
+     * starts after it. A start in flight at quit used to launch its core after
+     * the shutdown had looked, found nothing running and gone on, and that
+     * core outlived the app with its ports and the system's proxy.
+     */
+    private volatile boolean closed;
+
+    /** The thread inside {@link #start}, which {@link #close()} calls off; or null. */
+    private volatile Thread starting;
+
+    /**
+     * {@link #awaitEarlierTunnel} showed CONNECTING, and no start has taken
+     * it over yet; see {@link #connectEnded()}.
+     */
+    private volatile boolean showingEarlierWait;
+
+    /**
+     * The process whose session {@link #stopLocked} already cleaned up after,
+     * so its monitor does not run the slow system-proxy guard a second time.
+     * Guarded by {@link #lifecycle}.
+     */
+    private Process cleanedSession;
+
+    /**
      * Creates a new SingBoxEngine that writes its core down nowhere.
      *
      * @param singBoxBinary path to the sing-box executable, or null for an
@@ -202,11 +226,8 @@ public class SingBoxEngine {
             }
         });
 
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            if (isRunning()) {
-                forceStop();
-            }
-        }, "singbox-shutdown-hook"));
+        Runtime.getRuntime().addShutdownHook(new Thread(this::closeForExit,
+                "singbox-shutdown-hook"));
     }
 
     /**
@@ -273,7 +294,12 @@ public class SingBoxEngine {
         // the three caller threads could both pass the isRunning() guard and
         // launch a second core, orphaning the first.
         synchronized (lifecycle) {
-            startLocked(configJson, proxyMode);
+            starting = Thread.currentThread();
+            try {
+                startLocked(configJson, proxyMode);
+            } finally {
+                starting = null;
+            }
         }
     }
 
@@ -293,6 +319,11 @@ public class SingBoxEngine {
     }
 
     private void startLocked(String configJson, ProxyMode proxyMode) throws IOException {
+        if (closed) {
+            throw new InterruptedIOException("the app is quitting: no core is started");
+        }
+        // This start takes over whatever a wait for an earlier tunnel showed.
+        showingEarlierWait = false;
         if (isRunning()) {
             throw new IllegalStateException("sing-box is already running");
         }
@@ -391,6 +422,23 @@ public class SingBoxEngine {
         startConnectedWatchdog(extractController(configJson));
 
         startProcessMonitor();
+
+        // An interrupt that came during the launch, or a quit, abandons the
+        // start as one before it does. The launchers used to read an interrupt
+        // as "not set up" and go on to the launch that prompts every time, and
+        // a core launched here ran on with nothing left to stop it. Stopped as
+        // any session is, now that it has its monitor.
+        if (Thread.currentThread().isInterrupted() || closed) {
+            boolean interrupted = Thread.interrupted();
+            try {
+                stopLocked();
+            } finally {
+                if (interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            throw new InterruptedIOException("the start was called off as sing-box was launched");
+        }
     }
 
     private static final long CONNECTED_FALLBACK_DELAY_MS = 1800;
@@ -569,10 +617,12 @@ public class SingBoxEngine {
         }
         log.info("Waiting up to {} s for the tunnel an earlier core left ({}) to close",
                 timeout.toSeconds(), earlier.get().pid());
+        showingEarlierWait = true;
         Platform.runLater(() -> connectionState.set(ConnectionState.CONNECTING));
         long deadline = System.nanoTime() + timeout.toNanos();
         while (earlier.get().isAlive()) {
             if (!stillWanted.getAsBoolean()) {
+                showingEarlierWait = false;
                 publishNotStarted();
                 return false;
             }
@@ -589,6 +639,7 @@ public class SingBoxEngine {
                 break;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                showingEarlierWait = false;
                 publishNotStarted();
                 return false;
             }
@@ -597,6 +648,21 @@ public class SingBoxEngine {
         tunnelRecord.runningCore();
         log.info("The earlier tunnel has closed");
         return true;
+    }
+
+    /**
+     * Says that a connect is over, started or not. A connect that waited for
+     * an earlier tunnel showed CONNECTING for the wait, and one that then
+     * failed before its start, on a server the core cannot build, say, left
+     * the status on "Connecting" with nothing running and the Connect button
+     * acting as a stop. Only that CONNECTING is taken back: a start publishes
+     * its own outcome.
+     */
+    public void connectEnded() {
+        if (showingEarlierWait) {
+            showingEarlierWait = false;
+            publishNotStarted();
+        }
     }
 
     /**
@@ -614,7 +680,8 @@ public class SingBoxEngine {
 
     private void stopLocked() {
         stopRequested = true;
-        if (!isRunning()) {
+        Process p = process;
+        if (p == null || !p.isAlive()) {
             // A crashed core leaves the dead process in the field; retire it
             // so the next start() doesn't inherit a stale session token.
             process = null;
@@ -628,10 +695,10 @@ public class SingBoxEngine {
             logReader = null;
         }
 
-        Process p = process;
-        if (activeProxyMode == ProxyMode.TUN) {
-            stopPrivilegedProcess();
-        } else if (p != null) {
+        boolean tun = activeProxyMode == ProxyMode.TUN;
+        if (tun) {
+            stopPrivilegedProcess(p);
+        } else {
             p.destroy();
             try {
                 if (!p.waitFor(STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
@@ -644,11 +711,43 @@ public class SingBoxEngine {
             }
         }
 
-        process = null;
-        activeProxyMode = null;
-        forgetRecordedCore();
         cleanupConfigFile();
+        if (p.isAlive()) {
+            // A TUN core may take longer than the grace to close: sing-box
+            // gives itself ten seconds, and one took half a minute. Its
+            // launcher used to be killed here, which cannot stop a root core
+            // any sooner, and the session was forgotten with it: the next
+            // connect found nothing stopping and no earlier tunnel, and
+            // started a second tunnel beside the one still closing. The
+            // launcher and its record stay until it exits, so a connect waits
+            // for it (isStopping), and so does the next run; its monitor
+            // cleans up after it then.
+            log.warn("The TUN core is still closing after {} s; waiting for it",
+                    STOP_TIMEOUT_SECONDS);
+        } else {
+            process = null;
+            activeProxyMode = null;
+            forgetRecordedCore();
+            endSession(p, tun);
+        }
         Platform.runLater(() -> connectionState.set(ConnectionState.DISCONNECTED));
+    }
+
+    /**
+     * Cleans up after a session whose core has exited, before the stop
+     * returns: the system's proxy it may have left (a kill on Windows always
+     * leaves it) and a TUN launcher's published config. Both were left to the
+     * process monitor, a daemon thread, which a quit does not wait for: the
+     * app exited with the system's proxy still pointing at the dead core, and
+     * the next launch, finding the record of its port already removed, did
+     * not clear it either. The monitor skips what was done here.
+     */
+    private void endSession(Process ended, boolean tun) {
+        restoreSystemProxyIfNeeded();
+        if (tun) {
+            tunLauncher.cleanupSession();
+        }
+        cleanedSession = ended;
     }
 
     /**
@@ -660,41 +759,49 @@ public class SingBoxEngine {
      * file, one that runs as the user watches its stdin for end-of-file
      * ({@code StdinWatch}). The wrapper terminates sing-box and exits once the
      * core has. No password prompt.</p>
+     *
+     * <p>The launcher is never killed: that cannot stop a root core any
+     * sooner, and only took away what told the app the core still ran. One
+     * still running after the grace keeps its stop file too, for a privileged
+     * side that has yet to look; its monitor removes it.</p>
      */
-    private void stopPrivilegedProcess() {
-        Process p = process;
+    private void stopPrivilegedProcess(Process p) {
+        signalStop();
+        closeStdin(p);
         try {
-            if (stopSignalFile != null) {
-                try {
-                    Files.createFile(stopSignalFile);
-                } catch (java.nio.file.FileAlreadyExistsException ignored) {
-                    // Already signalled — the wrapper will notice regardless.
-                }
-            }
-            if (p != null) {
-                closeStdin(p);
-                if (!p.waitFor(STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                    p.destroyForcibly();
-                    p.waitFor(2, TimeUnit.SECONDS);
-                }
-            }
-        } catch (IOException | InterruptedException e) {
-            if (p != null) {
-                p.destroyForcibly();
-            }
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
-        } finally {
-            if (stopSignalFile != null) {
-                try {
-                    Files.deleteIfExists(stopSignalFile);
-                } catch (IOException ignored) {
-                    // best effort
-                }
-                stopSignalFile = null;
-            }
+            p.waitFor(STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
+        if (!p.isAlive()) {
+            removeStopSignal();
+        }
+    }
+
+    /** Creates the stop-signal file a root TUN wrapper polls for; best effort. */
+    private void signalStop() {
+        if (stopSignalFile == null) {
+            return;
+        }
+        try {
+            Files.createFile(stopSignalFile);
+        } catch (java.nio.file.FileAlreadyExistsException ignored) {
+            // Already signalled — the wrapper will notice regardless.
+        } catch (IOException e) {
+            log.warn("Could not signal the TUN wrapper to stop: {}", e.getMessage());
+        }
+    }
+
+    private void removeStopSignal() {
+        if (stopSignalFile == null) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(stopSignalFile);
+        } catch (IOException ignored) {
+            // best effort
+        }
+        stopSignalFile = null;
     }
 
     /**
@@ -854,6 +961,7 @@ public class SingBoxEngine {
         boolean sessionUsedTun = activeProxyMode == ProxyMode.TUN;
         CoreRecord.Entry sessionRecord = recordedCore;
         LogReader sessionReader = logReader;
+        Path sessionStopFile = stopSignalFile;
         if (proc == null) {
             return;
         }
@@ -907,6 +1015,11 @@ public class SingBoxEngine {
                 // under it.
                 try {
                     Files.deleteIfExists(sessionConfigFile);
+                    // Unique per session too; a stop leaves it while the
+                    // launcher still runs.
+                    if (sessionStopFile != null) {
+                        Files.deleteIfExists(sessionStopFile);
+                    }
                 } catch (IOException ignored) {
                     // best-effort cleanup
                 }
@@ -917,7 +1030,9 @@ public class SingBoxEngine {
                 // here as the successor, and one that comes second waits.
                 synchronized (lifecycle) {
                     Process current = process;
-                    boolean noSuccessor = current == null || current == proc;
+                    // A stop that saw the core exit has cleaned up already.
+                    boolean noSuccessor = (current == null || current == proc)
+                            && cleanedSession != proc;
                     if (sessionProxyTarget != null && noSuccessor) {
                         systemProxyGuard.clearIfPointsAt(
                                 sessionProxyTarget.host(), sessionProxyTarget.port());
@@ -1084,16 +1199,52 @@ public class SingBoxEngine {
     }
 
     /**
-     * Force-stops the sing-box process without state transitions.
-     * Used by the JVM shutdown hook.
+     * Stops the core for good, as the app quits: a start under way is called
+     * off, a start already launching is waited for and its core stopped, and
+     * no start runs after this.
+     *
+     * <p>The quit used to stop the core only when one was running as it
+     * looked. A Connect clicked a moment before Quit was still generating its
+     * configuration or checking it, so nothing was stopped, and the core it
+     * launched then outlived the app: in system proxy mode it went on as the
+     * system's proxy with no app in front of it.</p>
+     *
+     * @return true when a core was running and has been stopped
      */
-    private void forceStop() {
-        // Runs from the JVM shutdown hook. Taking `lifecycle` keeps it from
-        // racing a start()/stop() in flight; the wait is bounded (stop() blocks
-        // at most STOP_TIMEOUT_SECONDS+2), and the external quit killers halt
-        // the JVM if a start() is parked on an elevation prompt.
+    public boolean close() {
+        refuseStarts();
         synchronized (lifecycle) {
-            forceStopLocked();
+            Process running = process;
+            if (running == null || !running.isAlive()) {
+                return false;
+            }
+            stopLocked();
+            return true;
+        }
+    }
+
+    /** Refuses every start from now on, and calls off the one under way. */
+    private void refuseStarts() {
+        closed = true;
+        Thread starter = starting;
+        if (starter != null) {
+            starter.interrupt();
+        }
+    }
+
+    /**
+     * The JVM shutdown hook: {@link #close()} without state transitions, for
+     * a JVM on its way down. Taking {@code lifecycle} keeps it from racing a
+     * start() or stop() in flight, which the interrupt shortens; the external
+     * quit killers halt the JVM if one does not end.
+     */
+    private void closeForExit() {
+        refuseStarts();
+        synchronized (lifecycle) {
+            Process running = process;
+            if (running != null && running.isAlive()) {
+                forceStopLocked();
+            }
         }
     }
 
@@ -1102,39 +1253,37 @@ public class SingBoxEngine {
         // TUN mode: signal the wrapper via the stop file (and its stdin,
         // below) so it kills the root-owned sing-box gracefully. The wrappers
         // also notice the app's death on their own, but this is faster.
-        if (stopSignalFile != null) {
-            try {
-                Files.createFile(stopSignalFile);
-            } catch (IOException ignored) {
-                // already exists or can't create — best effort
-            }
-        }
+        signalStop();
         Process p = process;
+        boolean tun = activeProxyMode == ProxyMode.TUN;
+        closeStdin(p);
+        // The TUN wrappers stop the core on SIGTERM and wait for it to close;
+        // only a direct core is killed when it outlasts the grace.
+        p.destroy();
         try {
-            if (p != null && p.isAlive()) {
-                closeStdin(p);
-                p.destroy();
-                if (!p.waitFor(STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                    p.destroyForcibly();
-                }
+            if (!p.waitFor(STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS) && !tun) {
+                p.destroyForcibly();
+                p.waitFor(2, TimeUnit.SECONDS);
             }
         } catch (InterruptedException e) {
-            p.destroyForcibly();
+            if (!tun) {
+                p.destroyForcibly();
+            }
             Thread.currentThread().interrupt();
         }
-        if (stopSignalFile != null) {
-            try {
-                Files.deleteIfExists(stopSignalFile);
-            } catch (IOException ignored) {
-                // best effort
-            }
-            stopSignalFile = null;
-        }
-        forgetRecordedCore();
         cleanupConfigFile();
+        if (tun && p.isAlive()) {
+            // Still closing: its record stays for the next run to wait on.
+            return;
+        }
+        removeStopSignal();
+        forgetRecordedCore();
         // The JVM is going down: the daemon process monitor may never get to
         // run its own restore, so clear a stale OS proxy entry synchronously.
         restoreSystemProxyIfNeeded();
+        if (tun) {
+            tunLauncher.cleanupSession();
+        }
     }
 
     /** Prefix of the session configuration files, so an earlier run's can be found. */
