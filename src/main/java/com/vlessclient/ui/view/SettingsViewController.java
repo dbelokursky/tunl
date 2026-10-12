@@ -18,6 +18,10 @@ import com.vlessclient.ui.view.settings.TrafficHistorySettingsSection;
 import com.vlessclient.ui.view.settings.UpdatesSection;
 import java.io.IOException;
 import java.util.Map;
+import java.util.concurrent.Executor;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import javafx.application.Platform;
@@ -141,6 +145,23 @@ public class SettingsViewController implements ViewShownAware {
     private McpServerService mcpServerService;
     private boolean updatingMcpControls;
     private boolean suppressLaunchAtLoginListener;
+
+    /**
+     * Every read and write of the autostart entry, one at a time and in the
+     * order asked. Each was a thread of its own, and on Windows each is a
+     * {@code reg} process: a write could finish before an earlier one, which
+     * left the app starting at login under an unticked box. The one thread
+     * ends a second after the last call.
+     */
+    private final Executor autostartCalls = new ThreadPoolExecutor(0, 1, 1, TimeUnit.SECONDS,
+            new LinkedBlockingQueue<>(), Thread.ofVirtual().name("autostart").factory());
+
+    /**
+     * How many writes the box has asked for, on the FX thread. A read that
+     * started before the latest one answers about an entry since changed: shown,
+     * it ticked the box again over an entry the user had just removed.
+     */
+    private int autostartWrites;
     /** Set while {@link #showStored} fills the controls, so no listener acts on it. */
     private boolean showingStored;
 
@@ -385,13 +406,18 @@ public class SettingsViewController implements ViewShownAware {
             // Off the FX thread, like the read: on Windows this writes the
             // Run value with `reg`, and the click held the window until the
             // process came back.
-            Thread.startVirtualThread(() -> {
+            int write = ++autostartWrites;
+            autostartCalls.execute(() -> {
                 try {
                     autostart.setEnabled(newVal);
                 } catch (IOException e) {
                     log.error("Failed to {} launch at login",
                             newVal ? "enable" : "disable", e);
-                    Platform.runLater(() -> showAutostart(oldVal));
+                    Platform.runLater(() -> {
+                        if (write == autostartWrites) {
+                            showAutostart(oldVal);
+                        }
+                    });
                 }
             });
         });
@@ -410,9 +436,14 @@ public class SettingsViewController implements ViewShownAware {
         if (autostart == null) {
             return;
         }
-        Thread.startVirtualThread(() -> {
+        int writesBefore = autostartWrites;
+        autostartCalls.execute(() -> {
             boolean enabled = autostart.isEnabled();
-            Platform.runLater(() -> showAutostart(enabled));
+            Platform.runLater(() -> {
+                if (writesBefore == autostartWrites) {
+                    showAutostart(enabled);
+                }
+            });
         });
     }
 
