@@ -1,15 +1,26 @@
 package com.vlessclient.platform;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.nio.file.attribute.UserPrincipal;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Linux TUN launcher. Preference order:
@@ -60,9 +71,20 @@ public final class LinuxTunLauncher implements TunLauncher {
      */
     private static final List<String> TOOL_DIRS = List.of("/usr/sbin", "/sbin", "/usr/bin", "/bin");
 
+    /**
+     * Where libcap's tools are looked for after the PATH: NixOS's system
+     * profile, which the PATH of an app started from a desktop entry may not
+     * hold.
+     */
+    private static final List<String> LAST_SEARCH_DIRS = List.of("/run/current-system/sw/bin");
+
+    private static final ObjectMapper CONFIG_JSON = JsonMapper.builder().build();
+
     private final CommandRunner runner;
     private final String elevator;
     private final List<Path> toolDirs;
+    /** Where else getcap and setcap are looked for; see {@link #findTool}. */
+    private final List<Path> searchDirs;
 
     public LinuxTunLauncher() {
         this(CommandRunner.system(PROMPT_TIMEOUT), "pkexec");
@@ -70,14 +92,21 @@ public final class LinuxTunLauncher implements TunLauncher {
 
     /** Test seam: inject the capability-command runner and the elevation binary. */
     LinuxTunLauncher(CommandRunner runner, String elevator) {
-        this(runner, elevator, TOOL_DIRS.stream().map(Path::of).toList());
+        this(runner, elevator, TOOL_DIRS.stream().map(Path::of).toList(), searchDirs());
     }
 
-    /** Test seam: also where getcap and setcap are looked for. */
+    /** Test seam: also where getcap and setcap are looked for, and nowhere else. */
     LinuxTunLauncher(CommandRunner runner, String elevator, List<Path> toolDirs) {
+        this(runner, elevator, toolDirs, List.of());
+    }
+
+    /** Test seam: also where else they are looked for when none of those has them. */
+    LinuxTunLauncher(CommandRunner runner, String elevator, List<Path> toolDirs,
+                     List<Path> searchDirs) {
         this.runner = runner;
         this.elevator = elevator;
         this.toolDirs = List.copyOf(toolDirs);
+        this.searchDirs = List.copyOf(searchDirs);
     }
 
     /**
@@ -89,7 +118,7 @@ public final class LinuxTunLauncher implements TunLauncher {
     public Launched launch(Path binary, Path configFile, Prompt prompt) throws IOException {
         // Owner-only and unguessable, where java.io.tmpdir is usually the
         // shared /tmp; the root-side wrapper can read it there.
-        Path stopSignalFile = StopSignals.newStopSignalFile();
+        final Path stopSignalFile = StopSignals.newStopSignalFile();
 
         // Granted only to a core this user owns and alone can run. The binary
         // can be a system-wide one found on the PATH, root-owned and 0755:
@@ -108,6 +137,9 @@ public final class LinuxTunLauncher implements TunLauncher {
         // launch went on to the fallback: a PolicyKit prompt as the app quit.
         if (Thread.currentThread().isInterrupted()) {
             throw new InterruptedIOException("the TUN start was called off");
+        }
+        if (direct) {
+            removeForeignCacheFile(configFile);
         }
         String wrapper = direct
                 ? directWrapperCommand(binary, configFile)
@@ -167,7 +199,7 @@ public final class LinuxTunLauncher implements TunLauncher {
     boolean hasNetAdminCapability(Path binary) throws InterruptedIOException {
         Optional<Path> getcap = tool("getcap");
         if (getcap.isEmpty()) {
-            log.debug("getcap not found in {}", toolDirs);
+            log.debug("getcap not found in {} or {}", toolDirs, searchDirs);
             return false;
         }
         try {
@@ -182,12 +214,157 @@ public final class LinuxTunLauncher implements TunLauncher {
         }
     }
 
-    /** {@code name} in the first of the tool directories that has it, by absolute path. */
+    /** {@code name} by absolute path, where {@link #findTool} finds it. */
     private Optional<Path> tool(String name) {
-        return toolDirs.stream()
+        return findTool(name, toolDirs, searchDirs);
+    }
+
+    /**
+     * Finds a tool by absolute path: in the first of {@code toolDirs} that
+     * has it, or else in the first of {@code searchDirs} where only root can
+     * have put it ({@link #onlyRootCanChange}).
+     *
+     * <p>NixOS and Guix keep libcap in none of the fixed directories, only on
+     * the PATH. Looked for in those alone, getcap was not found there, the
+     * core never got the capability, and every connect raised a PolicyKit
+     * prompt; with no restart possible without one, recovery never brought a
+     * dropped tunnel back. The PATH is searched only after them, and with
+     * care, since setcap runs as root: a PATH directory the user can write to
+     * would let anything running as the user swap it.</p>
+     *
+     * @param name       the tool
+     * @param toolDirs   where it is installed, trusted as they are
+     * @param searchDirs where else to look, such as the PATH's directories
+     * @return its path, or empty when none of them has it
+     */
+    static Optional<Path> findTool(String name, List<Path> toolDirs, List<Path> searchDirs) {
+        Optional<Path> installed = toolDirs.stream()
                 .map(dir -> dir.resolve(name))
                 .filter(Files::isExecutable)
                 .findFirst();
+        if (installed.isPresent()) {
+            return installed;
+        }
+        return searchDirs.stream()
+                .map(dir -> dir.resolve(name))
+                .filter(Files::isExecutable)
+                .filter(LinuxTunLauncher::onlyRootCanChange)
+                .findFirst();
+    }
+
+    /** The PATH's absolute directories, then NixOS's system profile. */
+    private static List<Path> searchDirs() {
+        List<Path> dirs = new ArrayList<>();
+        String path = System.getenv("PATH");
+        for (String entry : path == null ? new String[0] : path.split(File.pathSeparator)) {
+            try {
+                Path dir = Path.of(entry);
+                if (dir.isAbsolute()) {
+                    dirs.add(dir);
+                }
+            } catch (InvalidPathException e) {
+                log.debug("Skipping a PATH entry that is no path: {}", entry);
+            }
+        }
+        LAST_SEARCH_DIRS.stream().map(Path::of).forEach(dirs::add);
+        return dirs;
+    }
+
+    /**
+     * Whether only root can have put {@code tool} where it was found, or
+     * changed it since: the directory it was found in, the file and the
+     * directory it really is in, with links followed, all belong to root and
+     * are writable by no one else. A store path (/nix/store, /gnu/store)
+     * passes; a link in ~/.local/bin does not, wherever it points.
+     */
+    static boolean onlyRootCanChange(Path tool) {
+        try {
+            Path foundIn = tool.toAbsolutePath().getParent();
+            Path real = tool.toRealPath();
+            Path realIn = real.getParent();
+            return foundIn != null && realIn != null && rootAlone(foundIn.toRealPath())
+                    && rootAlone(realIn) && rootAlone(real);
+        } catch (IOException | RuntimeException e) {
+            return false;
+        }
+    }
+
+    /** Owned by root, and writable by neither its group nor others. */
+    private static boolean rootAlone(Path path) throws IOException {
+        Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(path);
+        return (Integer) Files.getAttribute(path, "unix:uid") == 0
+                && !permissions.contains(PosixFilePermission.GROUP_WRITE)
+                && !permissions.contains(PosixFilePermission.OTHERS_WRITE);
+    }
+
+    /**
+     * Removes the core's cache file when another user owns it, before a
+     * start that runs the core as this user.
+     *
+     * <p>The per-connect fallback runs the core as root, and before it told
+     * the core whose app it ran for ({@link #appUserIds}), the cache file the
+     * core created there was root's. A later fallback run hands such a file
+     * back to the user, but a start through the capability, as the user,
+     * comes first: it failed on the file with "permission denied", start
+     * after start, until the file was removed by hand. The core creates it
+     * anew, fetching the rule-sets it held again. The user owns the
+     * directory, so removing it needs no privileges.</p>
+     *
+     * @param configFile the configuration the core is to run, which names the
+     *                   file; this app wrote it, so its owner is the app user
+     */
+    static void removeForeignCacheFile(Path configFile) {
+        try {
+            removeForeignCacheFile(configFile, Files.getOwner(configFile));
+        } catch (IOException | UnsupportedOperationException e) {
+            log.debug("Could not tell who owns {}: {}", configFile, e.toString());
+        }
+    }
+
+    /**
+     * {@link #removeForeignCacheFile(Path)} for a given app user.
+     *
+     * @param configFile the configuration the core is to run
+     * @param appUser    the user the core runs as
+     */
+    static void removeForeignCacheFile(Path configFile, UserPrincipal appUser) {
+        Path cache = cacheFileOf(configFile);
+        if (cache == null || !Files.exists(cache, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        try {
+            UserPrincipal owner = Files.getOwner(cache, LinkOption.NOFOLLOW_LINKS);
+            if (owner.equals(appUser)) {
+                return;
+            }
+            Files.delete(cache);
+            log.info("Removed the core's cache file {}: {} owned it, and the core runs as {}",
+                    cache, owner.getName(), appUser.getName());
+        } catch (IOException | UnsupportedOperationException e) {
+            log.warn("Could not remove the core's cache file {}, which another user owns: {}",
+                    cache, e.toString());
+        }
+    }
+
+    /**
+     * The cache file a configuration has the core keep
+     * ({@code experimental.cache_file}), or null when it keeps none or the
+     * file cannot be read.
+     */
+    private static Path cacheFileOf(Path configFile) {
+        try {
+            JsonNode cacheFile = CONFIG_JSON.readTree(Files.readString(configFile))
+                    .path("experimental").path("cache_file");
+            String path = cacheFile.path("path").asString("");
+            if (!cacheFile.path("enabled").asBoolean(false) || path.isEmpty()) {
+                return null;
+            }
+            Path cache = Path.of(path);
+            return cache.isAbsolute() ? cache : null;
+        } catch (IOException | JacksonException | InvalidPathException e) {
+            log.debug("Could not read the cache file's path from {}: {}", configFile, e.toString());
+            return null;
+        }
     }
 
     /**
@@ -198,7 +375,8 @@ public final class LinuxTunLauncher implements TunLauncher {
     private void grantNetAdminCapability(Path binary) throws IOException {
         Optional<Path> setcap = tool("setcap");
         if (setcap.isEmpty()) {
-            log.warn("setcap not found in {}: falling back to per-connect elevation", toolDirs);
+            log.warn("setcap not found in {} or {}: falling back to per-connect elevation",
+                    toolDirs, searchDirs);
             return;
         }
         try {
