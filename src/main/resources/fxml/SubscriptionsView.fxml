@@ -22,8 +22,11 @@
                 onAction="#onAddSubscriptionClicked"/>
     </HBox>
 
-    <!-- Subscription list (sits on the page background, like the Servers view) -->
-    <ListView fx:id="subscriptionListView" styleClass="server-list" VBox.vgrow="ALWAYS"/>
+    <!-- Subscription list (sits on the page background, like the Servers view).
+         prefHeight="120" for the reason LogsView gives: at ListView's own 400
+         the page overflowed the 820x500 window. -->
+    <ListView fx:id="subscriptionListView" styleClass="server-list" VBox.vgrow="ALWAYS"
+              prefHeight="120"/>
 
     <!-- Empty state -->
     <VBox fx:id="emptyState" styleClass="empty-state" spacing="8" alignment="CENTER"

@@ -21,6 +21,11 @@ import javafx.scene.layout.Region;
  * <p>Pinning the page's minimum height to its preferred height is what keeps
  * that one-directional: the page can still grow into a tall viewport, but it
  * can never be shrunk under its own content, so a short window scrolls.
+ *
+ * <p>A page's preferred height has to be its content's, then. A ListView
+ * prefers 400px whatever it holds, which is not content: it scrolls on its
+ * own. The pages built around one give it a small prefHeight in their FXML,
+ * or the pin keeps them taller than the window and they scroll twice.
  */
 public final class ContentScrollPane extends ScrollPane {
 

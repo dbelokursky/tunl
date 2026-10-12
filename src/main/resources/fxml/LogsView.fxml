@@ -50,6 +50,11 @@
                 onAction="#onClearClicked"/>
     </HBox>
 
-    <!-- Log Lines -->
-    <ListView fx:id="logListView" styleClass="log-list-view" VBox.vgrow="ALWAYS"/>
+    <!-- Log Lines. prefHeight is a floor, not a size: vgrow fills any taller
+         window. Left at ListView's own 400, which it asks whatever it holds,
+         it made the page taller than the 820x500 window, since
+         ContentScrollPane keeps a page at its preferred height: the page
+         scrolled under a second bar and the newest line sat below the fold. -->
+    <ListView fx:id="logListView" styleClass="log-list-view" VBox.vgrow="ALWAYS"
+              prefHeight="120"/>
 </VBox>
