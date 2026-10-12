@@ -295,7 +295,7 @@ jobs:
           path: |
             ~/.m2/repository
             ~/.m2/wrapper
-          key: maven-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml') }}
+          key: maven-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
           restore-keys: maven-${{ runner.os }}-${{ runner.arch }}-
       # Shares the cache the Build workflow populates on merge to main, so a
       # tagged release does not re-download the sing-box tarballs. Keyed on
@@ -518,7 +518,7 @@ jobs:
           path: |
             ~/.m2/repository
             ~/.m2/wrapper
-          key: maven-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml') }}
+          key: maven-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
           restore-keys: maven-${{ runner.os }}-${{ runner.arch }}-
       # Shares the cache the Build workflow populates on merge to main, so a
       # tagged release does not re-download the sing-box tarballs. Keyed on
@@ -633,7 +633,7 @@ jobs:
           path: |
             ~/.m2/repository
             ~/.m2/wrapper
-          key: maven-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml') }}
+          key: maven-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
           restore-keys: maven-${{ runner.os }}-${{ runner.arch }}-
       # Shares the cache the Build workflow populates on merge to main, so a
       # tagged release does not re-download the sing-box tarballs. Keyed on
@@ -713,7 +713,7 @@ jobs:
           path: |
             ~/.m2/repository
             ~/.m2/wrapper
-          key: maven-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml') }}
+          key: maven-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
           restore-keys: maven-${{ runner.os }}-${{ runner.arch }}-
       # Shares the cache the Build workflow populates on merge to main, so a
       # tagged release does not re-download the sing-box tarballs. Keyed on
