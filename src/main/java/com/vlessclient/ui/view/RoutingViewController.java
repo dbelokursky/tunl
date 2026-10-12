@@ -11,11 +11,14 @@ import com.vlessclient.service.RoutingService;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.beans.binding.ObjectBinding;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.WeakChangeListener;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
@@ -78,6 +81,16 @@ public class RoutingViewController {
     private final ObservableList<RoutingRule> rulesList = FXCollections.observableArrayList();
 
     /**
+     * Redraws the rows and the chips in a new language: they were worded when
+     * drawn, and after a switch still said "Domain suffix", "Proxy" and
+     * "Delete". Held here, since the locale keeps it only weakly.
+     */
+    private final ChangeListener<Locale> redrawInNewLanguage = (obs, oldLocale, newLocale) -> {
+        rulesListView.refresh();
+        showStored();
+    };
+
+    /**
      * Loads the routing config, populates the country chips and their ISO
      * catalog, and binds the rules list and bypass textarea.
      */
@@ -108,6 +121,29 @@ public class RoutingViewController {
         }
         updateBypassCount();
         updateEmptyState();
+        // The page is built once and kept, and agents change the rules over
+        // MCP: it listed the rules it was built with, an added one missing and
+        // a removed one still there, until the app was started again.
+        routingService.addChangeListener(() -> Platform.runLater(this::showStored));
+        I18n.localeProperty().addListener(new WeakChangeListener<>(redrawInNewLanguage));
+    }
+
+    /**
+     * Shows what is stored: the rules, the route mode and the bypass
+     * countries. The bypass list is left as it is, since the box may hold an
+     * edit not saved yet, and only this page changes it.
+     */
+    private void showStored() {
+        RoutingConfig config = routingService.getConfig();
+        loadRules();
+        if (routeAllRadio != null && routeBlockedRadio != null) {
+            // Already the stored mode, so the radios' listener saves nothing.
+            (config.getMode() == RouteMode.BLOCKED_IN_RUSSIA ? routeBlockedRadio : routeAllRadio)
+                    .setSelected(true);
+        }
+        if (bypassCountryCombo != null && bypassCountryChips != null) {
+            renderCountryChips(config.getBypassCountries());
+        }
     }
 
     /**

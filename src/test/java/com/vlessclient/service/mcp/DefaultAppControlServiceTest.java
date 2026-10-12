@@ -471,6 +471,10 @@ class DefaultAppControlServiceTest {
                     .as(network)
                     .isInstanceOf(McpToolException.class).hasMessageContaining("IPv4 network");
         }
+        // The core is given the name as it is; none of these makes a device.
+        String name = com.vlessclient.platform.Platform.current().isMac() ? "tunl0" : " ";
+        assertThatThrownBy(() -> service.setSetting("tun_interface_name", stringNode(name)))
+                .isInstanceOf(McpToolException.class).hasMessageContaining("TUN interface name");
         assertThat(store.getSettings().isAutoConnect()).isFalse();
         assertThat(store.getSettings().getServerSelection())
                 .isEqualTo(com.vlessclient.model.ServerSelection.SINGLE);

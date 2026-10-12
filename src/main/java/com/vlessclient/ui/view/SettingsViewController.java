@@ -7,9 +7,11 @@ import com.vlessclient.app.SettingsEffects;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.model.ProxyMode;
+import com.vlessclient.model.TunSettings;
 import com.vlessclient.platform.Autostart;
 import com.vlessclient.platform.SecretSealer;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.service.SubscriptionService;
 import com.vlessclient.service.ThemeManager;
 import com.vlessclient.service.TrafficHistoryStore;
 import com.vlessclient.service.mcp.McpServerService;
@@ -17,6 +19,10 @@ import com.vlessclient.ui.view.settings.TrafficHistorySettingsSection;
 import com.vlessclient.ui.view.settings.UpdatesSection;
 import java.io.IOException;
 import java.util.Map;
+import java.util.concurrent.Executor;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import javafx.application.Platform;
@@ -29,7 +35,6 @@ import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
-import javafx.scene.control.ListCell;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextFormatter;
@@ -140,6 +145,23 @@ public class SettingsViewController implements ViewShownAware {
     private McpServerService mcpServerService;
     private boolean updatingMcpControls;
     private boolean suppressLaunchAtLoginListener;
+
+    /**
+     * Every read and write of the autostart entry, one at a time and in the
+     * order asked. Each was a thread of its own, and on Windows each is a
+     * {@code reg} process: a write could finish before an earlier one, which
+     * left the app starting at login under an unticked box. The one thread
+     * ends a second after the last call.
+     */
+    private final Executor autostartCalls = new ThreadPoolExecutor(0, 1, 1, TimeUnit.SECONDS,
+            new LinkedBlockingQueue<>(), Thread.ofVirtual().name("autostart").factory());
+
+    /**
+     * How many writes the box has asked for, on the FX thread. A read that
+     * started before the latest one answers about an entry since changed: shown,
+     * it ticked the box again over an entry the user had just removed.
+     */
+    private int autostartWrites;
     /** Set while {@link #showStored} fills the controls, so no listener acts on it. */
     private boolean showingStored;
 
@@ -203,7 +225,15 @@ public class SettingsViewController implements ViewShownAware {
             saveSettings(settings);
         });
 
+        // A TUN value no TUN start can take keeps the stored one, as a port
+        // out of range does. Stored, it failed the next TUN start and every one
+        // after it, while MCP refused the same address.
         commitOnEditEnd(tunInterfaceNameField, text -> {
+            if (!TunSettings.isInterfaceName(text,
+                    com.vlessclient.platform.Platform.current())) {
+                tunInterfaceNameField.setText(settings.getTunInterfaceName());
+                return;
+            }
             settings.setTunInterfaceName(text);
             saveSettings(settings);
         });
@@ -213,9 +243,21 @@ public class SettingsViewController implements ViewShownAware {
         onUserChange(storeSecretsCheck.selectedProperty(), (oldVal, newVal) -> {
             settings.setStoreSecretsSecurely(newVal);
             saveSettings(settings);
+            // The files the credentials live in, written again for the choice
+            // to reach them. Only the setting was saved, and credentials stayed
+            // in plaintext, or sealed for a downgrade that cannot read them,
+            // until some unrelated save, which with servers added by hand
+            // might never come. Both writes run off the FX thread.
+            configStore.rewriteServers();
+            ServiceLocator.find(SubscriptionService.class).ifPresent(subscriptions ->
+                    Thread.startVirtualThread(subscriptions::rewriteSubscriptions));
         });
 
         commitOnEditEnd(tunIpv4Field, text -> {
+            if (!TunSettings.isIpv4Network(text)) {
+                tunIpv4Field.setText(settings.getTunIpv4Address());
+                return;
+            }
             settings.setTunIpv4Address(text);
             saveSettings(settings);
         });
@@ -233,24 +275,11 @@ public class SettingsViewController implements ViewShownAware {
 
     private void initThemeCombo(AppSettings settings) {
         themeCombo.getItems().addAll("auto", "light", "dark");
-        themeCombo.setConverter(new StringConverter<>() {
-            @Override
-            public String toString(String value) {
-                if (value == null) {
-                    return "";
-                }
-                return switch (value) {
-                    case "auto", "system" -> I18n.get("settings.theme.auto");
-                    case "light" -> I18n.get("settings.theme.light");
-                    case "dark" -> I18n.get("settings.theme.dark");
-                    default -> value;
-                };
-            }
-
-            @Override
-            public String fromString(String string) {
-                return string;
-            }
+        ComboLabels.follow(themeCombo, value -> switch (value) {
+            case "auto", "system" -> I18n.get("settings.theme.auto");
+            case "light" -> I18n.get("settings.theme.light");
+            case "dark" -> I18n.get("settings.theme.dark");
+            default -> value;
         });
 
         onUserChange(ComboCommits.committed(themeCombo), (oldVal, newVal) -> {
@@ -293,7 +322,6 @@ public class SettingsViewController implements ViewShownAware {
                 settings.setLanguage(newVal);
                 I18n.setLocale(SettingsEffects.localeFor(newVal));
                 saveSettings(settings);
-                refreshLabels();
             }
         });
     }
@@ -372,13 +400,18 @@ public class SettingsViewController implements ViewShownAware {
             // Off the FX thread, like the read: on Windows this writes the
             // Run value with `reg`, and the click held the window until the
             // process came back.
-            Thread.startVirtualThread(() -> {
+            int write = ++autostartWrites;
+            autostartCalls.execute(() -> {
                 try {
                     autostart.setEnabled(newVal);
                 } catch (IOException e) {
                     log.error("Failed to {} launch at login",
                             newVal ? "enable" : "disable", e);
-                    Platform.runLater(() -> showAutostart(oldVal));
+                    Platform.runLater(() -> {
+                        if (write == autostartWrites) {
+                            showAutostart(oldVal);
+                        }
+                    });
                 }
             });
         });
@@ -397,9 +430,14 @@ public class SettingsViewController implements ViewShownAware {
         if (autostart == null) {
             return;
         }
-        Thread.startVirtualThread(() -> {
+        int writesBefore = autostartWrites;
+        autostartCalls.execute(() -> {
             boolean enabled = autostart.isEnabled();
-            Platform.runLater(() -> showAutostart(enabled));
+            Platform.runLater(() -> {
+                if (writesBefore == autostartWrites) {
+                    showAutostart(enabled);
+                }
+            });
         });
     }
 
@@ -444,20 +482,7 @@ public class SettingsViewController implements ViewShownAware {
      */
     private void initCoreLogLevelCombo(AppSettings settings) {
         coreLogLevelCombo.getItems().addAll(CoreLogLevel.values());
-        coreLogLevelCombo.setCellFactory(cb -> new ListCell<>() {
-            @Override
-            protected void updateItem(CoreLogLevel item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : formatCoreLogLevel(item));
-            }
-        });
-        coreLogLevelCombo.setButtonCell(new ListCell<>() {
-            @Override
-            protected void updateItem(CoreLogLevel item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : formatCoreLogLevel(item));
-            }
-        });
+        ComboLabels.follow(coreLogLevelCombo, this::formatCoreLogLevel);
 
         onUserChange(coreLogLevelCombo.valueProperty(), (oldVal, newVal) -> {
             if (newVal != null && newVal != oldVal) {
@@ -473,20 +498,7 @@ public class SettingsViewController implements ViewShownAware {
      */
     private void initDnsStrategyCombo(AppSettings settings) {
         dnsStrategyCombo.getItems().addAll(AppSettings.DNS_STRATEGIES);
-        dnsStrategyCombo.setCellFactory(cb -> new ListCell<>() {
-            @Override
-            protected void updateItem(String item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : formatDnsStrategy(item));
-            }
-        });
-        dnsStrategyCombo.setButtonCell(new ListCell<>() {
-            @Override
-            protected void updateItem(String item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : formatDnsStrategy(item));
-            }
-        });
+        ComboLabels.follow(dnsStrategyCombo, SettingsViewController::formatDnsStrategy);
 
         onUserChange(ComboCommits.committed(dnsStrategyCombo), (oldVal, newVal) -> {
             if (newVal != null && !newVal.equals(oldVal)) {
@@ -509,20 +521,7 @@ public class SettingsViewController implements ViewShownAware {
 
     private void initProxyModeCombo(AppSettings settings) {
         proxyModeCombo.getItems().addAll(ProxyMode.values());
-        proxyModeCombo.setCellFactory(cb -> new ListCell<>() {
-            @Override
-            protected void updateItem(ProxyMode item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : formatProxyMode(item));
-            }
-        });
-        proxyModeCombo.setButtonCell(new ListCell<>() {
-            @Override
-            protected void updateItem(ProxyMode item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : formatProxyMode(item));
-            }
-        });
+        ComboLabels.follow(proxyModeCombo, this::formatProxyMode);
 
         onUserChange(proxyModeCombo.valueProperty(), (oldVal, newVal) -> {
             if (newVal != null && newVal != oldVal) {
@@ -665,34 +664,6 @@ public class SettingsViewController implements ViewShownAware {
                 .bind(I18n.binding("settings.traffic.history.recorded"));
         trafficHistoryHint.textProperty().bind(I18n.binding("settings.traffic.history.hint"));
         ButtonLabels.bindStatic(clearTrafficHistoryButton, "settings.traffic.history.clear");
-    }
-
-    private void refreshLabels() {
-        // Force theme combo to re-render display text
-        String currentTheme = themeCombo.getValue();
-        themeCombo.setValue(null);
-        themeCombo.setValue(currentTheme);
-
-        // Force proxy mode combo to re-render display text
-        ProxyMode currentMode = proxyModeCombo.getValue();
-        proxyModeCombo.setValue(null);
-        proxyModeCombo.setValue(currentMode);
-
-        // ...and the core log level combo
-        CoreLogLevel currentLevel = coreLogLevelCombo.getValue();
-        coreLogLevelCombo.setValue(null);
-        coreLogLevelCombo.setValue(currentLevel);
-
-        // ...and the DNS strategy combo, which is showing, not choosing
-        boolean wasShowingStored = showingStored;
-        showingStored = true;
-        try {
-            String currentStrategy = dnsStrategyCombo.getValue();
-            dnsStrategyCombo.setValue(null);
-            dnsStrategyCombo.setValue(currentStrategy);
-        } finally {
-            showingStored = wasShowingStored;
-        }
     }
 
     private String formatCoreLogLevel(CoreLogLevel level) {

@@ -103,6 +103,37 @@ class LogReaderTest {
         assertThat(logLines).hasSize(3);
     }
 
+    /**
+     * When WireGuard fails to set up, the pinned core prints the interface's
+     * whole configuration, its private key in hex among it. The lines went
+     * into the Logs view, the app log's record of why the core stopped, the
+     * saved log and the diagnostics bundle. The output below is the core's
+     * own, for a server saved without its peer's key.
+     */
+    @Test
+    void aWireGuardKeyTheCorePrintsNeverReachesTheLog() throws Exception {
+        String privateKey = "b52bdc0dc1452a263fd5d7cb1d7b132993d818b0515e9300cb1af9b8d2136c49";
+        String input = "FATAL[0000] start service: start outbound: start endpoint/wireguard[wg]:"
+                + " setup wireguard: \n"
+                + "private_key=" + privateKey + "\n"
+                + "public_key=\n"
+                + "preshared_key=" + privateKey.toUpperCase(java.util.Locale.ROOT) + "\n"
+                + "endpoint=198.51.100.7:51820\n";
+        ObservableList<String> logLines = FXCollections.observableArrayList();
+
+        Set<Thread> before = Await.liveThreadsNamed(READER_THREAD);
+        new LogReader(new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8)),
+                logLines, 100, line -> { }).start();
+        awaitReaderFinished(before);
+        flushFxEvents();
+
+        assertThat(String.join("\n", logLines))
+                .doesNotContainIgnoringCase(privateKey)
+                .contains("private_key=" + Redact.REDACTED)
+                .contains("preshared_key=" + Redact.REDACTED)
+                .contains("endpoint=198.51.100.7:51820");
+    }
+
     @Test
     void aLineWithoutAnEscapeIsLeftAsItIsAndOneWithEscapesIsStripped() {
         String plain = "+0200 INFO outbound/vless[proxy]: outbound connection to 1.2.3.4:443";

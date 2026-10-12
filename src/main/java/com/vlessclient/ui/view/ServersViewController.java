@@ -1019,8 +1019,15 @@ public class ServersViewController {
         if (resolver == null) {
             return;
         }
-        resolver.countryOf(server)
-                .ifPresent(code -> slot.getChildren().setAll(Flags.of(code, 15)));
+        // Asked only when the country is not known: a known one came back from
+        // the lookup at once, and the task queued with it drew a second flag
+        // over the first on the next pulse, two flags and two layouts a row on
+        // every refresh of the list.
+        Optional<String> known = resolver.countryOf(server);
+        if (known.isPresent()) {
+            slot.getChildren().setAll(Flags.of(known.get(), 15));
+            return;
+        }
         resolver.resolveAsync(server, code -> Platform.runLater(() -> {
             // The cell may have been recycled onto another server by now. The
             // slot being in a scene says nothing about which server it shows

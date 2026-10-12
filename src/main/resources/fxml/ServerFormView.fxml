@@ -36,8 +36,7 @@
 
             <!-- Protocol -->
             <Label fx:id="protocolLabel" text="Protocol" styleClass="form-label"/>
-            <ComboBox fx:id="protocolCombo" maxWidth="Infinity" styleClass="form-field"
-                      onAction="#onProtocolChanged"/>
+            <ComboBox fx:id="protocolCombo" maxWidth="Infinity" styleClass="form-field"/>
 
             <!-- Basic Settings -->
             <Label fx:id="nameLabel" text="Name" styleClass="form-label"/>

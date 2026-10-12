@@ -57,7 +57,6 @@ import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
 import javafx.stage.FileChooser;
 import javafx.stage.Window;
-import javafx.util.StringConverter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -114,40 +113,28 @@ public class LogsViewController {
         // never break the filtering logic.
         logLevelFilter.setItems(FXCollections.observableArrayList(
                 "all", "info", "warn", "error", "debug"));
-        logLevelFilter.setConverter(new StringConverter<>() {
-            @Override
-            public String toString(String level) {
-                if (level == null) {
-                    return "";
-                }
-                // Full key literals keep I18nBundleConsistencyTest able to
-                // verify every reference statically.
-                String key = switch (level) {
-                    case "info" -> "logs.level.info";
-                    case "warn" -> "logs.level.warn";
-                    case "error" -> "logs.level.error";
-                    case "debug" -> "logs.level.debug";
-                    default -> "logs.level.all";
-                };
-                return I18n.get(key);
-            }
-
-            @Override
-            public String fromString(String string) {
-                return string;
-            }
-        });
+        // Redrawn on a language switch, as the tooltips and the context menu
+        // below follow it: each was worded once, when the page was built.
+        ComboLabels.follow(logLevelFilter, level -> I18n.get(switch (level) {
+            // Full key literals keep I18nBundleConsistencyTest able to
+            // verify every reference statically.
+            case "info" -> "logs.level.info";
+            case "warn" -> "logs.level.warn";
+            case "error" -> "logs.level.error";
+            case "debug" -> "logs.level.debug";
+            default -> "logs.level.all";
+        }));
         logLevelFilter.getSelectionModel().select("all");
-        logLevelFilter.setTooltip(new Tooltip(I18n.get("logs.filter.tooltip")));
+        logLevelFilter.setTooltip(tooltip("logs.filter.tooltip"));
 
         // Compact icon buttons keep the toolbar from overflowing on a narrow
         // window; tooltips preserve discoverability without the text labels.
         downloadButton.setGraphic(Icons.download(16));
-        downloadButton.setTooltip(new Tooltip(I18n.get("logs.download.tooltip")));
+        downloadButton.setTooltip(tooltip("logs.download.tooltip"));
         diagnosticsButton.setGraphic(Icons.diagnostics(16));
-        diagnosticsButton.setTooltip(new Tooltip(I18n.get("logs.diagnostics.tooltip")));
+        diagnosticsButton.setTooltip(tooltip("logs.diagnostics.tooltip"));
         clearButton.setGraphic(Icons.clear(16));
-        clearButton.setTooltip(new Tooltip(I18n.get("logs.clear.tooltip")));
+        clearButton.setTooltip(tooltip("logs.clear.tooltip"));
         // Icon-only, so a screen reader had nothing to read for them. The name
         // is the tooltip's text, kept in the current language.
         downloadButton.accessibleTextProperty().bind(I18n.binding("logs.download.tooltip"));
@@ -202,15 +189,17 @@ public class LogsViewController {
         });
 
         // Right-click context menu with Copy / Copy All / Clear
-        MenuItem copyItem = new MenuItem(I18n.get("logs.copy"));
+        MenuItem copyItem = menuItem("logs.copy");
         copyItem.setAccelerator(copyCombo);
         copyItem.setOnAction(e -> copySelection());
-        MenuItem copyAllItem = new MenuItem(I18n.get("logs.copy.all"));
+        MenuItem copyAllItem = menuItem("logs.copy.all");
         copyAllItem.setOnAction(e -> copyAll());
-        MenuItem selectAllItem = new MenuItem(I18n.get("logs.select.all"));
+        MenuItem selectAllItem = menuItem("logs.select.all");
         selectAllItem.setOnAction(e -> logListView.getSelectionModel().selectAll());
-        MenuItem clearItem = new MenuItem(I18n.get("button.clear"));
-        clearItem.setOnAction(e -> sourceLogLines.clear());
+        MenuItem clearItem = menuItem("button.clear");
+        // Asks first, as the toolbar's Clear does: this one, under Select all,
+        // emptied the only copy of the core's output on one click.
+        clearItem.setOnAction(e -> onClearClicked());
         ContextMenu contextMenu = new ContextMenu();
         contextMenu.getItems().addAll(copyItem, copyAllItem, selectAllItem, clearItem);
         logListView.setContextMenu(contextMenu);
@@ -514,6 +503,20 @@ public class LogsViewController {
         private ViewportAnchor shiftedBy(int delta) {
             return new ViewportAnchor(item, Math.max(0, index + delta), offset);
         }
+    }
+
+    /** A tooltip worded in the language of the UI, now and after a switch. */
+    private static Tooltip tooltip(String key) {
+        Tooltip tooltip = new Tooltip();
+        tooltip.textProperty().bind(I18n.binding(key));
+        return tooltip;
+    }
+
+    /** A menu item worded in the language of the UI, now and after a switch. */
+    private static MenuItem menuItem(String key) {
+        MenuItem item = new MenuItem();
+        item.textProperty().bind(I18n.binding(key));
+        return item;
     }
 
     @FXML

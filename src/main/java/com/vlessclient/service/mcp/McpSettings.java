@@ -3,8 +3,7 @@ package com.vlessclient.service.mcp;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.model.ServerSelection;
-import java.net.Inet4Address;
-import java.net.InetAddress;
+import com.vlessclient.model.TunSettings;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -55,7 +54,7 @@ final class McpSettings {
                 (s, v, k) -> s.setDnsStrategy(oneOf(v, k, AppSettings.DNS_STRATEGIES)));
         WRITERS.put("system_proxy_auto_config",
                 (s, v, k) -> s.setSystemProxyAutoConfig(flag(v, k)));
-        WRITERS.put("tun_interface_name", (s, v, k) -> s.setTunInterfaceName(text(v, k)));
+        WRITERS.put("tun_interface_name", (s, v, k) -> s.setTunInterfaceName(tunName(v, k)));
         WRITERS.put("tun_ipv4_address", (s, v, k) -> s.setTunIpv4Address(tunCidr(v, k)));
         WRITERS.put("tun_ipv6_enabled", (s, v, k) -> s.setTunIpv6Enabled(flag(v, k)));
         WRITERS.put("core_log_level", (s, v, k) -> s.setCoreLogLevel(logLevel(v, k)));
@@ -189,20 +188,23 @@ final class McpSettings {
      */
     private static String tunCidr(JsonNode value, String key) throws McpToolException {
         String raw = text(value, key).trim();
-        int slash = raw.indexOf('/');
-        boolean valid = false;
-        if (slash > 0) {
-            try {
-                InetAddress address = InetAddress.ofLiteral(raw.substring(0, slash));
-                int prefix = Integer.parseInt(raw.substring(slash + 1));
-                valid = address instanceof Inet4Address && prefix >= 8 && prefix <= 30;
-            } catch (IllegalArgumentException notAnAddressOrPrefix) {
-                valid = false;
-            }
-        }
-        if (!valid) {
+        if (!TunSettings.isIpv4Network(raw)) {
             throw new McpToolException("Setting '" + key
                     + "' expects an IPv4 network such as 172.19.0.1/30 (prefix 8-30).");
+        }
+        return raw;
+    }
+
+    /**
+     * A TUN interface name this system takes: the core is given it as it is,
+     * and macOS makes no TUN device not named {@code utunN}.
+     */
+    private static String tunName(JsonNode value, String key) throws McpToolException {
+        String raw = text(value, key).trim();
+        if (!TunSettings.isInterfaceName(raw, com.vlessclient.platform.Platform.current())) {
+            throw new McpToolException("Setting '" + key + "' expects a TUN interface name"
+                    + " this system takes: utunN on macOS, at most 15 characters with no"
+                    + " space, '/' or ':' on Linux.");
         }
         return raw;
     }

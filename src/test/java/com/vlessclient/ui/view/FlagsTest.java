@@ -1,11 +1,15 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.testing.FxToolkitExtension;
+import com.vlessclient.app.ThemeCss;
 import java.util.List;
 import java.util.Locale;
 import javafx.geometry.Bounds;
+import javafx.scene.Group;
 import javafx.scene.Node;
+import javafx.scene.Scene;
 import javafx.scene.text.Text;
+import org.testfx.util.WaitForAsyncUtils;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -58,6 +62,37 @@ class FlagsTest {
                 assertThat(bounds.getWidth()).as("'%s' width", spelled).isCloseTo(24, within(0.5));
                 assertThat(bounds.getHeight()).as("'%s' height", spelled).isCloseTo(18, within(0.5));
             }
+        }
+    }
+
+    /**
+     * The letters were placed with the default font's measurements, before
+     * the stylesheet gave them their size and weight, and sat a few pixels
+     * left of and below the middle of the chip. Measured in a scene with the
+     * app's stylesheet, as a row draws them.
+     */
+    @Test
+    void theLettersSitInTheMiddleOfTheirChip() throws Exception {
+        for (String code : List.of("HK", "KR", "WW")) {
+            Bounds[] measured = WaitForAsyncUtils.asyncFx(() -> {
+                Node flag = Flags.of(code, 15);
+                Scene scene = new Scene(new Group(flag));
+                scene.getStylesheets().setAll(ThemeCss.light());
+                scene.getRoot().applyCss();
+                scene.getRoot().layout();
+                Node letters = flag.lookup(".flag-chip-text");
+                return new Bounds[] {
+                    flag.lookup(".flag-chip").getBoundsInParent(),
+                    letters.getParent().localToParent(letters.getBoundsInParent())};
+            }).get();
+            Bounds chip = measured[0];
+            Bounds letters = measured[1];
+
+            // Within a pixel: the layout puts the letters on whole pixels.
+            assertThat(letters.getCenterX()).as("%s across", code)
+                    .isCloseTo(chip.getCenterX(), within(1.0));
+            assertThat(letters.getCenterY()).as("%s down", code)
+                    .isCloseTo(chip.getCenterY(), within(1.0));
         }
     }
 
