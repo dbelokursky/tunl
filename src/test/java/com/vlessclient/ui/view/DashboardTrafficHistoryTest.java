@@ -244,9 +244,18 @@ public class DashboardTrafficHistoryTest extends ApplicationTest {
         assertThat(panel.isVisible()).as("the panel after a screen reader's press").isTrue();
     }
 
+    /**
+     * A whole keystroke, down and up. The label presses on the release, as a
+     * Button does, so a KEY_PRESSED alone, which this sent, no longer opens
+     * anything (PressableLabelTest).
+     */
     private void press(Node target, KeyCode key) {
-        interact(() -> target.fireEvent(
-                new KeyEvent(KeyEvent.KEY_PRESSED, "", "", key, false, false, false, false)));
+        interact(() -> {
+            target.fireEvent(
+                    new KeyEvent(KeyEvent.KEY_PRESSED, "", "", key, false, false, false, false));
+            target.fireEvent(
+                    new KeyEvent(KeyEvent.KEY_RELEASED, "", "", key, false, false, false, false));
+        });
         WaitForAsyncUtils.waitForFxEvents();
     }
 

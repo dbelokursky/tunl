@@ -19,16 +19,49 @@ public class PressableLabel extends Label {
 
     private Runnable onPress = () -> { };
 
-    /** Creates an empty label that takes the focus and presses like a button. */
+    /** The key that pressed the label and has not been released yet, or null. */
+    private KeyCode armedBy;
+
+    /**
+     * Creates an empty label that takes the focus and presses like a button.
+     *
+     * <p>Like a Button, it presses once per press of the key, on its release,
+     * and not under a modifier. It used to run the action on every
+     * KEY_PRESSED, which a held key repeats about thirty times a second:
+     * holding Enter on the dashboard's session total flickered the traffic
+     * history open and shut and rewrote settings.json on every repeat, and
+     * Shift+Enter or Ctrl+Space toggled it too.</p>
+     */
     public PressableLabel() {
         setFocusTraversable(true);
         setAccessibleRole(AccessibleRole.BUTTON);
         addEventHandler(KeyEvent.KEY_PRESSED, event -> {
-            if (event.getCode() == KeyCode.ENTER || event.getCode() == KeyCode.SPACE) {
+            if (isPressKey(event)) {
+                if (armedBy == null) {
+                    armedBy = event.getCode();
+                }
+                event.consume();
+            }
+        });
+        addEventHandler(KeyEvent.KEY_RELEASED, event -> {
+            if (armedBy != null && event.getCode() == armedBy) {
+                armedBy = null;
                 onPress.run();
                 event.consume();
             }
         });
+        // A press the focus left mid-way is called off, as a Button's is.
+        focusedProperty().addListener((obs, was, focused) -> {
+            if (!focused) {
+                armedBy = null;
+            }
+        });
+    }
+
+    private static boolean isPressKey(KeyEvent event) {
+        return (event.getCode() == KeyCode.ENTER || event.getCode() == KeyCode.SPACE)
+                && !event.isShiftDown() && !event.isControlDown() && !event.isAltDown()
+                && !event.isMetaDown() && !event.isShortcutDown();
     }
 
     /**
