@@ -16,9 +16,11 @@ import com.vlessclient.testing.UiTest;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
+import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Scene;
 import javafx.scene.control.Label;
@@ -111,6 +113,26 @@ public class ServersImportConfTest extends ApplicationTest {
         Path conf = Files.writeString(tempDir.resolve(UUID.randomUUID() + ".conf"), CONF);
 
         interact(() -> controller.importFile(conf));
+
+        assertThat(awaitServer(Protocol.WIREGUARD).getAddress()).isEqualTo("wg.example");
+        awaitSaved("wg.example");
+    }
+
+    /**
+     * Saved as "UTF-8 with BOM", which Windows Notepad offers and some editors
+     * do by default, the file starts with a byte order mark. Trimming the text
+     * kept it before [Interface], and the import said "No [Interface] section"
+     * of a file that has one.
+     */
+    @Test
+    void aConfFileSavedWithAByteOrderMarkBecomesAWireguardServer() throws IOException {
+        byte[] mark = {(byte) 0xEF, (byte) 0xBB, (byte) 0xBF};
+        Path conf = tempDir.resolve(UUID.randomUUID() + ".conf");
+        Files.write(conf, mark);
+        Files.writeString(conf, CONF, StandardOpenOption.APPEND);
+
+        // Not interact(): an import that fails waits in its error dialog.
+        Platform.runLater(() -> controller.importFile(conf));
 
         assertThat(awaitServer(Protocol.WIREGUARD).getAddress()).isEqualTo("wg.example");
         awaitSaved("wg.example");

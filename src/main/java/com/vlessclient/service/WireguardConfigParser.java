@@ -4,10 +4,12 @@ import com.vlessclient.app.I18n;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Parses a standard WireGuard {@code .conf} file into a {@link ServerConfig}.
@@ -67,7 +69,10 @@ public class WireguardConfigParser {
             throw new InvalidConfigException("The configuration is empty");
         }
 
-        Map<String, Map<String, String>> sections = parseSections(text);
+        // A file saved as "UTF-8 with BOM" starts with the mark, and before
+        // [Interface] it hid the header: "No [Interface] section".
+        Map<String, Map<String, String>> sections =
+                parseSections(ShareLinkParser.withoutByteOrderMark(text));
         Map<String, String> iface = sections.getOrDefault("interface", Map.of());
         Map<String, String> peer = sections.getOrDefault("peer", Map.of());
 
@@ -110,8 +115,15 @@ public class WireguardConfigParser {
 
         String address = iface.get("address");
         if (address != null && !address.isBlank()) {
-            // Providers list several; the builder takes one local address.
-            server.setFlow(address.split(",")[0].trim());
+            // Every address, comma-separated as the file lists them. Only the
+            // first was kept, but the endpoint routes IPv4 and IPv6 alike
+            // through the peer, so the other family went into a tunnel with no
+            // address for it: a dual-stack config lost IPv6, or with IPv6
+            // listed first, nearly everything.
+            server.setFlow(Arrays.stream(address.split(","))
+                    .map(String::strip)
+                    .filter(part -> !part.isEmpty())
+                    .collect(Collectors.joining(", ")));
         }
         server.setName(defaultName(server));
         return server;
@@ -188,8 +200,14 @@ public class WireguardConfigParser {
         Map<String, String> current = null;
 
         for (String rawLine : text.split("\\R")) {
-            String line = rawLine.trim();
-            if (line.isEmpty() || line.startsWith("#") || line.startsWith(";")) {
+            // A # ends the line wherever it stands, as in wg-quick and the
+            // WireGuard apps; no key, address or endpoint holds one. Kept, a
+            // comment after the private key went to the core as part of the
+            // key, which refused every connect, and one after [Peer] hid the
+            // section.
+            int comment = rawLine.indexOf('#');
+            String line = (comment >= 0 ? rawLine.substring(0, comment) : rawLine).trim();
+            if (line.isEmpty() || line.startsWith(";")) {
                 continue;
             }
             if (line.startsWith("[") && line.endsWith("]")) {
@@ -206,7 +224,13 @@ public class WireguardConfigParser {
             }
             String key = line.substring(0, eq).trim().toLowerCase(Locale.ROOT);
             String value = line.substring(eq + 1).trim();
-            current.putIfAbsent(key, value);
+            if ("address".equals(key)) {
+                // wg-quick reads every Address line, as it reads every address
+                // listed on one: WARP's config gives IPv4 and IPv6 a line each.
+                current.merge(key, value, (first, next) -> first + ", " + next);
+            } else {
+                current.putIfAbsent(key, value);
+            }
         }
         return sections;
     }

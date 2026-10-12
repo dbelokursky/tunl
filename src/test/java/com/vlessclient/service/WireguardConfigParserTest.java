@@ -41,9 +41,64 @@ class WireguardConfigParserTest {
         assertThat(server.getEncryption()).isEqualTo("xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=");
         assertThat(server.getAddress()).isEqualTo("vpn.example.com");
         assertThat(server.getPort()).isEqualTo(51820);
-        // Several local addresses are common; the endpoint takes one.
-        assertThat(server.getFlow()).isEqualTo("10.66.66.2/32");
+        // Every local address. The endpoint routes IPv4 and IPv6 alike
+        // through the peer, and with the first address alone, the other
+        // family went into a tunnel with no address for it.
+        assertThat(server.getFlow()).isEqualTo("10.66.66.2/32, fd42:42::2/128");
         assertThat(server.getName()).contains("vpn.example.com");
+    }
+
+    /**
+     * WARP's config (wgcf) gives IPv4 and IPv6 an Address line each, and
+     * wg-quick reads both. Only the first line was kept, so IPv6 went into a
+     * tunnel with no IPv6 address.
+     */
+    @Test
+    void keepsTheAddressesOfEveryAddressLine() {
+        ServerConfig server = parser.parse(TYPICAL.replace(
+                "Address = 10.66.66.2/32, fd42:42::2/128",
+                "Address = 172.16.0.2/32\nAddress = 2606:4700:110:8a36::2/128"));
+
+        assertThat(server.getFlow()).isEqualTo("172.16.0.2/32, 2606:4700:110:8a36::2/128");
+    }
+
+    /**
+     * wg-quick and the WireGuard apps end a line at its first #. Kept, a
+     * comment after the private key went to the core as part of the key,
+     * which then refused every connect; one after [Peer] hid the section,
+     * and one after the endpoint read as part of its port.
+     */
+    @Test
+    void endsEachLineAtItsFirstHash() {
+        ServerConfig server = parser.parse("""
+                [Interface] # laptop
+                PrivateKey = qGvIaLPuXqhbbFJTZ8kMtKz1BZ0i9CTfKk1PavDTVFo= # laptop key
+                Address = 10.66.66.2/32 # IPv4 only
+
+                [Peer] # se-sto-wg-001
+                PublicKey = xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=#no space
+                Endpoint = 185.65.134.83:51820 # se-sto
+                """);
+
+        assertThat(server.getUuid()).isEqualTo("qGvIaLPuXqhbbFJTZ8kMtKz1BZ0i9CTfKk1PavDTVFo=");
+        assertThat(server.getEncryption()).isEqualTo("xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=");
+        assertThat(server.getFlow()).isEqualTo("10.66.66.2/32");
+        assertThat(server.getAddress()).isEqualTo("185.65.134.83");
+        assertThat(server.getPort()).isEqualTo(51820);
+    }
+
+    /**
+     * Windows Notepad offers "UTF-8 with BOM", and some editors save that way
+     * by default. The mark is not whitespace, so trimming kept it before
+     * [Interface], which was then no header: the import said "No [Interface]
+     * section" of a file that has one.
+     */
+    @Test
+    void aConfigSavedWithAByteOrderMarkParses() {
+        ServerConfig server = parser.parse("\uFEFF" + TYPICAL);
+
+        assertThat(server.getUuid()).isEqualTo("qGvIaLPuXqhbbFJTZ8kMtKz1BZ0i9CTfKk1PavDTVFo=");
+        assertThat(server.getAddress()).isEqualTo("vpn.example.com");
     }
 
     @Test
