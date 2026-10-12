@@ -230,7 +230,11 @@ public class ServerBackupService {
                     "File is too large to be a server list (" + size + " bytes)");
         }
         try {
-            return Files.readString(file, StandardCharsets.UTF_8);
+            // Without the byte order mark of a file saved with one: before a
+            // backup's opening brace it hid the JSON, and the backup was read
+            // as share links and refused.
+            return ShareLinkParser.withoutByteOrderMark(
+                    Files.readString(file, StandardCharsets.UTF_8));
         } catch (MalformedInputException e) {
             throw new IllegalArgumentException("File is not UTF-8 text", e);
         }

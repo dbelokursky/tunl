@@ -76,10 +76,30 @@ class ShareLinkParserEdgeCaseTest {
         }
 
         @Test
-        void emptySchemeThrows() {
+        void emptySchemeIsNotALink() {
             assertThatThrownBy(() -> parser.parse("://host.example:443"))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("Unsupported protocol scheme");
+                    .isInstanceOf(ShareLinkParser.NotLinkException.class);
+        }
+
+        /**
+         * Text before :// that cannot be a scheme was reported as a protocol
+         * this app lacks: a captive portal's page read as links in protocols
+         * named {@code <html xmlns="http}, and the message repeated whatever
+         * stood there.
+         */
+        @Test
+        void textThatCannotBeASchemeIsNotAnUnsupportedProtocol() {
+            for (String line : List.of(
+                    "<html xmlns=\"http://www.w3.org/1999/xhtml\">",
+                    "<link rel=\"stylesheet\" href=\"https://portal.example/style.css\">",
+                    "Support: https://t.me/provider",
+                    "(vless://uuid@host.example:443)")) {
+                assertThatThrownBy(() -> parser.parse(line)).as(line)
+                        .isInstanceOf(ShareLinkParser.NotLinkException.class)
+                        .hasMessage(com.vlessclient.app.I18n.get("import.not.a.link"))
+                        .hasMessageNotContaining("portal.example")
+                        .hasMessageNotContaining("<");
+            }
         }
 
         @Test
@@ -89,11 +109,22 @@ class ShareLinkParserEdgeCaseTest {
                     .hasMessageContaining("Unsupported protocol scheme: ftp");
         }
 
+        /**
+         * A link copied out of a chat or a web page can bring a zero-width or
+         * a no-break space along, which trimming the line leaves there. They
+         * read as part of the scheme, and the link was reported as an
+         * unsupported protocol, which read as "VLESS is not supported".
+         */
         @Test
-        void leadingWhitespaceIsNotTrimmed() {
-            assertThatThrownBy(() -> parser.parse(" vless://uuid@host.example:443"))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("Unsupported protocol scheme");
+        void spacesAndInvisibleCharactersBeforeTheSchemeAreIgnored() {
+            for (String before : List.of(" ", "\u00A0", "\u200B", "\u2060", "\u200E",
+                    "\uFEFF\u200B")) {
+                ServerConfig config = parser.parse(before + "vless://uuid@host.example:443#n");
+
+                assertThat(config.getProtocol()).as("U+%04X", (int) before.charAt(0))
+                        .isEqualTo(Protocol.VLESS);
+                assertThat(config.getAddress()).isEqualTo("host.example");
+            }
         }
 
         @Test
@@ -460,13 +491,18 @@ class ShareLinkParserEdgeCaseTest {
         }
 
         @Test
-        void nonNumericPortThrowsNumberFormatException() {
-            // Integer.parseInt propagates raw; NumberFormatException still satisfies the
-            // broader IllegalArgumentException contract.
+        void nonNumericPortThrowsWithoutQuotingIt() {
+            // Integer.parseInt's own exception quoted its input, and cut at the
+            // wrong @ that input was the tail of a password.
             String uri = "ss://" + b64Url("aes-256-gcm:pw") + "@host.example:abc";
+            String legacy = "ss://" + b64("aes-256-gcm:pw@host.example:abc");
 
             assertThatThrownBy(() -> parser.parse(uri))
-                    .isInstanceOf(NumberFormatException.class);
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("Invalid port in Shadowsocks URI");
+            assertThatThrownBy(() -> parser.parse(legacy))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("Invalid port in Shadowsocks URI");
         }
 
         @Test

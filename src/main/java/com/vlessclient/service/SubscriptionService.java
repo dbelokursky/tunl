@@ -1152,7 +1152,10 @@ public class SubscriptionService {
         if (content == null || content.isBlank()) {
             return new ParsedContent(List.of(), 0);
         }
-        String trimmed = content.trim();
+        // Without the byte order mark of a list saved with one, which trim()
+        // keeps: the base64 check failed on it, the blob was read as one
+        // unreadable line, and the subscription never imported a server.
+        String trimmed = ShareLinkParser.withoutByteOrderMark(content).trim();
 
         // Try base64 decode first
         if (looksLikeBase64(trimmed)) {
@@ -1231,6 +1234,12 @@ public class SubscriptionService {
             try {
                 ServerConfig server = shareLinkParser.parseForImport(trimmedLine);
                 servers.add(server);
+            } catch (ShareLinkParser.NotLinkException e) {
+                // A line of a web page, or prose quoting an address: like a
+                // comment, it stands for no server. Counted as a protocol this
+                // client lacks, a captive portal's login page was reported as
+                // a list of unsupported links instead of as no list at all.
+                log.debug("Passing over a line that is not a share link");
             } catch (ShareLinkParser.UnsupportedSchemeException e) {
                 unsupported.add(e.scheme());
                 log.debug("Leaving out a {} link: protocol not supported", e.scheme());
