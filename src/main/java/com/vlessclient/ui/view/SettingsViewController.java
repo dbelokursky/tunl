@@ -7,6 +7,7 @@ import com.vlessclient.app.SettingsEffects;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.model.ProxyMode;
+import com.vlessclient.model.TunSettings;
 import com.vlessclient.platform.Autostart;
 import com.vlessclient.platform.SecretSealer;
 import com.vlessclient.service.ConfigStore;
@@ -203,7 +204,15 @@ public class SettingsViewController implements ViewShownAware {
             saveSettings(settings);
         });
 
+        // A TUN value no TUN start can take keeps the stored one, as a port
+        // out of range does. Stored, it failed the next TUN start and every one
+        // after it, while MCP refused the same address.
         commitOnEditEnd(tunInterfaceNameField, text -> {
+            if (!TunSettings.isInterfaceName(text,
+                    com.vlessclient.platform.Platform.current())) {
+                tunInterfaceNameField.setText(settings.getTunInterfaceName());
+                return;
+            }
             settings.setTunInterfaceName(text);
             saveSettings(settings);
         });
@@ -216,6 +225,10 @@ public class SettingsViewController implements ViewShownAware {
         });
 
         commitOnEditEnd(tunIpv4Field, text -> {
+            if (!TunSettings.isIpv4Network(text)) {
+                tunIpv4Field.setText(settings.getTunIpv4Address());
+                return;
+            }
             settings.setTunIpv4Address(text);
             saveSettings(settings);
         });

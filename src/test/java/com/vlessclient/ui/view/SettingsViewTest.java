@@ -9,6 +9,7 @@ import com.vlessclient.service.ConfigStore;
 import com.vlessclient.testing.Await;
 import com.vlessclient.testing.UiTest;
 import java.time.Duration;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 import javafx.application.Platform;
@@ -188,6 +189,47 @@ public class SettingsViewTest extends ApplicationTest {
                 http.requestFocus();
             });
         }
+    }
+
+    /**
+     * The TUN fields stored whatever they held, an address MCP refuses
+     * included, and the core is given both as they are: the next TUN start
+     * failed, and every one after it, until the user found the field. A value
+     * no TUN start can take keeps the stored one, as a port out of range does.
+     */
+    @Test
+    void theTunFieldsKeepTheStoredValueForOneNoTunStartCanTake() {
+        TextField address = lookup("#tunIpv4Field").query();
+        TextField name = lookup("#tunInterfaceNameField").query();
+        TextField http = lookup("#httpPortField").query();
+        ConfigStore store = ServiceLocator.get(ConfigStore.class);
+        String storedAddress = store.getSettings().getTunIpv4Address();
+        String storedName = store.getSettings().getTunInterfaceName();
+        try {
+            for (String refused : List.of("172.19.0.1", "", "172.19.0.1/32", "300.1.1.1/30")) {
+                commit(address, refused, http);
+                assertThat(store.getSettings().getTunIpv4Address())
+                        .as("the address stored after '%s'", refused).isEqualTo(storedAddress);
+                assertThat(address.getText()).as("what the field shows").isEqualTo(storedAddress);
+            }
+            commit(name, " ", http);
+            assertThat(store.getSettings().getTunInterfaceName()).isEqualTo(storedName);
+            assertThat(name.getText()).isEqualTo(storedName);
+
+            commit(address, "10.66.0.1/30", http);
+            assertThat(store.getSettings().getTunIpv4Address()).isEqualTo("10.66.0.1/30");
+        } finally {
+            commit(address, storedAddress, http);
+            commit(name, storedName, http);
+        }
+    }
+
+    private void commit(TextField field, String text, TextField next) {
+        interact(() -> {
+            field.requestFocus();
+            field.setText(text);
+            next.requestFocus();
+        });
     }
 
     @Test
