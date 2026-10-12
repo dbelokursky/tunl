@@ -10,7 +10,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The UI graphs start from an empty data dir, whatever an earlier, stopped
- * run left there, and nothing but the test data dir is ever emptied.
+ * run left there, apart from the log files logback holds open, and nothing
+ * but the test data dir is ever emptied.
  */
 class UiTestDataDirTest {
 
@@ -26,7 +27,13 @@ class UiTestDataDirTest {
 
         assertThat(UiTestServices.emptyTestDataDir(dir)).isTrue();
 
-        assertThat(dir).isEmptyDirectory();
+        assertThat(dir.resolve("servers.json")).doesNotExist();
+        assertThat(dir.resolve("logs").resolve("app.log"))
+                .as("the log files logback opened at JVM start stay where it writes them")
+                .exists();
+        try (var left = Files.list(dir)) {
+            assertThat(left.toList()).containsExactly(dir.resolve("logs"));
+        }
     }
 
     @Test

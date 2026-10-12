@@ -114,6 +114,11 @@ public final class UiTestServices {
      * from surefire, and a run that did not get it from there must never
      * empty a directory that may be someone's profile.</p>
      *
+     * <p>Its {@code logs} folder stays: logback opened its files there when
+     * the JVM started, before any test, and deleting them under it left the
+     * appenders writing to files that no longer existed, which
+     * LogDirIsolationTest then failed to find whenever it ran after this.</p>
+     *
      * @param dir the data dir the graphs are built on
      * @return whether it was emptied
      */
@@ -123,9 +128,10 @@ public final class UiTestServices {
                 || !Files.isDirectory(dir)) {
             return false;
         }
+        Path logs = dir.resolve("logs");
         try (Stream<Path> paths = Files.walk(dir)) {
             for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
-                if (!path.equals(dir)) {
+                if (!path.equals(dir) && !path.startsWith(logs)) {
                     Files.delete(path);
                 }
             }
