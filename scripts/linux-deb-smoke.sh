@@ -194,9 +194,43 @@ done
 grep -qE '^    https://github\.com/.+/releases/tag/' "${APP_ROOT}/lib/app/NOTICE" \
     || fail "${APP_ROOT}/lib/app/NOTICE does not say where the source of the bundled sing-box is"
 COPYRIGHT="${APP_ROOT}/share/doc/copyright"
-if ! grep -qx 'License: Apache-2.0' "${COPYRIGHT}" || grep -q 'Unknown' "${COPYRIGHT}"; then
-    fail "${COPYRIGHT} does not name the licences: $(grep '^License:' "${COPYRIGHT}" || true)"
+if grep -q 'Unknown' "${COPYRIGHT}"; then
+    fail "${COPYRIGHT} still calls a licence Unknown"
 fi
+# The licence the copyright file gives a path under APP_ROOT, read as a
+# licence scanner reads it: the last Files stanza with a matching pattern
+# applies, and '*' matches '/' too. A lone "Files: *" stanza used to give the
+# whole package Apache-2.0, the GPL-2.0 runtime and the GPL-3.0 core with it,
+# and a "License: Apache-2.0" line anywhere was all this checked.
+license_of() {
+    local path="$1" pattern license found=""
+    while IFS=$'\t' read -r pattern license; do
+        # shellcheck disable=SC2053 # the pattern is a glob on purpose
+        if [[ "${path}" == ${pattern} ]]; then found="${license}"; fi
+    done < <(awk '
+        /^Files:/ { sub(/^Files:[[:space:]]*/, ""); files = $0; more = 1; next }
+        more && /^[[:space:]]/ { files = files " " $0; next }
+        { more = 0 }
+        /^License:/ && files != "" {
+            sub(/^License:[[:space:]]*/, "")
+            n = split(files, patterns, /[[:space:]]+/)
+            for (i = 1; i <= n; i++) if (patterns[i] != "") print patterns[i] "\t" $0
+            files = ""
+        }
+        /^$/ { files = "" }' "${COPYRIGHT}")
+    printf '%s\n' "${found}"
+}
+jar_rel="${jars[0]#"${APP_ROOT}/"}"
+for expected in \
+    "lib/app/LICENSE|Apache-2.0" \
+    "${jar_rel}|Apache-2.0" "${jar_rel}|GPL-3+" "${jar_rel}|GPL-2 with Classpath exception" \
+    "bin/tunl|GPL-2 with Classpath exception" \
+    "lib/runtime/lib/server/libjvm.so|GPL-2 with Classpath exception"; do
+    rel="${expected%%|*}"
+    given="$(license_of "${rel}")"
+    [[ "${given}" == *"${expected#*|}"* ]] \
+        || fail "${COPYRIGHT} gives ${rel} '${given}', which does not name ${expected#*|}"
+done
 echo "[linux-deb-smoke] installed payload verified at ${APP_ROOT}"
 
 echo "[linux-deb-smoke] launching ${LAUNCHER} under Xvfb for ${LAUNCH_SECONDS}s"

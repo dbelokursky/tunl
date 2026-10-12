@@ -83,6 +83,42 @@ class SingBoxInstallerTest {
         assertThat(installer.findExisting()).isPresent().get().isEqualTo(cached.toAbsolutePath());
     }
 
+    /**
+     * The test JVM never takes a core the developer installed: one on $PATH
+     * became the UI tests' core, every Settings view ran it and asked GitHub
+     * for a newer release, and the network guard failed an unrelated test.
+     */
+    @Test
+    void findExisting_skipsASystemCore_whenTestsSaySo() throws IOException {
+        Path onPath = tempDir.resolve("path-dir");
+        Files.createDirectories(onPath);
+        boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT)
+                .contains("win");
+        Path core = onPath.resolve(windows ? "sing-box.exe" : "sing-box");
+        Files.writeString(core, "#!/bin/sh\necho fake\n");
+        core.toFile().setExecutable(true);
+        SingBoxInstaller installer = new SingBoxInstaller(tempDir.resolve("empty"));
+        String before = System.getProperty("vless.singbox.skipSystem");
+
+        try {
+            System.clearProperty("vless.singbox.skipSystem");
+            // Present, not necessarily this one: a Homebrew core comes first.
+            assertThat(installer.findExisting(onPath.toString()))
+                    .as("found on the PATH it is given, outside tests").isPresent();
+
+            System.setProperty("vless.singbox.skipSystem", "true");
+            assertThat(installer.findExisting(onPath.toString()))
+                    .as("and passed over when tests say so").isEmpty();
+        } finally {
+            if (before == null) {
+                System.clearProperty("vless.singbox.skipSystem");
+            } else {
+                System.setProperty("vless.singbox.skipSystem", before);
+            }
+        }
+        assertThat(before).as("surefire sets it for the whole test JVM").isEqualTo("true");
+    }
+
     @Test
     void findExisting_returnsEmpty_whenNoBinaryAnywhere() {
         // Use a path that definitely has no sing-box under it — isolated from the

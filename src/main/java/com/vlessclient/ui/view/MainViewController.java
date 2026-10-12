@@ -104,9 +104,10 @@ public class MainViewController {
             persistenceBanner.visibleProperty().bind(persistence.unsavedProperty());
             persistenceBanner.managedProperty().bind(persistenceBanner.visibleProperty());
             unreadableMessage.textProperty().bind(Bindings.createStringBinding(
-                    () -> I18n.get("persistence.unreadable",
-                            persistence.unreadableFilesProperty().get()),
-                    I18n.localeProperty(), persistence.unreadableFilesProperty()));
+                    () -> unreadableNotice(persistence.unreadableFilesProperty().get(),
+                            persistence.keptUnreadableFilesProperty().get()),
+                    I18n.localeProperty(), persistence.unreadableFilesProperty(),
+                    persistence.keptUnreadableFilesProperty()));
             unreadableBanner.visibleProperty().bind(persistence.hasUnreadableProperty());
             unreadableBanner.managedProperty().bind(unreadableBanner.visibleProperty());
             fileNoticeMessage.textProperty().bind(Bindings.createStringBinding(
@@ -127,6 +128,22 @@ public class MainViewController {
             dismissFileNoticeButton.managedProperty().bind(
                     dismissFileNoticeButton.visibleProperty());
         });
+    }
+
+    /**
+     * The banner's text about entries this build could not read: a sentence
+     * for the files whose next save removes them, and one for those whose
+     * saves keep them in the file for the newer version that wrote them.
+     */
+    static String unreadableNotice(String dropped, String kept) {
+        List<String> sentences = new ArrayList<>();
+        if (!dropped.isEmpty()) {
+            sentences.add(I18n.get("persistence.unreadable", dropped));
+        }
+        if (!kept.isEmpty()) {
+            sentences.add(I18n.get("persistence.unreadable.kept", kept));
+        }
+        return String.join(" ", sentences);
     }
 
     /**

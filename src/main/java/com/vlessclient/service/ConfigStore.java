@@ -97,6 +97,21 @@ public class ConfigStore {
     private final Map<String, SealedSecret> sealCache = new HashMap<>();
 
     /**
+     * The servers.json entries this build could not read, as they were read.
+     * Every save writes them back: they come from a newer build, and the
+     * first save used to delete them, though nobody had asked for that.
+     * Guarded by this object's monitor.
+     */
+    private final List<JsonNode> unreadableServers = new ArrayList<>();
+
+    /**
+     * The top-level fields of servers.json other than the version and the
+     * list, as read, so the fields a newer build wrote there are written back
+     * as settings.json's are. Guarded by this object's monitor.
+     */
+    private ObjectNode serversEnvelopeExtras;
+
+    /**
      * Serializes the writes of servers.json. The FX thread never waits for
      * it: a save asked for there while another runs is left to that one,
      * which writes again before it lets go.
@@ -302,7 +317,10 @@ public class ConfigStore {
         boolean removed = mutateList(() -> {
             boolean gone = servers.removeIf(s -> s.getId().equals(serverId));
             if (gone) {
-                keepOnePicked(List.of(), List.of());
+                ServerConfig pick = keepOnePicked(servers, List.of(), List.of());
+                if (pick != null) {
+                    servers.set(servers.indexOf(pick), pick);
+                }
             }
             return gone;
         });
@@ -337,12 +355,22 @@ public class ConfigStore {
      * appended and inherits {@link #addServer}'s rule that the first server to
      * exist when nothing is active becomes active, and removals are applied
      * after upserts. A batch that removes the picked server picks another, so
-     * a non-empty list always has one.</p>
+     * a non-empty list always has one. An upsert that holds nothing the
+     * stored server does not leaves the stored one in place.</p>
+     *
+     * <p>The list's listeners hear the whole batch as one change, and nothing
+     * when it changed nothing. Each replacement and each removal used to be a
+     * change of its own, and every change runs every listener on the FX
+     * thread, the tray's copy of the whole list among them: an hourly refresh
+     * that changed nothing at all took seconds for a subscription of tens of
+     * thousands of servers, and past the FX wait's ten seconds it failed
+     * half-applied.</p>
      *
      * @param upserts servers to add or replace, matched by id
      * @param removalIds ids to remove; unknown ids are ignored
      */
     public void applyServerBatch(List<ServerConfig> upserts, List<String> removalIds) {
+        Map<String, ServerConfig> alike = storedAlike(upserts);
         Set<String> removed = mutateList(() -> {
             // Where each id sits, read once. Each upsert and each removal used
             // to walk the whole list for its id, on the FX thread: a refresh
@@ -353,31 +381,43 @@ public class ConfigStore {
                 indexById.put(servers.get(i).getId(), i);
             }
             boolean picked = servers.stream().anyMatch(ServerConfig::isActive);
+            // The list as the batch leaves it, built aside and put in place
+            // as one change below.
+            List<ServerConfig> next = new ArrayList<>(servers);
             List<ServerConfig> added = new ArrayList<>();
+            // Each upsert as the list holds it after the batch.
+            List<ServerConfig> applied = new ArrayList<>(upserts.size());
             for (ServerConfig incoming : upserts) {
                 Integer existing = indexById.get(incoming.getId());
                 if (existing != null) {
+                    ServerConfig stored = next.get(existing);
+                    if (stored == alike.get(incoming.getId())) {
+                        // Nothing new, and nothing replaced it since.
+                        applied.add(stored);
+                        continue;
+                    }
                     // Picked or not as the store says now. A refresh carried
                     // the flag over from the servers it read before its fetch,
                     // so a server picked meanwhile was unpicked again, or left
                     // picked beside the refreshed one, and the connect took
                     // whichever came first.
-                    incoming.setActive(servers.get(existing).isActive());
-                    servers.set(existing, incoming);
+                    incoming.setActive(stored.isActive());
+                    next.set(existing, incoming);
                 } else {
                     if (!picked) {
                         incoming.setActive(true);
                     }
                     picked |= incoming.isActive();
-                    indexById.put(incoming.getId(), servers.size());
-                    servers.add(incoming);
+                    indexById.put(incoming.getId(), next.size());
+                    next.add(incoming);
                     added.add(incoming);
                 }
+                applied.add(incoming);
             }
             Set<String> gone = new HashSet<>();
             if (!removalIds.isEmpty()) {
                 Set<String> removals = new HashSet<>(removalIds);
-                servers.removeIf(server -> {
+                next.removeIf(server -> {
                     boolean withdrawn = removals.contains(server.getId());
                     if (withdrawn) {
                         gone.add(server.getId());
@@ -386,7 +426,8 @@ public class ConfigStore {
                 });
                 gone.forEach(this::evictSealCache);
             }
-            keepOnePicked(added, upserts);
+            ServerConfig repicked = keepOnePicked(next, added, applied);
+            putInPlace(next, repicked);
             return gone;
         });
 
@@ -414,17 +455,94 @@ public class ConfigStore {
      * picked: the running core kept the withdrawn one, and the next recovery
      * stopped it and found nothing to connect to. A server this batch added
      * is the likeliest replacement, then one it updated, then the first.
+     *
+     * @param list    the servers as the change leaves them
+     * @param added   the servers the change added
+     * @param upserts the servers it added or updated, as {@code list} holds them
+     * @return the server picked now, flagged but not yet set again in the
+     *     observable list, so its listeners have still to hear of it; null
+     *     when the list has one picked or is empty
      */
-    private void keepOnePicked(List<ServerConfig> added, List<ServerConfig> upserts) {
-        if (servers.isEmpty() || servers.stream().anyMatch(ServerConfig::isActive)) {
+    private ServerConfig keepOnePicked(List<ServerConfig> list, List<ServerConfig> added,
+                                       List<ServerConfig> upserts) {
+        if (list.isEmpty() || list.stream().anyMatch(ServerConfig::isActive)) {
+            return null;
+        }
+        ServerConfig pick = added.stream().filter(list::contains).findFirst()
+                .or(() -> upserts.stream().filter(list::contains).findFirst())
+                .orElse(list.getFirst());
+        pick.setActive(true);
+        log.info("The picked server was withdrawn; picked '{}' instead", pick.getName());
+        return pick;
+    }
+
+    /**
+     * The stored server each upsert would replace with nothing new, by id: one
+     * that holds the same in every field, its name and its subscription stamp
+     * among them, but for whether it is picked, which is the store's to say.
+     * Compared on the caller's thread, before the batch goes to the FX
+     * thread, where the comparison of tens of thousands of servers would
+     * hold the window. The batch keeps a stored server only if it is still
+     * the one compared, so a server replaced meanwhile is replaced again.
+     */
+    private Map<String, ServerConfig> storedAlike(List<ServerConfig> upserts) {
+        if (upserts.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, ServerConfig> storedById = new HashMap<>();
+        synchronized (this) {
+            for (ServerConfig server : servers) {
+                storedById.put(server.getId(), server);
+            }
+        }
+        Map<String, ServerConfig> alike = new HashMap<>();
+        for (ServerConfig incoming : upserts) {
+            ServerConfig stored = storedById.get(incoming.getId());
+            if (stored != null && contentOf(stored).equals(contentOf(incoming))) {
+                alike.put(incoming.getId(), stored);
+            }
+        }
+        return alike;
+    }
+
+    /** What a server would be saved as, but for whether it is picked. */
+    private JsonNode contentOf(ServerConfig server) {
+        ObjectNode node = objectMapper.valueToTree(server);
+        node.remove("active");
+        return node;
+    }
+
+    /**
+     * Puts {@code next} in place of the server list as a single change: the
+     * stretch from the first server that differs to the last, compared by
+     * instance, and {@code touched} counted as differing even where it is the
+     * same instance, for a flag set on it in place. Nothing when nothing
+     * differs.
+     */
+    private void putInPlace(List<ServerConfig> next, ServerConfig touched) {
+        int from = 0;
+        int oldEnd = servers.size();
+        int newEnd = next.size();
+        while (from < oldEnd && from < newEnd
+                && servers.get(from) == next.get(from) && next.get(from) != touched) {
+            from++;
+        }
+        while (oldEnd > from && newEnd > from
+                && servers.get(oldEnd - 1) == next.get(newEnd - 1)
+                && next.get(newEnd - 1) != touched) {
+            oldEnd--;
+            newEnd--;
+        }
+        if (from == oldEnd && from == newEnd) {
             return;
         }
-        ServerConfig pick = added.stream().filter(servers::contains).findFirst()
-                .or(() -> upserts.stream().filter(servers::contains).findFirst())
-                .orElse(servers.getFirst());
-        pick.setActive(true);
-        servers.set(servers.indexOf(pick), pick);
-        log.info("The picked server was withdrawn; picked '{}' instead", pick.getName());
+        if (from == 0 && oldEnd == servers.size() && oldEnd > 0) {
+            // Every stored server goes: the same single change, without
+            // removing them one at a time, each moving the rest down.
+            servers.setAll(next);
+        } else {
+            servers.replaceRange(from, oldEnd, next.subList(from, newEnd));
+        }
     }
 
     /**
@@ -682,18 +800,27 @@ public class ConfigStore {
         }
         ArrayNode snapshot;
         boolean secureStorage;
+        List<JsonNode> keep;
+        ObjectNode extras;
         synchronized (this) {
             snapshot = objectMapper.valueToTree(servers);
             secureStorage = settings.isStoreSecretsSecurely();
+            keep = List.copyOf(unreadableServers);
+            extras = serversEnvelopeExtras;
         }
         if (secureStorage && sealer.isAvailable()) {
             sealCredentials(snapshot);
         }
+        // After sealing: an entry this build cannot read goes back as it came.
+        keep.forEach(entry -> snapshot.add(entry.deepCopy()));
         Path file = dataDir.resolve(SERVERS_FILE);
         try {
             ObjectNode envelope = objectMapper.createObjectNode();
             envelope.put("config_version", SERVERS_CONFIG_VERSION);
             envelope.set("servers", snapshot);
+            if (extras != null) {
+                envelope.setAll(extras.deepCopy());
+            }
             SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(envelope));
             persistence.saved(SERVERS_FILE);
             dropLegacyBackupOnceMigrated(file, objectMapper, "servers");
@@ -817,9 +944,10 @@ public class ConfigStore {
                 items = root.path("servers");
             }
             if (!items.isArray()) {
-                log.error("servers.json has no readable server list; leaving list empty");
+                keepWithoutList(file, SERVERS_FILE, root, SERVERS_CONFIG_VERSION, persistence);
                 return;
             }
+            ObjectNode extras = envelopeExtras(root, "servers");
             List<ServerConfig> loaded = new ArrayList<>();
             int unreadable = 0;
             for (JsonNode item : items) {
@@ -832,12 +960,19 @@ public class ConfigStore {
                     unreadable++;
                     log.warn("Skipping a server entry this build cannot read: {}",
                             e.getMessage());
+                    synchronized (this) {
+                        unreadableServers.add(item);
+                    }
                 }
             }
             Unsealing.each(loaded, this::unsealInPlace);
             servers.addAll(loaded);
+            synchronized (this) {
+                serversEnvelopeExtras = extras;
+            }
             if (unreadable > 0) {
                 persistence.couldNotRead(SERVERS_FILE, unreadable);
+                persistence.keepsUnreadableOnSave(SERVERS_FILE);
             }
             log.info("Loaded {} servers from {}", servers.size(), file);
         } catch (JacksonException e) {
@@ -865,6 +1000,50 @@ public class ConfigStore {
     }
 
     /**
+     * The top-level fields of a list file's envelope other than its version
+     * and its list, to be written back by the next save; null for none, or
+     * for the pre-envelope bare array.
+     *
+     * <p>Package-private: {@link SubscriptionService} keeps its envelope's the
+     * same way.</p>
+     */
+    static ObjectNode envelopeExtras(JsonNode root, String listField) {
+        if (!(root instanceof ObjectNode envelope)) {
+            return null;
+        }
+        ObjectNode extras = envelope.deepCopy();
+        extras.remove("config_version");
+        extras.remove(listField);
+        return extras.isEmpty() ? null : extras;
+    }
+
+    /**
+     * Keeps a list file that parsed but holds no list this build can read.
+     *
+     * <p>It used to be logged and left in place with nothing recorded, so the
+     * app started empty, showed no notice, and the first save (an add, or a
+     * subscription refresh a minute after start) wrote the new list over it.
+     * One a newer build wrote is held where it is: it is likely fine, and the
+     * newer build reads it again after an upgrade. Anything else is set aside
+     * like a damaged file.</p>
+     *
+     * <p>Package-private: {@link SubscriptionService} reads its file the same
+     * way.</p>
+     */
+    static void keepWithoutList(Path file, String name, JsonNode root, int understood,
+                                PersistenceState persistence) {
+        int version = root.path("config_version").asInt(0);
+        if (version > understood) {
+            log.error("{} (config_version {}) holds no list this build can read; "
+                    + "leaving it as it is and not saving over it", file, version);
+            persistence.couldNotOpen(name, "written by a newer version of Tunl");
+            return;
+        }
+        log.error("{} holds no readable list; moving it aside", file);
+        setAsideDamaged(file, name, persistence);
+    }
+
+    /**
      * Leaves a file that is there and could not be opened as it is, and holds
      * its saves: it may be locked or left unreadable by a restore, and moving
      * it aside, or writing over it, lost data the app never saw.
@@ -880,11 +1059,18 @@ public class ConfigStore {
     /**
      * Moves a damaged file aside and says so: the app starts without it,
      * which looks like data loss unless the user hears where the file went.
+     *
+     * <p>A file that will not move (on Windows, one an editor or a sync client
+     * still has open) is held instead, so no save writes over it. It used to
+     * get neither: no notice, no hold, and the first save replaced the file
+     * that setting it aside was meant to keep.</p>
      */
     static void setAsideDamaged(Path file, String name, PersistenceState persistence) {
         Path aside = quarantineCorrupt(file);
         if (aside != null) {
             persistence.setAside(name, aside.toString());
+        } else if (Files.exists(file)) {
+            persistence.couldNotOpen(name, "damaged, and it could not be moved aside");
         }
     }
 

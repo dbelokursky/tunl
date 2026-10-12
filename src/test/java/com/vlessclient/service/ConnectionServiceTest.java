@@ -107,8 +107,21 @@ class ConnectionServiceTest {
         volatile java.util.function.Predicate<java.util.function.BooleanSupplier> earlierTunnel =
                 stillWanted -> true;
 
+        /**
+         * The state the real engine publishes from its process monitor, set
+         * by a test here, so the service's own listener on it runs.
+         */
+        final javafx.beans.property.ReadOnlyObjectWrapper<ConnectionState> published =
+                new javafx.beans.property.ReadOnlyObjectWrapper<>(ConnectionState.DISCONNECTED);
+
         RecordingEngine(Path binary) {
             super(binary);
+        }
+
+        @Override
+        public javafx.beans.property.ReadOnlyObjectProperty<ConnectionState>
+                connectionStateProperty() {
+            return published.getReadOnlyProperty();
         }
 
         @Override
@@ -444,6 +457,35 @@ class ConnectionServiceTest {
         });
         api.start();
         return api;
+    }
+
+    /**
+     * The engine's own report of a crash reaches recovery through the
+     * listener the service puts on the engine's state. Every other recovery
+     * test hands the state to recovery directly, so that listener, which
+     * also starts and stops the network watch and clears the start notices,
+     * never ran in a test: dropping its call to recovery left every test
+     * green and a core that crashed at night never restarted.
+     */
+    @Test
+    void aCrashTheEngineReportsIsRecoveredThroughTheServicesListener() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.getSettings().setHealthCheckAutoReconnect(true);
+        store.getSettings().setHealthCheckDelaySeconds(1);
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        try {
+            assertThat(service.connect().started()).as("the first start").isTrue();
+            engine.published.set(ConnectionState.CONNECTED);
+            engine.running = false;
+
+            engine.published.set(ConnectionState.ERROR);
+
+            Await.until("recovery to start the core again",
+                    () -> starts(engine) >= 2, Duration.ofSeconds(10));
+        } finally {
+            service.getRecoveryService().close();
+        }
     }
 
     /**
@@ -1057,6 +1099,71 @@ class ConnectionServiceTest {
         service.disconnect();
         assertThat(store.getSettings().listenHttpPort()).as("no run: the chosen port")
                 .isEqualTo(base + 3);
+    }
+
+    /**
+     * A start that runs no core leaves no ports of a run behind. Only a
+     * disconnect forgot them, so after a start the core refused, one that
+     * failed, or one whose administrator prompt was dismissed, the status an
+     * agent asks for and the port the Dashboard tells apps to use named the
+     * ports of that start, nothing listening on them, and not the ones the
+     * user chose after it.
+     */
+    @Test
+    void aStartTheCoreRefusesLeavesTheChosenPorts() throws Exception {
+        RecordingEngine refusing = engine();
+        refusing.refuseWith = config -> "decode config: unknown field \"bogus\"";
+        ConnectionService service = service(refusing);
+
+        assertChosenPortsReadAfter(() -> assertThatThrownBy(service::connect)
+                .isInstanceOf(ConfigRejectedException.class));
+    }
+
+    @Test
+    void aStartThatFailsLeavesTheChosenPorts() throws Exception {
+        RecordingEngine failing = engine();
+        failing.failStartWith = new IOException("cannot run the core");
+        ConnectionService service = service(failing);
+
+        assertChosenPortsReadAfter(() -> assertThatThrownBy(service::connect)
+                .isInstanceOf(IOException.class));
+    }
+
+    @Test
+    void aStartWhosePromptIsDismissedLeavesTheChosenPorts() throws Exception {
+        ConnectionService service = service(new SingBoxEngine(tempDir.resolve("sing-box")) {
+            @Override
+            public void start(String configJson, ProxyMode proxyMode) throws IOException {
+                throw new com.vlessclient.platform.ElevationDeclinedException(
+                        "the administrator prompt was dismissed");
+            }
+        });
+
+        assertChosenPortsReadAfter(() -> assertThat(service.connect(ProxyMode.TUN).outcome())
+                .isEqualTo(ConnectionService.Outcome.CANCELLED));
+    }
+
+    /** A start of no core, then other ports chosen: those are the ones read. */
+    private void assertChosenPortsReadAfter(ThrowingRunnable startOfNoCore) throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        int base = freeBlockOf(6);
+        store.getSettings().setSocksPort(base);
+        store.getSettings().setHttpPort(base + 1);
+        store.getSettings().setClashApiPort(base + 2);
+
+        startOfNoCore.run();
+        store.getSettings().setSocksPort(base + 3);
+        store.getSettings().setHttpPort(base + 4);
+        store.getSettings().setClashApiPort(base + 5);
+
+        assertThat(store.getSettings().listenSocksPort()).isEqualTo(base + 3);
+        assertThat(store.getSettings().listenHttpPort()).isEqualTo(base + 4);
+        assertThat(store.getSettings().listenClashApiPort()).isEqualTo(base + 5);
+    }
+
+    @FunctionalInterface
+    private interface ThrowingRunnable {
+        void run() throws Exception;
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.ThemeCss;
+import com.vlessclient.testing.SettledLayout;
 import com.vlessclient.testing.UiTest;
 import java.util.ArrayList;
 import java.util.List;
@@ -114,9 +115,17 @@ public class SettingsScrollBarTest extends ApplicationTest {
      * MainView at a window size, with Settings mounted the way its nav button
      * mounts it. Never shown, as in ControlSizingTest: a scene lays out
      * without a stage, and a stage would clamp the size to the runner's
-     * screen.
+     * screen. Laid out until it settles, since a scene with no stage gets no
+     * pass but the ones a test runs, and one was measured as finished while
+     * a scroll pane's skin had still to decide its bars.
      */
     private Scene mainViewShowingSettings(int width, int height) {
+        Scene scene = buildMainViewShowingSettings(width, height);
+        SettledLayout.settle(scene);
+        return scene;
+    }
+
+    private Scene buildMainViewShowingSettings(int width, int height) {
         final Scene[] holder = new Scene[1];
         interact(() -> {
             try {

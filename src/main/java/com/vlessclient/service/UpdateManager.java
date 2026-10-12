@@ -138,6 +138,8 @@ public class UpdateManager {
     private final ScheduledExecutorService scheduler;
     private final UpdateStaging staging;
     private final Supplier<UpdateApplier> applier;
+    /** Whether a downloaded installer's signature authorises it. */
+    private final UpdateStaging.ReleaseCheck signatureCheck;
 
     private final ReadOnlyBooleanWrapper updateAvailable = new ReadOnlyBooleanWrapper(false);
     private final ReadOnlyStringWrapper latestVersion = new ReadOnlyStringWrapper("");
@@ -179,9 +181,24 @@ public class UpdateManager {
     /** Test seam: also what decides whether this installation installs updates itself. */
     UpdateManager(HttpClient httpClient, UpdateStaging staging,
                   Supplier<UpdateApplier> applier) {
+        this(httpClient, staging, applier, ReleaseSignature::verifyRelease);
+    }
+
+    /**
+     * Test seam: also how a downloaded installer's signature is checked.
+     *
+     * <p>The release key is the maintainer's, so with the built-in check every
+     * download a test could make ended in a rejection, and the path that
+     * accepts an update (a newer release, its installer, a valid signature,
+     * staged) never ran. A test passes the same check with a key of its own,
+     * as UpdateStaging's seam allows.</p>
+     */
+    UpdateManager(HttpClient httpClient, UpdateStaging staging,
+                  Supplier<UpdateApplier> applier, UpdateStaging.ReleaseCheck signatureCheck) {
         this.httpClient = httpClient;
         this.staging = staging;
         this.applier = applier;
+        this.signatureCheck = signatureCheck;
         this.objectMapper = JsonMapper.builder().build();
         this.scheduler = Executors.newSingleThreadScheduledExecutor(
                 DaemonThreads.factory("update-checker"));
@@ -731,8 +748,7 @@ public class UpdateManager {
                         signatureUrl, response.statusCode());
                 return null;
             }
-            if (!ReleaseSignature.verifyRelease(version, assetName, digest,
-                    response.body())) {
+            if (!signatureCheck.test(version, assetName, digest, response.body())) {
                 log.error("Update rejected: signature does not match {}", url);
                 return null;
             }

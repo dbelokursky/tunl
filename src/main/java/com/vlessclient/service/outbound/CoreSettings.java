@@ -8,8 +8,11 @@ import com.vlessclient.model.TlsConfig;
 import com.vlessclient.model.TransportConfig;
 import com.vlessclient.model.TransportType;
 import com.vlessclient.platform.SecretSealer;
+import java.net.InetAddress;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -322,6 +325,46 @@ public final class CoreSettings {
             return address;
         }
         return address + (address.contains(":") ? "/128" : "/32");
+    }
+
+    /**
+     * The interface addresses of a WireGuard server, listed comma-separated,
+     * each address once, in the first spelling given. The core refuses an
+     * interface that has one address twice, under any prefix length or
+     * spelling ("duplicate address"), and the endpoint of every member of a
+     * group goes into one configuration: a {@code .conf} that repeated its
+     * Address line, or a form that listed an address twice, stopped every
+     * connect of the group.
+     *
+     * @param addresses the addresses as stored, comma-separated
+     * @return the distinct addresses, stripped, as written
+     */
+    public static List<String> interfaceAddresses(String addresses) {
+        Map<String, String> distinct = new LinkedHashMap<>();
+        for (String part : addresses.split(",")) {
+            String address = part.strip();
+            if (!address.isEmpty()) {
+                distinct.putIfAbsent(addressKey(address), address);
+            }
+        }
+        return List.copyOf(distinct.values());
+    }
+
+    /**
+     * An interface address without its prefix length, as the core compares
+     * them: {@code FD42:42:0::2} and {@code fd42:42::2} are one address. An
+     * IPv4 address written as IPv6 stays apart, as it does in the core.
+     */
+    private static String addressKey(String address) {
+        int slash = address.indexOf('/');
+        String ip = (slash >= 0 ? address.substring(0, slash) : address).strip();
+        try {
+            InetAddress literal = InetAddress.ofLiteral(ip);
+            return (ip.indexOf(':') >= 0 ? "6 " : "4 ") + literal.getHostAddress();
+        } catch (IllegalArgumentException e) {
+            // No address the core takes either; compared as written.
+            return ip.toLowerCase(Locale.ROOT);
+        }
     }
 
     /**

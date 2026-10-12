@@ -3,6 +3,7 @@ package com.vlessclient.ui.view;
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ThemeCss;
 import com.vlessclient.service.TextScale;
+import com.vlessclient.testing.SettledLayout;
 import com.vlessclient.testing.UiTest;
 import java.io.IOException;
 import java.io.InputStream;
@@ -142,14 +143,12 @@ public class ControlSizingTest extends ApplicationTest {
             interact(() -> I18n.setLocale(locale));
             for (String view : VIEWS) {
                 Scene scene = load(view);
-                // Collected inside the FX thread and asserted outside it, so
-                // one offender does not hide the rest.
-                interact(() -> {
-                    for (String theme : List.of("light", "dark")) {
-                        dress(scene, theme);
-                        collectClipped(view, theme, locale, scene.getRoot(), clipped);
-                    }
-                });
+                for (String theme : List.of("light", "dark")) {
+                    dressAndSettle(scene, theme);
+                    // Collected inside the FX thread and asserted outside it,
+                    // so one offender does not hide the rest.
+                    interact(() -> collectClipped(view, theme, locale, scene.getRoot(), clipped));
+                }
             }
         }
 
@@ -234,9 +233,9 @@ public class ControlSizingTest extends ApplicationTest {
         interact(() -> I18n.setLocale(Locale.ENGLISH));
         for (String view : VIEWS) {
             Scene scene = load(view);
-            interact(() -> {
-                for (String theme : List.of("light", "dark")) {
-                    dress(scene, theme);
+            for (String theme : List.of("light", "dark")) {
+                dressAndSettle(scene, theme);
+                interact(() -> {
                     for (Node node : scene.getRoot().lookupAll("*")) {
                         if (!(node instanceof Region region) || !isOnScreen(node)) {
                             continue;
@@ -262,8 +261,8 @@ public class ControlSizingTest extends ApplicationTest {
                                     region.getHeight(), expected[0]));
                         }
                     }
-                }
-            });
+                });
+            }
         }
 
         assertThat(odd)
@@ -285,6 +284,7 @@ public class ControlSizingTest extends ApplicationTest {
     @Test
     void bothChecksMeasureExactlyTheFieldsTheServerFormShows() {
         Scene scene = load("ServerFormView");
+        dressAndSettle(scene, "light");
         List<String> measured = new ArrayList<>();
         interact(() -> {
             for (Node node : scene.getRoot().lookupAll(".form-field")) {
@@ -437,6 +437,16 @@ public class ControlSizingTest extends ApplicationTest {
         scene.getRoot().resize(width, height);
         scene.getRoot().applyCss();
         scene.getRoot().layout();
+    }
+
+    /**
+     * {@link #dress} the view, then lay it out until it settles. The scene is
+     * never shown, so it gets only the passes a test runs, and one pass left
+     * skins and scroll panes still deciding their sizes when this measured.
+     */
+    private void dressAndSettle(Scene scene, String theme) {
+        interact(() -> dress(scene, theme));
+        SettledLayout.settle(scene);
     }
 
     private Scene load(String view) {

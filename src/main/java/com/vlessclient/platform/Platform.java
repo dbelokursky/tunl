@@ -29,7 +29,20 @@ public enum Platform {
     }
 
     static Platform detect() {
-        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        return detect(System.getProperty("os.name", ""));
+    }
+
+    /**
+     * The platform an {@code os.name} names. Apart from {@link #detect()} so
+     * a test can try names without setting the JVM-wide property: one that
+     * did, and was the first to touch this class, fixed {@link #current()}
+     * to the name it was trying for the rest of the run.
+     *
+     * @param osName a value of the {@code os.name} property
+     * @return the platform it names
+     */
+    static Platform detect(String osName) {
+        String os = osName.toLowerCase(Locale.ROOT);
         if (os.contains("mac") || os.contains("darwin")) {
             return MAC;
         }

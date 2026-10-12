@@ -262,10 +262,11 @@ public class AppSettings extends KeepsUnknownFields {
     }
 
     /**
-     * Ports this run listens on, or null when no core runs. Runtime only:
-     * settings are saved whole, and a moved port written into the chosen one
-     * became the user's choice at the next save of anything. The file keeps
-     * what the user chose, and the next start tries it again.
+     * Ports this run listens on, or null when no core runs: a disconnect
+     * forgets them, and so does a start that failed or was cancelled. Runtime
+     * only: settings are saved whole, and a moved port written into the chosen
+     * one became the user's choice at the next save of anything. The file
+     * keeps what the user chose, and the next start tries it again.
      *
      * <p>Kept for every run, moved or not. A port the run did not move was
      * read from the chosen one, so a port chosen while a core ran was taken
@@ -342,8 +343,9 @@ public class AppSettings extends KeepsUnknownFields {
     }
 
     /**
-     * Forgets the ports of a run that ended, so what reads them reads the
-     * chosen ones, which the next start listens on.
+     * Forgets the ports of a run that ended, or of a start no core came of,
+     * so what reads them reads the chosen ones, which the next start listens
+     * on.
      */
     public void endRun() {
         runSocksPort = null;
