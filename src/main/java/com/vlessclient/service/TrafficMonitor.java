@@ -7,7 +7,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javafx.application.Platform;
 import javafx.beans.property.LongProperty;
@@ -48,6 +50,14 @@ public class TrafficMonitor {
     private final LongProperty totalUpload = new SimpleLongProperty(0);
     private final LongProperty totalDownload = new SimpleLongProperty(0);
 
+    /**
+     * Told of every sample, on the FX thread. The properties above fire only
+     * on a change, so a listener that counted bytes from them missed every
+     * second whose figure matched the one before: the traffic history kept
+     * the first second of a steady upload and nothing after it.
+     */
+    private final List<SampleListener> sampleListeners = new CopyOnWriteArrayList<>();
+
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final Object lifecycleLock = new Object();
     private volatile Thread sseThread;
@@ -73,6 +83,31 @@ public class TrafficMonitor {
 
     public ReadOnlyLongProperty totalDownloadProperty() {
         return totalDownload;
+    }
+
+    /** Receives each traffic sample the core reports, repeated values included. */
+    @FunctionalInterface
+    public interface SampleListener {
+
+        /**
+         * Called on the FX thread once per sample, after the properties have
+         * taken its values.
+         *
+         * @param upload bytes sent in this sample
+         * @param download bytes received in this sample
+         */
+        void onSample(long upload, long download);
+    }
+
+    /**
+     * Registers a listener called for every sample, whether or not it changed
+     * a speed. Anything that adds samples up must use this rather than a
+     * change listener on the speed properties.
+     *
+     * @param listener the listener to call on the FX thread
+     */
+    public void addSampleListener(SampleListener listener) {
+        sampleListeners.add(listener);
     }
 
     /**
@@ -265,6 +300,9 @@ public class TrafficMonitor {
                 downloadSpeed.set(down);
                 totalUpload.set(totalUpload.get() + up);
                 totalDownload.set(totalDownload.get() + down);
+                for (SampleListener listener : sampleListeners) {
+                    listener.onSample(up, down);
+                }
             });
         } catch (Exception e) {
             log.debug("Failed to parse traffic line: {}", line, e);

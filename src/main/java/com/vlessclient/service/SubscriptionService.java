@@ -107,6 +107,13 @@ public class SubscriptionService {
     private ScheduledExecutorService scheduler;
 
     /**
+     * Set once the app starts quitting ({@link #beginShutdown()}): no fetch is
+     * sent after it, a refresh cycle stops before the next subscription, and
+     * a refresh the quit cut short records nothing.
+     */
+    private volatile boolean closing;
+
+    /**
      * The headers of the response the current thread's last
      * {@link #fetchContent} read. A side channel on purpose: fetchContent's
      * String contract is the seam every test double overrides, and a double
@@ -310,16 +317,34 @@ public class SubscriptionService {
             log.warn("Subscription not found for refresh: {}", subscriptionId);
             return;
         }
+        // The link this refresh reads. An edit can point the subscription at
+        // another one while the fetch waits, and what the old link answers
+        // then is no longer the subscription's (see stillFetchedFrom).
+        String fetchedUrl = urlOf(sub);
 
         String content;
         ParsedContent parsed;
         HttpHeaders headers;
         try {
             responseHeaders.remove();
-            content = fetchContent(sub.getUrl());
+            content = fetchContent(fetchedUrl);
             headers = responseHeaders.get();
             parsed = parseContent(content);
         } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            if (closing || Thread.currentThread().isInterrupted()) {
+                // Stopped, not failed: an interrupt or the closed client is
+                // how quitting stops a refresh. Caught as a failure, the quit
+                // went into the file as the provider's ("closed",
+                // "java.lang.InterruptedException"), the rows showed it at
+                // the next launch, and the swallowed interrupt let the cycle
+                // go on to the next subscription.
+                log.info("Refresh of subscription '{}' stopped before it finished",
+                        sub.getName());
+                return;
+            }
             // Scrub before both sinks: the throw sites we control are already
             // redacted, but a message from the JDK (URI parse failures quote
             // the whole URI) or from a future call site is not ours to trust.
@@ -331,16 +356,16 @@ public class SubscriptionService {
             // it knows the failure, the technical reason where it does not.
             // A panel that refuses this device can say so with a failure
             // status too (3x-ui: 404), and its headers say more than the code.
-            Declined worded = deviceRefusal(responseHeaders.get());
-            if (worded == null) {
-                worded = wordedFailure(e, sub.getUrl());
-            }
-            if (worded != null) {
-                sub.recordFailure(worded.key(), worded.args());
-            } else {
-                sub.recordFailure(reason);
-            }
-            saveSubscriptions();
+            Declined deviceRefused = deviceRefusal(responseHeaders.get());
+            Declined worded = deviceRefused != null
+                    ? deviceRefused : wordedFailure(e, fetchedUrl);
+            recordIfCurrent(sub, fetchedUrl, () -> {
+                if (worded != null) {
+                    sub.recordFailure(worded.key(), worded.args());
+                } else {
+                    sub.recordFailure(reason);
+                }
+            });
             return;
         }
 
@@ -352,8 +377,8 @@ public class SubscriptionService {
         if (declined != null) {
             log.warn("Subscription '{}' answered without its servers ({}); keeping the {} "
                     + "stored", sub.getName(), declined.key(), sub.getServerIds().size());
-            sub.recordFailure(declined.key(), declined.args());
-            saveSubscriptions();
+            recordIfCurrent(sub, fetchedUrl,
+                    () -> sub.recordFailure(declined.key(), declined.args()));
             return;
         }
 
@@ -371,15 +396,16 @@ public class SubscriptionService {
             log.warn("Subscription '{}' returned {} bytes with no usable "
                     + "server links; keeping the {} server(s) already stored",
                     sub.getName(), content.length(), sub.getServerIds().size());
-            if (parsed.unsupportedSchemes().isEmpty()) {
-                sub.recordFailure("subscriptions.error.no.links", List.of());
-            } else {
-                // The list was read fine; it just holds nothing this client
-                // can connect to. Say so rather than hinting at expiry.
-                sub.recordFailure("subscriptions.error.unsupported",
-                        List.of(parsed.unsupportedSummary()));
-            }
-            saveSubscriptions();
+            recordIfCurrent(sub, fetchedUrl, () -> {
+                if (parsed.unsupportedSchemes().isEmpty()) {
+                    sub.recordFailure("subscriptions.error.no.links", List.of());
+                } else {
+                    // The list was read fine; it just holds nothing this client
+                    // can connect to. Say so rather than hinting at expiry.
+                    sub.recordFailure("subscriptions.error.unsupported",
+                            List.of(parsed.unsupportedSummary()));
+                }
+            });
             return;
         }
 
@@ -388,13 +414,24 @@ public class SubscriptionService {
         // re-check diffAndApply would resolve none of the (now-gone) ids, treat
         // every fetched server as new, and re-insert the whole list as
         // untracked orphans that no future refresh or delete can reach.
+        // Or the user pointed it at another link meanwhile, and the refresh
+        // that edit started has already applied the new link's list: the old
+        // link's late answer put the old servers, quota and interval back
+        // over it, for a whole interval.
         // removeSubscription takes the same lock, so this check and the apply
         // are atomic against a concurrent delete; it also serializes two
         // refreshes of one subscription so they cannot mint duplicate servers.
         synchronized (refreshApplyLock) {
-            if (!isRegistered(subscriptionId)) {
-                log.info("Subscription '{}' was removed during refresh; "
-                        + "discarding the fetched result", sub.getName());
+            if (!stillFetchedFrom(subscriptionId, fetchedUrl)) {
+                log.info("Subscription '{}' was removed or given another link during "
+                        + "refresh; discarding the fetched result", sub.getName());
+                return;
+            }
+            if (closing) {
+                // The next launch refreshes it; applied now, the batch waits
+                // on an FX thread that is going away.
+                log.info("Quitting; discarding the fetched result of subscription '{}'",
+                        sub.getName());
                 return;
             }
             // Before the servers take the name as their prefix.
@@ -446,6 +483,49 @@ public class SubscriptionService {
             saveSubscriptions();
             log.info("Refreshed subscription '{}': {} servers",
                     sub.getName(), sub.getServerIds().size());
+        }
+    }
+
+    /** The subscription's link, read under the monitor its edit writes it under. */
+    private String urlOf(Subscription sub) {
+        synchronized (this) {
+            return sub.getUrl();
+        }
+    }
+
+    /**
+     * Whether the subscription is still registered and still has the link a
+     * refresh fetched. A scan under the monitor rather than a stream, so it
+     * cannot throw a ConcurrentModificationException against an FX-thread
+     * change of the list.
+     */
+    private boolean stillFetchedFrom(String subscriptionId, String fetchedUrl) {
+        synchronized (this) {
+            for (Subscription s : subscriptions) {
+                if (s.getId().equals(subscriptionId)) {
+                    return java.util.Objects.equals(s.getUrl(), fetchedUrl);
+                }
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Records a refresh's failure and saves it, unless the subscription was
+     * deleted or given another link while the refresh ran, or the app began
+     * quitting. The failure of a link the subscription no longer has said
+     * nothing about the one it has, and stayed on its row until the next
+     * refresh, over a new link that had just worked.
+     */
+    private void recordIfCurrent(Subscription sub, String fetchedUrl, Runnable record) {
+        synchronized (refreshApplyLock) {
+            if (closing || !stillFetchedFrom(sub.getId(), fetchedUrl)) {
+                log.info("Not recording the failed refresh of subscription '{}': it was "
+                        + "removed or given another link meanwhile", sub.getName());
+                return;
+            }
+            record.run();
+            saveSubscriptions();
         }
     }
 
@@ -822,17 +902,37 @@ public class SubscriptionService {
     }
 
     /**
-     * Refreshes the subscriptions due a refresh: their provider's interval
-     * ({@code profile-update-interval}), or an hour, since both the last
-     * success and the last attempt, so a failing one is tried again an
-     * interval later, not at every check.
+     * Refreshes the subscriptions due a refresh: the ones whose list is older
+     * than their provider's interval ({@code profile-update-interval}), or an
+     * hour, and that were not tried within the last hour, or within the
+     * interval if it is shorter, so a failing one is not tried at every check.
+     *
+     * <p>The interval is how often a provider wants a list it has served read
+     * again, not a wait after a fetch that never reached it. Counted from the
+     * last attempt as well, a failure pushed the next try a whole interval
+     * away: a list a 12 h provider could not be reached for, at a start
+     * before the network was up, stayed stale and the row said "could not
+     * connect" for twelve more hours.</p>
      */
     void refreshDue() {
-        long now = System.currentTimeMillis();
+        refreshDue(System.currentTimeMillis());
+    }
+
+    /** {@link #refreshDue()} as of {@code now}; a test seam, since the schedule spans hours. */
+    void refreshDue(long now) {
         for (Subscription sub : new ArrayList<>(subscriptions)) {
-            long last = Math.max(sub.getLastRefreshedAt(),
-                    lastAttemptAt.getOrDefault(sub.getId(), 0L));
-            if (now - last >= intervalOf(sub).toMillis()) {
+            if (closing || Thread.currentThread().isInterrupted()) {
+                // A quit stops the cycle here: the next fetch would go out
+                // as the tunnel's routing is lifted, or fail on the closed
+                // client and be recorded as the provider's failure.
+                log.info("Subscription refresh cycle stopped by the quit");
+                return;
+            }
+            Duration interval = intervalOf(sub);
+            long sinceRefreshed = now - sub.getLastRefreshedAt();
+            long sinceTried = now - lastAttemptAt.getOrDefault(sub.getId(), 0L);
+            long retryAfter = Math.min(interval.toMillis(), DEFAULT_INTERVAL.toMillis());
+            if (sinceRefreshed >= interval.toMillis() && sinceTried >= retryAfter) {
                 lastAttemptAt.put(sub.getId(), now);
                 refreshSubscription(sub.getId());
                 if ("subscriptions.error.tunnel".equals(sub.getLastErrorKey())) {
@@ -898,10 +998,23 @@ public class SubscriptionService {
      * the client's selector thread behind.
      */
     public void shutdown() {
+        beginShutdown();
         stopAutoRefresh();
         if (httpClient != null) {
             httpClient.shutdownNow();
         }
+    }
+
+    /**
+     * Sends no fetch from now on, without waiting for one under way: what a
+     * quit does first, before it lifts the routing that keeps a fetch inside
+     * the tunnel. The refreshes were stopped only after the core, seconds
+     * later, and a cycle that went on meanwhile sent the next subscription's
+     * link, account token and all, straight to the provider from the user's
+     * real address. A refresh it cuts short records nothing.
+     */
+    public void beginShutdown() {
+        closing = true;
     }
 
     /**
@@ -955,6 +1068,10 @@ public class SubscriptionService {
     }
 
     String fetchContent(String url) throws IOException, InterruptedException {
+        if (closing) {
+            // The quit lifts the tunnel's routing next (beginShutdown).
+            throw new IOException("Quitting; the subscription was not fetched.");
+        }
         if (AppHttpClients.isTunnelWantedButNotCarrying()) {
             // The selector falls back to a direct connection while the tunnel
             // carries nothing, so the updater keeps working on hostile
@@ -1158,8 +1275,8 @@ public class SubscriptionService {
      */
     private void diffAndApply(Subscription sub, List<ServerConfig> fetchedServers,
             boolean allowRemovals) {
-        SubscriptionReconciler.Batch batch =
-                SubscriptionReconciler.reconcile(membersOf(sub), fetchedServers, allowRemovals);
+        SubscriptionReconciler.Batch batch = SubscriptionReconciler.reconcile(
+                membersOf(sub), strays(), fetchedServers, allowRemovals);
         // Stamped before the servers are saved: their membership is then on
         // disk with them even if the list saved after them never is.
         batch.upserts().forEach(server -> server.setSubscriptionId(sub.getId()));
@@ -1184,6 +1301,24 @@ public class SubscriptionService {
     }
 
     /**
+     * The stored servers stamped with a subscription that no longer exists:
+     * restored from a backup, which keeps the stamps but not the
+     * subscriptions, or left by a subscription list that could not be read.
+     * A refresh may take one back when the provider sends the same server.
+     */
+    private List<ServerConfig> strays() {
+        java.util.Set<String> registered = new java.util.HashSet<>();
+        synchronized (this) {
+            for (Subscription s : subscriptions) {
+                registered.add(s.getId());
+            }
+        }
+        return configStore.getSubscriptionServers().stream()
+                .filter(server -> !registered.contains(server.getSubscriptionId()))
+                .toList();
+    }
+
+    /**
      * Puts back into each subscription's list the servers stamped with its id
      * that the list misses, so its count and its members agree from the start.
      */
@@ -1204,7 +1339,7 @@ public class SubscriptionService {
     }
 
     private Subscription findById(String id) {
-        // A plain loop under the monitor, like isRegistered: streaming the
+        // A plain loop under the monitor, like stillFetchedFrom: streaming the
         // FX-owned list from the scheduler thread could throw a
         // ConcurrentModificationException against an add on the FX thread.
         synchronized (this) {
@@ -1215,23 +1350,6 @@ public class SubscriptionService {
             }
         }
         return null;
-    }
-
-    /**
-     * Whether a subscription with this id is still registered. Uses an explicit
-     * synchronized scan rather than the streaming findById so it cannot throw a
-     * ConcurrentModificationException against an FX-thread list mutation while
-     * refreshSubscription re-checks existence at apply time.
-     */
-    private boolean isRegistered(String id) {
-        synchronized (this) {
-            for (Subscription s : subscriptions) {
-                if (s.getId().equals(id)) {
-                    return true;
-                }
-            }
-            return false;
-        }
     }
 
     synchronized void saveSubscriptions() {

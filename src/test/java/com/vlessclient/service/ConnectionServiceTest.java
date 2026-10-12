@@ -938,6 +938,36 @@ class ConnectionServiceTest {
         assertThat(SessionPorts.recorded(tempDir)).isEmpty();
     }
 
+    /**
+     * A port chosen while a core runs applies at the next start; what reads
+     * the run's ports meanwhile (the app's own requests, the latency probes,
+     * the status an agent asks for) reads the ports the core listens on. A
+     * run on the chosen ports followed the choice at once, to a port nothing
+     * listened on.
+     */
+    @Test
+    void thePortsARunListensOnStayTheRunsUntilItEnds() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        int base = freeBlockOf(4);
+        store.getSettings().setSocksPort(base);
+        store.getSettings().setHttpPort(base + 1);
+        store.getSettings().setClashApiPort(base + 2);
+        ConnectionService service = service(engine());
+        assertThat(service.connect().started()).isTrue();
+
+        store.getSettings().setHttpPort(base + 3);
+        store.getSettings().setClashApiPort(base + 3);
+
+        assertThat(store.getSettings().listenHttpPort()).as("the run's HTTP port")
+                .isEqualTo(base + 1);
+        assertThat(store.getSettings().listenClashApiPort()).as("the run's control port")
+                .isEqualTo(base + 2);
+
+        service.disconnect();
+        assertThat(store.getSettings().listenHttpPort()).as("no run: the chosen port")
+                .isEqualTo(base + 3);
+    }
+
     @Test
     void aSessionThatLeavesTheSystemsProxyAloneIsNotRecorded() throws Exception {
         store.addServer(server("srv-1", "Tokyo"));

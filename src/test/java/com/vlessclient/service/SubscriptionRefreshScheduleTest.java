@@ -119,6 +119,33 @@ class SubscriptionRefreshScheduleTest {
                 .containsExactly(declined.getId(), declined.getId());
     }
 
+    /**
+     * The provider's interval is how often it wants its list read, not how
+     * long to wait after a failure. A refresh that failed while the network
+     * was not up yet, as at a start offline, waited the whole interval, 12 h
+     * with Remnawave, before the next try, with withdrawn servers left in
+     * place and the error on the row all that time.
+     */
+    @Test
+    void aFailedRefreshOfALongIntervalIsTriedAgainWithinTheHour() {
+        long now = System.currentTimeMillis();
+        Subscription stale = subscription(14 * HOUR);
+        stale.setUpdateIntervalHours(12);
+        service.failWith = "subscriptions.error.connect";
+
+        service.refreshDue(now);
+        assertThat(service.refreshed).as("due, and failed").containsExactly(stale.getId());
+
+        service.failWith = null;
+        service.refreshDue(now + 30 * 60 * 1000L);
+        assertThat(service.refreshed).as("half an hour on: not at every check")
+                .containsExactly(stale.getId());
+
+        service.refreshDue(now + 2 * HOUR);
+        assertThat(service.refreshed).as("two hours on, the list still 16 h old")
+                .containsExactly(stale.getId(), stale.getId());
+    }
+
     @Test
     void theProvidersIntervalHeaderIsReadInHoursAndBounded() {
         assertThat(SubscriptionService.updateIntervalHours(headers("12"))).isEqualTo(12);
