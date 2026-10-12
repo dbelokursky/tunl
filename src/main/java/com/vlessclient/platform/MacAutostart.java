@@ -45,8 +45,11 @@ public final class MacAutostart implements Autostart {
         return Files.isRegularFile(plistPath());
     }
 
+    // Synchronized with refresh(), which runs off the launch thread at start:
+    // a refresh that had read "on" must not write the entry back after the
+    // user's untick has removed it.
     @Override
-    public void setEnabled(boolean enabled) throws IOException {
+    public synchronized void setEnabled(boolean enabled) throws IOException {
         if (enabled) {
             install();
         } else {
@@ -55,7 +58,7 @@ public final class MacAutostart implements Autostart {
     }
 
     @Override
-    public void refresh() {
+    public synchronized void refresh() {
         if (!isEnabled()) {
             return;
         }

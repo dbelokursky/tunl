@@ -1,11 +1,13 @@
 package com.vlessclient.platform;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,8 +52,17 @@ public final class LinuxTunLauncher implements TunLauncher {
      */
     public static final int PKEXEC_DISMISSED = 126;
 
+    /**
+     * Where getcap and setcap are looked for. They live in /usr/sbin (libcap2-bin),
+     * which a desktop user's PATH on Debian does not hold: found by name, getcap
+     * did not run, the core read as having no capability, pkexec could not find
+     * setcap either, and every connect raised a PolicyKit prompt.
+     */
+    private static final List<String> TOOL_DIRS = List.of("/usr/sbin", "/sbin", "/usr/bin", "/bin");
+
     private final CommandRunner runner;
     private final String elevator;
+    private final List<Path> toolDirs;
 
     public LinuxTunLauncher() {
         this(CommandRunner.system(PROMPT_TIMEOUT), "pkexec");
@@ -59,8 +70,14 @@ public final class LinuxTunLauncher implements TunLauncher {
 
     /** Test seam: inject the capability-command runner and the elevation binary. */
     LinuxTunLauncher(CommandRunner runner, String elevator) {
+        this(runner, elevator, TOOL_DIRS.stream().map(Path::of).toList());
+    }
+
+    /** Test seam: also where getcap and setcap are looked for. */
+    LinuxTunLauncher(CommandRunner runner, String elevator, List<Path> toolDirs) {
         this.runner = runner;
         this.elevator = elevator;
+        this.toolDirs = List.copyOf(toolDirs);
     }
 
     /**
@@ -77,12 +94,21 @@ public final class LinuxTunLauncher implements TunLauncher {
         // Granted only to a core this user owns and alone can run. The binary
         // can be a system-wide one found on the PATH, root-owned and 0755:
         // the chmod fails there, and setcap as root then made CAP_NET_ADMIN
-        // available to every account on the machine, with no prompt.
-        if (restrictToOwner(binary) && !hasNetAdminCapability(binary)) {
+        // available to every account on the machine, with no prompt. A grant
+        // whose result getcap cannot show would be a prompt for nothing.
+        if (restrictToOwner(binary) && tool("getcap").isPresent()
+                && !hasNetAdminCapability(binary)) {
             grantNetAdminCapability(binary);
         }
 
         boolean direct = hasNetAdminCapability(binary);
+        // An interrupt is the start being called off (at quit the recovery
+        // scheduler and the MCP server interrupt their threads). It used to
+        // fail getcap and the grant, which read as "no capability", and the
+        // launch went on to the fallback: a PolicyKit prompt as the app quit.
+        if (Thread.currentThread().isInterrupted()) {
+            throw new InterruptedIOException("the TUN start was called off");
+        }
         String wrapper = direct
                 ? directWrapperCommand(binary, configFile)
                 : wrapperCommand(binary, configFile, stopSignalFile);
@@ -127,15 +153,30 @@ public final class LinuxTunLauncher implements TunLauncher {
      * True when the binary already carries {@code cap_net_admin} — the xattr
      * survives restarts but not file replacement (core updates).
      */
-    boolean hasNetAdminCapability(Path binary) {
+    boolean hasNetAdminCapability(Path binary) throws InterruptedIOException {
+        Optional<Path> getcap = tool("getcap");
+        if (getcap.isEmpty()) {
+            log.debug("getcap not found in {}", toolDirs);
+            return false;
+        }
         try {
             CommandRunner.Result result = runner.run(List.of(
-                    "getcap", binary.toAbsolutePath().toString()));
+                    getcap.get().toString(), binary.toAbsolutePath().toString()));
             return result.exitCode() == 0 && result.output().contains("cap_net_admin");
+        } catch (InterruptedIOException e) {
+            throw e;
         } catch (IOException e) {
             log.debug("getcap unavailable: {}", e.getMessage());
             return false;
         }
+    }
+
+    /** {@code name} in the first of the tool directories that has it, by absolute path. */
+    private Optional<Path> tool(String name) {
+        return toolDirs.stream()
+                .map(dir -> dir.resolve(name))
+                .filter(Files::isExecutable)
+                .findFirst();
     }
 
     /**
@@ -143,10 +184,15 @@ public final class LinuxTunLauncher implements TunLauncher {
      * dismissed dialog is the user cancelling the connect, which the
      * fallback's own prompt used to follow at once.
      */
-    private void grantNetAdminCapability(Path binary) throws ElevationDeclinedException {
+    private void grantNetAdminCapability(Path binary) throws IOException {
+        Optional<Path> setcap = tool("setcap");
+        if (setcap.isEmpty()) {
+            log.warn("setcap not found in {}: falling back to per-connect elevation", toolDirs);
+            return;
+        }
         try {
             CommandRunner.Result result = runner.run(List.of(
-                    elevator, "setcap", "cap_net_admin+ep",
+                    elevator, setcap.get().toString(), "cap_net_admin+ep",
                     binary.toAbsolutePath().toString()));
             if (result.exitCode() == 0) {
                 log.info("Granted cap_net_admin to {} (one-time setup)", binary);
@@ -156,8 +202,8 @@ public final class LinuxTunLauncher implements TunLauncher {
                 log.warn("setcap failed (exit {}): falling back to per-connect elevation",
                         result.exitCode());
             }
-        } catch (ElevationDeclinedException declined) {
-            throw declined;
+        } catch (ElevationDeclinedException | InterruptedIOException calledOff) {
+            throw calledOff;
         } catch (IOException e) {
             log.warn("Could not run {} setcap: {}", elevator, e.getMessage());
         }
@@ -191,16 +237,63 @@ public final class LinuxTunLauncher implements TunLauncher {
         // first, then the shell exits through the loop as usual. The trap is
         // set before the core starts: a signal between the two used to kill
         // the shell with the core already running.
+        // The core gets the app user's ids, as sudo hands them over: sing-box
+        // then gives what it creates (its cache file) to that user. pkexec
+        // sets none, so the root core's cache file was root's, and every
+        // later start through the capability, as the user, failed on it with
+        // "permission denied" until the file was removed by hand. It exits
+        // with the core's status and waits for the core on a signal; see
+        // StdinWatch#around.
         return String.format(
-                "trap 'kill ${SBPID:-$!} 2>/dev/null; exit 0' EXIT INT TERM; "
-                        + "%s run -c %s & SBPID=$!; "
+                StdinWatch.SIGNAL_TRAP + "rm -f %s; exit 143' INT TERM; "
+                        + StdinWatch.EXIT_TRAP
+                        + "%s%s run -c %s & SBPID=$!; "
                         + "while kill -0 $SBPID 2>/dev/null "
                         + "&& kill -0 %d 2>/dev/null "
                         + "&& [ ! -f %s ]; do sleep 0.3; done; "
                         + "kill $SBPID 2>/dev/null; "
-                        + "wait $SBPID 2>/dev/null; "
-                        + "rm -f %s",
-                singBoxCmd, configPath, parentPid, stopPath, stopPath);
+                        + "wait $SBPID 2>/dev/null; RC=$?; "
+                        + "rm -f %s; exit $RC",
+                stopPath, appUserIds(), singBoxCmd, configPath, parentPid, stopPath, stopPath);
+    }
+
+    /**
+     * The app user's ids as sudo would hand them to the core, for a root core
+     * started by pkexec: {@code "SUDO_UID=1000 SUDO_GID=1000 "}, or empty when
+     * they cannot be read.
+     */
+    static String appUserIds() {
+        return userIds(Path.of("/proc/" + ProcessHandle.current().pid() + "/status"));
+    }
+
+    /**
+     * The real user and group ids in a {@code /proc/PID/status} file, as
+     * {@link #appUserIds()} gives them.
+     *
+     * @param status the file to read
+     * @return the assignments, or empty when the file does not hold both ids
+     */
+    static String userIds(Path status) {
+        String uid = null;
+        String gid = null;
+        try {
+            for (String line : Files.readAllLines(status)) {
+                if (line.startsWith("Uid:")) {
+                    uid = firstId(line);
+                } else if (line.startsWith("Gid:")) {
+                    gid = firstId(line);
+                }
+            }
+        } catch (IOException | RuntimeException e) {
+            log.debug("Could not read the app's ids from {}: {}", status, e.toString());
+        }
+        return uid != null && gid != null ? "SUDO_UID=" + uid + " SUDO_GID=" + gid + " " : "";
+    }
+
+    /** The first id on a "Uid:" or "Gid:" line, the real one; null when it is not a number. */
+    private static String firstId(String line) {
+        String[] ids = line.substring(4).strip().split("\\s+");
+        return ids[0].matches("\\d+") ? ids[0] : null;
     }
 
     /**

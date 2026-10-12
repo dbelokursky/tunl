@@ -2,15 +2,19 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   jpackage's own Info.plist (Info-lite.plist.template in the jdk.jpackage
-  module), which jpackage takes from resource-dir and still fills in, with one
-  addition: CFBundleURLTypes, which registers Tunl for tunl:// links. jpackage
-  has no option for a URL scheme. When the JDK's template changes, carry the
-  change over here.
+  module), which jpackage takes from resource-dir and still fills in, with two
+  changes. CFBundleURLTypes registers Tunl for tunl:// links: jpackage has no
+  option for a URL scheme. LSMinimumSystemVersion is 12.0, not the
+  template's 10.11: the bundled sing-box is built for macOS 12 (Go supports
+  nothing older; the JDK 27 runtime and JavaFX need 11), and with 10.11 macOS
+  opened Tunl on macOS 11, where every Connect failed, instead of saying it
+  needs a newer macOS. macos-dmg-smoke.sh checks it against the core and the
+  runtime. When the JDK's template changes, carry the change over here.
 -->
 <plist version="1.0">
  <dict>
   <key>LSMinimumSystemVersion</key>
-  <string>10.11</string>
+  <string>12.0</string>
   <key>CFBundleDevelopmentRegion</key>
   <string>en-US</string>
   <key>CFBundleAllowMixedLocalizations</key>

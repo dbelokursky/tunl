@@ -359,25 +359,47 @@ public class ConfigStore {
      */
     public void applyServerBatch(List<ServerConfig> upserts, List<String> removalIds) {
         Set<String> removed = mutateList(() -> {
+            // Where each id sits, read once. Each upsert and each removal used
+            // to walk the whole list for its id, on the FX thread: a refresh
+            // of a subscription with tens of thousands of servers froze the
+            // window for seconds.
+            Map<String, Integer> indexById = new HashMap<>();
+            for (int i = 0; i < servers.size(); i++) {
+                indexById.put(servers.get(i).getId(), i);
+            }
+            boolean picked = servers.stream().anyMatch(ServerConfig::isActive);
             List<ServerConfig> added = new ArrayList<>();
             for (ServerConfig incoming : upserts) {
-                int existing = indexOfServer(incoming.getId());
-                if (existing >= 0) {
+                Integer existing = indexById.get(incoming.getId());
+                if (existing != null) {
+                    // Picked or not as the store says now. A refresh carried
+                    // the flag over from the servers it read before its fetch,
+                    // so a server picked meanwhile was unpicked again, or left
+                    // picked beside the refreshed one, and the connect took
+                    // whichever came first.
+                    incoming.setActive(servers.get(existing).isActive());
                     servers.set(existing, incoming);
                 } else {
-                    if (servers.stream().noneMatch(ServerConfig::isActive)) {
+                    if (!picked) {
                         incoming.setActive(true);
                     }
+                    picked |= incoming.isActive();
+                    indexById.put(incoming.getId(), servers.size());
                     servers.add(incoming);
                     added.add(incoming);
                 }
             }
             Set<String> gone = new HashSet<>();
-            for (String id : removalIds) {
-                if (servers.removeIf(s -> s.getId().equals(id))) {
-                    gone.add(id);
-                    evictSealCache(id);
-                }
+            if (!removalIds.isEmpty()) {
+                Set<String> removals = new HashSet<>(removalIds);
+                servers.removeIf(server -> {
+                    boolean withdrawn = removals.contains(server.getId());
+                    if (withdrawn) {
+                        gone.add(server.getId());
+                    }
+                    return withdrawn;
+                });
+                gone.forEach(this::evictSealCache);
             }
             keepOnePicked(added, upserts);
             return gone;
@@ -502,6 +524,17 @@ public class ConfigStore {
     public synchronized List<ServerConfig> getServersOfSubscription(String subscriptionId) {
         return servers.stream()
                 .filter(s -> subscriptionId.equals(s.getSubscriptionId()))
+                .toList();
+    }
+
+    /**
+     * The servers stamped as coming from any subscription.
+     *
+     * @return a snapshot of the stamped servers, in list order
+     */
+    public synchronized List<ServerConfig> getSubscriptionServers() {
+        return servers.stream()
+                .filter(s -> s.getSubscriptionId() != null)
                 .toList();
     }
 

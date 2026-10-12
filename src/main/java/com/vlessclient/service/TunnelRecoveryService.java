@@ -291,10 +291,23 @@ public final class TunnelRecoveryService implements AutoCloseable {
         }
         if (state == ConnectionState.ERROR) {
             schedule(Reason.CORE_STOPPED);
-        } else if (state == ConnectionState.CONNECTED && !settings.get().isHealthCheckEnabled()) {
+        } else if (state == ConnectionState.CONNECTED && !verdictExpected(settings.get())) {
             attempts = 0;
             cancelPending();
         }
+    }
+
+    /**
+     * Whether a reachability verdict will follow a connect: the checks are on
+     * and have a target. With every target removed none comes, and only a
+     * verdict reset the backoff, so each crash a successful restart had
+     * recovered from still added to it: a week of daily crashes left the
+     * tunnel down five minutes at a time.
+     */
+    private static boolean verdictExpected(AppSettings config) {
+        return config.isHealthCheckEnabled()
+                && config.getHealthCheckTargets() != null
+                && !config.getHealthCheckTargets().isEmpty();
     }
 
     /** Receives the shared reachability verdict. A successful verdict resets the backoff. */
@@ -305,6 +318,10 @@ public final class TunnelRecoveryService implements AutoCloseable {
         } else if (health == TunnelHealth.HEALTHY || health == TunnelHealth.DEGRADED) {
             attempts = 0;
             cancelPending();
+        } else if (health == TunnelHealth.UNMONITORED && lastState == ConnectionState.CONNECTED) {
+            // An up tunnel no verdict will come for: checks switched off or
+            // the last target removed while connected. It never restarts.
+            attempts = 0;
         }
     }
 

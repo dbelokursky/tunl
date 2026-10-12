@@ -28,6 +28,11 @@
     stamp next to the bundled binary, naming the version and the release,
     makes incremental builds re-bundle after either changes instead of
     silently keeping the old binary.
+
+    The archive's LICENSE, sing-box's GPL-3.0 notice, is copied beside the
+    binary as well, so the jar carries it as native/windows-<arch>/LICENSE
+    and package-windows.ps1 can ship it with the MSI, as bundle-singbox.sh
+    does for the other systems.
 #>
 [CmdletBinding()]
 param(
@@ -73,6 +78,7 @@ switch ("$osArch") {
 }
 $targetDir = Join-Path $OutDir "windows-$arch"
 $targetBinary = Join-Path $targetDir 'sing-box.exe'
+$targetLicense = Join-Path $targetDir 'LICENSE'
 $stampFile = Join-Path $targetDir '.singbox-version'
 $release = Get-Prop 'singbox.release'
 if ($release) {
@@ -85,7 +91,7 @@ if ($release) {
     $stamp = $Version
 }
 
-if ((Test-Path $targetBinary) -and (Test-Path $stampFile) -and
+if ((Test-Path $targetBinary) -and (Test-Path $targetLicense) -and (Test-Path $stampFile) -and
     ((Get-Content -LiteralPath $stampFile -Raw).Trim() -eq $stamp)) {
     Write-Host "[bundle-singbox] already present: $targetBinary ($stamp)"
     exit 0
@@ -147,7 +153,7 @@ if ($actual -ne $expected.ToLower()) {
 }
 
 New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
-Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $targetBinary, $stampFile
+Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $targetBinary, $targetLicense, $stampFile
 
 # Extract just sing-box.exe out of the nested sing-box-<version>-windows-<arch>/
 # directory (the .sh bundler's --strip-components=1 equivalent). Use .NET
@@ -164,6 +170,11 @@ try {
         throw "[bundle-singbox] sing-box.exe not found inside $zip"
     }
     Copy-Item -Force -LiteralPath $exe.FullName -Destination $targetBinary
+    $license = Join-Path $exe.DirectoryName 'LICENSE'
+    if (-not (Test-Path -LiteralPath $license)) {
+        throw "[bundle-singbox] LICENSE not found beside sing-box.exe inside $zip"
+    }
+    Copy-Item -Force -LiteralPath $license -Destination $targetLicense
 } finally {
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -LiteralPath $extractDir
 }

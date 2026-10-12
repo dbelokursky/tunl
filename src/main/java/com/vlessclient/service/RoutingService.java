@@ -265,7 +265,17 @@ public class RoutingService {
         int unreadable = 0;
         for (JsonNode rule : rules) {
             try {
-                kept.add(objectMapper.treeToValue(rule, RoutingRule.class));
+                RoutingRule read = objectMapper.treeToValue(rule, RoutingRule.class);
+                // A rule without a type or an action, from a hand edit or an
+                // older tool, was kept with nulls, and every connect threw a
+                // NullPointerException in the generator over it.
+                if (read.getType() == null || read.getAction() == null) {
+                    unreadable++;
+                    log.warn("Skipping routing rule {}: it has no type or no action",
+                            read.getId());
+                    continue;
+                }
+                kept.add(read);
             } catch (JacksonException e) {
                 unreadable++;
                 log.warn("Skipping a routing rule this build cannot read: {}", e.getMessage());

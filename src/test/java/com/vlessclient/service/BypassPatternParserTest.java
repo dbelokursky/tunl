@@ -135,6 +135,33 @@ class BypassPatternParserTest {
                         BypassPatternParser.Kind.DOMAIN, "xn--e1ajeds9e.xn--p1ai"));
     }
 
+    /**
+     * An address the core cannot read reached it as ip_cidr, and it refused
+     * the whole configuration: one mistyped line stopped every server from
+     * connecting. Such a line matches nothing now, and says why.
+     */
+    @Test
+    void anAddressTheCoreCannotReadIsLeftOutWithTheReason() {
+        for (String line : java.util.List.of("192.168.1.256", "10.0.0.0/33", "192.168.01.1",
+                "010.0.0.1", "10.0.0.0/08", "cafe::/200", "1:2:3:4:5:6:7:8:9", "dead:beef",
+                "300.1.1.1:8080", "https://999.0.0.1/path")) {
+            assertThat(BypassPatternParser.parse(line)).as(line).isNull();
+            assertThat(BypassPatternParser.problem(line)).as(line).isPresent();
+        }
+        for (String line : java.util.List.of("192.168.0.0/16", "203.0.113.42", "fd00::/8",
+                "2001:db8::1", "0.0.0.0/0", "::/0", "1.2.3.4:80", "https://10.0.0.1:8080/x",
+                "example.com", "*.example.org", "*google*", "# 10.0.0.0/33", "", "  ")) {
+            assertThat(BypassPatternParser.problem(line)).as(line).isEmpty();
+        }
+    }
+
+    /** {@code .} and {@code *.} name no suffix, and the core refused the empty one. */
+    @Test
+    void aSuffixWithNothingAfterTheDotIsLeftOut() {
+        assertThat(BypassPatternParser.parse(".")).isNull();
+        assertThat(BypassPatternParser.parse("*.")).isNull();
+    }
+
     /** A star between names stands for anything, dots included, which only a regex says. */
     @Test
     void aStarInTheMiddleBecomesARegex() {
