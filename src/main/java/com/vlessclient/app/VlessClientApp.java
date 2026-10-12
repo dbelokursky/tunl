@@ -21,6 +21,7 @@ import com.vlessclient.ui.view.SingBoxInstallerDialog;
 import java.awt.Desktop;
 import java.awt.Taskbar;
 import java.awt.Toolkit;
+import java.awt.desktop.AppReopenedListener;
 import java.awt.desktop.QuitStrategy;
 import java.io.IOException;
 import java.io.InputStream;
@@ -358,6 +359,7 @@ public class VlessClientApp extends Application {
         // another one (SingleInstance); the window may be hidden in the tray.
         SingleInstance.current().ifPresent(instance -> instance.onShowRequest(
                 () -> Platform.runLater(() -> bringForward(primaryStage))));
+        showOnReopen(() -> Platform.runLater(() -> bringForward(primaryStage)));
 
         installTrayIcon(primaryStage);
 
@@ -379,6 +381,29 @@ public class VlessClientApp extends Application {
         }
 
         offerToReplaceLegacySudoersRule(primaryStage);
+    }
+
+    /**
+     * Shows the window when macOS asks the running app to reopen: a click on
+     * its Dock icon, or opening it again from Finder or Spotlight, which
+     * starts no second process. AWT, the delegate since it started first,
+     * had no listener for the event, so a window closed to the menu bar
+     * stayed hidden. A no-op where AWT has no such event.
+     */
+    private static void showOnReopen(Runnable show) {
+        try {
+            if (Desktop.isDesktopSupported()
+                    && Desktop.getDesktop().isSupported(Desktop.Action.APP_EVENT_REOPENED)) {
+                Desktop.getDesktop().addAppEventListener(reopenListener(show));
+            }
+        } catch (RuntimeException | LinkageError e) {
+            log.debug("No reopen events here: {}", e.getMessage());
+        }
+    }
+
+    /** What a reopen event does: {@code show}. Package-private for a test. */
+    static AppReopenedListener reopenListener(Runnable show) {
+        return event -> show.run();
     }
 
     private static void stopAnsweringLaunches() {
