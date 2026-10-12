@@ -11,6 +11,7 @@ import com.vlessclient.model.TunSettings;
 import com.vlessclient.platform.Autostart;
 import com.vlessclient.platform.SecretSealer;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.service.SubscriptionService;
 import com.vlessclient.service.ThemeManager;
 import com.vlessclient.service.TrafficHistoryStore;
 import com.vlessclient.service.mcp.McpServerService;
@@ -242,6 +243,14 @@ public class SettingsViewController implements ViewShownAware {
         onUserChange(storeSecretsCheck.selectedProperty(), (oldVal, newVal) -> {
             settings.setStoreSecretsSecurely(newVal);
             saveSettings(settings);
+            // The files the credentials live in, written again for the choice
+            // to reach them. Only the setting was saved, and credentials stayed
+            // in plaintext, or sealed for a downgrade that cannot read them,
+            // until some unrelated save, which with servers added by hand
+            // might never come. Both writes run off the FX thread.
+            configStore.rewriteServers();
+            ServiceLocator.find(SubscriptionService.class).ifPresent(subscriptions ->
+                    Thread.startVirtualThread(subscriptions::rewriteSubscriptions));
         });
 
         commitOnEditEnd(tunIpv4Field, text -> {
