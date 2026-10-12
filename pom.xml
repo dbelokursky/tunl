@@ -312,6 +312,13 @@
                             prompts on first run.
                         -->
                         <vless.singbox.skipBundled>true</vless.singbox.skipBundled>
+                        <!--
+                            And never a sing-box the developer installed
+                            (Homebrew, a package, $PATH): the UI tests ran it
+                            and asked GitHub for a newer core, which the
+                            network guard reported against an unrelated test.
+                        -->
+                        <vless.singbox.skipSystem>true</vless.singbox.skipSystem>
                         <vless.singbox.installDir>${project.build.directory}/test-singbox-install</vless.singbox.installDir>
                         <!--
                             Same idea one level up: every service resolving
