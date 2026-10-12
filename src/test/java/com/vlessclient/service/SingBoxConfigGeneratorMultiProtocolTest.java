@@ -432,6 +432,30 @@ class SingBoxConfigGeneratorMultiProtocolTest {
         assertThat(address.get(1).asString()).isEqualTo("fd42:42::2/128");
     }
 
+    /**
+     * The core refuses an interface that has one address twice, under any
+     * prefix or spelling ("duplicate address"), and the endpoint of every
+     * group member goes into one config: a server whose form lists an address
+     * twice stopped every connect of its group. Each address goes once, in
+     * the first spelling given.
+     */
+    @Test
+    void wireguard_givesTheInterfaceEachAddressOnce() throws Exception {
+        ServerConfig server = new ServerConfig();
+        server.setProtocol(Protocol.WIREGUARD);
+        server.setAddress("wg.example.com");
+        server.setPort(51820);
+        server.setUuid("wg-private-key-base64");
+        server.setEncryption("wg-peer-public-key-base64");
+        server.setFlow("10.66.66.2, fd42:42::2/128, 10.66.66.2/32, 10.66.66.2/24, FD42:42:0::2");
+
+        JsonNode address = wireguardEndpoint(server).get("address");
+
+        assertThat(address.size()).isEqualTo(2);
+        assertThat(address.get(0).asString()).isEqualTo("10.66.66.2/32");
+        assertThat(address.get(1).asString()).isEqualTo("fd42:42::2/128");
+    }
+
     @Test
     void wireguard_keepsProxyOutOfOutbounds_andRoutesFinalToEndpoint() throws Exception {
         ServerConfig server = new ServerConfig();

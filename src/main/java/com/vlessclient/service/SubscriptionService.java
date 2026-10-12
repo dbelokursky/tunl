@@ -1160,7 +1160,11 @@ public class SubscriptionService {
         // Try base64 decode first
         if (looksLikeBase64(trimmed)) {
             try {
-                String decoded = decodeBase64(trimmed);
+                // And of a list base64-encoded from such a file, whose mark
+                // the decoding brings back: before a first line that is a
+                // comment, it made that line an unreadable server, and every
+                // refresh partial.
+                String decoded = ShareLinkParser.withoutByteOrderMark(decodeBase64(trimmed));
                 ParsedContent parsed = parseLines(decoded);
                 // A list of links this client cannot run is still the list:
                 // read again as plain text, the blob is one unreadable line,
@@ -1218,6 +1222,14 @@ public class SubscriptionService {
         }
     }
 
+    /**
+     * The schemes of addresses on the web. In a list they are a portal's
+     * sign-in link or a footer pointing at the provider's site; no server
+     * this client could run is given in one.
+     */
+    private static final java.util.Set<String> WEB_SCHEMES =
+            java.util.Set.of("http", "https", "ftp", "file");
+
     private ParsedContent parseLines(String text) {
         List<ServerConfig> servers = new ArrayList<>();
         List<String> unsupported = new ArrayList<>();
@@ -1241,6 +1253,14 @@ public class SubscriptionService {
                 // a list of unsupported links instead of as no list at all.
                 log.debug("Passing over a line that is not a share link");
             } catch (ShareLinkParser.UnsupportedSchemeException e) {
+                if (WEB_SCHEMES.contains(e.scheme())) {
+                    // A web address on a line of its own: a portal's sign-in
+                    // link, or the provider's support page under its list.
+                    // Left out as a protocol this client lacks, a portal's
+                    // page read as the provider's links asking for "https".
+                    log.debug("Passing over a web address in the list");
+                    continue;
+                }
                 unsupported.add(e.scheme());
                 log.debug("Leaving out a {} link: protocol not supported", e.scheme());
             } catch (ShareLinkParser.UnsupportedFeatureException e) {
