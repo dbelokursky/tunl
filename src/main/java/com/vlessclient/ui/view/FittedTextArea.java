@@ -6,6 +6,7 @@ import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.layout.Region;
 import javafx.scene.text.Text;
+import javafx.scene.text.TextBoundsType;
 
 /**
  * A wrapping {@link TextArea} as tall as its text at the width it is laid out
@@ -30,8 +31,27 @@ import javafx.scene.text.Text;
  */
 public class FittedTextArea extends TextArea {
 
-    /** Wraps a copy of the text the way the skin's own Text node wraps it. */
+    /**
+     * Wraps a copy of the text the way the skin's own Text node wraps it.
+     *
+     * <p>Including its bounds type. The skin's paragraphs are styled by
+     * modena's {@code .text} rule, {@code LOGICAL_VERTICAL_CENTER}, which
+     * rounds each line's ascent and descent to whole pixels; this node has no
+     * style class and kept the default, {@code LOGICAL}. A 13px line came out
+     * 15.73px here and 16px in the skin, so the MCP command's four lines
+     * measured 62.9 where the skin needed 64, and the box was a pixel short of
+     * its own scroll bar. It was right only when it happened to reuse the
+     * skin's shaping from JavaFX's JVM-wide text cache, which is why a test of
+     * it passed alone and failed in full runs. Set before the first
+     * measurement: a node that has shaped its text keeps those line metrics
+     * until its bounds type or font changes.</p>
+     */
     private final Text measure = new Text();
+
+    /** Starts the measuring node in the bounds type the skin's text is styled with. */
+    public FittedTextArea() {
+        measure.setBoundsType(TextBoundsType.LOGICAL_VERTICAL_CENTER);
+    }
 
     @Override
     public Orientation getContentBias() {
@@ -63,6 +83,10 @@ public class FittedTextArea extends TextArea {
             return -1;
         }
         measure.setFont(getFont());
+        // Whatever a stylesheet makes of the skin's text, measured the same way.
+        if (content.lookup(".text") instanceof Text shown) {
+            measure.setBoundsType(shown.getBoundsType());
+        }
         measure.setText(getText());
         // Asked without a width, answer for the preferred width: that is the
         // width a layout pane passes a biased child when it has none itself.

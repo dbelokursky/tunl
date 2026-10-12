@@ -1,6 +1,7 @@
 package com.vlessclient.ui.view;
 
 import com.vlessclient.app.ThemeCss;
+import com.vlessclient.testing.SettledLayout;
 import com.vlessclient.testing.UiTest;
 import java.util.ArrayList;
 import java.util.List;
@@ -96,8 +97,8 @@ public class SettingsMcpCommandTest extends ApplicationTest {
             if (child instanceof ScrollBar bar && bar.getOrientation() == Orientation.VERTICAL
                     && isShowing(bar)) {
                 Bounds at = inScene(bar);
-                wrong.add("%s: the box draws a vertical scroll bar at x=%.0f..%.0f".formatted(
-                        where, at.getMinX(), at.getMaxX()));
+                wrong.add("%s: the box draws a vertical scroll bar at x=%.0f..%.0f; %s".formatted(
+                        where, at.getMinX(), at.getMaxX(), sizes(area, scroller)));
             }
         }
 
@@ -107,10 +108,27 @@ public class SettingsMcpCommandTest extends ApplicationTest {
         if (text.getMinY() < shown.getMinY() - 0.5 || text.getMaxY() > shown.getMaxY() + 0.5
                 || text.getMaxX() > shown.getMaxX() + 0.5) {
             wrong.add(("%s: the command spans x=%.0f..%.0f y=%.0f..%.0f, the box shows "
-                    + "x=%.0f..%.0f y=%.0f..%.0f").formatted(where,
+                    + "x=%.0f..%.0f y=%.0f..%.0f; %s").formatted(where,
                     text.getMinX(), text.getMaxX(), text.getMinY(), text.getMaxY(),
-                    shown.getMinX(), shown.getMaxX(), shown.getMinY(), shown.getMaxY()));
+                    shown.getMinX(), shown.getMaxX(), shown.getMinY(), shown.getMaxY(),
+                    sizes(area, scroller)));
         }
+    }
+
+    /**
+     * What a failure needs to be diagnosed: the command, how wide the box
+     * is, the height it fitted itself to, and the height the skin's text
+     * asks for. It failed once in a full run and never alone, and the
+     * message said only that a bar was drawn.
+     */
+    private static String sizes(TextArea area, ScrollPane scroller) {
+        Text text = (Text) scroller.lookup(".text");
+        return ("the box is %.1f wide and %.1f tall, fitted to %.1f; the skin's text is %.3f "
+                + "tall (%s) in a %.1f viewport; the command (%d characters) is \"%s\"")
+                .formatted(area.getWidth(), area.getHeight(), area.prefHeight(area.getWidth()),
+                        text.getLayoutBounds().getHeight(), text.getBoundsType(),
+                        scroller.getViewportBounds().getHeight(), area.getText().length(),
+                        area.getText());
     }
 
     private static void looksLikeTheFields(Scene scene, String where, List<String> wrong) {
@@ -184,8 +202,19 @@ public class SettingsMcpCommandTest extends ApplicationTest {
      * MainView at a window size and theme, sidebar included, with Settings
      * mounted the way its nav button mounts it. Never shown: a scene lays out
      * without a stage, and a stage would clamp the size to the runner's screen.
+     *
+     * <p>Laid out until it settles. This used to measure after one pass, and
+     * a scene with no stage gets no other: TextAreaSkin settles its own bar in
+     * a runLater after the pass, and 206 parents were still waiting for
+     * layout when the box was measured.</p>
      */
     private Scene mainViewShowingSettings(String theme, int width, int height) {
+        Scene scene = buildMainViewShowingSettings(theme, width, height);
+        SettledLayout.settle(scene);
+        return scene;
+    }
+
+    private Scene buildMainViewShowingSettings(String theme, int width, int height) {
         final Scene[] holder = new Scene[1];
         interact(() -> {
             try {
