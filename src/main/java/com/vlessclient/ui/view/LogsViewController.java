@@ -210,7 +210,9 @@ public class LogsViewController {
         MenuItem selectAllItem = new MenuItem(I18n.get("logs.select.all"));
         selectAllItem.setOnAction(e -> logListView.getSelectionModel().selectAll());
         MenuItem clearItem = new MenuItem(I18n.get("button.clear"));
-        clearItem.setOnAction(e -> sourceLogLines.clear());
+        // Asks first, as the toolbar's Clear does: this one, under Select all,
+        // emptied the only copy of the core's output on one click.
+        clearItem.setOnAction(e -> onClearClicked());
         ContextMenu contextMenu = new ContextMenu();
         contextMenu.getItems().addAll(copyItem, copyAllItem, selectAllItem, clearItem);
         logListView.setContextMenu(contextMenu);

@@ -444,6 +444,25 @@ public class LogsViewTest extends ApplicationTest {
         assertThat(source).isEmpty();
     }
 
+    /**
+     * Clear in the log's context menu, directly under Select all, still
+     * emptied the log at once after the toolbar's Clear had learned to ask.
+     */
+    @Test
+    void clearingTheLogFromItsContextMenuAsksFirstToo() {
+        ListView<String> list = lookup("#logListView").query();
+        ObservableList<String> source = sourceOf(list);
+        interact(() -> source.setAll(logLine(0), logLine(1)));
+        javafx.scene.control.MenuItem clear = list.getContextMenu().getItems().getLast();
+
+        Platform.runLater(clear::fire);
+        DialogPane confirm = awaitDialogAsking(I18n.get("logs.clear.confirm"));
+        interact(buttonFor(confirm, ButtonBar.ButtonData.CANCEL_CLOSE)::fire);
+        WaitForAsyncUtils.waitForFxEvents();
+
+        assertThat(source).as("the log after Cancel").hasSize(2);
+    }
+
     /** The showing dialog that asks {@code question}, once one does. */
     private DialogPane awaitDialogAsking(String question) {
         return Await.untilValue("a dialog asking: " + question, () -> {

@@ -10,6 +10,7 @@ import com.vlessclient.testing.ThreadDump;
 import com.vlessclient.testing.UiTest;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import javafx.fxml.FXMLLoader;
@@ -156,6 +157,36 @@ public class MainViewTest extends ApplicationTest {
     }
 
     /** The main window's Shortcut+F, as the scene runs it for the key. */
+    /**
+     * Shortcut+W hid the window outright, where its close button asks first
+     * whether there is a tray icon to bring it back from and quits when there
+     * is none. On stock GNOME, which has no tray, the window vanished with the
+     * app, and the tunnel, still running and no way back to either.
+     */
+    @Test
+    void theCloseShortcutAsksTheWindowAsItsCloseButtonDoes() {
+        Scene scene = lookup("#btnDashboard").queryButton().getScene();
+        Stage stage = (Stage) scene.getWindow();
+        Runnable close = scene.getAccelerators().get(KeyCombination.keyCombination("Shortcut+W"));
+        assertThat(close).as("the main window's Shortcut+W").isNotNull();
+        AtomicBoolean asked = new AtomicBoolean();
+        interact(() -> stage.setOnCloseRequest(event -> {
+            asked.set(true);
+            event.consume();
+        }));
+        try {
+            interact(close);
+
+            assertThat(asked).as("the close request the window answers").isTrue();
+            assertThat(stage.isShowing()).as("left to what the window decides").isTrue();
+        } finally {
+            interact(() -> {
+                stage.setOnCloseRequest(null);
+                stage.show();
+            });
+        }
+    }
+
     private static Runnable findShortcut(Scene scene) {
         Runnable find = scene.getAccelerators().get(KeyCombination.keyCombination("Shortcut+F"));
         assertThat(find).as("the main window's Shortcut+F").isNotNull();
