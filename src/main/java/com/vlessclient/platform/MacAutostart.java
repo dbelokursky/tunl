@@ -1,9 +1,15 @@
 package com.vlessclient.platform;
 
 import java.io.IOException;
+import java.lang.foreign.FunctionDescriptor;
+import java.lang.foreign.Linker;
+import java.lang.foreign.ValueLayout;
+import java.lang.invoke.MethodHandle;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.function.IntSupplier;
+import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,6 +28,12 @@ import org.slf4j.LoggerFactory;
  * started, and loading a {@code RunAtLoad} agent would immediately spawn a
  * second instance. Writing (or deleting) the file is enough — launchd picks
  * it up at the next login.</p>
+ *
+ * <p>System Settings, General, Login Items ("Allow in the Background")
+ * switches the agent off without touching the file: launchd records the label
+ * as disabled for the user's session, which {@link #isEnabled()} reads with
+ * {@code launchctl print-disabled} and enabling clears with
+ * {@code launchctl enable}.</p>
  */
 public final class MacAutostart implements Autostart {
 
@@ -30,19 +42,44 @@ public final class MacAutostart implements Autostart {
     private static final String LABEL = "com.vlessclient.client";
     private static final String PLIST_NAME = LABEL + ".plist";
 
+    /**
+     * Our label in {@code launchctl print-disabled} output, switched off: it
+     * prints {@code "label" => disabled} since macOS 13 and
+     * {@code "label" => true} before.
+     */
+    private static final Pattern SWITCHED_OFF = Pattern.compile(
+            "^\\s*\"" + Pattern.quote(LABEL) + "\"\\s*=>\\s*(?:disabled|true)\\s*$",
+            Pattern.MULTILINE);
+
     private final Path launchAgentsDir;
+    private final CommandRunner launchctl;
+    private final IntSupplier uid;
 
     public MacAutostart() {
-        this(Path.of(System.getProperty("user.home"), "Library", "LaunchAgents"));
+        this(Path.of(System.getProperty("user.home"), "Library", "LaunchAgents"),
+                CommandRunner.system(), MacAutostart::processUid);
     }
 
-    MacAutostart(Path launchAgentsDir) {
+    /**
+     * Test seam.
+     *
+     * @param launchAgentsDir where the agent's plist lives
+     * @param launchctl runs {@code launchctl}
+     * @param uid the user whose login session launchd starts the agent in, or
+     *     -1 when it cannot be told
+     */
+    MacAutostart(Path launchAgentsDir, CommandRunner launchctl, IntSupplier uid) {
         this.launchAgentsDir = launchAgentsDir;
+        this.launchctl = launchctl;
+        this.uid = uid;
     }
 
     @Override
     public boolean isEnabled() {
-        return Files.isRegularFile(plistPath());
+        // The file alone was read. Switching Tunl off under Login Items leaves
+        // it in place, so Settings kept the box ticked for an agent launchd no
+        // longer starts.
+        return Files.isRegularFile(plistPath()) && !switchedOffInLaunchd();
     }
 
     // Synchronized with refresh(), which runs off the launch thread at start:
@@ -52,6 +89,11 @@ public final class MacAutostart implements Autostart {
     public synchronized void setEnabled(boolean enabled) throws IOException {
         if (enabled) {
             install();
+            // Rewriting the plist alone left launchd's switch saying off,
+            // which wins, so ticking the box again did nothing.
+            if (switchedOffInLaunchd()) {
+                clearLaunchdSwitch();
+            }
         } else {
             uninstall();
         }
@@ -67,6 +109,45 @@ public final class MacAutostart implements Autostart {
         } catch (IOException e) {
             log.warn("Could not refresh LaunchAgent plist", e);
         }
+    }
+
+    /**
+     * Whether launchd has the agent switched off for this user's session. An
+     * answer that cannot be had or read leaves the file to decide, as it did
+     * before this was asked at all.
+     */
+    private boolean switchedOffInLaunchd() {
+        String domain = guiDomain();
+        if (domain == null) {
+            return false;
+        }
+        try {
+            CommandRunner.Result result =
+                    launchctl.run(List.of("launchctl", "print-disabled", domain));
+            return result.exitCode() == 0 && SWITCHED_OFF.matcher(result.output()).find();
+        } catch (IOException e) {
+            log.warn("Could not ask launchd whether the login item is switched off", e);
+            return false;
+        }
+    }
+
+    private void clearLaunchdSwitch() {
+        try {
+            CommandRunner.Result result = launchctl.run(
+                    List.of("launchctl", "enable", guiDomain() + "/" + LABEL));
+            if (result.exitCode() != 0) {
+                log.warn("launchctl enable returned {}: {}",
+                        result.exitCode(), result.output());
+            }
+        } catch (IOException e) {
+            log.warn("Could not clear launchd's switch for the login item", e);
+        }
+    }
+
+    /** launchd's domain for this user's login session, or null without a uid. */
+    private String guiDomain() {
+        int id = uid.getAsInt();
+        return id < 0 ? null : "gui/" + id;
     }
 
     private void install() throws IOException {
@@ -144,6 +225,40 @@ public final class MacAutostart implements Autostart {
         plist.append("</dict>\n");
         plist.append("</plist>\n");
         return plist.toString();
+    }
+
+    /**
+     * This process's user id, read once: it does not change while the app runs.
+     *
+     * @return the uid, or -1 where it cannot be read
+     */
+    static int processUid() {
+        return ProcessUser.UID;
+    }
+
+    private static final class ProcessUser {
+
+        static final int UID = currentUid();
+
+        /**
+         * The user id from libc's {@code getuid}: launchd names the user's
+         * login session {@code gui/<uid>}, and Java has no API for it.
+         *
+         * @return the uid, or -1 where it cannot be read
+         */
+        private static int currentUid() {
+            try {
+                Linker linker = Linker.nativeLinker();
+                MethodHandle getuid = linker.downcallHandle(
+                        linker.defaultLookup().findOrThrow("getuid"),
+                        FunctionDescriptor.of(ValueLayout.JAVA_INT));
+                return (int) getuid.invokeExact();
+            } catch (Throwable t) {
+                log.warn("Cannot read the user id launchd knows this session by: {}",
+                        t.toString());
+                return -1;
+            }
+        }
     }
 
     private static String xmlEscape(String value) {
