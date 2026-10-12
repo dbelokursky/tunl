@@ -93,6 +93,23 @@ public interface TunLauncher {
     }
 
     /**
+     * Whether ending a launched process that is still at its elevation prompt
+     * takes the prompt down with it, so that no core can start from it later.
+     *
+     * <p>Yes for the macOS administrator dialog osascript raises and for the
+     * PolicyKit dialog pkexec does: each belongs to the process that asked.
+     * No for UAC, whose consent dialog outlives the PowerShell that asked for
+     * it and, approved later, starts an elevated core that nothing tracks;
+     * left running, that launcher finds the stop file and ends it at once.
+     * The default, for a launcher that does not say, is no.</p>
+     *
+     * @return true when ending the launcher withdraws its prompt
+     */
+    default boolean promptEndsWithLauncher() {
+        return false;
+    }
+
+    /**
      * Returns the launcher for the host platform.
      *
      * @return the launcher for the host platform

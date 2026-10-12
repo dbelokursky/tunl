@@ -150,6 +150,17 @@ public final class LinuxTunLauncher implements TunLauncher {
     }
 
     /**
+     * {@inheritDoc}
+     *
+     * <p>pkexec's PolicyKit dialog goes with pkexec. Once it is answered,
+     * pkexec has become the root wrapper, which the app cannot end.</p>
+     */
+    @Override
+    public boolean promptEndsWithLauncher() {
+        return true;
+    }
+
+    /**
      * True when the binary already carries {@code cap_net_admin} — the xattr
      * survives restarts but not file replacement (core updates).
      */

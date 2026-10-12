@@ -66,16 +66,10 @@ public class ConnectionService {
     private static final Logger log = LoggerFactory.getLogger(ConnectionService.class);
 
     /**
-     * How long a connect waits for a previous core to exit before giving up and
-     * letting the engine reject the start. Generous: a stop is bounded by the
-     * engine's own SIGTERM grace plus force-kill.
-     */
-    private static final Duration STOP_WAIT = Duration.ofSeconds(15);
-
-    /**
-     * How long a connect waits for a tunnel an earlier run's core left to
-     * close (SingBoxEngine#awaitEarlierTunnel). One such core took about half
-     * a minute after an update.
+     * How long a connect waits for a tunnel still closing: one an earlier
+     * run's core left (SingBoxEngine#awaitEarlierTunnel), or one this run
+     * stopped that outlasted the stop (SingBoxEngine#awaitStopped). One such
+     * core took about half a minute after an update.
      */
     private static final Duration EARLIER_TUNNEL_WAIT = Duration.ofSeconds(45);
 
@@ -479,7 +473,8 @@ public class ConnectionService {
      * @param modeOverride proxy mode to use, or null to take it from settings
      * @return what happened, the server the core was pointed at, and the
      *     servers it was started without
-     * @throws IOException           if the core could not be started
+     * @throws IOException           if the core could not be started, or the one
+     *                               being stopped was still closing after the wait
      * @throws IllegalStateException if called on the JavaFX thread
      */
     public ConnectAttempt connect(ProxyMode modeOverride) throws IOException {
@@ -538,7 +533,19 @@ public class ConnectionService {
         }
         restartMode = mode;
         log.info("Connecting to server: {} ({})", active.getName(), mode);
-        engine.awaitStopped(STOP_WAIT);
+        // A TUN core may take longer to close than its stop waits, and the
+        // stop returns with the launcher still running. This waited fifteen
+        // seconds for it with nothing on screen, and the start was then
+        // refused as "already running", which no caller showed: the click did
+        // nothing, the tunnel stayed wanted and down, and an agent was told
+        // it was up. It is waited for as an earlier run's tunnel is, showing
+        // Connecting, and one that outlasts the wait is said.
+        if (!engine.awaitStopped(EARLIER_TUNNEL_WAIT, allowed)) {
+            if (!allowed.getAsBoolean()) {
+                return new ConnectAttempt(Outcome.CANCELLED, active);
+            }
+            throw new IOException(I18n.get("engine.stop.still.closing"));
+        }
         if (!allowed.getAsBoolean()) {
             return new ConnectAttempt(Outcome.CANCELLED, active);
         }

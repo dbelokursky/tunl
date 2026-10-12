@@ -158,6 +158,13 @@ public class SingBoxEngine {
     private volatile boolean exitDeclined;
 
     /**
+     * The session whose core has shown it is up: it logged its start, or its
+     * controller answered. A launch that prompts each time and has shown
+     * neither is still at its prompt; see {@link #stillAtItsPrompt}.
+     */
+    private volatile Process answeredSession;
+
+    /**
      * Set once the app quits ({@link #close()}, the shutdown hook): no core
      * starts after it. A start in flight at quit used to launch its core after
      * the shutdown had looked, found nothing running and gone on, and that
@@ -403,12 +410,15 @@ public class SingBoxEngine {
                 sessionProcess.getInputStream(),
                 logLines,
                 MAX_LOG_LINES,
-                line -> Platform.runLater(() -> {
-                    if (!stopRequested && sessionProcess == process
-                            && connectionState.get() == ConnectionState.CONNECTING) {
-                        connectionState.set(ConnectionState.CONNECTED);
-                    }
-                })
+                line -> {
+                    answeredSession = sessionProcess;
+                    Platform.runLater(() -> {
+                        if (!stopRequested && sessionProcess == process
+                                && connectionState.get() == ConnectionState.CONNECTING) {
+                            connectionState.set(ConnectionState.CONNECTED);
+                        }
+                    });
+                }
         );
         logReader.start();
 
@@ -471,8 +481,12 @@ public class SingBoxEngine {
         Thread watchdog = new Thread(() -> {
             try {
                 if (controller == null) {
+                    // Promotes the session, but says nothing of a prompt: a
+                    // launcher waiting at one is alive all the same.
                     Thread.sleep(CONNECTED_FALLBACK_DELAY_MS);
-                } else if (!awaitController(proc, controller)) {
+                } else if (awaitController(proc, controller)) {
+                    answeredSession = proc;
+                } else {
                     return;
                 }
             } catch (InterruptedException e) {
@@ -617,22 +631,42 @@ public class SingBoxEngine {
         }
         log.info("Waiting up to {} s for the tunnel an earlier core left ({}) to close",
                 timeout.toSeconds(), earlier.get().pid());
+        if (!awaitExit(earlier.get(), timeout, stillWanted,
+                "The earlier tunnel ({}) is still up after {} s; starting anyway")) {
+            return false;
+        }
+        // Drops the record of the core that has now exited.
+        tunnelRecord.runningCore();
+        log.info("The earlier tunnel has closed");
+        return true;
+    }
+
+    /**
+     * Shows the connect as under way while {@code core} closes.
+     *
+     * @param timedOut what the log says when the wait runs out, with the
+     *                 core's pid and the seconds waited
+     * @return true once it has exited; false when the wait ran out, which
+     *         leaves CONNECTING to the start or {@link #connectEnded}, or was
+     *         called off, which takes it back
+     */
+    private boolean awaitExit(ProcessHandle core, Duration timeout, BooleanSupplier stillWanted,
+                              String timedOut) {
         showingEarlierWait = true;
         Platform.runLater(() -> connectionState.set(ConnectionState.CONNECTING));
         long deadline = System.nanoTime() + timeout.toNanos();
-        while (earlier.get().isAlive()) {
+        while (core.isAlive()) {
             if (!stillWanted.getAsBoolean()) {
                 showingEarlierWait = false;
                 publishNotStarted();
                 return false;
             }
             if (System.nanoTime() >= deadline) {
-                log.warn("The earlier tunnel ({}) is still up after {} s; starting anyway",
-                        earlier.get().pid(), timeout.toSeconds());
+                log.warn(timedOut, core.pid(), timeout.toSeconds());
                 return false;
             }
             try {
-                earlier.get().onExit().get(EARLIER_TUNNEL_POLL_MS, TimeUnit.MILLISECONDS);
+                core.onExit().get(EARLIER_TUNNEL_POLL_MS, TimeUnit.MILLISECONDS);
             } catch (TimeoutException stillUp) {
                 // Asked again, with the deadline and the request.
             } catch (ExecutionException e) {
@@ -644,9 +678,6 @@ public class SingBoxEngine {
                 return false;
             }
         }
-        // Drops the record of the core that has now exited.
-        tunnelRecord.runningCore();
-        log.info("The earlier tunnel has closed");
         return true;
     }
 
@@ -670,7 +701,10 @@ public class SingBoxEngine {
      *
      * <p>Sends SIGTERM via {@link Process#destroy()}, waits up to 5 seconds for
      * the process to exit, then force-kills it if still running. Cleans up the
-     * temporary configuration file.</p>
+     * temporary configuration file. A TUN core is asked to stop through its
+     * launcher instead, which is not killed unless it is still at its prompt;
+     * one still closing after the grace is left to close, and
+     * {@link #isStopping()} says so until it has.</p>
      */
     public void stop() {
         synchronized (lifecycle) {
@@ -712,7 +746,9 @@ public class SingBoxEngine {
         }
 
         cleanupConfigFile();
-        if (p.isAlive()) {
+        // A direct core is killed above; one an interrupt cut the wait short
+        // for may still be in the process table, but it is ending.
+        if (tun && p.isAlive()) {
             // A TUN core may take longer than the grace to close: sing-box
             // gives itself ten seconds, and one took half a minute. Its
             // launcher used to be killed here, which cannot stop a root core
@@ -720,7 +756,7 @@ public class SingBoxEngine {
             // connect found nothing stopping and no earlier tunnel, and
             // started a second tunnel beside the one still closing. The
             // launcher and its record stay until it exits, so a connect waits
-            // for it (isStopping), and so does the next run; its monitor
+            // for it (awaitStopped), and so does the next run; its monitor
             // cleans up after it then.
             log.warn("The TUN core is still closing after {} s; waiting for it",
                     STOP_TIMEOUT_SECONDS);
@@ -741,13 +777,26 @@ public class SingBoxEngine {
      * app exited with the system's proxy still pointing at the dead core, and
      * the next launch, finding the record of its port already removed, did
      * not clear it either. The monitor skips what was done here.
+     *
+     * <p>Done with the caller's interrupt set aside. The guard runs platform
+     * commands, which an interrupt fails at once, and a quit interrupts a
+     * recovery restart or an agent's disconnect that may be stopping the
+     * core right then: the guard failed, the session still counted as
+     * cleaned up, and nothing put the system's proxy back.</p>
      */
     private void endSession(Process ended, boolean tun) {
-        restoreSystemProxyIfNeeded();
-        if (tun) {
-            tunLauncher.cleanupSession();
+        boolean interrupted = Thread.interrupted();
+        try {
+            restoreSystemProxyIfNeeded();
+            if (tun) {
+                tunLauncher.cleanupSession();
+            }
+            cleanedSession = ended;
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
-        cleanedSession = ended;
     }
 
     /**
@@ -760,22 +809,46 @@ public class SingBoxEngine {
      * ({@code StdinWatch}). The wrapper terminates sing-box and exits once the
      * core has. No password prompt.</p>
      *
-     * <p>The launcher is never killed: that cannot stop a root core any
-     * sooner, and only took away what told the app the core still ran. One
-     * still running after the grace keeps its stop file too, for a privileged
-     * side that has yet to look; its monitor removes it.</p>
+     * <p>A launcher with a core behind it is never killed: that cannot stop a
+     * root core any sooner, and only took away what told the app the core
+     * still ran. One still running after the grace keeps its stop file too,
+     * for a privileged side that has yet to look; its monitor removes it.</p>
+     *
+     * <p>A launcher still at its prompt after the grace is ended, where that
+     * takes the prompt down ({@link #stillAtItsPrompt}). Left running, the
+     * password or PolicyKit dialog stayed up with no time limit after the
+     * Disconnect, and answered later it started a root core only for the
+     * wrapper to stop it again.</p>
      */
     private void stopPrivilegedProcess(Process p) {
         signalStop();
         closeStdin(p);
         try {
             p.waitFor(STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            if (p.isAlive() && stillAtItsPrompt(p)) {
+                log.info("The TUN launch is still at its elevation prompt; withdrawing it");
+                p.destroyForcibly();
+                p.waitFor(2, TimeUnit.SECONDS);
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
         if (!p.isAlive()) {
             removeStopSignal();
         }
+    }
+
+    /**
+     * Whether a TUN launch is still at the elevation prompt it raises on
+     * every launch, with no core behind it: its launcher's prompt goes with
+     * the launcher, and the core has neither logged its start nor answered
+     * on its controller, nor has the launcher started anything yet.
+     */
+    private boolean stillAtItsPrompt(Process launcher) {
+        return launchPrompts
+                && tunLauncher.promptEndsWithLauncher()
+                && answeredSession != launcher
+                && launcher.descendants().findAny().isEmpty();
     }
 
     /** Creates the stop-signal file a root TUN wrapper polls for; best effort. */
@@ -854,9 +927,10 @@ public class SingBoxEngine {
      *
      * <p>A stop can take seconds — a SIGTERM grace period, then a force-kill —
      * so a reconnect (server switch, health-check auto-reconnect) that started
-     * immediately after {@link #stop()} would hit "already running". Callers on
-     * the connect path wait here first. Must not be called on the JavaFX thread:
-     * it sleeps.</p>
+     * immediately after {@link #stop()} would hit "already running". The
+     * connect path waits through {@link #awaitStopped(Duration, BooleanSupplier)},
+     * which shows the wait and can be called off; this one shows nothing.
+     * Must not be called on the JavaFX thread: it sleeps.</p>
      *
      * @param timeout how long to wait
      * @return true if the core is stopped by the deadline
@@ -875,6 +949,35 @@ public class SingBoxEngine {
             Thread.currentThread().interrupt();
             return !running.isAlive();
         }
+    }
+
+    /**
+     * Waits for this engine's core, told to stop and still closing, to exit
+     * before another is started. The connect shows as under way meanwhile.
+     * Call it off the FX thread, on the connect path.
+     *
+     * <p>A TUN core may take longer to close than a stop waits for, and the
+     * stop returns with its launcher still running ({@link #isStopping}). The
+     * next connect waited for it with nothing on screen, and its start was
+     * then refused as "already running", which no caller showed: the click
+     * did nothing, and the tunnel stayed wanted and down. It is waited for as
+     * an earlier run's tunnel is ({@link #awaitEarlierTunnel}).</p>
+     *
+     * @param timeout     how long to wait at most
+     * @param stillWanted asked while waiting; false calls the connect off
+     * @return true when no core of this engine runs any more; false when the
+     *         wait ran out, which leaves CONNECTING for {@link #connectEnded},
+     *         or was called off
+     */
+    public boolean awaitStopped(Duration timeout, BooleanSupplier stillWanted) {
+        Process closing = process;
+        if (closing == null || !closing.isAlive()) {
+            return true;
+        }
+        log.info("Waiting up to {} s for the core still closing ({}) to exit",
+                timeout.toSeconds(), closing.pid());
+        return awaitExit(closing.toHandle(), timeout, stillWanted,
+                "The core still closing ({}) is up after {} s");
     }
 
     /**

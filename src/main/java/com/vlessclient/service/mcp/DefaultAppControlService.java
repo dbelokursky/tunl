@@ -383,9 +383,11 @@ public final class DefaultAppControlService implements AppControlService {
             throw new McpToolException("Failed to start sing-box: " + e.getMessage(), e);
         }
         if (attempt.outcome() == ConnectionService.Outcome.ALREADY_RUNNING
-                && !serverGiven && !modeGiven) {
+                && !serverGiven && !modeGiven && runningMode().isPresent()) {
             // Another request started a core since the check above: the
             // tunnel the agent asked for is up, as it would have been found.
+            // Only while one does run: a refusal with none running, as for a
+            // core still closing from a stop, was reported as a connect.
             return getStatus();
         }
         if (!attempt.started()) {

@@ -121,6 +121,16 @@ public final class MacTunLauncher implements TunLauncher {
     }
 
     /**
+     * {@inheritDoc}
+     *
+     * <p>The administrator dialog goes with the osascript that raised it.</p>
+     */
+    @Override
+    public boolean promptEndsWithLauncher() {
+        return true;
+    }
+
+    /**
      * Gives the start up when its thread was interrupted: the start is being
      * called off. The sudo check reads an interrupt as "not set up", and the
      * launch went on to the setup or the every-connect password dialog, which
