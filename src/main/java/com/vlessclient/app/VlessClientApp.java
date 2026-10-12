@@ -207,8 +207,11 @@ public class VlessClientApp extends Application {
             }
             Desktop desktop = Desktop.getDesktop();
             if (desktop.isSupported(Desktop.Action.APP_SUDDEN_TERMINATION)) {
-                desktop.enableSuddenTermination();
-                log.debug("Enabled sudden termination");
+                // Enabled, it told macOS the app may be killed at logout or
+                // shutdown with no quit event: no stop, no state saved, and
+                // the core left to the next launch's cleanup.
+                desktop.disableSuddenTermination();
+                log.debug("Disabled sudden termination");
             }
             if (desktop.isSupported(Desktop.Action.APP_QUIT_STRATEGY)) {
                 desktop.setQuitStrategy(QuitStrategy.CLOSE_ALL_WINDOWS);
