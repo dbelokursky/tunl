@@ -54,8 +54,16 @@ public final class RoutingRuleCheck {
     /** Go's limit on a repeat count, and on the counts of nested repeats multiplied. */
     private static final int RE2_MAX_REPEAT = 1000;
 
-    /** A repeat as Go reads one: {n}, {n,} or {n,m}. Anything else is a literal brace. */
-    private static final Pattern REPEAT = Pattern.compile("\\{([0-9]+)(,([0-9]*))?}");
+    /**
+     * A repeat as Go reads one: {n}, {n,} or {n,m}, each count without a
+     * leading zero. Anything else is a literal brace: {01} as well, which
+     * Java reads as a count.
+     */
+    private static final Pattern REPEAT =
+            Pattern.compile("\\{(0|[1-9][0-9]*)(,(0|[1-9][0-9]*)?)?}");
+
+    /** The inline flags Go has, as in (?i) or (?s-m:, with a flag after any "-". */
+    private static final Pattern RE2_FLAGS = Pattern.compile("[imsU]*(?:-[imsU]+)?");
 
     private RoutingRuleCheck() {
     }
@@ -127,23 +135,29 @@ public final class RoutingRuleCheck {
      * lookaround, an atomic group, a possessive quantifier, a back-reference,
      * an escape Go does not have ({@code \Z}, {@code \G}, {@code \h} and the
      * like, or any character outside ASCII), a property name only Java knows
-     * ({@code \p{Lower}}, {@code \p{IsLatin}}), a repeat of a repeat
-     * ({@code a{2}{3}}), or repeat counts over Go's limit of 1000, alone or
-     * multiplied along nested repeats ({@code (a{100}){100}}). Each of those
-     * passed here and then stopped every connect. Null when there is none.
+     * ({@code \p{Lower}}, {@code \p{IsLatin}}), an inline flag only Java has
+     * ({@code (?x)}, {@code (?u)}), a repeat of a repeat ({@code a{2}{3}}),
+     * or repeat counts over Go's limit of 1000, alone or multiplied along
+     * nested repeats ({@code (a{100}){100}}). Each of those passed here and
+     * then stopped every connect. Null when there is none.
      */
     private static String re2Unsupported(String regex) {
         boolean inClass = false;
-        // Per open group, the largest product of nested repeat counts in it;
-        // the whole expression is the first.
+        // Per open group, the largest product of nested repeat counts among
+        // its finished atoms; the whole expression is the first.
         Deque<int[]> groups = new ArrayDeque<>();
         groups.push(new int[] {1});
+        // The atom a repeat would apply to. It counts in its group only once
+        // the next one starts, since a {0} after it still takes it out: Go
+        // does not look inside a repeat of at most zero, and refused nothing
+        // in ((a{500}){0}){3}, which was refused here.
         int atomWeight = 1;
         boolean afterRepeat = false;
         int length = regex.length();
         for (int i = 0; i < length; i++) {
             char c = regex.charAt(i);
             if (c == '\\' && i + 1 < length) {
+                settle(groups, atomWeight);
                 char next = regex.charAt(i + 1);
                 atomWeight = 1;
                 afterRepeat = false;
@@ -176,6 +190,14 @@ public final class RoutingRuleCheck {
                     }
                     i = end;
                     continue;
+                } else if (next == 'x' && i + 2 < length && regex.charAt(i + 2) == '{') {
+                    // A code point, as in \x{2014}: its braces hold no repeat
+                    // count. Read as one, \x{2014} was over Go's 1000 and
+                    // \x{41}{2} a repeat of a repeat, so a stored rule the core
+                    // takes was left out. Java compiled it: the brace is closed.
+                    int close = regex.indexOf('}', i + 3);
+                    i = close < 0 ? length : close;
+                    continue;
                 } else if (Character.isLetter(next)
                         && RE2_ESCAPE_LETTERS.indexOf(next) < 0) {
                     return escape;
@@ -189,6 +211,7 @@ public final class RoutingRuleCheck {
             }
             if (c == '[') {
                 inClass = true;
+                settle(groups, atomWeight);
                 atomWeight = 1;
                 afterRepeat = false;
                 // A ] straight after [ or [^ belongs to the class.
@@ -205,6 +228,10 @@ public final class RoutingRuleCheck {
                     return group;
                 }
             }
+            String flags = c == '(' ? unsupportedFlags(regex, i) : null;
+            if (flags != null) {
+                return flags;
+            }
             if ((c == '*' || c == '+' || c == '?') && i + 1 < length
                     && regex.charAt(i + 1) == '+' && !isGroupFlag(regex, i)) {
                 return regex.substring(i, i + 2);
@@ -217,16 +244,14 @@ public final class RoutingRuleCheck {
                 }
                 int min = repeatCount(repeat.group(1));
                 int max = repeat.group(2) == null ? min
-                        : repeat.group(3).isEmpty() ? -1 : repeatCount(repeat.group(3));
+                        : repeat.group(3) == null ? -1 : repeatCount(repeat.group(3));
                 // Go counts an open-ended repeat by its minimum.
                 int count = max < 0 ? min : max;
                 if (afterRepeat || min > RE2_MAX_REPEAT || max > RE2_MAX_REPEAT
                         || count >= 2 && (long) count * atomWeight > RE2_MAX_REPEAT) {
                     return text;
                 }
-                atomWeight = count == 0 ? 1 : Math.max(1, count) * atomWeight;
-                int[] top = groups.peek();
-                top[0] = Math.max(top[0], atomWeight);
+                atomWeight = max == 0 ? 0 : Math.max(1, count) * atomWeight;
                 afterRepeat = true;
                 i = repeat.end() - 1;
                 continue;
@@ -238,18 +263,45 @@ public final class RoutingRuleCheck {
                 continue;
             }
             afterRepeat = false;
+            settle(groups, atomWeight);
             if (c == '(') {
                 groups.push(new int[] {1});
                 atomWeight = 1;
             } else if (c == ')' && groups.size() > 1) {
                 atomWeight = groups.pop()[0];
-                int[] outer = groups.peek();
-                outer[0] = Math.max(outer[0], atomWeight);
             } else {
                 atomWeight = 1;
             }
         }
         return null;
+    }
+
+    /** Counts the atom just finished in its group's largest product. */
+    private static void settle(Deque<int[]> groups, int atomWeight) {
+        int[] group = groups.peek();
+        group[0] = Math.max(group[0], atomWeight);
+    }
+
+    /**
+     * The inline flags opened at {@code index}, as in (?x) or (?i-:, when Go
+     * refuses them; null for any other group, named groups included. Java
+     * also has c, d, u and x, and takes a "-" with no flag after it: such a
+     * rule passed here, and the core refused the whole configuration over it.
+     */
+    private static String unsupportedFlags(String regex, int index) {
+        int start = index + 2;
+        if (!regex.startsWith("(?", index) || start >= regex.length()
+                || regex.charAt(start) == '<' || regex.charAt(start) == 'P') {
+            return null;
+        }
+        // Java compiled it, so the flags run to a ) or a :.
+        int end = start;
+        while (end < regex.length() && regex.charAt(end) != ')' && regex.charAt(end) != ':') {
+            end++;
+        }
+        return RE2_FLAGS.matcher(regex.substring(start, end)).matches()
+                ? null
+                : regex.substring(index, Math.min(end + 1, regex.length()));
     }
 
     /** A repeat count's digits as a number; more digits than Go's limit has, over it. */
