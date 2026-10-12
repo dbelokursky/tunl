@@ -84,6 +84,42 @@ class TrayConnectFailureTest {
     }
 
     /**
+     * The menu says "Disconnect" while a start shows Connecting, which it does
+     * with no process yet: during a wait for an earlier tunnel or a setup
+     * prompt. Decided by the process instead, the click started a second
+     * connect, and the tunnel came up anyway.
+     */
+    @Test
+    void aDisconnectClickedWhileConnectingCallsTheConnectOff() {
+        SingBoxEngine connecting = new SingBoxEngine(null, null) {
+            @Override
+            public javafx.beans.property.ReadOnlyObjectProperty<ConnectionState>
+                    connectionStateProperty() {
+                return new javafx.beans.property.ReadOnlyObjectWrapper<>(
+                        ConnectionState.CONNECTING).getReadOnlyProperty();
+            }
+        };
+        List<String> asked = new ArrayList<>();
+        TrayIconService tray = new TrayIconService(connecting, null,
+                new StubConnections(tempDir) {
+                    @Override
+                    public ConnectAttempt connect() {
+                        asked.add("connect");
+                        return new ConnectAttempt(Outcome.CANCELLED, null);
+                    }
+
+                    @Override
+                    public void disconnect() {
+                        asked.add("disconnect");
+                    }
+                }, null, null, null);
+
+        tray.toggleConnection();
+
+        assertThat(asked).containsExactly("disconnect");
+    }
+
+    /**
      * Recovery giving up leaves the user's request for a tunnel standing,
      * with nothing restarting it and the subscriptions held back. With the
      * window hidden, the tray's colour was all that changed.
