@@ -60,6 +60,32 @@ class TunnelRecoveryServiceTest {
                 .containsExactly(10L, 20L, 40L, 80L, 160L, 300L, 300L, 300L);
     }
 
+    /**
+     * With the checks on and every target removed no verdict comes, and only a
+     * verdict reset the backoff: each crash a restart had recovered from still
+     * added to it, until every crash left the tunnel down for five minutes.
+     */
+    @Test
+    void aRestartThatWorksResetsTheBackoffWhenNoVerdictWillCome() {
+        recovery.close();
+        settings.setHealthCheckTargets(List.of());
+        ManualScheduler other = new ManualScheduler();
+        recovery = new TunnelRecoveryService(() -> settings, guard -> guard.getAsBoolean(),
+                () -> false, other);
+        recovery.connectionRequested();
+        recovery.onConnectionState(ConnectionState.CONNECTED);
+
+        for (int crash = 0; crash < 3; crash++) {
+            recovery.onConnectionState(ConnectionState.ERROR);
+            recovery.onConnectionState(ConnectionState.DISCONNECTED);
+            other.jobs.getLast().run();
+            recovery.onConnectionState(ConnectionState.CONNECTING);
+            recovery.onConnectionState(ConnectionState.CONNECTED);
+        }
+
+        assertThat(other.jobs).extracting(job -> job.seconds).containsExactly(10L, 10L, 10L);
+    }
+
     @Test
     void restoredReachabilityCancelsThePendingRetryAndResetsBackoff() {
         recovery.onHealth(TunnelHealth.BROKEN);

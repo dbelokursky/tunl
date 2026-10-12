@@ -36,7 +36,7 @@ Ready-made installers are on the
 | macOS (Apple Silicon) | `tunl_x.y.z.dmg` | |
 | Windows 10/11 (x64) | `tunl_x.y.z.msi` | installs per-user, no admin rights needed |
 | Debian/Ubuntu (amd64) | `tunl_x.y.z_amd64.deb` | |
-| Debian/Ubuntu (arm64) | `tunl_x.y.z_arm64.deb` | Raspberry Pi 5 and other ARM machines |
+| Debian/Ubuntu (arm64) | `tunl_x.y.z_arm64.deb` | Raspberry Pi 5 and other ARM machines; Debian 13 / Ubuntu 24.04 or newer |
 
 A build of the newest merge to `main` (possibly rough) lives in the
 [**dev-latest**](https://github.com/dbelokursky/tunl/releases/tag/dev-latest)

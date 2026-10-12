@@ -168,6 +168,36 @@ class SingBoxConfigGeneratorRoutingTest {
         assertThat(cidrs.get(1).asString()).isEqualTo("203.0.113.42/32");
     }
 
+    /**
+     * One mistyped address in the bypass list made the core refuse the whole
+     * configuration, so no server could connect until the line was found. The
+     * line is left out, and the rest of the list still goes direct.
+     */
+    @Test
+    void bypassList_aLineTheCoreCannotReadIsLeftOutAndTheRestStay() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setBypassList(List.of("192.168.1.256", "10.0.0.0/33", "dead:beef", ".",
+                "*.", "203.0.113.42", "example.com"));
+
+        for (com.vlessclient.model.ProxyMode mode : com.vlessclient.model.ProxyMode.values()) {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(mode);
+            JsonNode root = parse(generator.generate(createVlessServer(), settings,
+                    routingConfig));
+
+            JsonNode bypass = null;
+            for (JsonNode rule : root.get("route").get("rules")) {
+                if (rule.path("domain").toString().contains("example.com")) {
+                    bypass = rule;
+                }
+            }
+            assertThat(bypass).as("%s: the bypass rule", mode).isNotNull();
+            assertThat(bypass.get("ip_cidr").valueStream().map(JsonNode::asString))
+                    .as(mode.name()).containsExactly("203.0.113.42/32");
+            assertThat(bypass.has("domain_suffix")).as("%s: no empty suffix", mode).isFalse();
+        }
+    }
+
     @Test
     void bypassList_emptyProducesNoBypassRule() throws Exception {
         RoutingConfig routingConfig = new RoutingConfig();
@@ -349,6 +379,143 @@ class SingBoxConfigGeneratorRoutingTest {
     }
 
     /**
+     * The route and DNS rules of a generated configuration, wherever they are.
+     */
+    private static List<JsonNode> allRules(JsonNode root) {
+        List<JsonNode> rules = new java.util.ArrayList<>();
+        root.path("route").path("rules").forEach(rules::add);
+        root.path("dns").path("rules").forEach(rules::add);
+        return rules;
+    }
+
+    /**
+     * The core reads an empty matcher list as no condition at all, so a rule
+     * carrying one matches every connection, or every query.
+     */
+    private static void assertNoRuleHasAnEmptyMatcherList(JsonNode root, String label) {
+        for (JsonNode rule : allRules(root)) {
+            for (java.util.Map.Entry<String, JsonNode> field : rule.properties()) {
+                assertThat(field.getValue().isArray() && field.getValue().isEmpty())
+                        .as("%s: %s has an empty %s, which matches everything", label, rule,
+                                field.getKey())
+                        .isFalse();
+            }
+        }
+    }
+
+    /**
+     * A country bypass whose geoip list a GEOIP rule had already named came
+     * out as {@code {"rule_set": [], "outbound": "direct"}}. The core matches
+     * such a rule for every connection, so all traffic the rules above it did
+     * not catch went direct, from the user's own address, while the card said
+     * Connected. The country keeps a rule of its own that names its list.
+     */
+    @Test
+    void aCountryThatAGeoipRuleAlsoNamesKeepsItsOwnRule() throws Exception {
+        for (com.vlessclient.model.ProxyMode mode : com.vlessclient.model.ProxyMode.values()) {
+            for (RoutingRule.RuleAction action : RoutingRule.RuleAction.values()) {
+                RoutingConfig routingConfig = new RoutingConfig();
+                routingConfig.setBypassCountries(List.of("ru"));
+                routingConfig.setRules(List.of(
+                        new RoutingRule(RoutingRule.RuleType.GEOIP, "RU", action)));
+                AppSettings settings = new AppSettings();
+                settings.setProxyMode(mode);
+                String label = mode + "/" + action;
+
+                JsonNode root = parse(generator.generate(createVlessServer(), settings,
+                        routingConfig));
+
+                assertNoRuleHasAnEmptyMatcherList(root, label);
+                List<JsonNode> naming = new java.util.ArrayList<>();
+                for (JsonNode rule : root.get("route").get("rules")) {
+                    if (rule.path("rule_set").toString().contains("\"geoip-ru\"")) {
+                        naming.add(rule);
+                    }
+                }
+                assertThat(naming).as("%s: the user's rule, then the country's", label)
+                        .hasSize(2);
+                assertThat(naming.get(1).get("outbound").asString()).as(label)
+                        .isEqualTo("direct");
+                assertThat(root.get("route").get("rule_set").valueStream()
+                        .filter(set -> "geoip-ru".equals(set.get("tag").asString())))
+                        .as("%s: declared once", label)
+                        .hasSize(1);
+            }
+        }
+    }
+
+    /**
+     * Whatever the sections hold and however they overlap, no generated rule
+     * carries an empty matcher list: the core would match it for everything.
+     */
+    @Test
+    void noRuleEverHasAnEmptyMatcherList() throws Exception {
+        List<List<String>> countrySets = List.of(List.of(), List.of("ru"),
+                List.of("ru", "kz", "cn"), List.of("de"));
+        List<List<RoutingRule>> ruleSets = List.of(List.of(),
+                List.of(new RoutingRule(RoutingRule.RuleType.GEOIP, "ru",
+                                RoutingRule.RuleAction.PROXY),
+                        new RoutingRule(RoutingRule.RuleType.GEOIP, "cn",
+                                RoutingRule.RuleAction.DIRECT),
+                        new RoutingRule(RoutingRule.RuleType.GEOSITE, "cn",
+                                RoutingRule.RuleAction.BLOCK),
+                        new RoutingRule(RoutingRule.RuleType.GEOSITE, "category-ru",
+                                RoutingRule.RuleAction.DIRECT),
+                        new RoutingRule(RoutingRule.RuleType.IP_CIDR, "203.0.113.0/24",
+                                RoutingRule.RuleAction.DIRECT)));
+        List<List<String>> bypassLists = List.of(List.of(),
+                List.of("example.com", "10.0.0.0/8", "*.example.org"));
+        for (List<String> countries : countrySets) {
+            for (List<RoutingRule> rules : ruleSets) {
+                for (List<String> bypass : bypassLists) {
+                    for (com.vlessclient.model.RouteMode routeMode
+                            : com.vlessclient.model.RouteMode.values()) {
+                        for (com.vlessclient.model.ProxyMode mode
+                                : com.vlessclient.model.ProxyMode.values()) {
+                            RoutingConfig routingConfig = new RoutingConfig();
+                            routingConfig.setBypassCountries(countries);
+                            routingConfig.setRules(rules);
+                            routingConfig.setBypassList(bypass);
+                            routingConfig.setMode(routeMode);
+                            AppSettings settings = new AppSettings();
+                            settings.setProxyMode(mode);
+
+                            assertNoRuleHasAnEmptyMatcherList(
+                                    parse(generator.generate(createVlessServer(), settings,
+                                            routingConfig)),
+                                    countries + " " + rules.size() + " rules " + bypass + " "
+                                            + routeMode + " " + mode);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * The last line of defence: a rule that comes out with an empty matcher
+     * list is left out rather than handed to the core, which would match it
+     * for everything. Rules that match everything on purpose, such as the
+     * sniff action, have no list at all and stay.
+     */
+    @Test
+    void aRuleWithAnEmptyMatcherListIsLeftOut() throws Exception {
+        JsonNode rules = parse("""
+                [{"action": "sniff"},
+                 {"rule_set": [], "outbound": "direct"},
+                 {"domain": ["example.com"], "domain_suffix": [], "outbound": "direct"},
+                 {"rule_set": ["geoip-ru"], "outbound": "direct"}]
+                """);
+
+        SingBoxConfigGenerator.dropRulesThatMatchEverything(
+                (tools.jackson.databind.node.ArrayNode) rules);
+
+        assertThat(rules).hasSize(2);
+        assertThat(rules.get(0).path("action").asString()).isEqualTo("sniff");
+        assertThat(rules.get(1).path("rule_set").path(0).asString()).isEqualTo("geoip-ru");
+    }
+
+    /**
      * A stored rule the core would refuse stopped every server from
      * connecting: sing-box refuses the whole configuration over it. It is
      * left out, and the rules around it stay.
@@ -371,6 +538,60 @@ class SingBoxConfigGeneratorRoutingTest {
         assertThat(rules).anySatisfy(rule -> assertThat(rule.path("domain_suffix").toString())
                 .contains("example.com"));
         assertThat(rules).noneSatisfy(rule -> assertThat(rule.has("domain_regex")).isTrue());
+    }
+
+    /**
+     * A rule without a type or an action threw a NullPointerException here,
+     * so every connect failed. It is left out, and the rules around it stay.
+     */
+    @Test
+    void aRuleWithoutATypeOrAnActionIsLeftOut() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setRules(List.of(
+                new RoutingRule(null, "untyped.example", RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN, "no-action.example", null),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN, "kept.example",
+                        RoutingRule.RuleAction.DIRECT)));
+
+        String json = generator.generate(createVlessServer(), defaultSettings, routingConfig);
+
+        assertThat(json).contains("kept.example").doesNotContain("untyped.example")
+                .doesNotContain("no-action.example");
+    }
+
+    /**
+     * The core lower-cases the name a connection carries, and SNI and DNS
+     * carry punycode, but a custom rule's value went out as typed: a rule for
+     * "Gosuslugi.ru" or "госуслуги.рф" showed in the list and matched nothing.
+     * The bypass list had this fixed; the rules now share its spelling.
+     */
+    @Test
+    void aCustomRulesNameIsWrittenAsTheCoreComparesIt() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "Gosuslugi.RU",
+                        RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN,
+                        "пример.рф",
+                        RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX,
+                        ".Пример.рф",
+                        RoutingRule.RuleAction.PROXY),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_KEYWORD, "Ads",
+                        RoutingRule.RuleAction.BLOCK),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_REGEX, "^\\D+\\.Example$",
+                        RoutingRule.RuleAction.BLOCK)));
+
+        JsonNode rules = parse(generator.generate(createVlessServer(), defaultSettings,
+                routingConfig)).get("route").get("rules");
+        String all = rules.toString();
+
+        assertThat(all).contains("\"gosuslugi.ru\"")
+                .contains("\"xn--e1afmkfd.xn--p1ai\"")
+                .contains("\".xn--e1afmkfd.xn--p1ai\"")
+                .contains("\"ads\"")
+                .as("a regex is left alone: lower case would turn \\D into \\d")
+                .contains("^\\\\D+\\\\.Example$");
     }
 
     /** The repository names its lists in lower case: "Google" was a 404, and no core. */

@@ -182,6 +182,29 @@ public class FormDialogsWaitForInputTest extends ApplicationTest {
                 PATIENCE);
     }
 
+    /**
+     * OK was enabled by a check on the value without Unicode spaces around it,
+     * but the rule was stored with them (trim() leaves an em space), so the
+     * store refused it on the FX thread and the rule was lost without a word.
+     */
+    @Test
+    void aValuePastedWithAUnicodeSpaceIsAddedWithoutIt() {
+        RoutingService routing = TestRoutingServices.at(freshDir("routing"));
+        ServiceLocator.register(RoutingService.class, routing);
+        mount("RoutingView");
+        DialogPane form = open(button("#addRuleButton")::fire);
+
+        setRuleValue(form, "　example.org ");
+        assertThat(okDisabled(form)).as("OK with a value the check takes").isFalse();
+        pressOk(form);
+
+        Await.until("the rule to be added",
+                () -> routing.getConfig().getRules().stream()
+                        .map(RoutingRule::getValue)
+                        .anyMatch("example.org"::equals),
+                PATIENCE);
+    }
+
     private void setRuleType(DialogPane form, RoutingRule.RuleType type) {
         interact(() -> {
             @SuppressWarnings("unchecked")

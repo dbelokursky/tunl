@@ -262,11 +262,16 @@ public class AppSettings extends KeepsUnknownFields {
     }
 
     /**
-     * Ports this run listens on in place of chosen ones another program held,
-     * or null where the run uses the chosen port. Runtime only: settings are
-     * saved whole, and a moved port written into the chosen one became the
-     * user's choice at the next save of anything. The file keeps what the user
-     * chose, and the next start tries it again.
+     * Ports this run listens on, or null when no core runs. Runtime only:
+     * settings are saved whole, and a moved port written into the chosen one
+     * became the user's choice at the next save of anything. The file keeps
+     * what the user chose, and the next start tries it again.
+     *
+     * <p>Kept for every run, moved or not. A port the run did not move was
+     * read from the chosen one, so a port chosen while a core ran was taken
+     * at once by what reads the run's ports (the app's own requests, the
+     * latency probes, the status an agent asks for), though the core goes on
+     * listening on the old one until the next start.</p>
      *
      * <p>Plain fields, like every other one here: the connect thread sets them
      * before the core starts, and the readers get to them through the same
@@ -288,19 +293,22 @@ public class AppSettings extends KeepsUnknownFields {
     @JsonIgnore
     private Integer runProbePort;
 
-    /** The SOCKS port this run listens on: the chosen one, or where it moved. */
+    /**
+     * The SOCKS port this run listens on: the chosen one or where it moved,
+     * as it was when the run started; the chosen one when no core runs.
+     */
     public int listenSocksPort() {
         Integer run = runSocksPort;
         return run != null ? run : socksPort;
     }
 
-    /** The HTTP port this run listens on: the chosen one, or where it moved. */
+    /** The HTTP port this run listens on; see {@link #listenSocksPort()}. */
     public int listenHttpPort() {
         Integer run = runHttpPort;
         return run != null ? run : httpPort;
     }
 
-    /** The control port this run listens on: the chosen one, or where it moved. */
+    /** The control port this run listens on; see {@link #listenSocksPort()}. */
     public int listenClashApiPort() {
         Integer run = runClashApiPort;
         return run != null ? run : clashApiPort;
@@ -327,10 +335,20 @@ public class AppSettings extends KeepsUnknownFields {
      * @param probe    the health checks' port for the run, which has no chosen one
      */
     public void listenOn(int socks, int http, int clashApi, int probe) {
-        runSocksPort = socks == socksPort ? null : socks;
-        runHttpPort = http == httpPort ? null : http;
-        runClashApiPort = clashApi == clashApiPort ? null : clashApi;
+        runSocksPort = socks;
+        runHttpPort = http;
+        runClashApiPort = clashApi;
         runProbePort = probe;
+    }
+
+    /**
+     * Forgets the ports of a run that ended, so what reads them reads the
+     * chosen ones, which the next start listens on.
+     */
+    public void endRun() {
+        runSocksPort = null;
+        runHttpPort = null;
+        runClashApiPort = null;
     }
 
     public int getSocksPort() {

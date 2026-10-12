@@ -94,7 +94,10 @@ public class VlessClientApp extends Application {
                 AppSteps.required("services", ServiceLocator::initialize),
                 // Needs the graph, and runs before the window can connect.
                 AppSteps.step("stale system proxy", this::clearStaleSystemProxy),
-                AppSteps.step("login item", this::refreshLoginItem),
+                // On a thread of its own like the next step: on Windows it runs
+                // reg up to three times, and held the window back at login.
+                AppSteps.step("login item",
+                        () -> Thread.startVirtualThread(VlessClientApp::refreshLoginItem)),
                 // Points tunl:// links at this launcher on Windows, on a thread
                 // of its own: it waits on reg, and nothing here waits for it.
                 AppSteps.step("tunl links",
@@ -179,9 +182,13 @@ public class VlessClientApp extends Application {
      * graph never touches the real LaunchAgents directory. Headless UI tests
      * also use the locator's dormant startup mode.
      */
-    private void refreshLoginItem() {
-        ServiceLocator.find(Autostart.class).ifPresentOrElse(Autostart::refresh,
-                () -> log.debug("Autostart not available"));
+    private static void refreshLoginItem() {
+        try {
+            ServiceLocator.find(Autostart.class).ifPresentOrElse(Autostart::refresh,
+                    () -> log.debug("Autostart not available"));
+        } catch (RuntimeException e) {
+            log.warn("Could not refresh the login item", e);
+        }
     }
 
     /**
@@ -222,8 +229,11 @@ public class VlessClientApp extends Application {
                 desktop.setQuitHandler((event, response) -> {
                     log.info("Desktop quit handler fired — terminating");
                     // Don't let shutdown block us forever: kick a watchdog
-                    // that force-halts after 2 seconds no matter what.
-                    runAfter(2000, "vless-quit-killer", forceKill);
+                    // that force-halts no matter what. It gets the teardown's
+                    // budget: at 2 seconds it halted a stop that was still
+                    // waiting for the core, before the system's proxy was put
+                    // back or a TUN session's config removed.
+                    runAfter(TEARDOWN_BUDGET_MS, "vless-quit-killer", forceKill);
 
                     try {
                         shutdown();

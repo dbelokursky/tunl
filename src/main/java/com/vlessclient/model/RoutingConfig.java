@@ -50,6 +50,27 @@ public class RoutingConfig extends KeepsUnknownFields {
     private static final java.util.Set<String> ISO_COUNTRIES = java.util.Set.of(
             java.util.Locale.getISOCountries());
 
+    /**
+     * ISO countries sing-geoip publishes no list for: territories without
+     * address blocks of their own. Each geoip-&lt;cc&gt;.srs was a 404 when asked
+     * on 2026-10-11, and the core does not start without its rule-sets, so
+     * picking one of them stopped every server from connecting.
+     */
+    private static final java.util.Set<String> WITHOUT_GEOIP_LIST = java.util.Set.of(
+            "bv", "cc", "cx", "eh", "gs", "hm", "pn", "sh", "sj", "tf", "um");
+
+    /**
+     * Whether a country can be bypassed: a real ISO code that sing-geoip has a
+     * list for.
+     *
+     * @param code a lower-case ISO 3166 code
+     * @return whether {@link #setBypassCountries} keeps it
+     */
+    public static boolean isBypassCountry(String code) {
+        return ISO_COUNTRIES.contains(code.toUpperCase(java.util.Locale.ROOT))
+                && !WITHOUT_GEOIP_LIST.contains(code);
+    }
+
     @JsonProperty("rules")
     private List<RoutingRule> rules = new ArrayList<>();
 
@@ -147,7 +168,7 @@ public class RoutingConfig extends KeepsUnknownFields {
                     continue;
                 }
                 String code = c.trim().toLowerCase(java.util.Locale.ROOT);
-                if (ISO_COUNTRIES.contains(code.toUpperCase(java.util.Locale.ROOT))) {
+                if (isBypassCountry(code)) {
                     clean.add(code);
                 }
             }

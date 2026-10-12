@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -31,11 +32,15 @@ public class ShareLinkParser {
     /** U+FEFF, which a file or a response saved with a byte order mark starts with. */
     private static final char BYTE_ORDER_MARK = 0xFEFF;
 
+    /** What RFC 3986 allows as a scheme: a letter, then letters, digits, + . and -. */
+    private static final Pattern SCHEME = Pattern.compile("[A-Za-z][A-Za-z0-9+.-]*");
+
     /**
      * Parses a share link URI, dispatching by its scheme.
      *
      * @param uri the share link URI to parse
      * @return the parsed server configuration
+     * @throws NotLinkException         if the text before {@code ://} cannot be a scheme
      * @throws IllegalArgumentException if {@code uri} is null, blank, malformed, or has an
      *         unsupported scheme
      */
@@ -44,14 +49,26 @@ public class ShareLinkParser {
             throw new IllegalArgumentException("URI must not be null or blank");
         }
         // A list saved with a byte order mark hands it over with its first
-        // link, and trimming the line leaves it there. It read as part of the
-        // scheme, so the first server counted as an unsupported protocol.
-        String link = uri.charAt(0) == BYTE_ORDER_MARK ? uri.substring(1) : uri;
+        // link, and a link copied out of a chat or a web page can bring a
+        // zero-width or a no-break space along; trimming the line leaves all
+        // of them there. They read as part of the scheme, so the link counted
+        // as an unsupported protocol named "vless" behind an invisible
+        // character, which reads as "VLESS is not supported".
+        String link = withoutLeadingInvisibles(uri);
         int schemeEnd = link.indexOf("://");
         if (schemeEnd < 0) {
             throw new IllegalArgumentException("Share link URI must contain ://");
         }
-        String scheme = link.substring(0, schemeEnd).toLowerCase(Locale.ROOT);
+        // Text before :// that cannot be a scheme is not a link at all: a line
+        // of a web page (<a href="https://…">) or a sentence quoting an
+        // address. Taken for a scheme, a captive portal's login page read as a
+        // list of links in protocols this app lacks, and the subscription
+        // blamed the provider instead of the portal.
+        String prefix = link.substring(0, schemeEnd);
+        if (!SCHEME.matcher(prefix).matches()) {
+            throw new NotLinkException();
+        }
+        String scheme = prefix.toLowerCase(Locale.ROOT);
         return switch (scheme) {
             case "vless" -> parseVless(link);
             case "vmess" -> parseVmess(link);
@@ -80,6 +97,39 @@ public class ShareLinkParser {
             throw new UnsupportedFeatureException(refusal.feature(), refusal.reason());
         }
         return server;
+    }
+
+    /**
+     * {@code uri} without what can stand invisibly before its scheme: spaces,
+     * the no-break space included, and format characters such as the byte
+     * order mark and the zero-width space.
+     */
+    private static String withoutLeadingInvisibles(String uri) {
+        int start = 0;
+        while (start < uri.length()) {
+            int c = uri.codePointAt(start);
+            if (!Character.isWhitespace(c) && !Character.isSpaceChar(c)
+                    && Character.getType(c) != Character.FORMAT) {
+                break;
+            }
+            start += Character.charCount(c);
+        }
+        return uri.substring(start);
+    }
+
+    /**
+     * A whole text read as one, a {@code .conf} file, a subscription's body
+     * or a backup, without the byte order mark a file saved with one starts
+     * with. The mark is not whitespace, so trimming kept it: in front of
+     * {@code [Interface]}, of a base64 body or of a backup's opening brace,
+     * it hid what the text is.
+     *
+     * @param text the text as read, possibly null
+     * @return the text without one leading byte order mark
+     */
+    static String withoutByteOrderMark(String text) {
+        return text != null && !text.isEmpty() && text.charAt(0) == BYTE_ORDER_MARK
+                ? text.substring(1) : text;
     }
 
     /** Longest display name kept from a link; anything past it is noise. */
@@ -204,6 +254,28 @@ public class ShareLinkParser {
         /** The scheme of the rejected link, e.g. {@code tuic}. */
         public String scheme() {
             return scheme;
+        }
+    }
+
+    /**
+     * Text that holds {@code ://} but is no share link: what stands before it
+     * cannot be a scheme, as in a line of a web page or a sentence quoting an
+     * address.
+     *
+     * <p>Kept apart from {@link UnsupportedSchemeException}, which such a line
+     * used to raise: a captive portal's login page then read as a list of
+     * links in protocols such as {@code <html xmlns="http}, and the
+     * subscription said its links asked for what the app lacks instead of
+     * pointing at the portal. A list's reader passes over such a line the way
+     * it passes over a comment. The message does not repeat the text, which
+     * can be anything.</p>
+     */
+    public static final class NotLinkException extends IllegalArgumentException {
+
+        /** Creates the exception. */
+        public NotLinkException() {
+            // Shown in the import report, so worded in the language of the UI.
+            super(I18n.get("import.not.a.link"));
         }
     }
 
@@ -359,9 +431,11 @@ public class ShareLinkParser {
         String scy = getJsonString(node, "scy", "auto");
         config.setEncryption(scy);
 
-        // Transport
+        // Transport. An empty net is TCP, as v2rayN reads it and as a link's
+        // empty type= is read: taken as a name, it was refused as a transport
+        // the core lacks, "the  transport", and a plain TCP server went missing.
         String net = getJsonString(node, "net", "tcp");
-        TransportType transportType = parseTransportType(mapVmessNet(net));
+        TransportType transportType = parseTransportType(mapVmessNet(net.isBlank() ? "tcp" : net));
         if (transportType == TransportType.TCP
                 && "http".equalsIgnoreCase(getJsonString(node, "type", ""))) {
             throw unsupportedTcpHeader();
@@ -508,7 +582,13 @@ public class ShareLinkParser {
 
         // SIP002 format: BASE64(method:password)@host:port/?plugin=...
         // Legacy format: BASE64(method:password@host:port)
-        int atSign = rest.indexOf('@');
+        // The userinfo ends at the last @ before the query. A password written
+        // out in the plain form can hold an @ of its own, and cut at the first
+        // one, its tail was stored as part of the address, or quoted by the
+        // port's parse failure into the log, the import report and the MCP
+        // audit log. Base64 holds neither @ nor ?.
+        int queryStart = rest.indexOf('?');
+        int atSign = rest.lastIndexOf('@', queryStart >= 0 ? queryStart : rest.length());
         if (atSign >= 0) {
             // SIP002: userinfo is base64, then @host:port
             String userInfoEncoded = rest.substring(0, atSign);
@@ -536,8 +616,8 @@ public class ShareLinkParser {
             if (lastColon < 0) {
                 throw new IllegalArgumentException("Missing port in Shadowsocks URI");
             }
-            host = hostPort.substring(0, lastColon);
-            port = Integer.parseInt(hostPort.substring(lastColon + 1));
+            host = shadowsocksHost(hostPort.substring(0, lastColon));
+            port = shadowsocksPort(hostPort.substring(lastColon + 1));
         } else {
             // Legacy: entire part is base64 encoded
             String decoded = decodeBase64(rest);
@@ -560,8 +640,8 @@ public class ShareLinkParser {
             if (lastColon < 0) {
                 throw new IllegalArgumentException("Missing port in Shadowsocks URI");
             }
-            host = hostPort.substring(0, lastColon);
-            port = Integer.parseInt(hostPort.substring(lastColon + 1));
+            host = shadowsocksHost(hostPort.substring(0, lastColon));
+            port = shadowsocksPort(hostPort.substring(lastColon + 1));
         }
 
         ServerConfig config = new ServerConfig();
@@ -593,6 +673,32 @@ public class ShareLinkParser {
             return URLDecoder.decode(encoded.replace("+", "%2B"), StandardCharsets.UTF_8);
         }
         return decodeBase64(encoded);
+    }
+
+    /**
+     * The host of a Shadowsocks link, which no URI parser has checked: one
+     * left empty, or holding a space or an @, was stored as the address.
+     */
+    private static String shadowsocksHost(String host) {
+        if (host.isBlank()) {
+            throw new IllegalArgumentException("Missing host in Shadowsocks URI");
+        }
+        if (host.indexOf('@') >= 0 || host.chars().anyMatch(Character::isWhitespace)) {
+            throw new IllegalArgumentException("Invalid host in Shadowsocks URI");
+        }
+        return host;
+    }
+
+    /**
+     * The port of a Shadowsocks link. Integer.parseInt's own failure quotes
+     * its input, which in a link cut at the wrong @ was a password's tail.
+     */
+    private static int shadowsocksPort(String text) {
+        try {
+            return Integer.parseInt(text);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid port in Shadowsocks URI");
+        }
     }
 
     /**
@@ -703,6 +809,18 @@ public class ShareLinkParser {
         String allowInsecure = params.get("insecure");
         if ("1".equals(allowInsecure)) {
             config.getTls().setAllowInsecure(true);
+            // pinSHA256 is what makes insecure=1 safe in the official client:
+            // no authority vouches for the certificate, but it has to hash to
+            // the pin. The core pins a public key, not a certificate, and the
+            // one cannot be worked out from the other, so the pin was dropped
+            // and any certificate taken: whoever sat on the path could read
+            // the password and the tunnel. Beside verification, the pin only
+            // narrows which vouched-for certificate is taken, and the server
+            // is verified without it.
+            if (pinsCertificate(params)) {
+                throw new UnsupportedFeatureException("certificate pin",
+                        I18n.get("refusal.hysteria2.pin"));
+            }
         }
 
         // Obfuscation - store obfs-password in flow field
@@ -755,14 +873,25 @@ public class ShareLinkParser {
             return null;
         }
         if (!HysteriaPorts.isValid(ports)) {
-            throw new IllegalArgumentException("Malformed port list in Hysteria2 URI: " + ports);
+            // Without the list: in a link with no @host, what stands where the
+            // ports go is the password.
+            throw new IllegalArgumentException("Malformed port list in Hysteria2 URI");
         }
         return ports;
     }
 
+    /** Whether a Hysteria2 link pins its server's certificate, pinSHA256 in any case. */
+    private static boolean pinsCertificate(Map<String, String> params) {
+        return params.entrySet().stream().anyMatch(param ->
+                "pinSHA256".equalsIgnoreCase(param.getKey()) && !param.getValue().isBlank());
+    }
+
     private void applyTransportParams(ServerConfig config, Map<String, String> params) {
-        String type = params.getOrDefault("type", "tcp");
-        TransportType transportType = parseTransportType(type);
+        // An empty type= is TCP, as for Shadowsocks below: taken as a name, it
+        // was refused as a transport the core lacks, "the  transport".
+        String type = params.get("type");
+        TransportType transportType = parseTransportType(
+                type == null || type.isBlank() ? "tcp" : type);
         if (transportType == TransportType.TCP
                 && "http".equalsIgnoreCase(params.get("headerType"))) {
             throw unsupportedTcpHeader();
@@ -798,15 +927,30 @@ public class ShareLinkParser {
      * <p>{@code defaultSecurity} is what a link means when it names none: a
      * VLESS link is plain unless it says otherwise, a Trojan link is TLS by
      * definition.</p>
+     *
+     * <p>Only {@code tls} and {@code reality} spelled exactly so turned TLS
+     * on, and every other value meant none: {@code TLS}, an empty
+     * {@code security=} on a Trojan link, and the legacy {@code xtls} the
+     * core never had. The server then dialled its TLS port in the clear and
+     * sent the Trojan password or the VLESS UUID as its first bytes. The
+     * value is now read in any case, blank means left out, and a layer the
+     * core lacks is refused rather than read as none.</p>
      */
     private void applyTlsParams(ServerConfig config, Map<String, String> params,
                                 String defaultSecurity) {
-        String security = params.getOrDefault("security", defaultSecurity);
-        if ("tls".equals(security)) {
-            config.getTls().setEnabled(true);
-        } else if ("reality".equals(security)) {
-            config.getTls().setEnabled(true);
-            config.getTls().setReality(true);
+        String security = params.get("security");
+        security = security == null || security.isBlank()
+                ? defaultSecurity : security.strip().toLowerCase(Locale.ROOT);
+        switch (security) {
+            case "tls" -> config.getTls().setEnabled(true);
+            case "reality" -> {
+                config.getTls().setEnabled(true);
+                config.getTls().setReality(true);
+            }
+            case "none" -> {
+                // Plain, as the link asks.
+            }
+            default -> throw unsupportedSecurity(security);
         }
 
         String sni = params.get("sni");
@@ -910,6 +1054,20 @@ public class ShareLinkParser {
         String name = type.toLowerCase(Locale.ROOT);
         return new UnsupportedFeatureException("transport " + name,
                 I18n.get("refusal.transport", name));
+    }
+
+    /**
+     * A security layer the core does not have, such as Xray's legacy
+     * {@code xtls}. The refusal repeats the value, cleaned like a name and
+     * capped, since it goes into the log: it is the link's own word, not a
+     * credential.
+     */
+    private static UnsupportedFeatureException unsupportedSecurity(String security) {
+        String cleaned = cleanName(security);
+        String name = cleaned.length() > MAX_FEATURE_LENGTH
+                ? cleaned.substring(0, MAX_FEATURE_LENGTH) : cleaned;
+        return new UnsupportedFeatureException("security " + name,
+                I18n.get("refusal.security", name));
     }
 
     /**

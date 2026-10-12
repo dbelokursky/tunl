@@ -143,6 +143,51 @@ class SingBoxConfigGeneratorBlockedOnlyTest {
         assertThat(rule.get("server").asString()).isEqualTo("proxy-dns");
     }
 
+    /**
+     * The DNS rules put every direct rule first and the blocked list after
+     * them, while the route checks the list first. Every .ru name is in
+     * geosite-category-ru, so with the country bypass a blocked .ru site was
+     * resolved by the provider, whose answer is the address of its stub page,
+     * and the tunnel then dialled that address. The list now comes first in
+     * both, in both proxy modes.
+     */
+    @Test
+    void aBlockedNameResolvesThroughTheTunnelAlthoughTheCountryBypassNamesIt() {
+        RoutingConfig routing = blockedOnly();
+        routing.setBypassCountries(List.of("ru"));
+        for (ProxyMode mode : ProxyMode.values()) {
+            JsonNode dns = generate(mode, routing).get("dns");
+
+            int blocked = indexOfRuleUsing(dns.get("rules"), "geosite-ru-blocked");
+            int country = indexOfRuleUsing(dns.get("rules"), "geosite-category-ru");
+            assertThat(blocked).as("%s: the blocked list", mode).isNotNegative()
+                    .isLessThan(country);
+            assertThat(dns.get("rules").get(blocked).get("server").asString())
+                    .isEqualTo("proxy-dns");
+            assertThat(dns.get("rules").get(country).get("server").asString())
+                    .isEqualTo("direct-dns");
+        }
+    }
+
+    /**
+     * A site the user sends through the tunnel with a rule of their own was
+     * still resolved by the provider's resolver, which dns.final is in this
+     * mode: the provider saw the name, and could answer with its stub page.
+     */
+    @Test
+    void aNameTheUserSendsThroughTheTunnelResolvesThroughItToo() {
+        RoutingConfig routing = blockedOnly();
+        routing.setRules(List.of(
+                new RoutingRule(RuleType.DOMAIN_SUFFIX, "example.org", RuleAction.PROXY)));
+        JsonNode dns = generate(ProxyMode.TUN, routing).get("dns");
+
+        assertThat(dns.get("final").asString()).isEqualTo("direct-dns");
+        assertThat(list(dns.get("rules"))).anySatisfy(rule -> {
+            assertThat(rule.path("domain_suffix").toString()).contains("example.org");
+            assertThat(rule.path("server").asString()).isEqualTo("proxy-dns");
+        });
+    }
+
     @Test
     void everythingGoesThroughTheTunnelByDefault() {
         JsonNode root = generate(ProxyMode.TUN, new RoutingConfig());

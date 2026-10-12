@@ -78,6 +78,64 @@ class LinuxAutostartTest {
         assertThat(service.isEnabled()).isFalse();
     }
 
+    /**
+     * Desktops switch an autostart entry off by editing the user's copy, not
+     * by deleting it: Cinnamon and gnome-session-properties write
+     * X-GNOME-Autostart-enabled=false, XFCE and LXQt write Hidden=true. The
+     * entry still existed, so Tunl read it as on, and the refresh at every
+     * start wrote it back with X-GNOME-Autostart-enabled=true, turning
+     * autostart on again against the user's choice.
+     */
+    @Test
+    void anEntryTheDesktopSwitchedOffIsOffAndStaysOff() throws IOException {
+        for (String off : new String[] {"X-GNOME-Autostart-enabled=false", "Hidden=true"}) {
+            LinuxAutostart service = new LinuxAutostart(tempDir);
+            service.setEnabled(true);
+            Path entry = tempDir.resolve(ENTRY);
+            String switchedOff = Files.readString(entry)
+                    .replace("X-GNOME-Autostart-enabled=true\n", "") + off + "\n";
+            Files.writeString(entry, switchedOff);
+
+            assertThat(service.isEnabled()).as(off).isFalse();
+
+            service.refresh();
+
+            assertThat(Files.readString(entry))
+                    .as("the desktop's own switch survives a start of the app (%s)", off)
+                    .isEqualTo(switchedOff);
+        }
+    }
+
+    @Test
+    void aSwitchInAnotherGroupOrWithSpacesIsReadLikeTheDesktopReadsIt() throws IOException {
+        Path entry = tempDir.resolve(ENTRY);
+        LinuxAutostart service = new LinuxAutostart(tempDir);
+
+        // The spec allows spaces around '='.
+        Files.writeString(entry, "[Desktop Entry]\nType=Application\nHidden = true\n");
+        assertThat(service.isEnabled()).isFalse();
+
+        // Only the [Desktop Entry] group says whether it starts.
+        Files.writeString(entry, "[Desktop Entry]\nType=Application\n"
+                + "[Desktop Action quit]\nHidden=true\n");
+        assertThat(service.isEnabled()).isTrue();
+    }
+
+    @Test
+    void tickingTheBoxAgainTurnsAnEntryTheDesktopSwitchedOffBackOn() throws IOException {
+        Path entry = tempDir.resolve(ENTRY);
+        Files.writeString(entry, "[Desktop Entry]\nType=Application\nExec=tunl\n"
+                + "X-GNOME-Autostart-enabled=false\nHidden=true\n");
+        LinuxAutostart service = new LinuxAutostart(tempDir);
+
+        service.setEnabled(true);
+
+        assertThat(service.isEnabled()).isTrue();
+        assertThat(Files.readString(entry))
+                .contains("X-GNOME-Autostart-enabled=true")
+                .doesNotContain("Hidden=");
+    }
+
     @Test
     void execLine_underJpackage_usesTheInstalledLauncher() {
         String exec = LinuxAutostart.execLine(

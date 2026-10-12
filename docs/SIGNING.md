@@ -5,10 +5,13 @@ launch and Windows SmartScreen warns on the MSI (see the README install
 sections). The packaging scripts already leave a hook for signing —
 `scripts/package-dmg.sh` signs the `.app` during `jpackage` **when
 `MACOS_SIGN_IDENTITY` is set**, and is a no-op otherwise. The workflow steps
-that consume the secrets are **already in place** in `release.yml`, each gated
-on its secret's presence — so activating signing is only a matter of adding
-the secrets below; nothing in the workflow itself changes. This doc lists the
-exact secret names and how to produce each.
+that consume the secrets are in place in `release.yml`, each gated on its
+secret's presence, so an unsigned release builds exactly as before. **None of
+them has run yet:** no signing secret has ever been set, so the first signed
+release is also the first test of these steps. Cut it as a pre-release, or
+re-run a tag, expecting to fix something; see *What happens once the secrets
+exist* for what is known to be needed. This doc lists the exact secret names
+and how to produce each.
 
 ## Prerequisites & cost
 
@@ -64,12 +67,21 @@ base64 -i AuthKey_XXXXXXXX.p8 | pbcopy   # → MACOS_NOTARY_KEY_BASE64
 ```
 
 **What happens once the secrets exist.** The release workflow imports the
-`.p12` into a temporary keychain and exports `MACOS_SIGN_IDENTITY`, so
-`package-dmg.sh`'s `jpackage` signs the `.app` with the Developer ID identity.
-A follow-up step submits the finished DMG to Apple's notary service with the
-`.p8` key (`xcrun notarytool submit --wait`) and staples the ticket
-(`xcrun stapler staple`). Without the secrets the release is unsigned, exactly
-as today.
+`.p12` into a temporary keychain. It then signs the sing-box core inside the
+build output with the Developer ID identity, the hardened runtime and a
+secure timestamp, builds the jar again around it, runs the real-binary smoke
+suite on it, and checks every Mach-O file in the jar (`codesign --verify
+--strict`, a Developer ID authority, the runtime flag, a timestamp).
+`jpackage --mac-sign` signs the Mach-O files of the `.app` but does not open
+the jar, while Apple's notary service does: the core as `core.yml` builds it
+carries only the Go linker's ad-hoc signature, and the notary would reject
+the submission for it. The JavaFX libraries in the jar come signed by their
+vendor. `package-dmg.sh`'s `jpackage` then signs the `.app`, and a
+follow-up step submits the finished DMG to Apple's notary service with the
+`.p8` key (`xcrun notarytool submit --wait`) and staples the ticket (`xcrun
+stapler staple`). If the notary still refuses the DMG, `xcrun notarytool log
+<submission id>` names each file it objects to. Without the secrets the
+release is unsigned, exactly as today.
 
 ## Windows — GitHub Actions secrets
 
