@@ -155,13 +155,23 @@ public final class WindowsTunLauncher implements TunLauncher {
      * and stops it when the stop file appears or the app process dies.
      *
      * <p>Bare body, for the reason given on {@link #outerScript}.
-     * {@link #wrapperCommand} prepends the six bindings it reads.</p>
+     * {@link #wrapperCommand} prepends the six bindings it reads. It carries
+     * no comments: it is encoded twice, on its own and inside the outer
+     * command, so every character of it costs nearly four on the command
+     * line.</p>
+     *
+     * <p>The core's arguments are one string with the config path in double
+     * quotes. {@code Start-Process} joins an array with spaces and quotes
+     * nothing, so once the session config moved from {@code %TEMP%} (often
+     * an 8.3 short path) to {@code %APPDATA%}, a profile path with a space
+     * reached the core as two arguments and every TUN connect failed after
+     * the UAC prompt. A Windows path cannot contain a double quote.</p>
      */
     static String wrapperScript() {
         return """
                 $ErrorActionPreference = 'Stop'
                 $proc = Start-Process -FilePath $Binary `
-                    -ArgumentList @('run', '-c', $Config) `
+                    -ArgumentList ('run -c "{0}"' -f $Config) `
                     -RedirectStandardOutput $LogOut -RedirectStandardError $LogErr `
                     -NoNewWindow -PassThru
                 try {

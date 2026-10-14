@@ -53,7 +53,12 @@ class WindowsTunLauncherTest {
     void wrapperScript_runsCoreAndWatchesStopFileAndOwner() {
         String wrapper = WindowsTunLauncher.wrapperScript();
 
-        assertThat(wrapper).contains("@('run', '-c', $Config)");
+        // The config path goes in double quotes inside one argument string:
+        // given an array, Start-Process joins it with spaces and quotes
+        // nothing, and a path with a space reached the core as two
+        // arguments. windowsTunLauncherFullCycle runs it on Windows.
+        assertThat(wrapper).contains("-ArgumentList ('run -c \"{0}\"' -f $Config)");
+        assertThat(wrapper).doesNotContain("@('run', '-c', $Config)");
         assertThat(wrapper).contains("-RedirectStandardOutput $LogOut");
         assertThat(wrapper).contains("-RedirectStandardError $LogErr");
         assertThat(wrapper).contains("Test-Path -LiteralPath $StopFile");

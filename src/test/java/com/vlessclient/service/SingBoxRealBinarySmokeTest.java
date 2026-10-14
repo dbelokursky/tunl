@@ -1568,7 +1568,12 @@ class SingBoxRealBinarySmokeTest {
                         .put("auto_route", false);
             }
         }
-        Path configFile = Files.createTempFile("smoke-tunlauncher-", ".json");
+        // In a folder with a space in its name, as under C:\Users\John Smith,
+        // where the session config lives since it left %TEMP%: the wrapper's
+        // Start-Process joined the core's arguments with spaces and quoted
+        // nothing, so the core got half a path and every TUN connect failed.
+        Path configDir = Files.createTempDirectory("smoke tunlauncher ");
+        Path configFile = configDir.resolve("singbox-session.json");
         Files.writeString(configFile, mapper.writeValueAsString(config));
 
         com.vlessclient.platform.TunLauncher.Launched launched =
@@ -1615,6 +1620,7 @@ class SingBoxRealBinarySmokeTest {
         } finally {
             outer.destroyForcibly();
             Files.deleteIfExists(configFile);
+            Files.deleteIfExists(configDir);
             Files.deleteIfExists(launched.stopSignalFile());
         }
     }
