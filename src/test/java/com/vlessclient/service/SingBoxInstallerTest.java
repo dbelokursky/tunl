@@ -212,17 +212,72 @@ class SingBoxInstallerTest {
     // cache from another pin has to be cleared or bumping the pin would never
     // reach existing users.
 
+    /** Tunl's own build of a version, as singbox.properties pins it today. */
+    private static final SingBoxInstaller.Pin TUNL_BUILD =
+            new SingBoxInstaller.Pin("1.14.3", "core-v1.14.3-tunl2");
+
+    /** Upstream's release of a version: singbox.properties without a release. */
+    private static final SingBoxInstaller.Pin UPSTREAM = new SingBoxInstaller.Pin("1.14.3", "");
+
     @Test
     void reconcileCacheWithPin_keepsCache_whenMarkerMatchesPin() throws Exception {
         Path installDir = tempDir.resolve("bin");
-        Path cached = writeFakeCore(installDir, SingBoxInstaller.PINNED_VERSION);
+        Path cached = writeFakeCore(installDir, "1.14.3");
         Path marker = installDir.resolve("sing-box.version");
-        Files.writeString(marker, SingBoxInstaller.PINNED_VERSION);
+        Files.writeString(marker, "1.14.3 core-v1.14.3-tunl2");
 
-        new SingBoxInstaller(installDir).reconcileCacheWithPin();
+        new SingBoxInstaller(installDir, TUNL_BUILD).reconcileCacheWithPin();
 
         assertThat(cached).exists();
         assertThat(marker).exists();
+    }
+
+    /**
+     * Tunl's builds report upstream's version, so a marker naming the version
+     * alone kept a rebuild of it from reaching anyone: v1.23.3 shipped
+     * core-v1.14.2-tunl2, a REALITY fix, and every cache from 1.23.0 to
+     * 1.23.2 went on running tunl1.
+     */
+    @Test
+    void reconcileCacheWithPin_dropsCache_whenMarkerNamesAnotherBuildOfTheVersion()
+            throws Exception {
+        Path installDir = tempDir.resolve("bin");
+        Path cached = writeFakeCore(installDir, "1.14.3");
+        Path marker = installDir.resolve("sing-box.version");
+        Files.writeString(marker, "1.14.3 core-v1.14.3-tunl1");
+
+        new SingBoxInstaller(installDir, TUNL_BUILD).reconcileCacheWithPin();
+
+        assertThat(cached).doesNotExist();
+        assertThat(marker).doesNotExist();
+    }
+
+    @Test
+    void reconcileCacheWithPin_dropsCache_whenMarkerNamesNoBuild() throws Exception {
+        // What every release up to 1.25.0 wrote: the version alone, which
+        // cannot say whether the cache holds the build this release ships.
+        Path installDir = tempDir.resolve("bin");
+        Path cached = writeFakeCore(installDir, "1.14.3");
+        Path marker = installDir.resolve("sing-box.version");
+        Files.writeString(marker, "1.14.3");
+
+        new SingBoxInstaller(installDir, TUNL_BUILD).reconcileCacheWithPin();
+
+        assertThat(cached).doesNotExist();
+        assertThat(marker).doesNotExist();
+    }
+
+    @Test
+    void reconcileCacheWithPin_keepsCache_whenMarkerMatchesAnUpstreamPin() throws Exception {
+        // Upstream's release has no build of ours to tell apart: the version
+        // is the whole marker, as it always was.
+        Path installDir = tempDir.resolve("bin");
+        Path cached = writeFakeCore(installDir, "1.14.3");
+        Files.writeString(installDir.resolve("sing-box.version"), "1.14.3");
+
+        new SingBoxInstaller(installDir, UPSTREAM).reconcileCacheWithPin();
+
+        assertThat(cached).exists();
     }
 
     @Test
@@ -232,7 +287,7 @@ class SingBoxInstallerTest {
         Path marker = installDir.resolve("sing-box.version");
         Files.writeString(marker, "1.12.0");
 
-        new SingBoxInstaller(installDir).reconcileCacheWithPin();
+        new SingBoxInstaller(installDir, TUNL_BUILD).reconcileCacheWithPin();
 
         assertThat(cached).doesNotExist();
         assertThat(marker).doesNotExist();
@@ -242,15 +297,28 @@ class SingBoxInstallerTest {
     void reconcileCacheWithPin_probesBinaryAndRecordsIt_whenMarkerIsMissing() throws Exception {
         // The migration path: caches written before the marker existed.
         Path installDir = tempDir.resolve("bin");
-        Path cached = writeFakeCore(installDir, SingBoxInstaller.PINNED_VERSION);
+        Path cached = writeFakeCore(installDir, "1.14.3");
 
-        new SingBoxInstaller(installDir).reconcileCacheWithPin();
+        new SingBoxInstaller(installDir, UPSTREAM).reconcileCacheWithPin();
 
         assertThat(cached).exists();
         assertThat(installDir.resolve("sing-box.version"))
                 .exists()
                 .content()
-                .isEqualTo(SingBoxInstaller.PINNED_VERSION);
+                .isEqualTo("1.14.3");
+    }
+
+    @Test
+    void reconcileCacheWithPin_dropsCache_whenMarkerIsMissingUnderTunlsBuild() throws Exception {
+        // The binary reports upstream's version whichever build it is, so a
+        // probe cannot vouch for the build, and nothing is recorded for it.
+        Path installDir = tempDir.resolve("bin");
+        Path cached = writeFakeCore(installDir, "1.14.3");
+
+        new SingBoxInstaller(installDir, TUNL_BUILD).reconcileCacheWithPin();
+
+        assertThat(cached).doesNotExist();
+        assertThat(installDir.resolve("sing-box.version")).doesNotExist();
     }
 
     @Test
@@ -258,7 +326,7 @@ class SingBoxInstallerTest {
         Path installDir = tempDir.resolve("bin");
         Path cached = writeFakeCore(installDir, "1.11.5");
 
-        new SingBoxInstaller(installDir).reconcileCacheWithPin();
+        new SingBoxInstaller(installDir, UPSTREAM).reconcileCacheWithPin();
 
         assertThat(cached).doesNotExist();
     }
@@ -317,6 +385,21 @@ class SingBoxInstallerTest {
         SingBoxInstaller installer = new SingBoxInstaller(installDir);
 
         assertThat(installer.detectVersion(cached)).isEqualTo("1.13.14");
+    }
+
+    @Test
+    void detectVersion_answersTheVersion_whenTheMarkerAlsoNamesTheBuild() throws Exception {
+        Path installDir = tempDir.resolve("bin");
+        Files.createDirectories(installDir);
+        Path cached = installDir.resolve("sing-box");
+        Files.writeString(cached, "#!/bin/sh\nexit 1\n");
+        assertThat(cached.toFile().setExecutable(true)).isTrue();
+        Files.writeString(installDir.resolve("sing-box.version"), "1.14.3 core-v1.14.3-tunl2");
+
+        SingBoxInstaller installer = new SingBoxInstaller(installDir);
+
+        // Settings shows the core's version, as the binary itself reports it.
+        assertThat(installer.detectVersion(cached)).isEqualTo("1.14.3");
     }
 
     @Test

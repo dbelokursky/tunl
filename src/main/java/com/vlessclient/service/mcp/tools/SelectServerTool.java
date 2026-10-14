@@ -30,9 +30,12 @@ public class SelectServerTool implements McpTool {
     @Override
     public String description() {
         // It said "used on the next connect", but a connected tunnel switches
-        // to the server at once, as it does for a pick in the app's list.
-        return "Make a server the active one. A connected tunnel switches to it at once; "
-                + "otherwise the next connect uses it. Requires 'serverId'.";
+        // to the server at once, as it does for a pick in the app's list. It
+        // keeps its mode: a mode set since applies at the next connect.
+        return "Make a server the active one. A connected tunnel switches to it at once "
+                + "and keeps its proxy mode (with server_selection auto_best the core keeps "
+                + "picking the fastest server); otherwise the next connect uses it. "
+                + "Requires 'serverId'.";
     }
 
     @Override
