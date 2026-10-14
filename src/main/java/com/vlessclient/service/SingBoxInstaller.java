@@ -53,7 +53,7 @@ public class SingBoxInstaller {
     public static final String PINNED_VERSION;
 
     /**
-     * Records which pinned version populated the cache, so
+     * Records which pin populated the cache ({@link Pin#marker()}), so
      * {@link #reconcileCacheWithPin()} can spot a cache left behind by an
      * older app release without spawning the binary on every launch.
      */
@@ -118,6 +118,33 @@ public class SingBoxInstaller {
             com.vlessclient.platform.CorePlatform.current().osKey(),
             com.vlessclient.platform.CorePlatform.current().archiveExtension());
 
+    /** The core this build ships. */
+    private static final Pin SHIPPED_PIN = new Pin(PINNED_VERSION, RELEASE);
+
+    /**
+     * A pinned core: upstream's version and, for Tunl's own build of it, the
+     * release that published it.
+     *
+     * @param version upstream's version, which the binary reports
+     * @param release Tunl's release of it, or empty for upstream's
+     */
+    record Pin(String version, String release) {
+
+        /**
+         * What the cache marker records for this pin. The version alone said
+         * nothing of the build: Tunl's builds report upstream's version, so a
+         * rebuild of the same version kept every existing cache on the old
+         * build. v1.23.3 shipped core-v1.14.2-tunl2, a REALITY fix, and
+         * everyone updating from 1.23.0, 1.23.1 or 1.23.2 kept running tunl1
+         * until v1.25.0 moved to another version.
+         *
+         * @return the version, then the release when there is one
+         */
+        String marker() {
+            return release.isEmpty() ? version : version + " " + release;
+        }
+    }
+
     /**
      * Where the runtime fallback downloads the core, as a template formatted
      * with the version, the version and the arch: Tunl's own build when
@@ -139,6 +166,8 @@ public class SingBoxInstaller {
     private final LazyHttpClient httpClient;
     private final String downloadUrlTemplate;
     private final Map<String, String> expectedSha256;
+    /** The core the cache has to hold: {@link #SHIPPED_PIN} but in tests. */
+    private final Pin pin;
 
     public SingBoxInstaller() {
         this(resolveInstallDir(), DOWNLOAD_URL_TEMPLATE, EXPECTED_SHA256);
@@ -160,26 +189,37 @@ public class SingBoxInstaller {
     /** Test constructor: allows overriding install dir, URL template, and checksums. */
     SingBoxInstaller(
             Path installDir, String downloadUrlTemplate, Map<String, String> expectedSha256) {
-        // Built on the first download, which the bundled core makes rare.
-        this(installDir, downloadUrlTemplate, expectedSha256,
-                LazyHttpClient.of(() -> AppHttpClients.newBuilder()
-                        .connectTimeout(Duration.ofSeconds(30))
-                        .followRedirects(HttpClient.Redirect.ALWAYS)
-                        .build()));
+        this(installDir, downloadUrlTemplate, expectedSha256, downloadClient(), SHIPPED_PIN);
     }
 
     /** Test constructor: also the HTTP client, like every other downloading service. */
     SingBoxInstaller(Path installDir, String downloadUrlTemplate,
                      Map<String, String> expectedSha256, HttpClient httpClient) {
-        this(installDir, downloadUrlTemplate, expectedSha256, LazyHttpClient.ofBuilt(httpClient));
+        this(installDir, downloadUrlTemplate, expectedSha256,
+                LazyHttpClient.ofBuilt(httpClient), SHIPPED_PIN);
+    }
+
+    /** Test constructor: install dir, and the core the cache has to hold. */
+    SingBoxInstaller(Path installDir, Pin pin) {
+        this(installDir, DOWNLOAD_URL_TEMPLATE, EXPECTED_SHA256, downloadClient(), pin);
     }
 
     private SingBoxInstaller(Path installDir, String downloadUrlTemplate,
-                             Map<String, String> expectedSha256, LazyHttpClient httpClient) {
+                             Map<String, String> expectedSha256, LazyHttpClient httpClient,
+                             Pin pin) {
         this.installDir = installDir;
         this.downloadUrlTemplate = downloadUrlTemplate;
         this.expectedSha256 = Map.copyOf(expectedSha256);
         this.httpClient = httpClient;
+        this.pin = pin;
+    }
+
+    /** The download client, built on the first download, which the bundled core makes rare. */
+    private static LazyHttpClient downloadClient() {
+        return LazyHttpClient.of(() -> AppHttpClients.newBuilder()
+                .connectTimeout(Duration.ofSeconds(30))
+                .followRedirects(HttpClient.Redirect.ALWAYS)
+                .build());
     }
 
     /** Releases the HTTP client, if a download ever built it. */
@@ -292,12 +332,16 @@ public class SingBoxInstaller {
      * release would shadow the newer pinned core forever, and bumping the pin
      * would have no effect for existing users.</p>
      *
-     * <p>The cache's version comes from the {@value #VERSION_MARKER_NAME}
-     * marker. Caches written before the marker existed are probed once by
-     * running the binary, and the answer is recorded so later launches stay on
-     * the cheap path. A cache whose version cannot be determined is treated as
-     * stale — losing a cache costs one re-extraction, keeping a wrong one
-     * silently pins the user to the wrong core.</p>
+     * <p>Which core is cached comes from the {@value #VERSION_MARKER_NAME}
+     * marker, which names the version and, for Tunl's own build, its release
+     * ({@link Pin#marker()}). Caches written before the marker existed are
+     * probed once by running the binary, and for an upstream pin the answer
+     * is recorded so later launches stay on the cheap path. Tunl's builds
+     * report upstream's version, so a probe cannot tell one build of a
+     * version from another, and such a cache goes. A cache whose build
+     * cannot be determined is treated as stale — losing a cache costs one
+     * re-extraction, keeping a wrong one silently pins the user to the wrong
+     * core.</p>
      */
     public void reconcileCacheWithPin() {
         removeCoreUpdaterResidue();
@@ -308,20 +352,20 @@ public class SingBoxInstaller {
             return;
         }
 
-        String cachedVersion = readMarker(marker);
-        if (cachedVersion == null) {
-            cachedVersion = probeVersion(cached, VERSION_PROBE_TIMEOUT_SECONDS);
-            if (cachedVersion != null) {
-                writeMarker(marker, cachedVersion);
+        String recorded = readMarker(marker);
+        if (recorded == null) {
+            recorded = probeVersion(cached, VERSION_PROBE_TIMEOUT_SECONDS);
+            if (recorded != null && pin.release().isEmpty()) {
+                writeMarker(marker, recorded);
             }
         }
-        if (PINNED_VERSION.equals(cachedVersion)) {
+        if (pin.marker().equals(recorded)) {
             return;
         }
 
         log.info("Cached sing-box {} does not match the app-pinned {}; removing the cache "
                         + "so the bundled binary takes over",
-                cachedVersion != null ? cachedVersion : "of unknown version", PINNED_VERSION);
+                recorded != null ? recorded : "of unknown version", pin.marker());
         deleteQuietly(cached);
         deleteQuietly(marker);
     }
@@ -371,9 +415,9 @@ public class SingBoxInstaller {
      * The version of the sing-box binary at {@code binary}, as a bare
      * {@code 1.13.14}.
      *
-     * <p>For the managed binary the answer comes from the
-     * {@value #VERSION_MARKER_NAME} marker, so the common case costs no
-     * process spawn. That is safe because {@link #reconcileCacheWithPin()}
+     * <p>For the managed binary the answer is the version the
+     * {@value #VERSION_MARKER_NAME} marker records, so the common case costs
+     * no process spawn. That is safe because {@link #reconcileCacheWithPin()}
      * runs at startup before anything reads this and deletes any cache whose
      * marker disagrees with the pin. Anything else — Homebrew, {@code $PATH},
      * the .app bundle — is asked directly.</p>
@@ -387,7 +431,8 @@ public class SingBoxInstaller {
         if (isManagedBinary(binary)) {
             String recorded = readMarker(installDir.resolve(VERSION_MARKER_NAME));
             if (recorded != null) {
-                return recorded;
+                // The marker's first word: a release, when it names one, follows.
+                return recorded.split("\\s+", 2)[0];
             }
         }
         return probeVersion(binary, VERSION_PROBE_TIMEOUT_SECONDS);
@@ -486,7 +531,7 @@ public class SingBoxInstaller {
                 Files.copy(sourceBinary, targetBinary, StandardCopyOption.REPLACE_EXISTING);
                 makeExecutable(targetBinary);
                 verifyBinary(targetBinary);
-                writeMarker(installDir.resolve(VERSION_MARKER_NAME), PINNED_VERSION);
+                writeMarker(installDir.resolve(VERSION_MARKER_NAME), pin.marker());
                 log.info("sing-box {} installed at {}", PINNED_VERSION, targetBinary);
                 return targetBinary.toAbsolutePath();
             } finally {
@@ -545,7 +590,7 @@ public class SingBoxInstaller {
             Path target = installDir.resolve(binaryName);
             Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
             makeExecutable(target);
-            writeMarker(installDir.resolve(VERSION_MARKER_NAME), PINNED_VERSION);
+            writeMarker(installDir.resolve(VERSION_MARKER_NAME), pin.marker());
             log.info("Extracted bundled sing-box ({}) from classpath to {}", arch, target);
             return Optional.of(target.toAbsolutePath());
         }
