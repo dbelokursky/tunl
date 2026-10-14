@@ -871,7 +871,8 @@ public class ConnectionService {
 
     /**
      * Applies a manual server selection through the core API when the loaded
-     * configuration still matches; otherwise restarts with the latest config.
+     * configuration still matches; otherwise restarts with the latest config,
+     * in the mode the running core runs in.
      *
      * @return the selected server and whether it was switched or restarted
      * @throws IOException if the fallback start fails
@@ -891,15 +892,22 @@ public class ConnectionService {
                 return new ConnectAttempt(Outcome.NO_ACTIVE_SERVER, null);
             }
             AppSettings settings = configStore.getSettings();
-            // The saved mode, which a Connect click starts in. The mode an
-            // agent's connect over MCP named stayed in requestedMode, so every
-            // later pick restarted in it however the mode was changed since.
-            ProxyMode mode = settings.getProxyMode();
             Run current = run;
-            if (isRunning() && current != null && current.mode() == mode) {
+            boolean running = isRunning() && current != null;
+            // A pick changes the server, never the mode: it restarts in the
+            // mode the core runs in, as recovery does, and with no core it
+            // starts in the saved one, as a Connect click does. It restarted
+            // in the saved mode, so a mode changed while connected took effect
+            // at the next pick: an agent's set_proxy_mode to tun and a
+            // select_server started TUN without the confirm a connect asks
+            // for, and a pick in the list or the tray raised the administrator
+            // prompt, or turned TUN into a system proxy that apps ignoring it
+            // go around.
+            ProxyMode mode = running ? current.mode() : settings.getProxyMode();
+            if (running) {
                 LiveSelector live = current.selector();
-                String generated = generatedNow(
-                        candidates, active, settings, current.leftOut(), current.host());
+                String generated = generatedNow(candidates, active, inMode(settings, mode),
+                        current.leftOut(), current.host());
                 if (live.keepsAnyPick(generated)) {
                     // The automatic selection holds every server whichever is
                     // picked, so the pick changes nothing the core runs. It was

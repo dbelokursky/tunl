@@ -1406,33 +1406,90 @@ class ConnectionServiceTest {
     }
 
     /**
-     * A pick the running core cannot take live restarts it in the saved mode,
-     * as a Connect click starts it. An agent's connect over MCP names its
-     * mode, and the service kept that one: every later pick restarted in it,
-     * with a configuration generated for the mode saved since, so a TUN
-     * configuration ran without the privileges it needs, or a system-proxy
-     * one through the TUN launcher's prompt.
+     * A pick the running core cannot take live restarts it in the mode it
+     * runs in, as recovery does. It restarted in the saved mode, so a mode
+     * changed while connected took effect at the next pick: an agent's
+     * set_proxy_mode to tun followed by select_server started TUN without
+     * the confirm a connect over MCP asks for, and a pick in the list or the
+     * tray raised the administrator prompt.
      */
     @Test
-    void aPickAfterAnAgentsConnectRestartsInTheSavedMode() throws Exception {
+    void aPickKeepsTheModeTheCoreRunsIn() throws Exception {
         store.addServer(server("srv-1", "Tokyo"));
         store.addServer(server("srv-2", "Osaka"));
         store.setActiveServer("srv-1");
         RecordingEngine engine = engine();
         ConnectionService service = service(engine);
         try {
-            assertThat(service.connect(ProxyMode.SYSTEM_PROXY).started()).isTrue();
+            assertThat(service.connect().started()).isTrue();
             store.getSettings().setProxyMode(ProxyMode.TUN);
             store.setActiveServer("srv-2");
 
             assertThat(service.switchToActiveServer().outcome())
                     .isEqualTo(ConnectionService.Outcome.STARTED);
 
-            assertThat(engine.modes).containsExactly(ProxyMode.SYSTEM_PROXY, ProxyMode.TUN);
-            assertThat(JsonMapper.builder().build().readTree(engine.configs.get(1))
-                    .path("inbounds").valueStream()
-                    .map(inbound -> inbound.path("type").asString()))
+            assertThat(engine.modes)
+                    .containsExactly(ProxyMode.SYSTEM_PROXY, ProxyMode.SYSTEM_PROXY);
+            assertThat(inboundTypes(engine.configs.get(1)))
+                    .as("the configuration the core restarted with").doesNotContain("tun");
+            assertThat(store.getSettings().getProxyMode())
+                    .as("the saved mode waits for the next connect").isEqualTo(ProxyMode.TUN);
+        } finally {
+            service.getRecoveryService().close();
+        }
+    }
+
+    /**
+     * The other way round: TUN carries every app, a system proxy only the
+     * apps that ask for it, and a pick turned the one into the other.
+     */
+    @Test
+    void aPickDoesNotTurnTunIntoASystemProxy() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(server("srv-2", "Osaka"));
+        store.setActiveServer("srv-1");
+        store.getSettings().setProxyMode(ProxyMode.TUN);
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        try {
+            assertThat(service.connect().started()).isTrue();
+            store.getSettings().setProxyMode(ProxyMode.SYSTEM_PROXY);
+            store.setActiveServer("srv-2");
+
+            assertThat(service.switchToActiveServer().outcome())
+                    .isEqualTo(ConnectionService.Outcome.STARTED);
+
+            assertThat(engine.modes).containsExactly(ProxyMode.TUN, ProxyMode.TUN);
+            assertThat(inboundTypes(engine.configs.get(1)))
                     .as("the configuration the core restarted with").contains("tun");
+        } finally {
+            service.getRecoveryService().close();
+        }
+    }
+
+    /**
+     * The mode is the running core's, so nothing older can stand in for it:
+     * the mode an agent's connect named stayed behind in requestedMode, and
+     * after the user's own Connect every pick restarted in the agent's mode.
+     */
+    @Test
+    void aPickFollowsTheLatestStartNotAnAgentsEarlierMode() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(server("srv-2", "Osaka"));
+        store.setActiveServer("srv-1");
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+        try {
+            assertThat(service.connect(ProxyMode.TUN).started()).isTrue();
+            service.disconnect();
+            assertThat(service.connect().started()).isTrue();
+            store.setActiveServer("srv-2");
+
+            assertThat(service.switchToActiveServer().outcome())
+                    .isEqualTo(ConnectionService.Outcome.STARTED);
+
+            assertThat(engine.modes).containsExactly(
+                    ProxyMode.TUN, ProxyMode.SYSTEM_PROXY, ProxyMode.SYSTEM_PROXY);
         } finally {
             service.getRecoveryService().close();
         }
