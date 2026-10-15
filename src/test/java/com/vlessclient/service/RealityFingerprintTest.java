@@ -13,17 +13,17 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * A REALITY server whose link asks for {@code random} is sent
- * {@code randomized}.
+ * A REALITY server is sent a fingerprint whose hello newer REALITY servers
+ * accept in place of one whose hello they refuse.
  *
  * <p>The core answers {@code random} with one browser's hello for the whole
- * run, picked among Chrome, Firefox, Edge, Safari and iOS, and only Chrome's
- * carries the X25519MLKEM768 key share that Xray 26.9.8 requires of a REALITY
- * hello. Against such a server four core starts in five fail every
- * connection, until a restart picks again. The bundled core puts that share
- * into every randomized hello, so the hello stays random, as the link asks,
- * and Chrome's, which TSPU is reported to single out, is not sent in its
- * place.</p>
+ * run, Edge's and iOS's among the ones it picks, and its own hellos for Edge,
+ * QQ, 360, iOS and Android are old ones without the X25519MLKEM768 key share
+ * Xray 26.9.8 requires of a REALITY hello. {@code ios} goes as Safari's,
+ * whose current hello the core has. The rest go as {@code randomized}, which
+ * the bundled core gives the share, not as Chrome's, the only current hello
+ * the core has for Chromium browsers and Android, which TSPU is reported to
+ * single out.</p>
  */
 class RealityFingerprintTest {
 
@@ -50,22 +50,40 @@ class RealityFingerprintTest {
     }
 
     /**
+     * A browser the core has only an old hello for goes as Safari's for iOS,
+     * and as {@code randomized} for Edge, QQ, 360 and Android, whose only
+     * current hello in the core would be Chrome's.
+     */
+    @Test
+    void realitySendsAnOutdatedBrowserAsAHelloWithTheShare() throws Exception {
+        assertThat(sent("edge")).isEqualTo("randomized");
+        assertThat(sent("qq")).isEqualTo("randomized");
+        assertThat(sent("360")).isEqualTo("randomized");
+        assertThat(sent("android")).isEqualTo("randomized");
+        assertThat(sent("ios")).isEqualTo("safari");
+        assertThat(sent(" IOS ")).isEqualTo("safari");
+    }
+
+    /**
      * What else a link names goes as it is: {@code randomized}, which the
-     * bundled core now makes compliant, a browser, and Chrome's by default
-     * when the link names none.
+     * bundled core makes compliant, Chrome, Firefox and Safari, whose hellos
+     * the bundled core sends with the share, and Chrome's by default when the
+     * link names none.
      */
     @Test
     void realityKeepsEveryOtherFingerprint() throws Exception {
         assertThat(sent("randomized")).isEqualTo("randomized");
         assertThat(sent("chrome")).isEqualTo("chrome");
         assertThat(sent("firefox")).isEqualTo("firefox");
+        assertThat(sent("safari")).isEqualTo("safari");
         assertThat(sent("")).isEqualTo("chrome");
         assertThat(sent(null)).isEqualTo("chrome");
     }
 
     /**
-     * Plain TLS keeps {@code random}: an ordinary TLS server takes any
-     * hello, and only REALITY servers were seen refusing one.
+     * Plain TLS keeps {@code random}, and the old browsers below: an ordinary
+     * TLS server takes any hello, and only REALITY servers were seen refusing
+     * one.
      */
     @Test
     void plainTlsKeepsRandom() throws Exception {
@@ -73,6 +91,17 @@ class RealityFingerprintTest {
         server.getTls().setReality(false);
 
         assertThat(utlsOf(server).path("fingerprint").asString()).isEqualTo("random");
+    }
+
+    @Test
+    void plainTlsKeepsAnOutdatedBrowser() throws Exception {
+        for (String fingerprint : new String[] {"edge", "ios"}) {
+            ServerConfig server = reality(fingerprint);
+            server.getTls().setReality(false);
+
+            assertThat(utlsOf(server).path("fingerprint").asString())
+                    .as(fingerprint).isEqualTo(fingerprint);
+        }
     }
 
     /**

@@ -16,6 +16,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import javafx.beans.binding.Bindings;
+import javafx.beans.property.ObjectProperty;
+import javafx.beans.property.SimpleObjectProperty;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
 import javafx.geometry.Insets;
@@ -157,6 +159,12 @@ public class ServerFormController {
      * TLS that had been looked at as Hysteria2 was saved with it on.
      */
     private boolean tlsBeforeHysteria2;
+
+    /**
+     * The TLS settings the form would save, as the fingerprint note last read
+     * them; its text follows them and the language of the UI.
+     */
+    private final ObjectProperty<TlsConfig> noteTls = new SimpleObjectProperty<>(new TlsConfig());
 
     /** Encryption and flow, which mean something different for each protocol. */
     private record SharedFields(String encryption, String flow) {
@@ -614,15 +622,27 @@ public class ServerFormController {
 
     /**
      * Says so when the core is sent another fingerprint than the field holds:
-     * a REALITY server whose link asks for {@code random} is sent
-     * {@code randomized} ({@link CoreSettings#replacesRandomPick}). The field
-     * keeps the link's value, which is what the server stores, and which a
+     * a REALITY server is sent one whose hello newer REALITY servers accept in
+     * place of {@code random} or of a browser the core has only an old hello
+     * for ({@link CoreSettings#realityReplacement}). The field keeps the
+     * link's value, which is what the server stores, and which a
      * subscription's next refresh would bring back anyway.
      */
     private void showFingerprintNote() {
         TlsConfig shown = new TlsConfig();
         writeTls(shown, protocolCombo.getValue());
-        setNodeVisible(fingerprintNoteLabel, CoreSettings.replacesRandomPick(shown));
+        noteTls.set(shown);
+        setNodeVisible(fingerprintNoteLabel, CoreSettings.realityReplacement(shown).isPresent());
+    }
+
+    /** What the fingerprint note says for these TLS settings, in the language of the UI. */
+    private static String fingerprintNote(TlsConfig tls) {
+        String named = CoreSettings.fingerprint(tls);
+        return CoreSettings.realityReplacement(tls)
+                .map(sent -> CoreSettings.RANDOM_PICK.equals(named)
+                        ? I18n.get("form.fingerprint.note")
+                        : I18n.get("form.fingerprint.note.outdated", sent, named))
+                .orElse("");
     }
 
     /**
@@ -848,7 +868,8 @@ public class ServerFormController {
         bindLabel(tlsEnabledCheck, "form.tls.enable");
         bindLabel(sniLabel, "form.server.name");
         bindLabel(fingerprintLabel, "form.fingerprint");
-        bindLabel(fingerprintNoteLabel, "form.fingerprint.note");
+        fingerprintNoteLabel.textProperty().bind(Bindings.createStringBinding(
+                () -> fingerprintNote(noteTls.get()), noteTls, I18n.localeProperty()));
         bindLabel(allowInsecureCheck, "form.allow.insecure");
         bindLabel(realityCheck, "form.reality");
         bindLabel(realityPublicKeyLabel, "form.public.key");

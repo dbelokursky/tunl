@@ -675,7 +675,7 @@ The version, the release and the SHA-256 digests live in a single file —
 [singbox.properties](src/main/resources/singbox.properties). It is read by
 pom.xml (properties-maven-plugin), [scripts/bundle-singbox.sh](scripts/bundle-singbox.sh)
 and SingBoxInstaller, so they can never drift. The core is Tunl's own build of
-the version, with one REALITY patch, published here as the pre-release
+the version, with two REALITY patches, published here as the pre-release
 `core-v<version>-tunl<N>`; [packaging/sing-box](packaging/sing-box/README.md)
 says why and how. The **Bump sing-box** workflow builds and proposes each new
 version by itself; by hand, bumping is one command:
@@ -766,8 +766,9 @@ scripts/
 
 sing-box is licensed under
 [GPL-3.0](https://github.com/SagerNet/sing-box/blob/main/LICENSE); the
-installers and dev builds bundle a build of it with one patch,
-[reality-xray.patch](packaging/sing-box/reality-xray.patch), as a separate
+installers and dev builds bundle a build of it with two patches,
+[reality-xray.patch](packaging/sing-box/reality-xray.patch) and
+[utls-presets.patch](packaging/sing-box/utls-presets.patch), as a separate
 process invoked over a documented interface. The bundled build is pinned in
 [`singbox.properties`](src/main/resources/singbox.properties), and its
 `core-v…` release on this repository carries the corresponding source.

@@ -1,11 +1,13 @@
 name: Core
 # Builds the sing-box core Tunl bundles: upstream's source at a version
 # (the one singbox.properties pins unless a run names another), with
-# packaging/sing-box/reality-xray.patch applied (packaging/sing-box/README.md
-# says why). Every target is built and the REALITY hello checked on each pull
-# request that touches the core. A run by hand, or one bump-singbox.yml
-# starts, also publishes the build as the pre-release core-v<version>-tunl<N>,
-# which singbox.properties then pins by digest.
+# packaging/sing-box/reality-xray.patch applied, against the uTLS it requires
+# with packaging/sing-box/utls-presets.patch applied
+# (packaging/sing-box/README.md says why). Every target is built and the
+# REALITY hello checked on each pull request that touches the core. A run by
+# hand, or one bump-singbox.yml starts, also publishes the build as the
+# pre-release core-v<version>-tunl<N>, which singbox.properties then pins by
+# digest.
 on:
   pull_request:
     paths:
@@ -119,6 +121,35 @@ jobs:
         working-directory: sing-box
         run: git apply --verbose ../packaging/sing-box/reality-xray.patch
 
+      # sing-box builds with metacubex/utls, whose Firefox and Safari hellos
+      # (Firefox 120, Safari 16.0) carry no X25519MLKEM768 key share, which
+      # REALITY on Xray 26.9.8 requires. utls-presets.patch adds Firefox 148
+      # and Safari 26.3 from refraction-networking/utls to the version sing-box
+      # requires; go mod download fetches that version and checks it against
+      # sing-box's go.sum, and the build takes the patched copy in its place.
+      # The patch is applied from the top of this checkout, as git apply skips
+      # every file of a patch run from a subdirectory of a repository, and
+      # still succeeds.
+      - name: Patch uTLS
+        env:
+          MODULE: github.com/metacubex/utls
+        run: |
+          version=$(cd sing-box && go list -m -f '{{.Version}}' "$MODULE")
+          info=$(cd sing-box && go mod download -json "$MODULE@$version")
+          source=$(jq -r .Dir <<<"$info")
+          echo "$MODULE $version $(jq -r .Sum <<<"$info")"
+          cp -R "$source" utls
+          chmod -R u+w utls
+          git apply --verbose --directory=utls packaging/sing-box/utls-presets.patch
+          (cd sing-box && go mod edit -replace "$MODULE=../utls")
+
+      # uTLS's own tests on the patched copy, the two the Firefox commit
+      # brought among them. Seconds, and the same on every target.
+      - name: Test the patched uTLS
+        if: matrix.target == 'linux-amd64'
+        working-directory: utls
+        run: go test .
+
       - name: Build
         working-directory: sing-box
         env:
@@ -160,7 +191,7 @@ jobs:
 
       # The same check on upstream's own build of this version has to fail,
       # or it proves nothing: a check the unpatched core passes would pass
-      # a patch that did nothing too. The token fetches the archive and is
+      # patches that did nothing too. The token fetches the archive and is
       # gone before the archive's binary runs.
       - name: Fetch upstream's build
         if: matrix.target == 'linux-amd64'
@@ -178,13 +209,32 @@ jobs:
             exit 1
           fi
 
+      # It has to fail on the hellos themselves (1), not because the core sent
+      # none (2): a check that never saw a hello fails any build. And each
+      # hello has to fail for want of the X25519MLKEM768 share, which upstream
+      # cuts out of every REALITY hello: its client version (1.8.1) alone
+      # fails them all, and would hide a check that no longer sees the share.
       - name: Check that upstream's build fails it
         if: matrix.target == 'linux-amd64'
         env:
           VERSION: ${{ steps.pin.outputs.version }}
         run: |
-          if packaging/sing-box/verify.sh "upstream/sing-box-${VERSION}-linux-amd64.tar.gz"; then
-            echo "upstream's build passes the check, so the check cannot tell the patch apart" >&2
+          set -o pipefail
+          status=0
+          packaging/sing-box/verify.sh "upstream/sing-box-${VERSION}-linux-amd64.tar.gz" 2>&1 \
+            | tee upstream.log || status=$?
+          if [ "$status" -eq 0 ]; then
+            echo "upstream's build passes the check, so the check cannot tell the patches apart" >&2
+            exit 1
+          elif [ "$status" -ne 1 ]; then
+            echo "the check judged no hello of upstream's build (exit $status), so it proves nothing" >&2
+            exit 1
+          fi
+          checked=$(grep -c '^== ' upstream.log)
+          shareless=$(grep -c '^FAIL: no X25519MLKEM768 key share ahead of X25519' upstream.log || true)
+          if [ "$shareless" -ne "$checked" ]; then
+            echo "only $shareless of upstream's $checked hellos failed for want of the X25519MLKEM768" \
+              "share, so the check cannot be shown to see it" >&2
             exit 1
           fi
 
@@ -196,9 +246,9 @@ jobs:
 
   # The only job with write access, and it runs no build: it takes the
   # archives the build jobs made, adds the digests and the corresponding
-  # source (upstream's at the tag, plus the patch; sing-box is GPL-3.0), and
-  # publishes them as a pre-release that never becomes "latest", which the
-  # app's updater reads. Never for a pull request.
+  # source (upstream's at the tag, plus the two patches; sing-box is
+  # GPL-3.0), and publishes them as a pre-release that never becomes
+  # "latest", which the app's updater reads. Never for a pull request.
   publish:
     if: github.event_name != 'pull_request'
     needs: build
@@ -245,17 +295,22 @@ jobs:
           tag="core-v${VERSION}-tunl${REVISION}"
           git -C sing-box archive --format=tar.gz --prefix="sing-box-${VERSION}/" \
             -o "../dist/sing-box-${VERSION}-source.tar.gz" HEAD
-          cp packaging/sing-box/reality-xray.patch dist/
+          cp packaging/sing-box/reality-xray.patch packaging/sing-box/utls-presets.patch dist/
           (cd dist && sha256sum -- * > SHA256SUMS)
+          blob="https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/packaging/sing-box"
           cat > notes.md <<EOF
           sing-box ${VERSION}, built from upstream's source at v${VERSION} with
-          [reality-xray.patch](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/packaging/sing-box/reality-xray.patch)
-          applied, for Tunl to bundle. The patch lets REALITY connect to Xray 26.7
-          and later: the unmodified Chrome hello with its X25519MLKEM768 key share,
-          and client version 26.3.27. See packaging/sing-box/README.md.
+          [reality-xray.patch](${blob}/reality-xray.patch) applied, and with
+          [utls-presets.patch](${blob}/utls-presets.patch) applied to the uTLS it
+          requires, for Tunl to bundle. The patches let REALITY connect to Xray 26.7
+          and later: browser hellos with their X25519MLKEM768 key share (Chrome 133,
+          Firefox 148, Safari 26.3, and every randomized one), and client version
+          26.3.27. See packaging/sing-box/README.md.
 
           Built by run ${GITHUB_RUN_ID} of ${GITHUB_SHA}. sing-box is GPL-3.0: the
-          corresponding source is sing-box-${VERSION}-source.tar.gz with the patch.
+          corresponding source is sing-box-${VERSION}-source.tar.gz with
+          reality-xray.patch, and the github.com/metacubex/utls version its go.mod
+          requires, from the Go module proxy, with utls-presets.patch.
           EOF
           gh release create "$tag" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "Core ${VERSION} (tunl${REVISION})" --notes-file notes.md \

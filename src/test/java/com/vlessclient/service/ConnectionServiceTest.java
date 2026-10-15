@@ -311,10 +311,10 @@ class ConnectionServiceTest {
 
     /**
      * A REALITY server whose link asks for {@code random} is given
-     * {@code randomized}, and the log says so once per start. The
-     * configuration is generated again on every dashboard update to compare,
-     * so a note written there would repeat all day; plain TLS keeps the
-     * link's own and goes unnamed.
+     * {@code randomized}, and the log says so once per start, naming both.
+     * The configuration is generated again on every dashboard update to
+     * compare, so a note written there would repeat all day; plain TLS keeps
+     * the link's own and goes unnamed.
      */
     @Test
     void randomReplacedForRealityIsLoggedOncePerConnect() throws Exception {
@@ -348,8 +348,8 @@ class ConnectionServiceTest {
             assertThat(service.runsCurrentSettings()).isTrue();
 
             assertThat(replacedHelloNotes(appender)).containsExactly(
-                    "REALITY servers get uTLS fingerprint randomized in place of random, "
-                            + "which picks one browser for the whole run: 'Frankfurt'");
+                    "REALITY servers get a uTLS fingerprint whose hello newer servers accept "
+                            + "in place of their link's: 'Frankfurt' (random as randomized)");
 
             assertThat(service.reconnect(null).started()).isTrue();
             assertThat(replacedHelloNotes(appender)).hasSize(2);
@@ -362,7 +362,7 @@ class ConnectionServiceTest {
             ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> log) {
         return log.list.stream()
                 .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
-                .filter(message -> message.contains("in place of random,"))
+                .filter(message -> message.contains("in place of their link's"))
                 .toList();
     }
 

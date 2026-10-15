@@ -655,7 +655,7 @@ java --source 27 scripts/GenerateAppIcon.java
 [singbox.properties](src/main/resources/singbox.properties). Его читают
 pom.xml (properties-maven-plugin), [scripts/bundle-singbox.sh](scripts/bundle-singbox.sh)
 и SingBoxInstaller, так что разъехаться они не могут. Ядро — собственная
-сборка Tunl этой версии с одним патчем для REALITY, опубликованная здесь как
+сборка Tunl этой версии с двумя патчами для REALITY, опубликованная здесь как
 пре-релиз `core-v<версия>-tunl<N>`; зачем и как — в
 [packaging/sing-box](packaging/sing-box/README.md). Workflow **Bump sing-box**
 сам собирает и предлагает каждую новую версию; вручную бамп — одна команда:
@@ -743,8 +743,9 @@ scripts/
 
 sing-box лицензируется под
 [GPL-3.0](https://github.com/SagerNet/sing-box/blob/main/LICENSE); установщики
-и dev-сборки бандлят его сборку с одним патчем,
-[reality-xray.patch](packaging/sing-box/reality-xray.patch), отдельным
+и dev-сборки бандлят его сборку с двумя патчами,
+[reality-xray.patch](packaging/sing-box/reality-xray.patch) и
+[utls-presets.patch](packaging/sing-box/utls-presets.patch), отдельным
 процессом, вызываемым по документированному интерфейсу. Забандленная сборка
 закреплена в [`singbox.properties`](src/main/resources/singbox.properties), а
 её релиз `core-v…` в этом репозитории содержит соответствующие исходники.

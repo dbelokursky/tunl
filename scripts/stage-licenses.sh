@@ -43,7 +43,7 @@ release="$(prop singbox.release)"
 if [[ -n "${release}" ]]; then
     source_url="https://github.com/dbelokursky/tunl/releases/tag/${release}"
     built_as="built by this project as ${release}"
-    source_what="sing-box's source at that version and the patch"
+    source_what="sing-box's source at that version and the patches"
 else
     source_url="https://github.com/SagerNet/sing-box/releases/tag/v${version}"
     built_as="upstream's own build"

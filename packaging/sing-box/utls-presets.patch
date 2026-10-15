@@ -1,0 +1,579 @@
+Tunl: the Firefox 148 and Safari 26.3 hellos, for metacubex/utls, the uTLS
+sing-box builds with (v1.8.7 for sing-box 1.14.3). Both send an
+X25519MLKEM768 key share ahead of X25519, which REALITY on Xray 26.9.8 and
+later requires; Firefox 120 and Safari 16.0, which "firefox" and "safari"
+named until now, send none. Xray's own client sends these two hellos.
+
+Three commits of refraction-networking/utls, cherry-picked onto
+metacubex/utls v1.8.7 in this order, their tests included:
+
+  fc716b2d1316dbf12aa46f66916061098d6664e4  feat: add ff 148 spec and impl keyshare reuse
+  ddebe3904b4d7c7f2c6c89181b349f0bb7bd1d00  fix: dont add unexported field
+  aa6edf4b11af82e110eea845bb2983d30138d651  feat: add safari 26.3
+
+The one conflict, in the imports of u_parrots.go, keeps metacubex's
+internal/mlkem in place of crypto/mlkem and adds crypto/ecdh. The result is
+the tree of Leadaxe/utls-lx 59e89bb, the same three commits on the same tag.
+packaging/sing-box/README.md says how to reproduce it.
+
+This is uTLS's code, under uTLS's BSD 3-Clause licence, Copyright (c) 2009
+The Go Authors (the LICENSE of either repository).
+
+diff --git a/u_common.go b/u_common.go
+index ad4ced7..770507c 100644
+--- a/u_common.go
++++ b/u_common.go
+@@ -602,7 +602,7 @@ var (
+ 	HelloRandomizedNoALPN = ClientHelloID{helloRandomizedNoALPN, helloAutoVers, nil, nil}
+ 
+ 	// The rest will will parrot given browser.
+-	HelloFirefox_Auto = HelloFirefox_120
++	HelloFirefox_Auto = HelloFirefox_148
+ 	HelloFirefox_55   = ClientHelloID{helloFirefox, "55", nil, nil}
+ 	HelloFirefox_56   = ClientHelloID{helloFirefox, "56", nil, nil}
+ 	HelloFirefox_63   = ClientHelloID{helloFirefox, "63", nil, nil}
+@@ -611,6 +611,7 @@ var (
+ 	HelloFirefox_102  = ClientHelloID{helloFirefox, "102", nil, nil}
+ 	HelloFirefox_105  = ClientHelloID{helloFirefox, "105", nil, nil}
+ 	HelloFirefox_120  = ClientHelloID{helloFirefox, "120", nil, nil}
++	HelloFirefox_148  = ClientHelloID{helloFirefox, "148", nil, nil}
+ 
+ 	HelloChrome_Auto        = HelloChrome_133
+ 	HelloChrome_58          = ClientHelloID{helloChrome, "58", nil, nil}
+@@ -657,8 +658,9 @@ var (
+ 	HelloEdge_85   = ClientHelloID{helloEdge, "85", nil, nil}
+ 	HelloEdge_106  = ClientHelloID{helloEdge, "106", nil, nil}
+ 
+-	HelloSafari_Auto = HelloSafari_16_0
++	HelloSafari_Auto = HelloSafari_26_3
+ 	HelloSafari_16_0 = ClientHelloID{helloSafari, "16.0", nil, nil}
++	HelloSafari_26_3 = ClientHelloID{helloSafari, "26.3", nil, nil}
+ 
+ 	Hello360_Auto = Hello360_7_5 // Hello360_11_0 seems to be incompatible with this library
+ 	Hello360_7_5  = ClientHelloID{hello360, "7.5", nil, nil}
+diff --git a/u_parrots.go b/u_parrots.go
+index 7fcf0d6..d3d41e7 100644
+--- a/u_parrots.go
++++ b/u_parrots.go
+@@ -5,6 +5,7 @@
+ package tls
+ 
+ import (
++	"crypto/ecdh"
+ 	crand "crypto/rand"
+ 	"crypto/sha256"
+ 	"encoding/binary"
+@@ -23,6 +24,15 @@ import (
+ 
+ var ErrUnknownClientHelloID = errors.New("tls: unknown ClientHelloID")
+ 
++func classicalCurveForHybrid(curveID CurveID) (CurveID, bool) {
++	switch curveID {
++	case X25519MLKEM768, X25519Kyber768Draft00:
++		return X25519, true
++	default:
++		return 0, false
++	}
++}
++
+ // UTLSIdToSpec converts a ClientHelloID to a corresponding ClientHelloSpec.
+ //
+ // Exported internal function utlsIdToSpec per request.
+@@ -1456,6 +1466,129 @@ func utlsIdToSpec(id ClientHelloID) (ClientHelloSpec, error) {
+ 				},
+ 			},
+ 		}, nil
++	case HelloFirefox_148:
++		return ClientHelloSpec{
++			TLSVersMin: VersionTLS12,
++			TLSVersMax: VersionTLS13,
++			CipherSuites: []uint16{
++				TLS_AES_128_GCM_SHA256,
++				TLS_CHACHA20_POLY1305_SHA256,
++				TLS_AES_256_GCM_SHA384,
++				TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
++				TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
++				TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
++				TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
++				TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
++				TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
++				TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
++				TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
++				TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
++				TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
++				TLS_RSA_WITH_AES_128_GCM_SHA256,
++				TLS_RSA_WITH_AES_256_GCM_SHA384,
++				TLS_RSA_WITH_AES_128_CBC_SHA,
++				TLS_RSA_WITH_AES_256_CBC_SHA,
++			},
++			CompressionMethods: []uint8{
++				0x0, // no compression
++			},
++			Extensions: []TLSExtension{
++				&SNIExtension{},
++				&ExtendedMasterSecretExtension{},
++				&RenegotiationInfoExtension{
++					Renegotiation: RenegotiateOnceAsClient,
++				},
++				&SupportedCurvesExtension{
++					Curves: []CurveID{
++						X25519MLKEM768,
++						X25519,
++						CurveP256,
++						CurveP384,
++						CurveP521,
++						0x0100,
++						0x0101,
++					},
++				},
++				&SupportedPointsExtension{
++					SupportedPoints: []uint8{
++						0x0, // uncompressed
++					},
++				},
++				&ALPNExtension{
++					AlpnProtocols: []string{
++						"h2",
++						"http/1.1",
++					},
++				},
++				&StatusRequestExtension{},
++				&FakeDelegatedCredentialsExtension{
++					SupportedSignatureAlgorithms: []SignatureScheme{
++						ECDSAWithP256AndSHA256,
++						ECDSAWithP384AndSHA384,
++						ECDSAWithP521AndSHA512,
++						ECDSAWithSHA1,
++					},
++				},
++				&SCTExtension{},
++				&KeyShareExtension{
++					KeyShares: append(
++						ReuseHybridAndClassicalKeyShares(
++							KeyShare{
++								Group: X25519MLKEM768,
++							},
++							KeyShare{
++								Group: X25519,
++							},
++						),
++						KeyShare{
++							Group: CurveP256,
++						},
++					),
++				},
++				&SupportedVersionsExtension{
++					Versions: []uint16{
++						VersionTLS13,
++						VersionTLS12,
++					},
++				},
++				&SignatureAlgorithmsExtension{
++					SupportedSignatureAlgorithms: []SignatureScheme{
++						ECDSAWithP256AndSHA256,
++						ECDSAWithP384AndSHA384,
++						ECDSAWithP521AndSHA512,
++						PSSWithSHA256,
++						PSSWithSHA384,
++						PSSWithSHA512,
++						PKCS1WithSHA256,
++						PKCS1WithSHA384,
++						PKCS1WithSHA512,
++						ECDSAWithSHA1,
++						PKCS1WithSHA1,
++					},
++				},
++				&FakeRecordSizeLimitExtension{
++					Limit: 0x4001,
++				},
++				&UtlsCompressCertExtension{[]CertCompressionAlgo{
++					CertCompressionZlib,
++					CertCompressionBrotli,
++					CertCompressionZstd,
++				}},
++				&GREASEEncryptedClientHelloExtension{
++					CandidateCipherSuites: []HPKESymmetricCipherSuite{
++						{
++							KdfId:  dicttls.HKDF_SHA256,
++							AeadId: dicttls.AEAD_AES_128_GCM,
++						},
++						{
++							KdfId:  dicttls.HKDF_SHA256,
++							AeadId: dicttls.AEAD_CHACHA20_POLY1305,
++						},
++					},
++					CandidatePayloadLens: []uint16{223}, // +16: 239
++				},
++			},
++		}, nil
+ 	case HelloIOS_11_1:
+ 		return ClientHelloSpec{
+ 			TLSVersMax: VersionTLS12,
+@@ -2106,6 +2239,116 @@ func utlsIdToSpec(id ClientHelloID) (ClientHelloSpec, error) {
+ 				},
+ 			},
+ 		}, nil
++	case HelloSafari_26_3:
++		return ClientHelloSpec{
++			TLSVersMin: VersionTLS12,
++			TLSVersMax: VersionTLS13,
++			CipherSuites: []uint16{
++				GREASE_PLACEHOLDER,
++				TLS_AES_256_GCM_SHA384,
++				TLS_CHACHA20_POLY1305_SHA256,
++				TLS_AES_128_GCM_SHA256,
++				TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
++				TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
++				TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
++				TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
++				TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
++				TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
++				TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
++				TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
++				TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
++				TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
++				TLS_RSA_WITH_AES_256_GCM_SHA384,
++				TLS_RSA_WITH_AES_128_GCM_SHA256,
++				TLS_RSA_WITH_AES_256_CBC_SHA,
++				TLS_RSA_WITH_AES_128_CBC_SHA,
++				FAKE_TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA,
++				TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
++				TLS_RSA_WITH_3DES_EDE_CBC_SHA,
++			},
++			CompressionMethods: []uint8{
++				0x0, // no compression
++			},
++			Extensions: []TLSExtension{
++				&UtlsGREASEExtension{},
++				&SNIExtension{},
++				&ExtendedMasterSecretExtension{},
++				&RenegotiationInfoExtension{
++					Renegotiation: RenegotiateOnceAsClient,
++				},
++				&SupportedCurvesExtension{
++					Curves: []CurveID{
++						GREASE_PLACEHOLDER,
++						X25519MLKEM768,
++						X25519,
++						CurveP256,
++						CurveP384,
++						CurveP521,
++					},
++				},
++				&SupportedPointsExtension{
++					SupportedPoints: []uint8{
++						0x0, // uncompressed
++					},
++				},
++				&ALPNExtension{
++					AlpnProtocols: []string{
++						"h2",
++						"http/1.1",
++					},
++				},
++				&StatusRequestExtension{},
++				&SignatureAlgorithmsExtension{
++					SupportedSignatureAlgorithms: []SignatureScheme{
++						ECDSAWithP256AndSHA256,
++						PSSWithSHA256,
++						PKCS1WithSHA256,
++						ECDSAWithP384AndSHA384,
++						PSSWithSHA384,
++						PSSWithSHA384,
++						PKCS1WithSHA384,
++						PSSWithSHA512,
++						PKCS1WithSHA512,
++						PKCS1WithSHA1,
++					},
++				},
++				&SCTExtension{},
++				&KeyShareExtension{
++					KeyShares: []KeyShare{
++						{
++							Group: GREASE_PLACEHOLDER,
++							Data: []byte{
++								0,
++							},
++						},
++						{
++							Group: X25519MLKEM768,
++						},
++						{
++							Group: X25519,
++						},
++					},
++				},
++				&PSKKeyExchangeModesExtension{
++					Modes: []uint8{
++						PskModeDHE,
++					},
++				},
++				&SupportedVersionsExtension{
++					Versions: []uint16{
++						GREASE_PLACEHOLDER,
++						VersionTLS13,
++						VersionTLS12,
++					},
++				},
++				&UtlsCompressCertExtension{
++					Algorithms: []CertCompressionAlgo{
++						CertCompressionZlib,
++					},
++				},
++				&UtlsGREASEExtension{},
++			},
++		}, nil
+ 	case Hello360_7_5:
+ 		return ClientHelloSpec{
+ 			CipherSuites: []uint16{
+@@ -2874,6 +3117,7 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
+ 			}
+ 		case *KeyShareExtension:
+ 			preferredCurveIsSet := false
++			reusableClassicalKeys := make(map[CurveID][]*ecdh.PrivateKey)
+ 			for i := range ext.KeyShares {
+ 				curveID := ext.KeyShares[i].Group
+ 				if isGREASEUint16(uint16(curveID)) { // just in case the user set a GREASE value instead of unGREASEd
+@@ -2884,7 +3128,19 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
+ 					continue
+ 				}
+ 
++				isHybridReuse := len(ext.KeyShares[i].Data) == 1 && ext.KeyShares[i].Data[0] == keyShareHybridReuseMarker
++				isClassicalReuse := len(ext.KeyShares[i].Data) == 1 && ext.KeyShares[i].Data[0] == keyShareClassicalReuseMarker
+ 				if curveID == X25519MLKEM768 || curveID == X25519Kyber768Draft00 {
++					if isClassicalReuse {
++						return fmt.Errorf("hybrid keyshare reuse mismatch: classical marker is invalid for hybrid group %v", curveID)
++					}
++					if isHybridReuse {
++						_, ok := classicalCurveForHybrid(curveID)
++						if !ok {
++							return fmt.Errorf("hybrid keyshare reuse mismatch: hybrid group %v is not supported for reuse", curveID)
++						}
++					}
++
+ 					ecdheKey, err := generateECDHEKey(uconn.config.rand(), X25519)
+ 					if err != nil {
+ 						return err
+@@ -2905,7 +3161,36 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
+ 					}
+ 					uconn.HandshakeState.State13.KeyShareKeys.Mlkem = mlkemKey
+ 					uconn.HandshakeState.State13.KeyShareKeys.MlkemEcdhe = ecdheKey
++					if isHybridReuse {
++						expectedClassical, _ := classicalCurveForHybrid(curveID)
++						reusableClassicalKeys[expectedClassical] = append(
++							reusableClassicalKeys[expectedClassical],
++							ecdheKey,
++						)
++					}
+ 				} else {
++					if isHybridReuse {
++						return fmt.Errorf("classical keyshare reuse mismatch: hybrid marker is invalid for classical group %v", curveID)
++					}
++					if isClassicalReuse {
++						keysForCurve := reusableClassicalKeys[curveID]
++						if len(keysForCurve) == 0 {
++							return fmt.Errorf("classical keyshare %v is configured to reuse a hybrid keyshare, but no matching hybrid keyshare was generated first",
++								curveID)
++						}
++
++						reusedKey := keysForCurve[0]
++						reusableClassicalKeys[curveID] = keysForCurve[1:]
++
++						ext.KeyShares[i].Data = reusedKey.PublicKey().Bytes()
++						if !preferredCurveIsSet {
++							// only do this once for the first non-grease curve
++							uconn.HandshakeState.State13.KeyShareKeys.Ecdhe = reusedKey
++							preferredCurveIsSet = true
++						}
++						continue
++					}
++
+ 					ecdheKey, err := generateECDHEKey(uconn.config.rand(), curveID)
+ 					if err != nil {
+ 						return fmt.Errorf("unsupported Curve in KeyShareExtension: %v."+
+diff --git a/u_parrots_test.go b/u_parrots_test.go
+new file mode 100644
+index 0000000..1a28d56
+--- /dev/null
++++ b/u_parrots_test.go
+@@ -0,0 +1,154 @@
++package tls
++
++import (
++	"bytes"
++	"net"
++	"testing"
++)
++
++type incrementingSource struct {
++	next byte
++}
++
++func (s *incrementingSource) Read(b []byte) (int, error) {
++	for i := range b {
++		b[i] = s.next
++		s.next++
++	}
++	return len(b), nil
++}
++
++func findKeyShareExtension(t *testing.T, exts []TLSExtension) *KeyShareExtension {
++	t.Helper()
++
++	for _, ext := range exts {
++		if keyShareExt, ok := ext.(*KeyShareExtension); ok {
++			return keyShareExt
++		}
++	}
++
++	t.Fatal("key_share extension not found")
++	return nil
++}
++
++func findKeyShareData(t *testing.T, keyShareExt *KeyShareExtension, group CurveID) []byte {
++	t.Helper()
++
++	for _, keyShare := range keyShareExt.KeyShares {
++		if keyShare.Group == group {
++			return keyShare.Data
++		}
++	}
++
++	t.Fatalf("key_share for group %v not found", group)
++	return nil
++}
++
++func newTestUConnWithIncrementingRand() *UConn {
++	return UClient(&net.TCPConn{}, &Config{
++		ServerName: "example.com",
++		Rand:       &incrementingSource{},
++	}, HelloCustom)
++}
++
++func fingerprintsWithHybridClassicalKeyShareReuse() []ClientHelloID {
++	return []ClientHelloID{
++		HelloFirefox_148,
++	}
++}
++
++func TestParrotFingerprintsReuseHybridClassicalKeyShare(t *testing.T) {
++	for _, helloID := range fingerprintsWithHybridClassicalKeyShareReuse() {
++		t.Run(helloID.Str(), func(t *testing.T) {
++			spec, err := UTLSIdToSpec(helloID)
++			if err != nil {
++				t.Fatalf("unexpected error creating %s spec: %v", helloID.Str(), err)
++			}
++
++			uconn := newTestUConnWithIncrementingRand()
++			if err := uconn.ApplyPreset(&spec); err != nil {
++				t.Fatalf("unexpected error applying %s spec: %v", helloID.Str(), err)
++			}
++
++			keyShareExt := findKeyShareExtension(t, uconn.Extensions)
++			hybridData := findKeyShareData(t, keyShareExt, X25519MLKEM768)
++			classicalData := findKeyShareData(t, keyShareExt, X25519)
++
++			if len(hybridData) < x25519PublicKeySize {
++				t.Fatalf("hybrid keyshare is too short: got %d bytes", len(hybridData))
++			}
++			hybridClassicalPart := hybridData[len(hybridData)-x25519PublicKeySize:]
++			if !bytes.Equal(hybridClassicalPart, classicalData) {
++				t.Fatalf("expected %s to reuse classical keyshare: hybrid classical part != X25519 keyshare", helloID.Str())
++			}
++
++			keys := uconn.HandshakeState.State13.KeyShareKeys
++			if keys == nil || keys.MlkemEcdhe == nil || keys.Ecdhe == nil {
++				t.Fatal("expected both hybrid and classical ECDHE private keys to be set")
++			}
++			if keys.MlkemEcdhe != keys.Ecdhe {
++				t.Fatalf("expected %s hybrid/classical keyshares to reuse the same ECDHE private key", helloID.Str())
++			}
++		})
++	}
++}
++
++func TestHybridClassicalKeySharesAreIndependentByDefault(t *testing.T) {
++	spec := ClientHelloSpec{
++		TLSVersMin: VersionTLS12,
++		TLSVersMax: VersionTLS13,
++		CipherSuites: []uint16{
++			TLS_AES_128_GCM_SHA256,
++		},
++		CompressionMethods: []uint8{compressionNone},
++		Extensions: []TLSExtension{
++			&SupportedCurvesExtension{
++				Curves: []CurveID{
++					X25519MLKEM768,
++					X25519,
++				},
++			},
++			&KeyShareExtension{
++				KeyShares: []KeyShare{
++					{
++						Group: X25519MLKEM768,
++					},
++					{
++						Group: X25519,
++					},
++				},
++			},
++			&SupportedVersionsExtension{
++				Versions: []uint16{
++					VersionTLS13,
++					VersionTLS12,
++				},
++			},
++		},
++	}
++
++	uconn := newTestUConnWithIncrementingRand()
++	if err := uconn.ApplyPreset(&spec); err != nil {
++		t.Fatalf("unexpected error applying independent keyshare spec: %v", err)
++	}
++
++	keyShareExt := findKeyShareExtension(t, uconn.Extensions)
++	hybridData := findKeyShareData(t, keyShareExt, X25519MLKEM768)
++	classicalData := findKeyShareData(t, keyShareExt, X25519)
++
++	if len(hybridData) < x25519PublicKeySize {
++		t.Fatalf("hybrid keyshare is too short: got %d bytes", len(hybridData))
++	}
++	hybridClassicalPart := hybridData[len(hybridData)-x25519PublicKeySize:]
++	if bytes.Equal(hybridClassicalPart, classicalData) {
++		t.Fatalf("expected independent keyshares by default: hybrid classical part == X25519 keyshare")
++	}
++
++	keys := uconn.HandshakeState.State13.KeyShareKeys
++	if keys == nil || keys.MlkemEcdhe == nil || keys.Ecdhe == nil {
++		t.Fatal("expected both hybrid and classical ECDHE private keys to be set")
++	}
++	if keys.MlkemEcdhe == keys.Ecdhe {
++		t.Fatal("expected independent keyshares by default: hybrid/classical ECDHE private keys should differ")
++	}
++}
+diff --git a/u_public.go b/u_public.go
+index 8fb573b..e20b61d 100644
+--- a/u_public.go
++++ b/u_public.go
+@@ -632,6 +632,21 @@ type KeyShare struct {
+ 	Data  []byte  `json:"key_exchange,omitempty"` // optional
+ }
+ 
++const (
++	// Internal marker bytes used by ReuseHybridAndClassicalKeyShares.
++	// ApplyPreset consumes these and generates real keyshare bytes.
++	keyShareHybridReuseMarker    byte = 0xf1
++	keyShareClassicalReuseMarker byte = 0xf2
++)
++
++// ReuseHybridAndClassicalKeyShares marks a hybrid/classical keyshare pair so
++// ApplyPreset reuses the same classical key material for both entries.
++func ReuseHybridAndClassicalKeyShares(hybrid, classical KeyShare) []KeyShare {
++	hybrid.Data = []byte{keyShareHybridReuseMarker}
++	classical.Data = []byte{keyShareClassicalReuseMarker}
++	return []KeyShare{hybrid, classical}
++}
++
+ func (ks KeyShare) ToPrivate() keyShare {
+ 	return keyShare{group: ks.Group, data: ks.Data}
+ }

@@ -16,13 +16,25 @@ GNU General Public License v3.0:
     https://github.com/SagerNet/sing-box/blob/main/LICENSE
 
 The binary is built by this project from sing-box's source at the version
-pinned in src/main/resources/singbox.properties, with one modification:
-packaging/sing-box/reality-xray.patch, which lets its REALITY client connect
-to current Xray servers (packaging/sing-box/README.md says what it changes
-and why). The patch is licensed under the GPL-3.0 as sing-box is. Each build
-is published as a pre-release named core-v<version>-tunl<N> in this
-repository, together with the corresponding source: sing-box's source at
-that version and the patch.
+pinned in src/main/resources/singbox.properties, with two modifications,
+which let its REALITY client connect to current Xray servers
+(packaging/sing-box/README.md says what they change and why):
+
+- packaging/sing-box/reality-xray.patch, to sing-box itself, licensed under
+  the GPL-3.0 as sing-box is;
+- packaging/sing-box/utls-presets.patch, to github.com/metacubex/utls, the
+  uTLS library sing-box builds with, at the version sing-box requires. It is
+  three commits of refraction-networking/utls
+  (https://github.com/refraction-networking/utls), fc716b2d1316, ddebe3904b4d
+  and aa6edf4b11af, which add the Firefox 148 and Safari 26.3 hellos.
+  uTLS, and so this patch, is licensed under the BSD 3-Clause License,
+  Copyright (c) 2009 The Go Authors:
+  https://github.com/refraction-networking/utls/blob/master/LICENSE
+
+Each build is published as a pre-release named core-v<version>-tunl<N> in
+this repository, together with the corresponding source: sing-box's source at
+that version and the two patches. The uTLS version the second applies to is
+the one sing-box's go.mod requires, which the Go module proxy serves.
 
 Every installer carries, next to this file, sing-box's licence notice
 (sing-box-LICENSE) and the GPL-3.0 text it refers to (sing-box-GPL-3.0.txt),

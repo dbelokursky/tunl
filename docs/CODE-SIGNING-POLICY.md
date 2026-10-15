@@ -17,7 +17,8 @@ approved. From then on the line below applies.
 - Nothing built on a developer's machine, and nothing from another
   repository.
 - The installer bundles a build of sing-box made from its published source
-  with one patch ([reality-xray.patch](../packaging/sing-box/reality-xray.patch)),
+  with two patches ([reality-xray.patch](../packaging/sing-box/reality-xray.patch)
+  and [utls-presets.patch](../packaging/sing-box/utls-presets.patch)),
   and a Java runtime assembled from OpenJDK with `jlink`. Both are open
   source. Their source for a given release is named in
   [`singbox.properties`](../src/main/resources/singbox.properties) and the

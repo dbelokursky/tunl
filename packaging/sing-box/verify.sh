@@ -5,13 +5,27 @@
 # verify/ (which plays the server, holding the private key), sends one
 # request through it, and takes verify's answer: 0 when the hello carries an
 # X25519MLKEM768 key share ahead of X25519, names client version 26.3.27,
-# lists each key share's group and offers browser ALPN. Chrome's fingerprint
-# is checked in one process. "randomized" is checked in twelve: the core
-# draws that hello once per process, and the draw that left the hybrid share
-# out used to come up in about half of them.
+# lists each key share's group and offers browser ALPN.
 #
-# Usage: verify.sh sing-box-<version>-linux-amd64.tar.gz
+# It checks every fingerprint Tunl sends a REALITY server, each in a core
+# process of its own: the fingerprints a link may name, as
+# CoreSettings.fingerprintToSend hands them to the core. CoreSettingsTest
+# fails when the list below and CoreSettings part. "randomized" is checked in
+# twelve processes: the core draws that hello once per process, and the draw
+# that left the hybrid share out used to come up in about half of them.
+#
+# Every hello is checked, and the ones that fail are named at the end. Exits
+# 0 when all of them pass and 1 when one fails. A core that sends no hello
+# stops the run with 2: the hello was not judged, so neither a pass nor a
+# failure would mean anything.
+#
+# Usage: verify.sh sing-box-<version>-<os>-<arch>.tar.gz
 set -euo pipefail
+
+# What Tunl sends a REALITY server, chrome's aliases included: the core maps
+# them to Chrome's hello today, and the check holds it to that.
+fingerprints=(chrome chrome_psk chrome_psk_shuffle chrome_padding_psk_shuffle chrome_pq
+  chrome_pq_psk firefox safari randomized)
 
 archive=$1
 here=$(cd "$(dirname "$0")" && pwd)
@@ -65,9 +79,34 @@ EOF
   return "$status"
 }
 
-echo "== chrome"
-check chrome
-for run in $(seq 1 12); do
-  echo "== randomized, core process $run of 12"
-  check randomized
+failed=()
+for fingerprint in "${fingerprints[@]}"; do
+  processes=1
+  if [ "$fingerprint" = randomized ]; then
+    processes=12
+  fi
+  for run in $(seq 1 "$processes"); do
+    label=$fingerprint
+    if [ "$processes" -gt 1 ]; then
+      label="$fingerprint, core process $run of $processes"
+    fi
+    echo "== $label"
+    status=0
+    check "$fingerprint" || status=$?
+    case $status in
+      0) ;;
+      1) failed+=("$label") ;;
+      *)
+        echo "verify: no hello to judge for $label (exit $status)" >&2
+        exit 2
+        ;;
+    esac
+  done
 done
+
+if [ "${#failed[@]}" -gt 0 ]; then
+  echo "verify: these hellos fail:" >&2
+  printf '  %s\n' "${failed[@]}" >&2
+  exit 1
+fi
+echo "verify: every hello passes"
