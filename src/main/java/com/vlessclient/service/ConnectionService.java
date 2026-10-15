@@ -735,20 +735,21 @@ public class ConnectionService {
     }
 
     /**
-     * Names the REALITY servers the core was given {@code randomized} for in
-     * place of the {@code random} their links ask for
-     * ({@link CoreSettings#replacesRandomPick}). Said once per start, like
-     * the IPv6 note: the generator writes the substitution into every
-     * configuration, and it writes one on every dashboard update to compare.
+     * Names the REALITY servers the core was given another uTLS fingerprint
+     * than their links name, with both ({@link CoreSettings#realityReplacement}).
+     * Said once per start, like the IPv6 note: the generator writes the
+     * substitution into every configuration, and it writes one on every
+     * dashboard update to compare.
      */
     private static void logReplacedFingerprints(List<ServerConfig> members) {
         String replaced = members.stream()
-                .filter(server -> CoreSettings.replacesRandomPick(server.getTls()))
-                .map(server -> "'" + server.getName() + "'")
+                .flatMap(server -> CoreSettings.realityReplacement(server.getTls()).stream()
+                        .map(sent -> "'" + server.getName() + "' ("
+                                + CoreSettings.fingerprint(server.getTls()) + " as " + sent + ")"))
                 .collect(Collectors.joining(", "));
         if (!replaced.isEmpty()) {
-            log.info("REALITY servers get uTLS fingerprint randomized in place of random, "
-                    + "which picks one browser for the whole run: {}", replaced);
+            log.info("REALITY servers get a uTLS fingerprint whose hello newer servers accept "
+                    + "in place of their link's: {}", replaced);
         }
     }
 

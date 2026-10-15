@@ -8,6 +8,7 @@ import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.testing.TestServers;
 import com.vlessclient.testing.UiTest;
+import java.util.Locale;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
@@ -24,10 +25,11 @@ import org.testfx.framework.junit5.ApplicationTest;
  * fingerprint field holds.
  *
  * <p>A REALITY server whose link asks for {@code random} is sent
- * {@code randomized}. The field keeps the link's value, since that is what
- * the server stores and what a subscription refresh puts back, so without a
- * word here the form would show {@code random} for a server that is sent
- * {@code randomized}.</p>
+ * {@code randomized}, and one that names a browser the core has only an old
+ * hello for is sent a hello with the share. The field keeps
+ * the link's value, since that is what the server stores and what a
+ * subscription refresh puts back, so without a word here the form would show
+ * {@code random} for a server that is sent {@code randomized}.</p>
  */
 @UiTest
 public class ServerFormFingerprintNoteTest extends ApplicationTest {
@@ -83,6 +85,36 @@ public class ServerFormFingerprintNoteTest extends ApplicationTest {
         interact(() -> protocolCombo().setValue(Protocol.VMESS));
         assertThat(note().isVisible()).as("VMess, which the form offers no REALITY for")
                 .isFalse();
+    }
+
+    /**
+     * A browser the core has only an old hello for is sent a hello with the
+     * share, and the note names both, in the language the UI switches to.
+     */
+    @Test
+    void aRealityServerAskingForAnOutdatedBrowserSaysWhatIsSentInstead() {
+        interact(() -> controller.setServerConfig(reality("edge")));
+
+        assertThat(note().isVisible()).isTrue();
+        assertThat(note().getText())
+                .isEqualTo(I18n.get("form.fingerprint.note.outdated", "randomized", "edge"));
+
+        interact(() -> lookup("#fingerprintField").queryAs(TextField.class).setText("iOS"));
+        assertThat(note().getText())
+                .isEqualTo(I18n.get("form.fingerprint.note.outdated", "safari", "ios"));
+        try {
+            interact(() -> I18n.setLocale(Locale.of("ru")));
+            assertThat(note().getText())
+                    .as("in Russian")
+                    .isEqualTo(I18n.get("form.fingerprint.note.outdated", "safari", "ios"))
+                    .contains("safari", "ios")
+                    .doesNotContain("Sent as");
+        } finally {
+            interact(() -> I18n.setLocale(Locale.ENGLISH));
+        }
+
+        interact(() -> lookup("#fingerprintField").queryAs(TextField.class).setText("safari"));
+        assertThat(note().isVisible()).as("safari, sent as it is").isFalse();
     }
 
     @Test

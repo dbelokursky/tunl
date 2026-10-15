@@ -6,9 +6,17 @@ import com.vlessclient.app.I18n;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.testing.TestServers;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -95,30 +103,73 @@ class CoreSettingsTest {
     }
 
     /**
-     * {@code randomized} goes in place of {@code random} only for REALITY
-     * with TLS on; the server form asks with either unticked, and the connect
-     * log asks for every member, WireGuard's and Shadowsocks' included.
+     * A REALITY server is sent a fingerprint whose hello newer REALITY servers
+     * accept in place of {@code random}, and of a browser the core has only an
+     * old hello for, whatever the link's spelling; only with REALITY and TLS
+     * on. The server form asks with either unticked, and the connect log asks
+     * for every member, WireGuard's and Shadowsocks' included.
      */
     @Test
-    void onlyARealityServerIsSentRandomizedInPlaceOfRandom() {
-        assertThat(CoreSettings.replacesRandomPick(reality(server ->
-                server.getTls().setFingerprint("random")).getTls())).isTrue();
-        assertThat(CoreSettings.replacesRandomPick(reality(server ->
-                server.getTls().setFingerprint(" RANDOM ")).getTls())).isTrue();
-        assertThat(CoreSettings.replacesRandomPick(reality(server ->
-                server.getTls().setFingerprint("randomized")).getTls()))
-                .as("randomized, sent as it is").isFalse();
-        assertThat(CoreSettings.replacesRandomPick(reality(server -> { }).getTls()))
-                .as("chrome").isFalse();
-        assertThat(CoreSettings.replacesRandomPick(reality(server -> {
-            server.getTls().setFingerprint("random");
-            server.getTls().setReality(false);
-        }).getTls())).as("plain TLS").isFalse();
-        assertThat(CoreSettings.replacesRandomPick(reality(server -> {
-            server.getTls().setFingerprint("random");
+    void aRealityServerIsSentAHelloNewerServersAcceptInPlaceOfOneTheyRefuse() {
+        Map<String, String> replacements = Map.of(
+                "random", "randomized",
+                "edge", "randomized",
+                "qq", "randomized",
+                "360", "randomized",
+                "android", "randomized",
+                "ios", "safari");
+        replacements.forEach((named, sent) -> assertThat(CoreSettings.realityReplacement(
+                reality(server -> server.getTls().setFingerprint(named)).getTls()))
+                .as(named).contains(sent));
+        assertThat(CoreSettings.realityReplacement(reality(server ->
+                server.getTls().setFingerprint(" RANDOM ")).getTls())).contains("randomized");
+        assertThat(CoreSettings.realityReplacement(reality(server ->
+                server.getTls().setFingerprint("iOS")).getTls())).contains("safari");
+        for (String asItIs : List.of("chrome", "firefox", "safari", "randomized", "chrome_pq")) {
+            assertThat(CoreSettings.realityReplacement(reality(server ->
+                    server.getTls().setFingerprint(asItIs)).getTls()))
+                    .as("%s, sent as it is", asItIs).isEmpty();
+        }
+        assertThat(CoreSettings.realityReplacement(reality(server ->
+                server.getTls().setFingerprint(null)).getTls())).as("none named: chrome").isEmpty();
+        for (String named : replacements.keySet()) {
+            assertThat(CoreSettings.realityReplacement(reality(server -> {
+                server.getTls().setFingerprint(named);
+                server.getTls().setReality(false);
+            }).getTls())).as("plain TLS, %s", named).isEmpty();
+        }
+        assertThat(CoreSettings.realityReplacement(reality(server -> {
+            server.getTls().setFingerprint("edge");
             server.getTls().setEnabled(false);
-        }).getTls())).as("TLS off").isFalse();
-        assertThat(CoreSettings.replacesRandomPick(null)).as("no TLS settings").isFalse();
+        }).getTls())).as("TLS off").isEmpty();
+        assertThat(CoreSettings.realityReplacement(null)).as("no TLS settings").isEmpty();
+    }
+
+    /**
+     * {@code packaging/sing-box/verify.sh} checks the hello of every
+     * fingerprint a REALITY server can be sent, which is every one the core
+     * knows as {@link CoreSettings#fingerprintToSend} hands it over. A
+     * fingerprint added there, or a replacement changed, without the check
+     * following would reach a REALITY server unchecked.
+     */
+    @Test
+    void theCoreCheckCoversEveryFingerprintARealityServerIsSent() throws IOException {
+        Set<String> sent = new TreeSet<>();
+        for (String fingerprint : CoreSettings.fingerprints()) {
+            sent.add(CoreSettings.fingerprintToSend(reality(server ->
+                    server.getTls().setFingerprint(fingerprint))));
+        }
+
+        assertThat(verifiedFingerprints()).containsExactlyInAnyOrderElementsOf(sent);
+    }
+
+    /** The fingerprints {@code verify.sh} starts the core with, its {@code fingerprints=(…)}. */
+    private static List<String> verifiedFingerprints() throws IOException {
+        String script = Files.readString(Path.of("packaging", "sing-box", "verify.sh"));
+        Matcher list = Pattern.compile("(?m)^fingerprints=\\(([^)]*)\\)").matcher(script);
+        assertThat(list.find()).as("verify.sh names its fingerprints in fingerprints=(...)")
+                .isTrue();
+        return List.of(list.group(1).strip().split("\\s+"));
     }
 
     @Test
