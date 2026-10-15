@@ -39,7 +39,7 @@ version, never backported to them.
 
 ## Out of scope
 
-- sing-box itself and the protocols it implements, outside what the patch
-  changes: report those upstream at
+- sing-box itself and the protocols it implements, outside what the patches
+  in `packaging/sing-box` change: report those upstream at
   <https://github.com/SagerNet/sing-box/security>.
 - The servers you connect to, or the services reached through them.

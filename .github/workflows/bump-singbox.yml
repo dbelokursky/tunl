@@ -7,7 +7,7 @@ name: Bump sing-box
 # new core is usable before a single user sees it.
 #
 # The core pinned is Tunl's own build of the version, the pre-release
-# core-v<version>-tunl<N> that core.yml makes with a REALITY patch
+# core-v<version>-tunl<N> that core.yml makes with two REALITY patches
 # (packaging/sing-box/README.md). When no such build exists yet, this run has
 # core.yml make and publish one first; a patch that no longer applies to the
 # new version fails that step, and the run with it, every day until the patch
@@ -325,7 +325,7 @@ jobs:
           $note
           ## Automated verification
 
-          **Core** built \`$RELEASE\` from upstream's source at \`v$WANT\` with \`packaging/sing-box/reality-xray.patch\`, and checked its REALITY hello against a stand-in Xray server that upstream's own build of the version had to fail. \`scripts/bump-singbox.sh\` then downloaded every asset, calculated its SHA-256 locally, and compared it with the digest returned by the Releases API. It ran the Linux binary and verified that it reports the requested version and carries the \`tunl\` build tag.
+          **Core** built \`$RELEASE\` from upstream's source at \`v$WANT\` with \`packaging/sing-box/reality-xray.patch\`, and the uTLS it requires with \`packaging/sing-box/utls-presets.patch\`, and checked its REALITY hello against a stand-in Xray server that upstream's own build of the version had to fail. \`scripts/bump-singbox.sh\` then downloaded every asset, calculated its SHA-256 locally, and compared it with the digest returned by the Releases API. It ran the Linux binary and verified that it reports the requested version and carries the \`tunl\` build tag.
 
           ## Maintainer review
 

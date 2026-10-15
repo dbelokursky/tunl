@@ -8,7 +8,7 @@
 #
 # With a revision the pin is Tunl's own build of that version, the
 # pre-release core-v<version>-tunl<revision> of this repository, made by
-# .github/workflows/core.yml with packaging/sing-box/reality-xray.patch.
+# .github/workflows/core.yml with the patches in packaging/sing-box.
 # Without one it is upstream's release on SagerNet/sing-box.
 #
 # For each bundled asset (darwin and linux tar.gz per arch, windows amd64 zip)

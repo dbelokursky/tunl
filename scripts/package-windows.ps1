@@ -119,7 +119,7 @@ if (-not $coreVersion) {
 if ($coreRelease) {
     $sourceUrl = "https://github.com/dbelokursky/tunl/releases/tag/$coreRelease"
     $builtAs = "built by this project as $coreRelease"
-    $sourceWhat = "sing-box's source at that version and the patch"
+    $sourceWhat = "sing-box's source at that version and the patches"
 } else {
     $sourceUrl = "https://github.com/SagerNet/sing-box/releases/tag/v$coreVersion"
     $builtAs = "upstream's own build"
