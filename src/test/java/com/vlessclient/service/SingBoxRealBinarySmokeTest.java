@@ -302,7 +302,15 @@ class SingBoxRealBinarySmokeTest {
                 with(shadowsocksServer("simple-obfs", "aes-256-gcm"), server -> {
                     server.setPlugin("simple-obfs");
                     server.setPluginOpts("obfs=http;obfs-host=www.bing.com");
-                }));
+                }),
+                // The legacy cipher the core's documentation names and its check refuses.
+                with(serverFor(Protocol.VMESS), server -> {
+                    server.setId("vmess-aes-128-ctr");
+                    server.setName("vmess-aes-128-ctr");
+                    server.setEncryption("aes-128-ctr");
+                }),
+                with(realityServer("flow-with-a-space", "chrome", realityKey),
+                        server -> server.setFlow("xtls-rprx-vision ")));
 
         for (ProxyMode mode : ProxyMode.values()) {
             AppSettings settings = new AppSettings();
@@ -422,7 +430,31 @@ class SingBoxRealBinarySmokeTest {
                 with(hysteria2Server("hysteria2-obfs-unknown"), server -> {
                     server.setEncryption("foo");
                     server.setFlow("obfs-password");
-                }));
+                }),
+                with(quicServer("vless-quic-reality", true), server -> withReality(server, realityKey)),
+                with(quicServer("trojan-quic-reality", true), server -> {
+                    server.setProtocol(Protocol.TROJAN);
+                    withReality(server, realityKey);
+                }),
+                with(hysteria2Server("hysteria2-reality"), server -> withReality(server, realityKey)),
+                with(shadowsocksServer("ss2022-chacha-one-key", "2022-blake3-chacha20-poly1305"),
+                        server -> server.setUuid(key32)),
+                with(shadowsocksServer("ss2022-chacha-server-key", "2022-blake3-chacha20-poly1305"),
+                        server -> server.setUuid(key32 + ":" + key32)),
+                withPlugin("v2ray-plugin-mux-true", "v2ray-plugin", "mux=true;host=example.com"),
+                withPlugin("v2ray-plugin-mux-1", "v2ray-plugin", "mux=1;host=example.com"),
+                withPlugin("v2ray-plugin-mux-flag", "v2ray-plugin", "mux;host=example.com"),
+                withPlugin("v2ray-plugin-mux-first", "v2ray-plugin", "mux=1;mux=true"),
+                withPlugin("v2ray-plugin-mux-quic", "v2ray-plugin",
+                        "mode=quic;tls;mux=true;host=example.com"),
+                pathServer("ws-path-percent", com.vlessclient.model.TransportType.WEBSOCKET, "/ws%"),
+                pathServer("h2-path-percent", com.vlessclient.model.TransportType.HTTP2, "/h2%zz"),
+                pathServer("httpupgrade-path-percent",
+                        com.vlessclient.model.TransportType.HTTPUPGRADE, "/up%2"),
+                pathServer("ws-path-escaped", com.vlessclient.model.TransportType.WEBSOCKET,
+                        "/ws%20x"),
+                pathServer("ws-path-early-data-percent",
+                        com.vlessclient.model.TransportType.WEBSOCKET, "/ws?ed=50%"));
 
         for (ServerConfig server : servers) {
             boolean coreAccepts = checkPasses(generator.generate(server, new AppSettings()));
@@ -494,6 +526,26 @@ class SingBoxRealBinarySmokeTest {
                                      java.util.function.Consumer<ServerConfig> change) {
         change.accept(server);
         return server;
+    }
+
+    private static void withReality(ServerConfig server, String publicKey) {
+        server.getTls().setReality(true);
+        server.getTls().setRealityPublicKey(publicKey);
+        server.getTls().setRealityShortId("0123abcd");
+    }
+
+    private static ServerConfig pathServer(String name, com.vlessclient.model.TransportType type,
+                                           String path) {
+        return TestServers.server()
+                .id(name)
+                .name(name)
+                .protocol(Protocol.VLESS)
+                .address("203.0.113.14")
+                .port(443)
+                .uuid(TEST_UUID)
+                .tls("example.com")
+                .transport(type, path, "example.com")
+                .build();
     }
 
     private boolean checkPasses(String config) throws Exception {

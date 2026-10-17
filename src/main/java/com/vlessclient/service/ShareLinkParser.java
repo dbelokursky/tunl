@@ -373,10 +373,11 @@ public class ShareLinkParser {
             config.setEncryption(encryption);
         }
 
-        // Flow
+        // Flow, without the spaces a link can carry around it (%20, +), which
+        // went into the outbound and made the core refuse Vision.
         String flow = params.get("flow");
         if (flow != null && !flow.isBlank()) {
-            config.setFlow(flow);
+            config.setFlow(flow.strip());
         }
 
         // Transport

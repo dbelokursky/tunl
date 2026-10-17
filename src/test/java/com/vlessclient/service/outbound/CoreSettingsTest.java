@@ -405,6 +405,114 @@ class CoreSettingsTest {
         }
     }
 
+    /**
+     * "uTLS is required by reality client": the core sends REALITY's hello
+     * through uTLS, which cannot run inside QUIC, Hysteria2's or the QUIC
+     * transport's. A link with type=quic and security=reality was stored and
+     * then failed every connect it was part of.
+     */
+    @Test
+    void realityWhereTheCoreCannotSendItsHelloIsRefused() {
+        for (Protocol protocol : List.of(Protocol.VLESS, Protocol.VMESS, Protocol.TROJAN)) {
+            ServerConfig server = quic(protocol, true);
+            server.getTls().setReality(true);
+            server.getTls().setRealityPublicKey(REALITY_KEY);
+            server.getTls().setRealityShortId("ab");
+
+            assertThat(CoreSettings.refusal(server)).as(protocol.name())
+                    .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                            .isEqualTo("REALITY over QUIC"));
+        }
+        ServerConfig hysteria2 = TestServers.server().id("hy2").name("hy2")
+                .protocol(Protocol.HYSTERIA2).address("203.0.113.5").port(443).uuid("pw")
+                .reality("www.microsoft.com", REALITY_KEY, "ab").build();
+        assertThat(CoreSettings.refusal(hysteria2))
+                .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                        .isEqualTo("REALITY over QUIC"));
+        assertThat(CoreSettings.refusal(reality(server -> server.getTransport()
+                .setType(com.vlessclient.model.TransportType.GRPC)))).isEmpty();
+    }
+
+    /**
+     * "Shadowsocks 2022 EIH support only available in AES ciphers": a server
+     * key and a user key are taken by the AES ciphers of Shadowsocks 2022
+     * only.
+     */
+    @Test
+    void aShadowsocks2022ChachaServerGivenAServerKeyAndAUserKeyIsRefused() {
+        String chacha = "2022-blake3-chacha20-poly1305";
+
+        assertThat(CoreSettings.refusal(shadowsocks(chacha, KEY_32_BYTES + ":" + KEY_32_BYTES)))
+                .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                        .isEqualTo("Shadowsocks 2022 ChaCha20 with a server key"));
+        assertThat(CoreSettings.refusal(shadowsocks(chacha, KEY_32_BYTES))).isEmpty();
+    }
+
+    /**
+     * "parse mux value: strconv.Atoi: parsing "true": invalid syntax": the
+     * core reads v2ray-plugin's mux as a number in websocket mode, the first
+     * one given, and a bare mux flag as 1. A link that said mux=true was
+     * stored and refused at every connect.
+     */
+    @Test
+    void aV2rayPluginMuxThatIsNoNumberIsRefused() {
+        for (String options : List.of("mux=true;host=v.example", "mux=;host=v.example",
+                "mux=1.0", "mux= 1", "mux=99999999999999999999", "mux=true;mux=1",
+                "mode=websocket;mux=on")) {
+            assertThat(CoreSettings.refusal(withPlugin("v2ray-plugin", options))).as(options)
+                    .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                            .isEqualTo("v2ray-plugin mux"));
+        }
+        for (String options : List.of("mux=1;host=v.example", "mux=0", "mux=-1", "mux=+1",
+                "mux=01", "mux;host=v.example", "mux=1;mux=true", "mode=quic;tls;mux=true",
+                "mux=9223372036854775807")) {
+            assertThat(CoreSettings.refusal(withPlugin("v2ray-plugin", options))).as(options)
+                    .isEmpty();
+        }
+    }
+
+    /**
+     * "parse path: invalid URL escape "%"": the core reads a WebSocket,
+     * HTTP/2 or HTTPUpgrade path as escaped, and a {@code %} that starts no
+     * escape is one it cannot send. Early data a WebSocket path asks for is
+     * not sent in the path, so a {@code %} there does not count.
+     */
+    @Test
+    void aTransportPathWithAPercentThatStartsNoEscapeIsRefused() {
+        for (com.vlessclient.model.TransportType type : List.of(
+                com.vlessclient.model.TransportType.WEBSOCKET,
+                com.vlessclient.model.TransportType.HTTP2,
+                com.vlessclient.model.TransportType.HTTPUPGRADE)) {
+            for (String path : List.of("/ws%", "/ws%2", "/ws%zz", "/a%2/b")) {
+                assertThat(CoreSettings.refusal(withPath(type, path))).as(type + " " + path)
+                        .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                                .isEqualTo("transport path"));
+            }
+            for (String path : List.of("/ws", "/ws%20x", "/%E2%82%AC", "/ws?a=b")) {
+                assertThat(CoreSettings.refusal(withPath(type, path))).as(type + " " + path)
+                        .isEmpty();
+            }
+        }
+        assertThat(CoreSettings.refusal(withPath(com.vlessclient.model.TransportType.WEBSOCKET,
+                "/ws?ed=50%"))).isEmpty();
+        ServerConfig grpc = withPath(com.vlessclient.model.TransportType.GRPC, null);
+        grpc.getTransport().setServiceName("svc%");
+        assertThat(CoreSettings.refusal(grpc)).isEmpty();
+    }
+
+    static ServerConfig withPath(com.vlessclient.model.TransportType type, String path) {
+        return TestServers.server()
+                .id("path")
+                .name("path")
+                .protocol(Protocol.VLESS)
+                .address("203.0.113.6")
+                .port(443)
+                .uuid("b1c2d3e4-f5a6-7890-abcd-ef1234567890")
+                .tls("a.example")
+                .transport(type, path, "cdn.example")
+                .build();
+    }
+
     static ServerConfig reality(Consumer<ServerConfig> change) {
         ServerConfig server = TestServers.server()
                 .id("reality")
@@ -482,6 +590,17 @@ class CoreSettingsTest {
     void aVmessCipherTheCoreDoesNotKnowIsAskedForAsAuto() {
         assertThat(CoreSettings.vmessSecurity(vmess("aes-256-cfb", true))).isEqualTo("auto");
         assertThat(CoreSettings.vmessSecurity(vmess(null, true))).isEqualTo("auto");
+    }
+
+    /**
+     * The core's documentation names aes-128-ctr as VMess's legacy cipher,
+     * and its check refuses it: "vmess: unsupported security type". A link
+     * with scy=aes-128-ctr was sent as it was and never connected.
+     */
+    @Test
+    void theLegacyCipherTheCoreRefusesIsAskedForAsAuto() {
+        assertThat(CoreSettings.vmessSecurity(vmess("aes-128-ctr", true))).isEqualTo("auto");
+        assertThat(CoreSettings.vmessSecurity(vmess("aes-128-ctr", false))).isEqualTo("auto");
     }
 
     private static ServerConfig vmess(String cipher, boolean tls) {

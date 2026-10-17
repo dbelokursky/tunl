@@ -86,6 +86,22 @@ class ShareLinkParserTest {
         assertThat(config.getName()).isEqualTo("Reality");
     }
 
+    /**
+     * A space after the flow, %20 or a + in the link, was kept: checked as
+     * Vision, written as "xtls-rprx-vision " and refused by the core, and
+     * copied back out with the space.
+     */
+    @Test
+    void theFlowIsStoredWithoutTheSpacesAroundIt() {
+        for (String flow : new String[] {"xtls-rprx-vision%20", "xtls-rprx-vision+",
+            "%20xtls-rprx-vision", "xtls-rprx-vision%0A"}) {
+            ServerConfig config = parser.parseForImport("vless://test-uuid@host.example:443"
+                    + "?security=tls&sni=example.com&flow=" + flow + "#V");
+
+            assertThat(config.getFlow()).as(flow).isEqualTo("xtls-rprx-vision");
+        }
+    }
+
     @Test
     void parseVlessWithUrlEncodedFragment() {
         String uri = "vless://test-uuid@host.example:443#My%20Server%20%26%20Proxy";
