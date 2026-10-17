@@ -109,6 +109,15 @@ public final class CoreSettings {
     /** The VMess ciphers that leave the payload as it is. */
     private static final Set<String> VMESS_CLEAR = Set.of("none", "zero");
 
+    /** The parameter of a WebSocket path that Xray's links ask for early data with. */
+    private static final String EARLY_DATA_PARAMETER = "ed";
+
+    /** The header Xray's servers read WebSocket early data from. */
+    public static final String EARLY_DATA_HEADER = "Sec-WebSocket-Protocol";
+
+    /** The most digits an early data size can have and still be an int. */
+    private static final int MAX_EARLY_DATA_DIGITS = 9;
+
     private CoreSettings() {
     }
 
@@ -382,6 +391,80 @@ public final class CoreSettings {
             }
         }
         return List.copyOf(distinct.values());
+    }
+
+    /**
+     * The path of a transport as the core is to send it: for WebSocket and
+     * HTTPUpgrade, without the {@code ed} parameter Xray's links ask for early
+     * data with, {@code /ws?ed=2048}. Xray's client takes the parameter out
+     * and its server compares the path without it, while the core sent the
+     * path as stored, with the {@code ?} escaped, {@code GET /ws%3Fed=2048},
+     * which such a server answers with 404. The stored path keeps the
+     * parameter, so a copied link still asks the clients that read it for
+     * early data. The other parameters of the path stay in it.
+     *
+     * @param transport the server's transport
+     * @return the path to send, or null when there is none
+     */
+    public static String transportPath(TransportConfig transport) {
+        if (transport.getType() != TransportType.WEBSOCKET
+                && transport.getType() != TransportType.HTTPUPGRADE) {
+            return transport.getPath();
+        }
+        return earlyDataIn(transport.getPath()).path();
+    }
+
+    /**
+     * How many bytes of early data a WebSocket server takes, as its path asks
+     * with {@code ed=}: the core sends them in {@link #EARLY_DATA_HEADER}, as
+     * Xray does. The core's HTTPUpgrade has no early data, and a size that is
+     * no number asks for none, as in Xray.
+     *
+     * @param transport the server's transport
+     * @return the size, or 0 when the server is sent none
+     */
+    public static int webSocketEarlyData(TransportConfig transport) {
+        if (transport.getType() != TransportType.WEBSOCKET) {
+            return 0;
+        }
+        return earlyDataIn(transport.getPath()).size();
+    }
+
+    /** A path without its early data parameter, and the size that parameter asked for. */
+    private record EarlyData(String path, int size) {
+    }
+
+    /**
+     * Takes Xray's early data parameter out of a path, as Xray does: every
+     * {@code ed} goes once the first one has a value, and a value that is no
+     * number is a size of 0.
+     */
+    private static EarlyData earlyDataIn(String path) {
+        int query = path == null ? -1 : path.indexOf('?');
+        if (query < 0) {
+            return new EarlyData(path, 0);
+        }
+        StringJoiner kept = new StringJoiner("&");
+        String size = null;
+        for (String parameter : path.substring(query + 1).split("&")) {
+            int equals = parameter.indexOf('=');
+            String name = equals < 0 ? parameter : parameter.substring(0, equals);
+            if (!EARLY_DATA_PARAMETER.equals(name)) {
+                if (!parameter.isEmpty()) {
+                    kept.add(parameter);
+                }
+            } else if (size == null) {
+                size = equals < 0 ? "" : parameter.substring(equals + 1);
+            }
+        }
+        if (size == null || size.isEmpty()) {
+            return new EarlyData(path, 0);
+        }
+        String rest = kept.toString();
+        String stripped = path.substring(0, query) + (rest.isEmpty() ? "" : "?" + rest);
+        boolean number = size.length() <= MAX_EARLY_DATA_DIGITS
+                && size.chars().allMatch(c -> c >= '0' && c <= '9');
+        return new EarlyData(stripped, number ? Integer.parseInt(size) : 0);
     }
 
     /**

@@ -98,6 +98,10 @@ public abstract class OutboundBuilder {
      * not know, and every stored server is a member of the proxy group, so one
      * server's stray field stopped all of them from connecting. A WebSocket
      * link with a Host header, the usual CDN setup, did exactly that.</p>
+     *
+     * <p>The path goes without the early data parameter of Xray's links
+     * ({@link CoreSettings#transportPath}), and a WebSocket server is sent
+     * the early data it asks for there in the header Xray sends it in.</p>
      */
     protected final void addTransportIfNeeded(ObjectNode outbound, TransportConfig transport) {
         if (transport == null || transport.getType() == null
@@ -110,7 +114,12 @@ public abstract class OutboundBuilder {
         transportNode.put("type", transport.getType().getValue());
 
         if (fields.contains("path")) {
-            putIfPresent(transportNode, "path", transport.getPath());
+            putIfPresent(transportNode, "path", CoreSettings.transportPath(transport));
+        }
+        int earlyData = CoreSettings.webSocketEarlyData(transport);
+        if (earlyData > 0) {
+            transportNode.put("max_early_data", earlyData);
+            transportNode.put("early_data_header_name", CoreSettings.EARLY_DATA_HEADER);
         }
         if (fields.contains("host")) {
             putIfPresent(transportNode, "host", transport.getHost());

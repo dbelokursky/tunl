@@ -244,6 +244,11 @@ class SingBoxRealBinarySmokeTest {
                         + "&host=example.com&path=%2Fh2#vless-h2",
                 "vless://" + TEST_UUID + "@example.com:443?type=httpupgrade&" + tls
                         + "&host=example.com&path=%2Fup#vless-httpupgrade",
+                // Xray's early data in the path, which the core is sent apart.
+                "vless://" + TEST_UUID + "@cdn.example.com:443?type=ws&" + tls
+                        + "&host=example.com&path=%2Fws%3Fed%3D2048#vless-ws-early-data",
+                "vless://" + TEST_UUID + "@example.com:443?type=httpupgrade&" + tls
+                        + "&host=example.com&path=%2Fup%3Fed%3D2048#vless-httpupgrade-early-data",
                 "vless://" + TEST_UUID + "@example.com:443?type=quic&" + tls
                         + "&quicSecurity=none&key=&headerType=none#vless-quic",
                 "trojan://smoke-password@example.com:443?type=ws&" + tls
