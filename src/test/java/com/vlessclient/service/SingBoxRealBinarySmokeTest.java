@@ -541,7 +541,12 @@ class SingBoxRealBinarySmokeTest {
                 // Not addresses the core takes: asked for as the default.
                 "dhcp://auto",
                 "http://1.1.1.1/dns-query",
-                "system");
+                "system",
+                // A port past 65535, and a path for a server that has none:
+                // the core refused the whole configuration over either.
+                "udp://1.1.1.1:99999",
+                "quic://dns.adguard-dns.com/dns-query",
+                "1.1.1.1, 8.8.8.8");
 
         for (String address : addresses) {
             AppSettings settings = new AppSettings();

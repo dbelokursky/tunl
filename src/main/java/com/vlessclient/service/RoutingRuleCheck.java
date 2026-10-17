@@ -324,9 +324,9 @@ public final class RoutingRuleCheck {
         String address = slash < 0 ? value : value.substring(0, slash);
         String bits = slash < 0 ? null : value.substring(slash + 1);
         int maxBits;
-        if (IPV4.matcher(address).matches()) {
+        if (isIpv4Address(address)) {
             maxBits = 32;
-        } else if (isIpv6(address)) {
+        } else if (isIpv6Address(address)) {
             maxBits = 128;
         } else {
             return false;
@@ -337,7 +337,13 @@ public final class RoutingRuleCheck {
         return BITS.matcher(bits).matches() && Integer.parseInt(bits) <= maxBits;
     }
 
-    private static boolean isIpv6(String address) {
+    /** An IPv4 address as Go reads one: four fields of 0 to 255, none with a leading zero. */
+    static boolean isIpv4Address(String address) {
+        return IPV4.matcher(address).matches();
+    }
+
+    /** An IPv6 address as Go reads one, with or without a zone. */
+    static boolean isIpv6Address(String address) {
         int zone = address.indexOf('%');
         String bare = zone < 0 ? address : address.substring(0, zone);
         if (!bare.contains(":") || !bare.matches("[0-9A-Fa-f:.]+")) {

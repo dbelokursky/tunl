@@ -19,8 +19,6 @@ import com.vlessclient.service.outbound.VlessOutboundBuilder;
 import com.vlessclient.service.outbound.VmessOutboundBuilder;
 import com.vlessclient.service.outbound.WireguardEndpointBuilder;
 import java.net.InetAddress;
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -293,39 +291,31 @@ public class SingBoxConfigGenerator {
     }
 
     private ObjectNode buildDns(AppSettings settings, ObjectNode route, boolean tunIpv6) {
-        // The fields and MCP store any text, and its scheme became the server's
-        // type: "dhcp://auto" or "http://..." made the core refuse the whole
-        // configuration, so TUN mode never started, and "system" as proxy DNS
-        // became a server named "system" that nothing could reach. Such a
-        // value is asked for as the field's default, as the DNS strategy is.
-        String proxyAddress = settings.getProxyDns();
-        if (!isCoreDnsAddress(proxyAddress)) {
-            log.warn("Proxy DNS {} is not an address the core takes; using {}",
-                    proxyAddress, DEFAULT_PROXY_DNS);
-            proxyAddress = DEFAULT_PROXY_DNS;
-        }
+        // The fields and MCP stored any text, and its scheme became the
+        // server's type: "dhcp://auto" or "http://..." made the core refuse the
+        // whole configuration, so TUN mode never started, and "system" as
+        // proxy DNS became a server named "system" that nothing could reach.
+        // Whatever followed the scheme became the server's name, so two
+        // resolvers made one server named "1.1.1.1, 8.8.8.8", and nothing
+        // resolved. Such a value, stored before the fields checked it, is
+        // asked for as the field's default, as the DNS strategy is.
         ObjectNode proxyDns = mapper.createObjectNode();
         proxyDns.put("tag", DnsTags.PROXY);
-        populateDnsServerAddress(proxyDns, proxyAddress);
+        putDnsServer(proxyDns, proxyResolver(settings.getProxyDns()));
         proxyDns.put("detour", OutboundTags.PROXY);
 
         ArrayNode servers = mapper.createArrayNode();
         servers.add(proxyDns);
 
-        boolean systemDirect = isSystemDns(settings.getDirectDns());
-        if (!systemDirect && !isCoreDnsAddress(settings.getDirectDns())) {
-            log.warn("Direct DNS {} is not an address the core takes; using the system's",
-                    settings.getDirectDns());
-            systemDirect = true;
-        }
+        Optional<DnsAddress> directResolver = directResolver(settings.getDirectDns());
         ObjectNode directDns = mapper.createObjectNode();
         directDns.put("tag", DnsTags.DIRECT);
-        if (systemDirect) {
+        if (directResolver.isEmpty()) {
             // The OS resolver: the network's own, from the address the direct
             // connection leaves anyway.
             directDns.put("type", "local");
         } else {
-            populateDnsServerAddress(directDns, settings.getDirectDns());
+            putDnsServer(directDns, directResolver.get());
         }
         // Deliberately NOT setting detour:"direct" here — sing-box 1.13
         // rejects DNS servers that detour to an "empty" direct outbound with
@@ -715,68 +705,61 @@ public class SingBoxConfigGenerator {
     }
 
     /**
-     * Populates a DNS server object using the sing-box 1.13 schema. Accepts
-     * both the legacy URL-style address (e.g. {@code https://1.1.1.1/dns-query})
-     * and bare IPs/hostnames. A bare address is read as a {@code udp://} one,
-     * so a port it carries ({@code 8.8.8.8:53}) is split off; left whole, it
-     * reached the core as a name that nothing could resolve.
+     * Fills a DNS server object in the sing-box 1.13 schema. A bare address
+     * reads as a {@code udp://} one, so a port it carries ({@code 8.8.8.8:53})
+     * is split off; left whole, it reached the core as a name that nothing
+     * could resolve.
      */
-    void populateDnsServerAddress(ObjectNode server, String address) {
-        if (address == null || address.isBlank()) {
-            server.put("type", "udp");
-            server.put("server", "1.1.1.1");
-            return;
+    private static void putDnsServer(ObjectNode server, DnsAddress address) {
+        server.put("type", address.type());
+        server.put("server", address.server());
+        if (address.port() > 0) {
+            server.put("server_port", address.port());
         }
-        String url = address.contains("://") ? address : "udp://" + address;
-        try {
-            URI uri = new URI(url);
-            String scheme = uri.getScheme() != null ? uri.getScheme().toLowerCase() : "udp";
-            String host = uri.getHost();
-            if (host == null || host.isBlank()) {
-                server.put("type", "udp");
-                server.put("server", address);
-                return;
-            }
-            server.put("type", scheme);
-            server.put("server", host);
-            if (uri.getPort() > 0) {
-                server.put("server_port", uri.getPort());
-            }
-            if ("https".equals(scheme) || "h3".equals(scheme) || "quic".equals(scheme)) {
-                String path = uri.getRawPath();
-                if (path != null && !path.isEmpty()) {
-                    server.put("path", path);
-                }
-            }
-        } catch (URISyntaxException e) {
-            log.warn("Could not parse DNS address {}, falling back to UDP", address);
-            server.put("type", "udp");
-            server.put("server", address);
+        if (!address.path().isEmpty()) {
+            server.put("path", address.path());
         }
     }
 
     /** Proxy DNS as Settings has it by default. */
     private static final String DEFAULT_PROXY_DNS = "https://1.1.1.1/dns-query";
 
-    /** The DNS server types the core takes as a URL scheme; an address without one is udp. */
-    private static final Set<String> DNS_SCHEMES =
-            Set.of("udp", "tcp", "tls", "https", "h3", "quic");
+    /** What an empty DNS field was asked for. */
+    private static final DnsAddress BLANK_DNS = new DnsAddress("udp", "1.1.1.1", 0, "");
 
     /**
-     * Whether the core can use a DNS address as {@link #populateDnsServerAddress}
-     * writes it: one of the core's own schemes, or none, which reads as udp;
-     * blank stands for the default. The {@link AppSettings#SYSTEM_DNS} word is
-     * not an address: only Direct DNS takes it, and asks for it before this.
+     * The resolver Proxy DNS names, or the default when it names none the
+     * core can use: see {@link DnsAddress}.
      */
-    static boolean isCoreDnsAddress(String address) {
-        if (address == null || address.isBlank()) {
-            return true;
+    private static DnsAddress proxyResolver(String stored) {
+        if (stored == null || stored.isBlank()) {
+            return BLANK_DNS;
         }
-        int scheme = address.indexOf("://");
-        return scheme < 0
-                ? !isSystemDns(address)
-                : DNS_SCHEMES.contains(
-                        address.substring(0, scheme).strip().toLowerCase(java.util.Locale.ROOT));
+        return DnsAddress.parse(stored).orElseGet(() -> {
+            log.warn("Proxy DNS {} is not one address the core can use; using {}",
+                    stored, DEFAULT_PROXY_DNS);
+            return DnsAddress.parse(DEFAULT_PROXY_DNS).orElseThrow();
+        });
+    }
+
+    /**
+     * The resolver Direct DNS names, or empty for the system's: the setting
+     * says {@link AppSettings#SYSTEM_DNS}, or names no resolver the core can
+     * use, as {@link DnsAddress} reads it.
+     */
+    private static Optional<DnsAddress> directResolver(String stored) {
+        if (isSystemDns(stored)) {
+            return Optional.empty();
+        }
+        if (stored == null || stored.isBlank()) {
+            return Optional.of(BLANK_DNS);
+        }
+        Optional<DnsAddress> resolver = DnsAddress.parse(stored);
+        if (resolver.isEmpty()) {
+            log.warn("Direct DNS {} is not one address the core can use; using the system's",
+                    stored);
+        }
+        return resolver;
     }
 
     /** Whether a DNS setting names the OS resolver, {@link AppSettings#SYSTEM_DNS}. */

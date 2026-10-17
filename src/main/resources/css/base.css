@@ -1523,7 +1523,8 @@
     -fx-text-fill: -c-warn-text;
 }
 
-/* Add-rule dialog: why the core would refuse the value typed. */
+/* Why the core would refuse the value typed: the add-rule dialog, the bypass
+   list, and the DNS fields in Settings. */
 .routing-rule-problem {
     -fx-font-size: 11px;
     -fx-text-fill: -c-danger-fg;

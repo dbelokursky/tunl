@@ -11,6 +11,7 @@ import com.vlessclient.model.TunSettings;
 import com.vlessclient.platform.Autostart;
 import com.vlessclient.platform.SecretSealer;
 import com.vlessclient.service.ConfigStore;
+import com.vlessclient.service.DnsAddress;
 import com.vlessclient.service.SubscriptionService;
 import com.vlessclient.service.ThemeManager;
 import com.vlessclient.service.TrafficHistoryStore;
@@ -105,7 +106,9 @@ public class SettingsViewController implements ViewShownAware {
     @FXML private Button deviceIdResetButton;
     @FXML private Label deviceIdHint;
     @FXML private TextField proxyDnsField;
+    @FXML private Label proxyDnsProblem;
     @FXML private TextField directDnsField;
+    @FXML private Label directDnsProblem;
     @FXML private TextField tunInterfaceNameField;
     @FXML private TextField tunIpv4Field;
     @FXML private CheckBox tunIpv6Check;
@@ -215,14 +218,28 @@ public class SettingsViewController implements ViewShownAware {
     }
 
     private void initAdvancedSettings(AppSettings settings) {
+        // One resolver the core can use, or blank for the default the field
+        // shows; anything else is not stored, and the field says why. Any text
+        // was: two resolvers became one server named "1.1.1.1, 8.8.8.8", and
+        // no name resolved while the card said Connected.
         commitOnEditEnd(proxyDnsField, text -> {
-            settings.setProxyDns(text);
-            saveSettings(settings);
+            boolean usable = DnsAddress.isProxySetting(text);
+            showDnsProblem(proxyDnsField, proxyDnsProblem,
+                    usable ? null : I18n.binding("settings.dns.problem"));
+            if (usable) {
+                settings.setProxyDns(text);
+                saveSettings(settings);
+            }
         });
 
         commitOnEditEnd(directDnsField, text -> {
-            settings.setDirectDns(text);
-            saveSettings(settings);
+            boolean usable = DnsAddress.isDirectSetting(text);
+            showDnsProblem(directDnsField, directDnsProblem,
+                    usable ? null : I18n.binding("settings.dns.problem"));
+            if (usable) {
+                settings.setDirectDns(text);
+                saveSettings(settings);
+            }
         });
 
         // A TUN value no TUN start can take keeps the stored one, as a port
@@ -881,7 +898,13 @@ public class SettingsViewController implements ViewShownAware {
             proxyModeCombo.setValue(settings.getProxyMode());
             systemProxyAutoConfigCheck.setSelected(settings.isSystemProxyAutoConfig());
             showCommitted(proxyDnsField, settings.getProxyDns());
+            showDnsProblem(proxyDnsField, proxyDnsProblem,
+                    DnsAddress.isProxySetting(settings.getProxyDns())
+                            ? null : I18n.binding("settings.dns.problem.stored.proxy"));
             showCommitted(directDnsField, settings.getDirectDns());
+            showDnsProblem(directDnsField, directDnsProblem,
+                    DnsAddress.isDirectSetting(settings.getDirectDns())
+                            ? null : I18n.binding("settings.dns.problem.stored.direct"));
             dnsStrategyCombo.setValue(settings.getDnsStrategy());
             showCommitted(tunInterfaceNameField, settings.getTunInterfaceName());
             storeSecretsCheck.setSelected(settings.isStoreSecretsSecurely());
@@ -907,6 +930,27 @@ public class SettingsViewController implements ViewShownAware {
                 onChange.accept(oldVal, newVal);
             }
         });
+    }
+
+    /**
+     * Shows under a DNS field why the core does not ask the address in it, in
+     * the language of the UI; null clears it.
+     */
+    private static void showDnsProblem(TextField field, Label problem,
+                                       ObservableValue<String> reason) {
+        boolean show = reason != null;
+        problem.textProperty().unbind();
+        if (show) {
+            problem.textProperty().bind(reason);
+        } else {
+            problem.setText("");
+        }
+        problem.setVisible(show);
+        problem.setManaged(show);
+        field.getStyleClass().remove("field-error");
+        if (show) {
+            field.getStyleClass().add("field-error");
+        }
     }
 
     /** Shows {@code text} in a field as already committed, so leaving it saves nothing. */

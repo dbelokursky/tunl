@@ -371,6 +371,56 @@ class SingBoxConfigGeneratorTunTest {
         }
     }
 
+    /**
+     * Only the scheme was checked. Two resolvers, the primary and secondary
+     * every OS dialog asks for, reached the core as one server named
+     * "1.1.1.1, 8.8.8.8": it started, and every lookup through it failed
+     * while the card said Connected. A port past 65535 made it refuse the
+     * whole configuration. Such a value is asked for as the field's default.
+     */
+    @Test
+    void tunMode_aDnsFieldHoldingMoreOrLessThanOneAddressIsAskedForAsTheDefault()
+            throws Exception {
+        for (String address : List.of("1.1.1.1, 8.8.8.8", "1.1.1.1,8.8.8.8", "1.1.1.1 8.8.8.8",
+                "1.1.1.1; 8.8.8.8", "https://1.1.1.1/dns-query,https://8.8.8.8/dns-query",
+                "udp:// 1.1.1.1", "\"1.1.1.1\"", "https://", "local", "fakeip",
+                "https://днс.example/dns-query", "udp://1.1.1.1:99999", "1.1.1.1:99999",
+                "1.1.1.1:0", "01.1.1.1", "1.1.1.256", "1.1.1", "dns..google")) {
+            AppSettings settings = tunSettings();
+            settings.setProxyDns(address);
+            settings.setDirectDns(address);
+
+            JsonNode servers = parse(generator.generate(createVlessServer(), settings))
+                    .get("dns").get("servers");
+
+            assertThat(servers.get(0).toString()).as(address)
+                    .isEqualTo("{\"tag\":\"proxy-dns\",\"type\":\"https\",\"server\":\"1.1.1.1\","
+                            + "\"path\":\"/dns-query\",\"detour\":\"proxy\"}");
+            assertThat(servers.get(1).toString()).as(address)
+                    .isEqualTo("{\"tag\":\"direct-dns\",\"type\":\"local\"}");
+        }
+    }
+
+    /**
+     * MCP stored the value untrimmed, and a space around one address is not a
+     * second one. A path is the core's only for DNS over HTTPS: written for
+     * {@code quic://}, the core refused the whole configuration over it.
+     */
+    @Test
+    void tunMode_aDnsAddressIsReadWithoutTheSpaceAroundIt() throws Exception {
+        AppSettings settings = tunSettings();
+        settings.setProxyDns(" tls://9.9.9.9:853 ");
+        settings.setDirectDns("quic://dns.adguard-dns.com/dns-query ");
+
+        JsonNode servers = parse(generator.generate(createVlessServer(), settings))
+                .get("dns").get("servers");
+
+        assertThat(servers.get(0).toString()).isEqualTo("{\"tag\":\"proxy-dns\",\"type\":\"tls\","
+                + "\"server\":\"9.9.9.9\",\"server_port\":853,\"detour\":\"proxy\"}");
+        assertThat(servers.get(1).toString()).isEqualTo("{\"tag\":\"direct-dns\",\"type\":\"quic\","
+                + "\"server\":\"dns.adguard-dns.com\",\"domain_resolver\":\"local-dns\"}");
+    }
+
     /** "8.8.8.8:53" reached the core as a name, which nothing could resolve. */
     @Test
     void tunMode_aPortWithoutASchemeIsSplitOffTheAddress() throws Exception {

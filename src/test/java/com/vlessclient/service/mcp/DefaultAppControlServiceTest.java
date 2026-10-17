@@ -507,6 +507,37 @@ class DefaultAppControlServiceTest {
                 .isEqualTo(com.vlessclient.model.ServerSelection.SINGLE);
     }
 
+    /**
+     * Any text was stored as a resolver: two of them reached the core as one
+     * server name, and every lookup through it failed, and a port past 65535
+     * made the core refuse the whole configuration.
+     */
+    @Test
+    void setSetting_aDnsServerIsOneAddressTheCoreCanUse() throws Exception {
+        for (String key : List.of("proxy_dns", "direct_dns")) {
+            for (String address : List.of("1.1.1.1, 8.8.8.8", "1.1.1.1 8.8.8.8",
+                    "udp://1.1.1.1:99999", "dhcp://auto", "https://", "fakeip")) {
+                assertThatThrownBy(() -> service.setSetting(key, stringNode(address)))
+                        .as("%s %s", key, address)
+                        .isInstanceOf(McpToolException.class)
+                        .hasMessageContaining("one DNS server");
+            }
+        }
+        assertThatThrownBy(() -> service.setSetting("proxy_dns", stringNode("system")))
+                .isInstanceOf(McpToolException.class);
+        assertThat(store.getSettings().getProxyDns()).isEqualTo("https://1.1.1.1/dns-query");
+        assertThat(store.getSettings().getDirectDns())
+                .isEqualTo(com.vlessclient.model.AppSettings.SYSTEM_DNS);
+
+        // The address alone, without the space an agent sent around it.
+        SettingsInfo info = service.setSetting("proxy_dns", stringNode(" tls://9.9.9.9:853 "));
+        service.setSetting("direct_dns", stringNode("System"));
+
+        assertThat(info.proxyDns()).startsWith("tls://9.9.9.9:853");
+        assertThat(store.getSettings().getProxyDns()).isEqualTo("tls://9.9.9.9:853");
+        assertThat(store.getSettings().getDirectDns()).isEqualTo("System");
+    }
+
     @Test
     void setSetting_anUnknownKeyIsToldEveryKeyThereIs() {
         assertThatThrownBy(() -> service.setSetting("colour", stringNode("red")))
