@@ -1286,7 +1286,11 @@ public class SubscriptionService {
                 skipped++;
                 // Scrubbed: the line is a share link and a parser message may
                 // quote it, and debug is what a user turns on for a bug report.
-                log.debug("Skipping unparseable line: {}", Redact.urlsIn(e.getMessage()));
+                // Only then: the scrubbing ran for every unreadable line of
+                // every refresh, at whatever level the log was.
+                if (log.isDebugEnabled()) {
+                    log.debug("Skipping unparseable line: {}", Redact.urlsIn(e.getMessage()));
+                }
             }
         }
         return new ParsedContent(servers, skipped, List.copyOf(unsupported));

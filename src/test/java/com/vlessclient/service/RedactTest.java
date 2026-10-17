@@ -1,7 +1,12 @@
 package com.vlessclient.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
+import java.time.Duration;
+import java.util.Random;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -110,6 +115,57 @@ class RedactTest {
         void handlesEmpty() {
             assertThat(Redact.urlsIn(null)).isNull();
             assertThat(Redact.urlsIn("")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("reads a long run of letters once, not once per letter")
+        void readsALongRunOnce() {
+            // A parser message quoting a link's field: every letter of the run
+            // was tried as the start of a scheme, and each try read the rest
+            // of the run, so 32 KB took seconds and this took hours.
+            String message = "Malformed mport in Hysteria2 URI: " + "a".repeat(200_000);
+            String alternating = "fp=" + "a1".repeat(100_000);
+
+            assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+                assertThat(Redact.urlsIn(message)).isSameAs(message);
+                assertThat(Redact.urlsIn(alternating)).isSameAs(alternating);
+                assertThat(Redact.urlsIn(message + SHARE_LINK))
+                        .doesNotContain("b1e4c0de-1234-4321-abcd-9f3caa1b2c3d");
+            });
+        }
+
+        @Test
+        @DisplayName("starts a URL at the first letter before its ://, as it always did")
+        void startsAtTheFirstLetterOfTheScheme() {
+            assertThat(Redact.urlsIn("error 1vless://b1e4c0de@gateway.example:443?x#y"))
+                    .isEqualTo("error 1vless://gateway.example:443/…");
+            assertThat(Redact.urlsIn("x".repeat(40) + SHARE_LINK))
+                    .isEqualTo("x".repeat(40) + "vless://gateway.example:443/…");
+            assertThat(Redact.urlsIn("see 123://secret and ://nothing"))
+                    .isEqualTo("see 123://secret and ://nothing");
+            assertThat(Redact.urlsIn("ends with vless://")).isEqualTo("ends with vless://");
+            assertThat(Redact.urlsIn("'" + SHARE_LINK + "' then \"" + SUBSCRIPTION_URL + "\""))
+                    .isEqualTo("'vless://gateway.example:443/…' then \"https://provider.example/…\"");
+        }
+
+        @Test
+        @DisplayName("finds the URLs the regular expression it replaced found")
+        void findsWhatTheRegularExpressionFound() {
+            Pattern before = Pattern.compile("[a-zA-Z][a-zA-Z0-9+.\\-]*://[^\\s\"'<>\\\\]+");
+            String alphabet = "av1+.-:/:/ @#?=\"'<>\\\t\n　 x";
+            Random random = new Random(20261017);
+            for (int i = 0; i < 20_000; i++) {
+                StringBuilder text = new StringBuilder();
+                for (int length = random.nextInt(40); length > 0; length--) {
+                    text.append(random.nextInt(4) == 0 ? "://"
+                            : alphabet.charAt(random.nextInt(alphabet.length())));
+                }
+                String sample = text.toString();
+                String expected = before.matcher(sample).replaceAll(
+                        match -> Matcher.quoteReplacement(Redact.url(match.group())));
+
+                assertThat(Redact.urlsIn(sample)).as("%s", sample).isEqualTo(expected);
+            }
         }
     }
 
