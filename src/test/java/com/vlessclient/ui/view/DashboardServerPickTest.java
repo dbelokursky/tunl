@@ -10,6 +10,7 @@ import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.platform.ElevationDeclinedException;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.HostFacts;
@@ -35,6 +36,7 @@ import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.fxml.FXMLLoader;
+import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.DialogPane;
@@ -48,7 +50,7 @@ import org.testfx.util.WaitForAsyncUtils;
 
 /**
  * What the Dashboard does with a server pick under a running core: the
- * tray's, the list's or an agent's.
+ * tray's, the list's, an agent's, or the store's own after a refresh.
  *
  * <p>Once a switch was done, the card compared the pick again, whatever the
  * switch had come to. One a Disconnect called off came back while the stop
@@ -69,6 +71,10 @@ public class DashboardServerPickTest extends ApplicationTest {
                 new ReadOnlyObjectWrapper<>(ConnectionState.DISCONNECTED);
         final List<ProxyMode> starts = new CopyOnWriteArrayList<>();
         volatile boolean running;
+        /** Every launch prompts, as UAC does for each TUN start. */
+        volatile boolean prompts;
+        /** What the next start throws instead of starting. */
+        volatile IOException failNextStart;
 
         SlowStopEngine() {
             super(Path.of("sing-box-not-used-in-tests"));
@@ -81,6 +87,12 @@ public class DashboardServerPickTest extends ApplicationTest {
 
         @Override
         public void start(String configJson, ProxyMode proxyMode) throws IOException {
+            IOException failure = failNextStart;
+            if (failure != null) {
+                failNextStart = null;
+                Platform.runLater(() -> state.set(ConnectionState.DISCONNECTED));
+                throw failure;
+            }
             starts.add(proxyMode);
             running = true;
             Platform.runLater(() -> state.set(ConnectionState.CONNECTED));
@@ -109,6 +121,11 @@ public class DashboardServerPickTest extends ApplicationTest {
         @Override
         public boolean isStopping() {
             return false;
+        }
+
+        @Override
+        public boolean restartNeedsElevationPrompt() {
+            return prompts;
         }
 
         @Override
@@ -165,6 +182,8 @@ public class DashboardServerPickTest extends ApplicationTest {
         generator = new PausingGenerator();
         service = new ConnectionService(store, generator, new RoutingService(), engine);
         ServiceLocator.register(ConnectionService.class, service);
+        tokyo.setSubscriptionId("sub-1");
+        osaka.setSubscriptionId("sub-1");
         store.addServer(tokyo);
         store.addServer(osaka);
 
@@ -272,6 +291,64 @@ public class DashboardServerPickTest extends ApplicationTest {
         assertThat(engine.isRunning()).as("a core runs after the Disconnect").isFalse();
         assertThat(service.isTunnelWanted()).as("the tunnel wanted again").isFalse();
         assertThat(stateOnFx()).isEqualTo(ConnectionState.DISCONNECTED);
+    }
+
+    // ===== a pick the tunnel does not take =====
+
+    /**
+     * A refresh withdraws the picked server under a TUN core whose every
+     * launch prompts: the core runs on, and the card offers the reconnect
+     * that takes the store's pick, rather than the prompt coming up unasked.
+     */
+    @Test
+    void aRepickUnderAPromptingTunCoreOffersTheReconnect() throws Exception {
+        store.getSettings().setProxyMode(ProxyMode.TUN);
+        engine.prompts = true;
+        interact(controller::toggleConnection);
+        awaitState(ConnectionState.CONNECTED);
+        WaitForAsyncUtils.waitForFxEvents();
+        assertThat(visible("#pendingChangesBanner")).as("the banner before the refresh")
+                .isFalse();
+
+        // SubscriptionService.diffAndApply, off the FX thread: Tokyo withdrawn.
+        store.applyServerBatch(List.of(), List.of(tokyo.getId()));
+
+        Await.until("the reconnect offered", () -> visible("#pendingChangesBanner"),
+                Duration.ofSeconds(5));
+        assertThat(engine.starts).as("TUN launches, each one a prompt")
+                .containsExactly(ProxyMode.TUN);
+        assertThat(engine.isRunning()).isTrue();
+    }
+
+    /**
+     * The user's pick restarted a TUN core, and the prompt that launch raised
+     * was dismissed. The working tunnel was stopped before the prompt, and
+     * the card said nothing more than that the start was cancelled; it
+     * offers the reconnect now, as for a dropped tunnel.
+     */
+    @Test
+    void aDismissedPromptOfAPicksRestartOffersTheReconnect() throws Exception {
+        store.getSettings().setProxyMode(ProxyMode.TUN);
+        engine.prompts = true;
+        interact(controller::toggleConnection);
+        awaitState(ConnectionState.CONNECTED);
+        // Something the core does not run yet, so the pick restarts it.
+        store.getSettings().setCoreLogLevel(CoreLogLevel.DEBUG);
+        engine.failNextStart = new ElevationDeclinedException("the setup dialog was dismissed");
+
+        interact(() -> store.setActiveServer(osaka.getId()));
+
+        Await.until("the reconnect offered", () -> visible("#tunnelDroppedBanner"),
+                Duration.ofSeconds(5));
+        assertThat(service.isTunnelWanted()).isTrue();
+        assertThat(engine.isRunning()).isFalse();
+    }
+
+    private boolean visible(String id) {
+        return onFx(() -> {
+            Node node = lookup(id).query();
+            return node.isVisible() && node.isManaged();
+        });
     }
 
     private void closeDialogs() {

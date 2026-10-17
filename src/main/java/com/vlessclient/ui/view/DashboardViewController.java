@@ -1042,6 +1042,10 @@ public class DashboardViewController implements ViewShownAware {
                 case CANCELLED -> log.debug("Connect superseded by a newer user request");
                 case NOT_RUNNING ->
                         log.debug("No core runs to switch; the next start takes the pick");
+                // The core runs on, and the banner offers the reconnect that
+                // takes the store's pick.
+                case DEFERRED -> Platform.runLater(
+                        () -> refreshPendingChanges(currentConnectionState()));
                 // STARTED: the engine's state listener drives the UI from here.
                 // SWITCHED changes no state, so nothing else tells the health
                 // checks that the traffic leaves through another server.

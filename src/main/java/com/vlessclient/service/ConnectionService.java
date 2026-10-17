@@ -107,7 +107,14 @@ public class ConnectionService {
          * A pick found no core running to move: the next start reads it,
          * the user's Connect or a recovery restart under way.
          */
-        NOT_RUNNING
+        NOT_RUNNING,
+        /**
+         * A pick the store made itself, as a removal took the picked server,
+         * left the running core as it was: the restart it needs would raise
+         * an elevation prompt nobody asked for, so it waits for the user's
+         * reconnect.
+         */
+        DEFERRED
     }
 
     /**
@@ -214,14 +221,18 @@ public class ConnectionService {
 
     /**
      * What a core was started from: the configuration it loaded, the mode, the
-     * ports the user chose, which its own may have moved off, and the ids of
-     * the servers it was started without. Set as one, before the core starts:
-     * it reports CONNECTED from its own thread, and a reader asking then got
-     * the mode and the left-out servers of the start before.
+     * ports the user chose, which its own may have moved off, the ids of the
+     * servers it was started without, and the request a pick restarted it
+     * under, or {@link #NOT_A_PICK}. Set as one, before the core starts: it
+     * reports CONNECTED from its own thread, and a reader asking then got the
+     * mode and the left-out servers of the start before.
      */
     private record Run(LiveSelector selector, ProxyMode mode, List<Integer> chosenPorts,
-                       Set<String> leftOut, HostFacts host) {
+                       Set<String> leftOut, HostFacts host, long pickedUnder) {
     }
+
+    /** The request of a start no pick made, which no request ever is. */
+    private static final long NOT_A_PICK = -1;
 
 
     /**
@@ -273,8 +284,13 @@ public class ConnectionService {
             // A dismissed administrator prompt is the user cancelling the
             // connect, and the request for a tunnel goes with it: kept, it
             // held subscriptions back for a tunnel nobody wanted any more.
+            // A pick's restart is no connect: it stopped the working tunnel
+            // before the prompt, which leaves the reconnect to the user.
             if (state == ConnectionState.DISCONNECTED && engine.lastExitWasDeclined()) {
-                recovery.cancel();
+                Run declined = run;
+                if (declined == null || !recovery.offerReconnect(declined.pickedUnder())) {
+                    recovery.cancel();
+                }
             }
             if (state == ConnectionState.CONNECTED) {
                 followActiveServer();
@@ -497,7 +513,7 @@ public class ConnectionService {
         long request = recovery.connectionRequested();
         synchronized (operations) {
             ConnectAttempt attempt =
-                    connectInternal(modeOverride, () -> recovery.isWanted(request));
+                    connectInternal(modeOverride, () -> recovery.isWanted(request), NOT_A_PICK);
             if (attempt.outcome() == Outcome.ALREADY_RUNNING) {
                 // Nothing restarted, so no state change will tell recovery.
                 recovery.keptUp(request);
@@ -506,11 +522,18 @@ public class ConnectionService {
         }
     }
 
-    private ConnectAttempt connectInternal(ProxyMode modeOverride, BooleanSupplier allowed)
-            throws IOException {
+    /**
+     * Starts a core, under the operations lock.
+     *
+     * @param pickedUnder the request a pick restarts the core under, or
+     *                    {@link #NOT_A_PICK}: what a dismissed elevation
+     *                    prompt of the start leaves the tunnel to
+     */
+    private ConnectAttempt connectInternal(ProxyMode modeOverride, BooleanSupplier allowed,
+                                           long pickedUnder) throws IOException {
         boolean started = false;
         try {
-            ConnectAttempt attempt = startCore(modeOverride, allowed);
+            ConnectAttempt attempt = startCore(modeOverride, allowed, pickedUnder);
             started = attempt.outcome() == Outcome.STARTED;
             return attempt;
         } finally {
@@ -530,8 +553,8 @@ public class ConnectionService {
         }
     }
 
-    private ConnectAttempt startCore(ProxyMode modeOverride, BooleanSupplier allowed)
-            throws IOException {
+    private ConnectAttempt startCore(ProxyMode modeOverride, BooleanSupplier allowed,
+                                     long pickedUnder) throws IOException {
         if (!engine.hasBinary()) {
             return new ConnectAttempt(Outcome.NO_CORE, null);
         }
@@ -618,7 +641,8 @@ public class ConnectionService {
                         configGenerator.generate(members, active, generatedFrom, routing, host));
                 Run previous = run;
                 String previousServer = appliedServerId;
-                run = new Run(prepared, mode, chosenPorts(settings), idsOf(skipped), host);
+                run = new Run(prepared, mode, chosenPorts(settings), idsOf(skipped), host,
+                        pickedUnder);
                 // Set with the run, for the same reason: followActiveServer and
                 // the Dashboard ask which server the core runs as it reports
                 // Connected. Set only once the start had returned, it could
@@ -654,10 +678,14 @@ public class ConnectionService {
                     }
                 } catch (ElevationDeclinedException declined) {
                     // The setup prompt dismissed: the connect is cancelled,
-                    // not failed, and the request goes with it.
+                    // not failed, and the request goes with it. A pick's
+                    // restart had stopped the working tunnel before the
+                    // prompt, which leaves the reconnect to the user.
                     run = previous;
                     appliedServerId = previousServer;
-                    recovery.cancel();
+                    if (!recovery.offerReconnect(pickedUnder)) {
+                        recovery.cancel();
+                    }
                     log.info("TUN connect cancelled: {}", declined.getMessage());
                     return new ConnectAttempt(Outcome.CANCELLED, active);
                 } catch (IOException | IllegalStateException e) {
@@ -810,9 +838,15 @@ public class ConnectionService {
         requestedMode = modeOverride;
         long request = recovery.connectionRequested();
         synchronized (operations) {
-            stopCurrent();
-            return connectInternal(modeOverride, () -> recovery.isWanted(request));
+            return restart(modeOverride, () -> recovery.isWanted(request), NOT_A_PICK);
         }
+    }
+
+    /** Stops the running core and starts another, under the operations lock. */
+    private ConnectAttempt restart(ProxyMode mode, BooleanSupplier allowed, long pickedUnder)
+            throws IOException {
+        stopCurrent();
+        return connectInternal(mode, allowed, pickedUnder);
     }
 
     /**
@@ -876,6 +910,13 @@ public class ConnectionService {
     }
 
     /**
+     * The server list and whether its pick is the store's own, read as one on
+     * the FX thread.
+     */
+    private record Picked(List<ServerConfig> candidates, boolean byTheStore) {
+    }
+
+    /**
      * Moves the running core to the picked server: through the core API when
      * the loaded configuration still matches; otherwise by a restart with the
      * latest config, in the mode the running core runs in.
@@ -893,7 +934,8 @@ public class ConnectionService {
      * move a pick now changes nothing: the next start reads it.</p>
      *
      * @return the selected server, and whether it was switched or restarted,
-     *     or left to the next start ({@link Outcome#NOT_RUNNING})
+     *     or left to the next start ({@link Outcome#NOT_RUNNING}) or to the
+     *     user's reconnect ({@link Outcome#DEFERRED})
      * @throws IOException if the fallback start fails
      */
     public ConnectAttempt switchToActiveServer() throws IOException {
@@ -903,8 +945,9 @@ public class ConnectionService {
             if (!recovery.isWanted(request)) {
                 return new ConnectAttempt(Outcome.CANCELLED, null);
             }
-            List<ServerConfig> candidates = FxExecutor.get(
-                    () -> List.copyOf(configStore.getServers()));
+            Picked picked = FxExecutor.get(() -> new Picked(
+                    List.copyOf(configStore.getServers()), configStore.isPickedByTheStore()));
+            List<ServerConfig> candidates = picked.candidates();
             ServerConfig active = candidates.stream().filter(ServerConfig::isActive)
                     .findFirst().orElse(null);
             if (active == null) {
@@ -955,11 +998,20 @@ public class ConnectionService {
                 engine.forgetRealityRefusal();
                 return new ConnectAttempt(Outcome.SWITCHED, active);
             }
+            if (picked.byTheStore() && mode == ProxyMode.TUN
+                    && engine.restartNeedsElevationPrompt()) {
+                // A refresh that withdrew the picked server, or a delete,
+                // stopped the working core for a launch whose prompt came up
+                // with nobody asking, and a dismissal left the VPN off.
+                // Recovery leaves such a restart to the user; so does this.
+                log.info("The picked server was withdrawn; the tunnel stays on the server it "
+                        + "runs until a reconnect, which asks for administrator rights");
+                return new ConnectAttempt(Outcome.DEFERRED, active);
+            }
             if (!recovery.isWanted(request)) {
                 return new ConnectAttempt(Outcome.CANCELLED, active);
             }
-            stopCurrent();
-            return connectInternal(mode, () -> recovery.isWanted(request));
+            return restart(mode, () -> recovery.isWanted(request), request);
         }
     }
 
@@ -1035,8 +1087,7 @@ public class ConnectionService {
             // Restarted as it ran: the saved mode applies at the next start
             // the user makes, which is what the Dashboard and MCP promise.
             ProxyMode mode = restartMode;
-            stopCurrent();
-            return connectInternal(mode != null ? mode : requestedMode, allowed).started();
+            return restart(mode != null ? mode : requestedMode, allowed, NOT_A_PICK).started();
         }
     }
 

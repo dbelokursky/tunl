@@ -9,6 +9,7 @@ import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.ServerSelection;
 import com.vlessclient.model.TunnelHealth;
+import com.vlessclient.platform.ElevationDeclinedException;
 import com.vlessclient.testing.Await;
 import com.vlessclient.testing.FxToolkitExtension;
 import com.vlessclient.testing.TestServers;
@@ -38,14 +39,15 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * What a server pick does to the tunnel: the list's, the tray's, an agent's
- * select_server, and one made while the core was starting, which the service
- * follows once it is up.
+ * select_server, a subscription refresh's re-pick, and one made while the
+ * core was starting, which the service follows once it is up.
  *
  * <p>A pick asked for a tunnel of its own (a new connection request), so a
  * Disconnect that met a pick was undone: the pick's switch, run after the
  * stop or queued behind it, found no core and started one in the saved mode,
  * or switched the core the Disconnect then stopped and left the tunnel
- * wanted with nothing running.</p>
+ * wanted with nothing running. A refresh's re-pick under a TUN core whose
+ * every launch prompts raised the prompt unasked.</p>
  */
 @ExtendWith(FxToolkitExtension.class)
 class ConnectionServicePickTest {
@@ -75,8 +77,9 @@ class ConnectionServicePickTest {
     }
 
     /**
-     * Launches nothing. Records the mode of each start, and can take as long
-     * to stop as a test says.
+     * Launches nothing. Records the mode of each start, can take as long to
+     * stop as a test says, and can be told what the next start throws, as a
+     * dismissed elevation prompt does.
      */
     static final class PickEngine extends SingBoxEngine {
 
@@ -84,6 +87,12 @@ class ConnectionServicePickTest {
         final ReadOnlyObjectWrapper<ConnectionState> state =
                 new ReadOnlyObjectWrapper<>(ConnectionState.DISCONNECTED);
         volatile boolean running;
+        /** Every launch raises an elevation prompt, as UAC does for each TUN start. */
+        volatile boolean prompts;
+        /** The last launch ended at a dismissed prompt, as the process monitor says. */
+        volatile boolean declined;
+        /** What the next start throws instead of starting. */
+        volatile IOException failNextStart;
         /** Counted down as a stop begins, when set. */
         volatile CountDownLatch stopEntered;
         /** Waited for before a stop ends, when set. */
@@ -105,6 +114,11 @@ class ConnectionServicePickTest {
 
         @Override
         public void start(String configJson, ProxyMode proxyMode) throws IOException {
+            IOException failure = failNextStart;
+            if (failure != null) {
+                failNextStart = null;
+                throw failure;
+            }
             modes.add(proxyMode);
             running = true;
         }
@@ -134,6 +148,16 @@ class ConnectionServicePickTest {
         @Override
         public boolean isStopping() {
             return false;
+        }
+
+        @Override
+        public boolean lastExitWasDeclined() {
+            return declined;
+        }
+
+        @Override
+        public boolean restartNeedsElevationPrompt() {
+            return prompts;
         }
 
         @Override
@@ -485,5 +509,186 @@ class ConnectionServicePickTest {
 
         assertThat(service.connect().started()).isTrue();
         assertThat(service.appliedServerId()).as("the next start's server").isEqualTo("srv-2");
+    }
+
+    // ===== a re-pick nobody made =====
+
+    /** Tokyo and Osaka from one subscription, Tokyo picked, in TUN. */
+    private void subscribedPairInTun() {
+        ServerConfig tokyo = server("srv-1", "Tokyo");
+        tokyo.setSubscriptionId("sub-1");
+        ServerConfig osaka = server("srv-2", "Osaka");
+        osaka.setSubscriptionId("sub-1");
+        store.addServer(tokyo);
+        store.addServer(osaka);
+        store.setActiveServer("srv-1");
+        store.getSettings().setProxyMode(ProxyMode.TUN);
+    }
+
+    /**
+     * An hourly refresh withdraws the picked server and the store picks
+     * another, under a TUN core whose every launch prompts (UAC on Windows).
+     * The candidates changed, so the pick cannot be taken live, and the
+     * working core was stopped for a launch that raised the prompt with
+     * nobody asking. Recovery, in the same spot, leaves the restart to the
+     * user, and so does a re-pick now: the core keeps running.
+     */
+    @Test
+    void aRepickARefreshMadeUnderAPromptingTunCoreKeepsTheCore() throws Exception {
+        subscribedPairInTun();
+        PickEngine engine = engine();
+        engine.prompts = true;
+        serviceOver(engine);
+        assertThat(service.connect().started()).isTrue();
+        assertThat(service.restartNeedsTheUser()).as("a restart would prompt").isTrue();
+        // What the prompt nobody asked for met: the user dismissed it, and the
+        // VPN was off with the request withdrawn.
+        engine.failNextStart = new ElevationDeclinedException("the UAC prompt was dismissed");
+
+        // The provider no longer lists Tokyo; the store picks Osaka.
+        store.applyServerBatch(List.of(), List.of("srv-1"));
+        assertThat(picked("srv-2")).isTrue();
+        ConnectionService.ConnectAttempt pick = service.switchToActiveServer();
+
+        assertThat(engine.modes).as("TUN launches, each one a prompt")
+                .containsExactly(ProxyMode.TUN);
+        assertThat(engine.failNextStart).as("a launch, and its prompt").isNotNull();
+        assertThat(pick.outcome()).isEqualTo(ConnectionService.Outcome.DEFERRED);
+        assertThat(engine.isRunning()).as("the working core").isTrue();
+        assertThat(service.isTunnelWanted()).isTrue();
+    }
+
+    /** The same for a delete of the picked server, from the list or an agent. */
+    @Test
+    void aRepickADeleteMadeUnderAPromptingTunCoreKeepsTheCore() throws Exception {
+        subscribedPairInTun();
+        PickEngine engine = engine();
+        engine.prompts = true;
+        serviceOver(engine);
+        assertThat(service.connect().started()).isTrue();
+
+        store.removeServer("srv-1");
+        assertThat(picked("srv-2")).isTrue();
+
+        assertThat(service.switchToActiveServer().outcome())
+                .isEqualTo(ConnectionService.Outcome.DEFERRED);
+        assertThat(engine.modes).containsExactly(ProxyMode.TUN);
+        assertThat(engine.isRunning()).isTrue();
+    }
+
+    /**
+     * Without a prompt a re-pick still moves the tunnel off the server the
+     * provider withdrew, as before: only a prompt nobody asked for is held.
+     */
+    @Test
+    void aRepickWithoutAPromptStillMovesTheTunnel() throws Exception {
+        subscribedPairInTun();
+        PickEngine engine = engine();
+        serviceOver(engine);
+        assertThat(service.connect().started()).isTrue();
+
+        store.applyServerBatch(List.of(), List.of("srv-1"));
+        ConnectionService.ConnectAttempt pick = service.switchToActiveServer();
+
+        assertThat(pick.outcome()).isEqualTo(ConnectionService.Outcome.STARTED);
+        assertThat(engine.modes).containsExactly(ProxyMode.TUN, ProxyMode.TUN);
+        assertThat(service.appliedServerId()).isEqualTo("srv-2");
+    }
+
+    /** A pick the user makes is asked for, prompt or not, and restarts as before. */
+    @Test
+    void aPickOfTheUsersUnderAPromptingTunCoreStillRestartsIt() throws Exception {
+        subscribedPairInTun();
+        PickEngine engine = engine();
+        engine.prompts = true;
+        serviceOver(engine);
+        assertThat(service.connect().started()).isTrue();
+        store.applyServerBatch(List.of(), List.of("srv-1"));
+        service.switchToActiveServer();
+
+        store.addServer(server("srv-3", "Nagoya"));
+        store.setActiveServer("srv-3");
+        ConnectionService.ConnectAttempt pick = service.switchToActiveServer();
+
+        assertThat(pick.outcome()).isEqualTo(ConnectionService.Outcome.STARTED);
+        assertThat(engine.modes).containsExactly(ProxyMode.TUN, ProxyMode.TUN);
+        assertThat(service.appliedServerId()).isEqualTo("srv-3");
+    }
+
+    // ===== a dismissed prompt of a pick's restart =====
+
+    /**
+     * The user's pick restarted a TUN core, and the user dismissed the
+     * prompt the launch raised (the macOS setup dialog, the Linux grant).
+     * The working tunnel was stopped before the prompt, and the dismissal
+     * withdrew the request: no core, no retry, no offer, the VPN off with
+     * nothing saying so. A dropped tunnel whose restart prompts offers the
+     * reconnect instead, and so does this one.
+     */
+    @Test
+    void dismissingThePromptOfAPicksRestartOffersTheReconnect() throws Exception {
+        tokyoAndOsaka();
+        store.getSettings().setProxyMode(ProxyMode.TUN);
+        PickEngine engine = engine();
+        engine.prompts = true;
+        serviceOver(engine);
+        assertThat(service.connect().started()).isTrue();
+        store.setActiveServer("srv-2");
+        engine.failNextStart = new ElevationDeclinedException("the setup dialog was dismissed");
+
+        ConnectionService.ConnectAttempt pick = service.switchToActiveServer();
+
+        assertThat(pick.outcome()).isEqualTo(ConnectionService.Outcome.CANCELLED);
+        assertThat(engine.isRunning()).isFalse();
+        assertThat(List.of(service.isTunnelWanted(),
+                        service.getRecoveryService().isReconnectNeeded()))
+                .as("[the tunnel wanted, the reconnect offered] after the dismissed prompt")
+                .containsExactly(true, true);
+    }
+
+    /**
+     * The same where the prompt is raised by the launch's own process (UAC,
+     * the osascript dialog, pkexec), which ends when it is dismissed and is
+     * reported as a declined exit.
+     */
+    @Test
+    void aDeclinedExitOfAPicksRestartOffersTheReconnect() throws Exception {
+        tokyoAndOsaka();
+        store.getSettings().setProxyMode(ProxyMode.TUN);
+        PickEngine engine = engine();
+        engine.prompts = true;
+        serviceOver(engine);
+        assertThat(service.connect().started()).isTrue();
+        store.setActiveServer("srv-2");
+        assertThat(service.switchToActiveServer().started()).as("the launcher started").isTrue();
+
+        engine.report(ConnectionState.CONNECTING);
+        engine.running = false;
+        engine.declined = true;
+        engine.report(ConnectionState.DISCONNECTED);
+
+        assertThat(List.of(service.isTunnelWanted(),
+                        service.getRecoveryService().isReconnectNeeded()))
+                .as("[the tunnel wanted, the reconnect offered] after the declined exit")
+                .containsExactly(true, true);
+    }
+
+    /** A Connect whose prompt is dismissed is still the user cancelling it. */
+    @Test
+    void aDeclinedExitOfAConnectStillWithdrawsTheRequest() throws Exception {
+        tokyoAndOsaka();
+        store.getSettings().setProxyMode(ProxyMode.TUN);
+        PickEngine engine = engine();
+        engine.prompts = true;
+        serviceOver(engine);
+        assertThat(service.connect().started()).isTrue();
+
+        engine.report(ConnectionState.CONNECTING);
+        engine.running = false;
+        engine.declined = true;
+        engine.report(ConnectionState.DISCONNECTED);
+
+        assertThat(service.isTunnelWanted()).isFalse();
+        assertThat(service.getRecoveryService().isReconnectNeeded()).isFalse();
     }
 }

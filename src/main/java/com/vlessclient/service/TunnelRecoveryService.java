@@ -258,6 +258,26 @@ public final class TunnelRecoveryService implements AutoCloseable {
         return generation;
     }
 
+    /**
+     * Leaves the tunnel to the user's reconnect: a restart of a pick's ended
+     * at an elevation prompt the user dismissed. The pick stopped the working
+     * tunnel before the prompt came up, and the dismissal withdrew the request
+     * as a dismissed Connect does, so the VPN was off with no retry and
+     * nothing offered. The request stands, as for a dropped tunnel whose
+     * restart would prompt, and the reconnect is offered.
+     *
+     * @param request the request the restart ran under
+     * @return whether that request still stands, so the reconnect is offered
+     */
+    public synchronized boolean offerReconnect(long request) {
+        if (!isWanted(request)) {
+            return false;
+        }
+        cancelPending();
+        publish(null, true);
+        return true;
+    }
+
     /** Cancels automatic recovery, including a restart that has not reached start() yet. */
     public synchronized void cancel() {
         wanted = false;

@@ -74,6 +74,14 @@ public class ConfigStore {
     private final PersistenceState persistence = new PersistenceState();
 
     /**
+     * The picked server is the store's own choice, made as a removal took the
+     * one picked (a refresh that withdrew it, a delete), not one the user
+     * made. A pick of the user's clears it. Changed on the FX thread with the
+     * list.
+     */
+    private volatile boolean pickedByTheStore;
+
+    /**
      * The last value sealed under each secret key, and the tag it produced.
      *
      * <p>Credentials are plaintext in memory, so {@code SecretSealer.isSealed}
@@ -277,11 +285,26 @@ public class ConfigStore {
                     any = true;
                 }
             }
+            if (any) {
+                pickedByTheStore = false;
+            }
             return any;
         });
         if (changed) {
             saveServers();
         }
+    }
+
+    /**
+     * Whether the picked server is the store's own choice: a removal took the
+     * one picked, a subscription refresh that withdrew it or a delete, and
+     * the store picked another, which nobody asked a running tunnel to move
+     * to. A pick the user makes ends it. Read on the FX thread, with the list.
+     *
+     * @return true while the pick is the store's
+     */
+    public boolean isPickedByTheStore() {
+        return pickedByTheStore;
     }
 
     /**
@@ -472,6 +495,7 @@ public class ConfigStore {
                 .or(() -> upserts.stream().filter(list::contains).findFirst())
                 .orElse(list.getFirst());
         pick.setActive(true);
+        pickedByTheStore = true;
         log.info("The picked server was withdrawn; picked '{}' instead", pick.getName());
         return pick;
     }
