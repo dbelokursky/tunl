@@ -1,6 +1,9 @@
 package com.vlessclient.service.outbound;
 
 import com.vlessclient.model.ServerConfig;
+import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.net.InetAddress;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
@@ -54,6 +57,21 @@ public final class WireguardEndpointBuilder {
 
         endpoint.put("private_key", server.getUuid());
 
+        // A peer on this machine, a local relay or obfuscator as udp2raw and
+        // wg-obfuscator setups have it, is reached from the loopback. The
+        // route's auto_detect_interface bound the endpoint's socket to the
+        // default interface before it knew the peer, and a handshake sent
+        // from there to 127.0.0.1 never arrived. The core leaves an endpoint
+        // with a bind address of its own out of that bind, and this one alone.
+        String peerAddress = server.getAddress() == null ? "" : server.getAddress().strip();
+        boolean localhost = "localhost".equalsIgnoreCase(peerAddress);
+        if (localhost || isLoopback(peerAddress, Inet4Address.class)) {
+            endpoint.put("inet4_bind_address", "127.0.0.1");
+        }
+        if (localhost || isLoopback(peerAddress, Inet6Address.class)) {
+            endpoint.put("inet6_bind_address", "::1");
+        }
+
         ObjectNode peer = mapper.createObjectNode();
         peer.put("address", server.getAddress());
         peer.put("port", server.getPort());
@@ -80,6 +98,19 @@ public final class WireguardEndpointBuilder {
         endpoint.set("peers", peers);
 
         return endpoint;
+    }
+
+    /** Whether {@code address} is a loopback literal of the family; nothing is looked up. */
+    private static boolean isLoopback(String address, Class<? extends InetAddress> family) {
+        if (address.isEmpty() || address.indexOf(':') < 0 && address.indexOf('.') < 0) {
+            return false;
+        }
+        try {
+            InetAddress literal = InetAddress.ofLiteral(address);
+            return family.isInstance(literal) && literal.isLoopbackAddress();
+        } catch (IllegalArgumentException notLiteral) {
+            return false;
+        }
     }
 
     /**

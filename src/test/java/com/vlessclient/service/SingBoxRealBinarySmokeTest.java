@@ -911,6 +911,122 @@ class SingBoxRealBinarySmokeTest {
         }
     }
 
+    /** A key pair for each side of the loopback WireGuard tunnel below. */
+    private static final String WG_CLIENT_PRIVATE_KEY =
+            "yAsvzGasgRVNEgeLKWg180ByMB7LlKAPpNON6mlz33g=";
+    private static final String WG_CLIENT_PUBLIC_KEY =
+            "RefnSxKudmcstcHyW1v5YskBdYq5Jb3llPigp7YjSTc=";
+    private static final String WG_SERVER_PRIVATE_KEY =
+            "uOMl/GnzItlyQsRrlhqhRj1G6Tt1W3NzHAYTlowV32I=";
+    private static final String WG_SERVER_PUBLIC_KEY =
+            "Jlis5v0ROUPH5A57OPn/oLF4Y+qntinc92Zfh/BOkhQ=";
+
+    /**
+     * A WireGuard peer on this machine, a local relay or obfuscator as
+     * udp2raw and wg-obfuscator setups have it. The route's
+     * auto_detect_interface bound the endpoint's socket to the default
+     * interface, a handshake sent from there to 127.0.0.1 never arrived, and
+     * the server carried nothing. Run on every system the core ships for:
+     * each binds a socket to an interface its own way. The target is on this
+     * machine's own address, not the loopback, which a WireGuard stack drops
+     * as martian.
+     */
+    @Test
+    void aWireguardPeerOnThisMachineCarriesTraffic() throws Exception {
+        InetAddress own = ownAddress();
+        org.junit.jupiter.api.Assumptions.assumeTrue(own != null,
+                "this machine has no IPv4 address but the loopback");
+        HttpServer target = HttpServer.create(new InetSocketAddress(own, 0), 0);
+        target.createContext("/generate_204", exchange -> {
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        target.start();
+        int wgPort;
+        try (java.net.DatagramSocket udp = new java.net.DatagramSocket(0)) {
+            wgPort = udp.getLocalPort();
+        }
+        int serverControlPort = freePort();
+        Path serverConfig = Files.createTempFile("smoke-wg-server-", ".json");
+        Path serverLog = Files.createTempFile("smoke-wg-server-", ".log");
+        Files.writeString(serverConfig, """
+                {"log": {"level": "warn"},
+                 "endpoints": [{"type": "wireguard", "tag": "wg-in", "address": ["10.13.0.1/24"],
+                                "private_key": "%s", "listen_port": %d,
+                                "peers": [{"public_key": "%s", "allowed_ips": ["10.13.0.2/32"]}]}],
+                 "outbounds": [{"type": "direct", "tag": "direct"}],
+                 "route": {"final": "direct"},
+                 "experimental": {"clash_api": {"external_controller": "127.0.0.1:%d"}}}
+                """.formatted(WG_SERVER_PRIVATE_KEY, wgPort, WG_CLIENT_PUBLIC_KEY,
+                serverControlPort));
+        Process server = new ProcessBuilder(binary.toString(), "run", "-c", serverConfig.toString())
+                .redirectErrorStream(true)
+                .redirectOutput(serverLog.toFile())
+                .start();
+        ServerConfig peer = TestServers.server()
+                .id("wg-loopback")
+                .name("wg-loopback")
+                .protocol(Protocol.WIREGUARD)
+                .address("127.0.0.1")
+                .port(wgPort)
+                .uuid(WG_CLIENT_PRIVATE_KEY)
+                .encryption(WG_SERVER_PUBLIC_KEY)
+                .flow("10.13.0.2/32")
+                .build();
+        AppSettings settings = new AppSettings();
+        settings.setProxyMode(ProxyMode.SYSTEM_PROXY);
+        settings.setSystemProxyAutoConfig(false);
+        ServiceReachabilityChecker checker = new ServiceReachabilityChecker();
+        CoreRun run = null;
+        try {
+            awaitPort(serverControlPort, server, serverLog);
+            // With routing, as every connect has it: the route is where
+            // auto_detect_interface is set.
+            run = startOnFreshPorts(settings, s -> {
+                s.listenOn(s.getSocksPort(), s.getHttpPort(), s.getClashApiPort(), unusedPort());
+                return generator.generate(List.of(peer), peer, s, new RoutingConfig());
+            });
+            String url = "http://" + own.getHostAddress() + ":" + target.getAddress().getPort()
+                    + "/generate_204";
+
+            assertThat(checker.checkAll(List.of(new HealthCheckTarget("Site", url)),
+                            settings.listenProbePort()).get(60, TimeUnit.SECONDS))
+                    .as("through the tunnel to a peer on 127.0.0.1")
+                    .extracting(ServiceReachabilityChecker.ProbeResult::detail)
+                    .containsExactly("HTTP 204");
+        } catch (Throwable e) {
+            throw new AssertionError(outputTail(serverLog)
+                    + (run == null ? "" : outputTail(run.logFile())), e);
+        } finally {
+            checker.shutdown();
+            if (run != null) {
+                stopCore(run.process());
+                Files.deleteIfExists(run.configFile());
+                Files.deleteIfExists(run.logFile());
+            }
+            stopCore(server);
+            target.stop(0);
+            Files.deleteIfExists(serverConfig);
+            Files.deleteIfExists(serverLog);
+        }
+    }
+
+    /** An IPv4 address of this machine's that is not the loopback, or null. */
+    private static InetAddress ownAddress() throws IOException {
+        for (var nic : java.util.Collections.list(java.net.NetworkInterface.getNetworkInterfaces())) {
+            if (!nic.isUp() || nic.isLoopback()) {
+                continue;
+            }
+            for (InetAddress address : java.util.Collections.list(nic.getInetAddresses())) {
+                if (address instanceof java.net.Inet4Address && !address.isLoopbackAddress()
+                        && !address.isLinkLocalAddress()) {
+                    return address;
+                }
+            }
+        }
+        return null;
+    }
+
     /**
      * A generated configuration whose server is a SOCKS server on the
      * loopback, and whose remote rule sets are inline ones: without a cache
