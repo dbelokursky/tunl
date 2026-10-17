@@ -251,6 +251,14 @@ public class ConnectionService {
     /** The request of a start no pick made, which no request ever is. */
     private static final long NOT_A_PICK = -1;
 
+    /**
+     * A start is under way: a connect, a reconnect, a pick's restart or a
+     * recovery restart holds the operations lock to bring a core up, from the
+     * stop of the core before to the start's end, its waits and prompts
+     * included.
+     */
+    private volatile boolean starting;
+
 
     /**
      * Creates the service, whose recovery takes the machine to be always
@@ -481,6 +489,19 @@ public class ConnectionService {
     }
 
     /**
+     * Whether a start is under way, which may have no core to show for it
+     * yet: while it waits for the core before it to close, while the core
+     * checks the configuration, and while a setup prompt is up before
+     * anything is launched. Safe from any thread.
+     *
+     * @return true while a connect, a reconnect or a restart is bringing a
+     *     core up
+     */
+    public boolean isStarting() {
+        return starting;
+    }
+
+    /**
      * The proxy mode the running core was started with. The settings may name
      * another: a mode changed there applies at the next start.
      *
@@ -540,7 +561,7 @@ public class ConnectionService {
     }
 
     /**
-     * Starts a core, under the operations lock.
+     * Starts a core, under the operations lock, as the start under way.
      *
      * @param pickedUnder the request a pick restarts the core under, or
      *                    {@link #NOT_A_PICK}: what a dismissed elevation
@@ -549,11 +570,13 @@ public class ConnectionService {
     private ConnectAttempt connectInternal(ProxyMode modeOverride, BooleanSupplier allowed,
                                            long pickedUnder) throws IOException {
         boolean started = false;
+        starting = true;
         try {
             ConnectAttempt attempt = startCore(modeOverride, allowed, pickedUnder);
             started = attempt.outcome() == Outcome.STARTED;
             return attempt;
         } finally {
+            starting = false;
             // A connect that waited for an earlier tunnel showed Connecting,
             // and one that failed after it without a start left it showing.
             engine.connectEnded();
@@ -869,11 +892,19 @@ public class ConnectionService {
         }
     }
 
-    /** Stops the running core and starts another, under the operations lock. */
+    /**
+     * Stops the running core and starts another, under the operations lock,
+     * as one start under way: {@link #isStarting()} holds from the stop on.
+     */
     private ConnectAttempt restart(ProxyMode mode, BooleanSupplier allowed, long pickedUnder)
             throws IOException {
-        stopCurrent();
-        return connectInternal(mode, allowed, pickedUnder);
+        starting = true;
+        try {
+            stopCurrent();
+            return connectInternal(mode, allowed, pickedUnder);
+        } finally {
+            starting = false;
+        }
     }
 
     /**
