@@ -1022,10 +1022,12 @@ public class DashboardViewController implements ViewShownAware {
     }
 
     private void runConnect(ConnectionService service, boolean restart, boolean switchServer) {
+        ConnectionService.Outcome outcome = null;
         try {
             ConnectionService.ConnectAttempt attempt =
                     switchServer ? service.switchToActiveServer()
                             : restart ? service.reconnect(null) : service.connect(null);
+            outcome = attempt.outcome();
             switch (attempt.outcome()) {
                 case NO_ACTIVE_SERVER -> Platform.runLater(() -> {
                     log.warn("No active server selected");
@@ -1038,6 +1040,8 @@ public class DashboardViewController implements ViewShownAware {
                                 I18n.get("dashboard.error.singbox.body")));
                 case ALREADY_RUNNING -> log.warn("sing-box already running");
                 case CANCELLED -> log.debug("Connect superseded by a newer user request");
+                case NOT_RUNNING ->
+                        log.debug("No core runs to switch; the next start takes the pick");
                 // STARTED: the engine's state listener drives the UI from here.
                 // SWITCHED changes no state, so nothing else tells the health
                 // checks that the traffic leaves through another server.
@@ -1066,11 +1070,21 @@ public class DashboardViewController implements ViewShownAware {
             Platform.runLater(() ->
                     statusLabel.setText(I18n.get("error.connection.failed", detail)));
         } finally {
+            // Compared again only once the core moved, for a pick made while
+            // it did. After a switch a Disconnect called off, the stop it
+            // waited for still read Connected here, and the second look
+            // started another switch, which asked for the tunnel again and
+            // started it after the stop; after one that moved nothing it only
+            // asked for the same again, and again.
+            boolean moved = outcome == ConnectionService.Outcome.SWITCHED
+                    || outcome == ConnectionService.Outcome.STARTED;
             Platform.runLater(() -> {
                 refreshConnectButtonAvailability();
                 if (switchServer) {
                     applyingServer = false;
-                    reconnectIfActiveServerChanged();
+                    if (moved) {
+                        reconnectIfActiveServerChanged();
+                    }
                 }
             });
         }

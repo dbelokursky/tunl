@@ -102,7 +102,12 @@ public class ConnectionService {
         /** A core was already running, so this attempt was refused. */
         ALREADY_RUNNING,
         /** A newer user request superseded this connection attempt. */
-        CANCELLED
+        CANCELLED,
+        /**
+         * A pick found no core running to move: the next start reads it,
+         * the user's Connect or a recovery restart under way.
+         */
+        NOT_RUNNING
     }
 
     /**
@@ -871,16 +876,29 @@ public class ConnectionService {
     }
 
     /**
-     * Applies a manual server selection through the core API when the loaded
-     * configuration still matches; otherwise restarts with the latest config,
-     * in the mode the running core runs in.
+     * Moves the running core to the picked server: through the core API when
+     * the loaded configuration still matches; otherwise by a restart with the
+     * latest config, in the mode the running core runs in.
      *
-     * @return the selected server and whether it was switched or restarted
+     * <p>A pick moves the tunnel the user asked for, and asks for none
+     * itself. It took a request of its own, before the lock, as a Connect
+     * does: a Disconnect that withdrew the user's request was then outlived
+     * by a switch already under way, by one the Dashboard started as the stop
+     * ran and the card still read Connected, and by the one this service
+     * starts for a pick made while connecting. Each found no core and started
+     * one in the saved mode after the Disconnect, or moved the core the
+     * Disconnect then stopped and left the tunnel wanted with nothing
+     * running. A pick that met a recovery restart's stop called the restart
+     * off the same way and started in the saved mode itself. With no core to
+     * move a pick now changes nothing: the next start reads it.</p>
+     *
+     * @return the selected server, and whether it was switched or restarted,
+     *     or left to the next start ({@link Outcome#NOT_RUNNING})
      * @throws IOException if the fallback start fails
      */
     public ConnectAttempt switchToActiveServer() throws IOException {
         requireOffFxThread("switchToActiveServer");
-        long request = recovery.connectionRequested();
+        long request = recovery.currentRequest();
         synchronized (operations) {
             if (!recovery.isWanted(request)) {
                 return new ConnectAttempt(Outcome.CANCELLED, null);
@@ -892,47 +910,50 @@ public class ConnectionService {
             if (active == null) {
                 return new ConnectAttempt(Outcome.NO_ACTIVE_SERVER, null);
             }
-            AppSettings settings = configStore.getSettings();
             Run current = run;
-            boolean running = isRunning() && current != null;
+            if (!isRunning() || current == null) {
+                return new ConnectAttempt(Outcome.NOT_RUNNING, active);
+            }
+            AppSettings settings = configStore.getSettings();
             // A pick changes the server, never the mode: it restarts in the
-            // mode the core runs in, as recovery does, and with no core it
-            // starts in the saved one, as a Connect click does. It restarted
-            // in the saved mode, so a mode changed while connected took effect
-            // at the next pick: an agent's set_proxy_mode to tun and a
-            // select_server started TUN without the confirm a connect asks
-            // for, and a pick in the list or the tray raised the administrator
-            // prompt, or turned TUN into a system proxy that apps ignoring it
-            // go around.
-            ProxyMode mode = running ? current.mode() : settings.getProxyMode();
-            if (running) {
-                LiveSelector live = current.selector();
-                String generated = generatedNow(candidates, active, inMode(settings, mode),
-                        current.leftOut(), current.host());
-                if (live.keepsAnyPick(generated)) {
-                    // The automatic selection holds every server whichever is
-                    // picked, so the pick changes nothing the core runs. It was
-                    // restarted all the same: every connection dropped, the TUN
-                    // device went down and came back, and on Windows each click
-                    // raised a UAC prompt.
-                    if (!recovery.isWanted(request)) {
-                        return new ConnectAttempt(Outcome.CANCELLED, active);
-                    }
-                    recovery.keptUp(request);
-                    appliedServerId = active.getId();
-                    return new ConnectAttempt(Outcome.SWITCHED, active);
+            // mode the core runs in, as recovery does. It restarted in the
+            // saved mode, so a mode changed while connected took effect at the
+            // next pick: an agent's set_proxy_mode to tun and a select_server
+            // started TUN without the confirm a connect asks for, and a pick
+            // in the list or the tray raised the administrator prompt, or
+            // turned TUN into a system proxy that apps ignoring it go around.
+            ProxyMode mode = current.mode();
+            LiveSelector live = current.selector();
+            String generated = generatedNow(candidates, active, inMode(settings, mode),
+                    current.leftOut(), current.host());
+            if (active.getId().equals(appliedServerId) && live.matches(generated)) {
+                // The core runs the pick already: a start that read it, the
+                // recovery restart this pick waited for among them.
+                return new ConnectAttempt(Outcome.SWITCHED, active);
+            }
+            if (live.keepsAnyPick(generated)) {
+                // The automatic selection holds every server whichever is
+                // picked, so the pick changes nothing the core runs. It was
+                // restarted all the same: every connection dropped, the TUN
+                // device went down and came back, and on Windows each click
+                // raised a UAC prompt.
+                if (!recovery.isWanted(request)) {
+                    return new ConnectAttempt(Outcome.CANCELLED, active);
                 }
-                if (live.accepts(generated) && live.select(OutboundTags.server(active))) {
-                    if (!recovery.isWanted(request)) {
-                        return new ConnectAttempt(Outcome.CANCELLED, active);
-                    }
-                    // The core kept running, so no state change will tell recovery.
-                    recovery.keptUp(request);
-                    appliedServerId = active.getId();
-                    // Nor tell the engine that its log so far was another server's.
-                    engine.forgetRealityRefusal();
-                    return new ConnectAttempt(Outcome.SWITCHED, active);
+                recovery.keptUp(request);
+                appliedServerId = active.getId();
+                return new ConnectAttempt(Outcome.SWITCHED, active);
+            }
+            if (live.accepts(generated) && live.select(OutboundTags.server(active))) {
+                if (!recovery.isWanted(request)) {
+                    return new ConnectAttempt(Outcome.CANCELLED, active);
                 }
+                // The core kept running, so no state change will tell recovery.
+                recovery.keptUp(request);
+                appliedServerId = active.getId();
+                // Nor tell the engine that its log so far was another server's.
+                engine.forgetRealityRefusal();
+                return new ConnectAttempt(Outcome.SWITCHED, active);
             }
             if (!recovery.isWanted(request)) {
                 return new ConnectAttempt(Outcome.CANCELLED, active);

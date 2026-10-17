@@ -1,0 +1,278 @@
+package com.vlessclient.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.vlessclient.app.ServiceLocator;
+import com.vlessclient.model.AppSettings;
+import com.vlessclient.model.ConnectionState;
+import com.vlessclient.model.Protocol;
+import com.vlessclient.model.ProxyMode;
+import com.vlessclient.model.ServerConfig;
+import com.vlessclient.model.TunnelHealth;
+import com.vlessclient.platform.TunLauncher;
+import com.vlessclient.service.mcp.DefaultAppControlService;
+import com.vlessclient.testing.Await;
+import com.vlessclient.testing.TestServers;
+import com.vlessclient.testing.UiTest;
+import com.vlessclient.ui.view.DashboardViewController;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
+import javafx.application.Platform;
+import javafx.fxml.FXMLLoader;
+import javafx.scene.Parent;
+import javafx.scene.Scene;
+import javafx.stage.Stage;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.io.TempDir;
+import org.testfx.framework.junit5.ApplicationTest;
+import org.testfx.util.WaitForAsyncUtils;
+
+/**
+ * Server picks against a Disconnect and a recovery restart, with the real
+ * engine driving a fake core whose SIGTERM takes a while, as a real core's
+ * close and the system proxy's restore do, and the real Dashboard. Nothing
+ * is paused or patched.
+ *
+ * <p>The engine says Disconnected only at the end of its stop, so the card
+ * and the tray read Connected for the whole stop, and a pick then reached
+ * the service: its switch asked for the tunnel again and started it after
+ * the Disconnect. A pick during a recovery restart's stop called the restart
+ * off and started in the saved mode.</p>
+ */
+@UiTest
+@EnabledOnOs({OS.MAC, OS.LINUX})
+public class RealCorePickRaceTest extends ApplicationTest {
+
+    @TempDir
+    static Path dirs;
+
+    /** The real engine; it only counts the launches. */
+    static final class CountingEngine extends SingBoxEngine {
+        final List<ProxyMode> starts = new CopyOnWriteArrayList<>();
+
+        CountingEngine(Path binary) {
+            super(binary);
+        }
+
+        @Override
+        public void start(String configJson, ProxyMode proxyMode) throws IOException {
+            starts.add(proxyMode);
+            super.start(configJson, proxyMode);
+        }
+    }
+
+    /**
+     * A TUN launcher without elevation: it starts a wrapper at once, as the
+     * UAC, osascript and pkexec launchers do, which stops on its stop file.
+     */
+    static final class FakeTunLauncher implements TunLauncher {
+        final Path wrapper;
+        final Path dir;
+        final List<String> launches = new CopyOnWriteArrayList<>();
+
+        FakeTunLauncher(Path wrapper, Path dir) {
+            this.wrapper = wrapper;
+            this.dir = dir;
+        }
+
+        @Override
+        public Launched launch(Path binary, Path configFile, Prompt prompt) throws IOException {
+            launches.add(configFile.getFileName().toString());
+            Path stop = dir.resolve("stop-" + UUID.randomUUID());
+            Process process = new ProcessBuilder("/bin/bash", wrapper.toString(), stop.toString())
+                    .redirectErrorStream(true).start();
+            return new Launched(process, stop, false);
+        }
+    }
+
+    private CountingEngine engine;
+    private FakeTunLauncher tunLauncher;
+    private ConnectionService service;
+    private ConfigStore store;
+    private DashboardViewController controller;
+    private DefaultAppControlService control;
+    private ServerConfig tokyo;
+    private ServerConfig osaka;
+
+    @Override
+    public void start(Stage stage) throws Exception {
+        Path dir = dirs.resolve(UUID.randomUUID().toString());
+        Files.createDirectories(dir);
+        Path core = dir.resolve("sing-box");
+        Files.writeString(core, "#!/bin/bash\n"
+                + "[ \"$1\" = check ] && exit 0\n"
+                + "trap 'sleep 0.8; exit 0' TERM\n"
+                + "echo 'sing-box started'\n"
+                + "while true; do sleep 0.1; done\n");
+        Files.setPosixFilePermissions(core, PosixFilePermissions.fromString("rwxr-xr-x"));
+        Path wrapper = dir.resolve("tun-wrapper.sh");
+        Files.writeString(wrapper, "#!/bin/bash\n"
+                + "STOP=\"$1\"\n"
+                + "echo 'sing-box started'\n"
+                + "while [ ! -f \"$STOP\" ]; do sleep 0.1; done\n"
+                + "sleep 0.5\n"
+                + "exit 0\n");
+        Files.setPosixFilePermissions(wrapper, PosixFilePermissions.fromString("rwxr-xr-x"));
+
+        store = new ConfigStore(dir.resolve("data"));
+        AppSettings settings = store.getSettings();
+        settings.setHealthCheckEnabled(false);
+        settings.setProxyMode(ProxyMode.SYSTEM_PROXY);
+        ServiceLocator.register(ConfigStore.class, store);
+        ServiceLocator.register(AppSettings.class, settings);
+        engine = new CountingEngine(core);
+        engine.setSystemProxyGuard((host, port) -> { });
+        tunLauncher = new FakeTunLauncher(wrapper, dir);
+        engine.setTunLauncher(tunLauncher);
+        ServiceLocator.register(SingBoxEngine.class, engine);
+        service = new ConnectionService(store, new SingBoxConfigGenerator(),
+                new RoutingService(), engine);
+        ServiceLocator.register(ConnectionService.class, service);
+        control = new DefaultAppControlService(store, null, null, new RoutingService(),
+                service, null, null, engine);
+        tokyo = server("Tokyo", "203.0.113.9");
+        osaka = server("Osaka", "203.0.113.10");
+        store.addServer(tokyo);
+        store.addServer(osaka);
+
+        FXMLLoader loader = new FXMLLoader(DashboardViewController.class
+                .getResource("/fxml/DashboardView.fxml"));
+        Parent root = loader.load();
+        controller = loader.getController();
+        stage.setScene(new Scene(root, 640, 480));
+        stage.show();
+    }
+
+    @AfterEach
+    void tearDown() {
+        service.getRecoveryService().close();
+        engine.stop();
+        WaitForAsyncUtils.waitForFxEvents();
+        store.awaitPendingWrites(5_000);
+    }
+
+    // ===== a Disconnect stays a Disconnect =====
+
+    /** As the tray does it: its Disconnect, then a pick in its Servers menu. */
+    @Test
+    void aTrayPickDuringTheStopOfATrayStartedCoreStaysDisconnected() throws Exception {
+        assertThat(service.connect().started()).isTrue();
+        awaitState(ConnectionState.CONNECTED);
+        pickDuringTheStop();
+    }
+
+    /** The same under the Dashboard's own Connect, which failed before round one too. */
+    @Test
+    void aTrayPickDuringTheStopOfADashboardStartedCoreStaysDisconnected() throws Exception {
+        interact(controller::toggleConnection);
+        awaitState(ConnectionState.CONNECTED);
+        pickDuringTheStop();
+    }
+
+    private void pickDuringTheStop() throws Exception {
+        Thread disconnect = Thread.startVirtualThread(service::disconnect);
+        Await.until("the stop under way", engine::isStopping, Duration.ofSeconds(5));
+        Thread.sleep(200);
+        assertThat(stateOnFx()).as("what the card and the tray read during the stop")
+                .isEqualTo(ConnectionState.CONNECTED);
+        // TrayIconService's Servers menu: Platform.runLater(() -> selectActiveServer(id)).
+        Platform.runLater(() -> store.setActiveServer(osaka.getId()));
+        disconnect.join(10_000);
+
+        assertStaysDown(1);
+    }
+
+    /**
+     * An agent's select_server, then its disconnect at once: two tool calls
+     * of one turn. The Dashboard's switch for the pick had begun, and its
+     * second look after the cancelled switch started the tunnel again.
+     */
+    @Test
+    void anAgentsSelectServerThenDisconnectStaysDisconnected() throws Exception {
+        for (int i = 0; i < 2; i++) {
+            if (engine.isRunning()) {
+                service.disconnect();
+            }
+            awaitState(ConnectionState.DISCONNECTED);
+            int before = engine.starts.size();
+            assertThat(service.connect().started()).isTrue();
+            awaitState(ConnectionState.CONNECTED);
+
+            control.selectServer(i % 2 == 0 ? osaka.getId() : tokyo.getId());
+            assertThat(control.disconnect().state()).isNotNull();
+
+            assertStaysDown(before + 1);
+        }
+    }
+
+    private void assertStaysDown(int starts) throws Exception {
+        awaitState(ConnectionState.DISCONNECTED);
+        // What came after the stop came at once: the switch queued behind it.
+        Thread.sleep(1_500);
+        assertThat(List.of(engine.starts.size(), engine.isRunning(), service.isTunnelWanted()))
+                .as("[launches, a core runs, the tunnel wanted] after the Disconnect")
+                .containsExactly(starts, false, false);
+        assertThat(control.getStatus().state()).isEqualTo(ConnectionState.DISCONNECTED.name());
+    }
+
+    // ===== a pick changes the server, never the mode =====
+
+    /**
+     * A pick that reaches the Dashboard while recovery's restart is stopping
+     * the core, with the saved mode changed since the start: the restart
+     * stays recovery's, in the mode the tunnel ran in.
+     */
+    @Test
+    void aPickDuringARecoveryRestartsStopKeepsTheModeTheCoreRan() throws Exception {
+        store.getSettings().setHealthCheckAutoReconnect(true);
+        store.getSettings().setHealthCheckDelaySeconds(1);
+        interact(controller::toggleConnection);
+        awaitState(ConnectionState.CONNECTED);
+        // The Dashboard's mode box or an agent's set_proxy_mode: saved, not applied.
+        FxExecutor.run(() -> store.getSettings().setProxyMode(ProxyMode.TUN));
+        service.getRecoveryService().onHealth(TunnelHealth.BROKEN);
+        Await.until("recovery's restart stopping the core", engine::isStopping,
+                Duration.ofSeconds(10));
+        Thread.sleep(200);
+        assertThat(stateOnFx()).as("what the card reads during recovery's stop")
+                .isEqualTo(ConnectionState.CONNECTED);
+
+        Platform.runLater(() -> store.setActiveServer(osaka.getId()));
+        Await.until("the restart", () -> engine.starts.size() >= 2, Duration.ofSeconds(10));
+        awaitState(ConnectionState.CONNECTED);
+        Thread.sleep(1_000);
+
+        assertThat(engine.starts).as("the modes the core was started in")
+                .containsExactly(ProxyMode.SYSTEM_PROXY, ProxyMode.SYSTEM_PROXY);
+        assertThat(tunLauncher.launches).as("TUN launches").isEmpty();
+        assertThat(service.appliedServerId()).isEqualTo(osaka.getId());
+    }
+
+    private void awaitState(ConnectionState wanted) {
+        Await.until("state " + wanted, () -> stateOnFx() == wanted, Duration.ofSeconds(10));
+    }
+
+    private ConnectionState stateOnFx() {
+        return FxExecutor.get(() -> engine.connectionStateProperty().get());
+    }
+
+    private static ServerConfig server(String name, String address) {
+        return TestServers.server()
+                .id(UUID.randomUUID().toString())
+                .name(name)
+                .protocol(Protocol.VLESS)
+                .address(address)
+                .port(443)
+                .uuid("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+                .build();
+    }
+}
