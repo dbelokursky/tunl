@@ -8,6 +8,7 @@ import com.vlessclient.platform.PrivilegeHelper;
 import com.vlessclient.platform.WindowsUrlScheme;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
+import com.vlessclient.service.EarlierSessionConfigs;
 import com.vlessclient.service.ProxyGroupMonitor;
 import com.vlessclient.service.SessionPorts;
 import com.vlessclient.service.SingBoxEngine;
@@ -91,6 +92,9 @@ public class VlessClientApp extends Application {
                 AppSteps.step("shutdown hook", VlessClientApp::installShutdownHook),
                 // Before the service graph, which would race it for its ports.
                 AppSteps.step("leftover core", this::endLeftoverCore),
+                // On a thread of its own: it lists the system temp dir, which
+                // on Windows can hold tens of thousands of files.
+                AppSteps.step("earlier session configs", this::removeEarlierSessionConfigs),
                 AppSteps.required("services", ServiceLocator::initialize),
                 // Needs the graph, and runs before the window can connect.
                 AppSteps.step("stale system proxy", this::clearStaleSystemProxy),
@@ -144,6 +148,21 @@ public class VlessClientApp extends Application {
         } catch (RuntimeException e) {
             // A failed cleanup must not keep the app from starting.
             log.warn("Could not end a sing-box left running by an earlier run", e);
+        }
+    }
+
+    /**
+     * Removes the plain-text session configurations an earlier release left
+     * where it wrote them ({@link EarlierSessionConfigs}): the temp dir up to
+     * 1.24, the data dir in 1.25. A session start sweeps only the folder this
+     * release writes to, so a copy left by a crash before the update stayed,
+     * on Windows for good. Only a copy that holds the single-instance lock
+     * does this, as for the leftover core: without the lock another copy,
+     * of an earlier release perhaps, may still be writing there.
+     */
+    private void removeEarlierSessionConfigs() {
+        if (SingleInstance.current().isPresent()) {
+            Thread.startVirtualThread(EarlierSessionConfigs::remove);
         }
     }
 
