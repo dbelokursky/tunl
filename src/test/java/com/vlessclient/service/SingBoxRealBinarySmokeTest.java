@@ -242,6 +242,8 @@ class SingBoxRealBinarySmokeTest {
                         + "&serviceName=grpc-svc&host=example.com#vless-grpc",
                 "vless://" + TEST_UUID + "@example.com:443?type=http&" + tls
                         + "&host=example.com&path=%2Fh2#vless-h2",
+                "vless://" + TEST_UUID + "@example.com:443?type=http&" + tls
+                        + "&host=a.example.com%2Cb.example.com&path=%2Fh2#vless-h2-hosts",
                 "vless://" + TEST_UUID + "@example.com:443?type=httpupgrade&" + tls
                         + "&host=example.com&path=%2Fup#vless-httpupgrade",
                 // Xray's early data in the path, which the core is sent apart.

@@ -130,7 +130,11 @@ public abstract class OutboundBuilder {
             transportNode.put("early_data_header_name", CoreSettings.EARLY_DATA_HEADER);
         }
         if (fields.contains("host")) {
-            putIfPresent(transportNode, "host", transport.getHost());
+            if (transport.getType() == TransportType.HTTP2) {
+                putHosts(transportNode, transport.getHost());
+            } else {
+                putIfPresent(transportNode, "host", transport.getHost());
+            }
         }
         if (fields.contains("service_name")) {
             // VMess links keep gRPC's service name in path, and servers
@@ -180,6 +184,29 @@ public abstract class OutboundBuilder {
             headers.put("Host", transport.getHost());
         }
         return headers;
+    }
+
+    /**
+     * The hosts of an HTTP/2 transport, which share links list
+     * comma-separated, as v2rayN's and Xray's do: a list for more than one.
+     * Given the list as one host, the core sent "Host: a.example,b.example",
+     * and a server holding both names answered 400.
+     */
+    private void putHosts(ObjectNode node, String hosts) {
+        if (!present(hosts)) {
+            return;
+        }
+        ArrayNode list = mapper.createArrayNode();
+        for (String host : hosts.split(",")) {
+            if (!host.isBlank()) {
+                list.add(host.strip());
+            }
+        }
+        if (list.size() == 1) {
+            node.set("host", list.get(0));
+        } else if (!list.isEmpty()) {
+            node.set("host", list);
+        }
     }
 
     private static void putIfPresent(ObjectNode node, String field, String value) {
