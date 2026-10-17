@@ -387,20 +387,22 @@ public final class CoreSettings {
     }
 
     /**
-     * The interface addresses of a WireGuard server, listed comma-separated,
-     * each address once, in the first spelling given. The core refuses an
-     * interface that has one address twice, under any prefix length or
-     * spelling ("duplicate address"), and the endpoint of every member of a
-     * group goes into one configuration: a {@code .conf} that repeated its
-     * Address line, or a form that listed an address twice, stopped every
-     * connect of the group.
+     * The interface addresses of a WireGuard server, listed separated by
+     * commas or spaces, as wg-quick reads them, each address once, in the
+     * first spelling given. The core refuses an interface that has one
+     * address twice, under any prefix length or spelling ("duplicate
+     * address"), and the endpoint of every member of a group goes into one
+     * configuration: a {@code .conf} that repeated its Address line, or a
+     * form that listed an address twice, stopped every connect of the group.
+     * Two addresses with a space between them were read as one, which the
+     * core could not read and refused the configuration over.
      *
-     * @param addresses the addresses as stored, comma-separated
+     * @param addresses the addresses as stored, separated by commas or spaces
      * @return the distinct addresses, stripped, as written
      */
     public static List<String> interfaceAddresses(String addresses) {
         Map<String, String> distinct = new LinkedHashMap<>();
-        for (String part : addresses.split(",")) {
+        for (String part : addresses.split("[,\\s]+")) {
             String address = part.strip();
             if (!address.isEmpty()) {
                 distinct.putIfAbsent(addressKey(address), address);
@@ -570,13 +572,16 @@ public final class CoreSettings {
 
     /**
      * Why the core would not start a WireGuard server: a private or peer key
-     * that is not 32 bytes in padded standard base64, or no local address.
+     * that is not 32 bytes in padded standard base64, no local address, or
+     * one the core cannot read.
      *
      * <p>None of them was refused. A key the core cannot decode fails its
      * check, but a missing peer key or one of the wrong length passes it, and
      * the core then stops at start printing the interface's settings, the
      * private key among them, which the app log kept. A server with no local
-     * address starts and carries nothing.</p>
+     * address starts and carries nothing, and one the core cannot read as an
+     * address with a prefix length, such as 10.0.0.2/33, made it refuse the
+     * whole configuration.</p>
      */
     private static Optional<Refusal> wireguardRefusal(ServerConfig server) {
         if (!isWireguardKey(server.getUuid())) {
@@ -587,10 +592,155 @@ public final class CoreSettings {
             // "failed to get peer by public key: hex string does not fit the slice"
             return refused("WireGuard peer key", "refusal.wireguard.peer.key");
         }
-        if (server.getFlow() == null || server.getFlow().isBlank()) {
+        List<String> addresses = server.getFlow() == null
+                ? List.of() : interfaceAddresses(server.getFlow());
+        if (addresses.isEmpty()) {
             return refused("WireGuard local address", "refusal.wireguard.address");
         }
+        for (String address : addresses) {
+            if (!isInterfacePrefix(interfaceAddress(address))) {
+                // "endpoints[0].address: ... netip.ParsePrefix("10.0.0.2/33"):
+                // prefix length out of range"
+                return refused("WireGuard local address", "refusal.wireguard.address.invalid",
+                        shown(address));
+            }
+        }
         return Optional.empty();
+    }
+
+    /** The most of a stored value a refusal repeats. */
+    private static final int MAX_SHOWN_LENGTH = 40;
+
+    /** A stored value as a refusal repeats it: control characters as spaces, and capped. */
+    private static String shown(String value) {
+        String cleaned = value.replaceAll("\\p{Cntrl}", " ");
+        return cleaned.length() > MAX_SHOWN_LENGTH
+                ? cleaned.substring(0, MAX_SHOWN_LENGTH) + "…" : cleaned;
+    }
+
+    /**
+     * Whether {@code prefix} is an address with a prefix length that the core
+     * reads, as Go's netip.ParsePrefix does: an IPv4 address in four decimal
+     * fields without leading zeros, or an IPv6 address without a zone, then
+     * a length without leading zeros no longer than the address. Java's own
+     * parsers take forms Go refuses, such as 010.0.0.2 or a group of five
+     * digits.
+     */
+    private static boolean isInterfacePrefix(String prefix) {
+        int slash = prefix.lastIndexOf('/');
+        if (slash < 0) {
+            return false;
+        }
+        String address = prefix.substring(0, slash);
+        int maxBits = -1;
+        // As netip.ParseAddr tells the families apart: by the first of these.
+        for (int i = 0; i < address.length() && maxBits < 0; i++) {
+            switch (address.charAt(i)) {
+                case '.' -> maxBits = isIpv4(address) ? 32 : 0;
+                case ':' -> maxBits = isIpv6(address) ? 128 : 0;
+                case '%' -> maxBits = 0;
+                default -> {
+                    // Part of the first field.
+                }
+            }
+        }
+        String bits = prefix.substring(slash + 1);
+        if (maxBits <= 0 || bits.isEmpty() || bits.length() > 3
+                || bits.length() > 1 && bits.charAt(0) == '0'
+                || !bits.chars().allMatch(c -> c >= '0' && c <= '9')) {
+            return false;
+        }
+        return Integer.parseInt(bits) <= maxBits;
+    }
+
+    /** An IPv4 address as netip reads one: four fields of up to 255, no leading zeros. */
+    private static boolean isIpv4(String address) {
+        int dots = 0;
+        int digits = 0;
+        int value = 0;
+        for (int i = 0; i < address.length(); i++) {
+            char c = address.charAt(i);
+            if (c >= '0' && c <= '9') {
+                if (digits == 1 && value == 0) {
+                    return false;
+                }
+                value = value * 10 + c - '0';
+                digits++;
+                if (value > 255) {
+                    return false;
+                }
+            } else if (c == '.' && digits > 0 && dots < 3 && i < address.length() - 1) {
+                dots++;
+                digits = 0;
+                value = 0;
+            } else {
+                return false;
+            }
+        }
+        return dots == 3 && digits > 0;
+    }
+
+    /**
+     * An IPv6 address as netip reads one, with no zone, which a prefix
+     * cannot have: groups of one to four hex digits, at most one {@code ::}
+     * standing for at least one group, and an IPv4 address in place of the
+     * last two.
+     */
+    private static boolean isIpv6(String address) {
+        if (address.indexOf('%') >= 0) {
+            return false;
+        }
+        int groups = 0;
+        int ellipsis = -1;
+        int at = 0;
+        if (address.startsWith("::")) {
+            ellipsis = 0;
+            at = 2;
+            if (at == address.length()) {
+                return true;
+            }
+        }
+        while (groups < 8) {
+            int end = at;
+            while (end < address.length() && HexFormat.isHexDigit(address.charAt(end))) {
+                end++;
+            }
+            if (end == at || end - at > 4) {
+                return false;
+            }
+            if (end < address.length() && address.charAt(end) == '.') {
+                if (ellipsis < 0 && groups != 6 || groups > 6
+                        || !isIpv4(address.substring(at))) {
+                    return false;
+                }
+                groups += 2;
+                at = address.length();
+                break;
+            }
+            groups++;
+            at = end;
+            if (at == address.length()) {
+                break;
+            }
+            if (address.charAt(at) != ':' || at + 1 == address.length()) {
+                return false;
+            }
+            at++;
+            if (address.charAt(at) == ':') {
+                if (ellipsis >= 0) {
+                    return false;
+                }
+                ellipsis = groups;
+                at++;
+                if (at == address.length()) {
+                    break;
+                }
+            }
+        }
+        if (at != address.length()) {
+            return false;
+        }
+        return groups < 8 ? ellipsis >= 0 : ellipsis < 0;
     }
 
     /**

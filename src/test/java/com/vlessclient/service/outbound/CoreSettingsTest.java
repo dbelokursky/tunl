@@ -246,6 +246,46 @@ class CoreSettingsTest {
                         .isEqualTo(I18n.get("refusal.wireguard.address")));
     }
 
+    /**
+     * The core reads each interface address as Go's netip.ParsePrefix does
+     * and refused the whole configuration over one it could not
+     * ("endpoints[0].address: ... netip.ParsePrefix"), while only that the
+     * server had an address was checked: a .conf with Address = 10.0.0.2/33,
+     * or the form's field with a semicolon between two addresses, was stored
+     * and failed every connect it was part of. Java's own parsers take forms
+     * Go refuses, a leading zero and a five-digit group among them.
+     */
+    @Test
+    void aWireGuardAddressTheCoreCannotReadIsRefused() {
+        for (String flow : List.of("10.0.0.2/33", "not-an-ip", "10.0.0.2/32;fd00::2/128",
+                "010.0.0.2/32", "02001:db8::2/128", "fe80::1%eth0/64", "10.0.0.2/032",
+                "::ffff:010.0.0.1/128", "10.0.0.2/", "10.0.0.256", "fd00::2/129",
+                "10.0.0.2/32, nope", "1:2:3:4:5:6:7:8::/128", "::1.2.3.4.5/128")) {
+            assertThat(CoreSettings.refusal(wireguard(server -> server.setFlow(flow)))).as(flow)
+                    .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                            .isEqualTo("WireGuard local address"));
+        }
+        assertThat(CoreSettings.refusal(wireguard(server -> server.setFlow("10.0.0.2/33"))))
+                .hasValueSatisfying(refusal -> assertThat(refusal.reason())
+                        .isEqualTo(I18n.get("refusal.wireguard.address.invalid", "10.0.0.2/33")));
+        for (String flow : List.of("10.0.0.2", "fd00::2", "10.0.0.2/32, fd00::2/128",
+                "10.0.0.2/32 fd00::2/128", "10.0.0.2/24", "::ffff:10.0.0.1/128",
+                "2606:4700:110:8a36:df92:102a:9602:fa18/128", "FD42:42:0::2/128", "::/0",
+                "1::/64", "1:2:3:4:5:6:1.2.3.4/128")) {
+            assertThat(CoreSettings.refusal(wireguard(server -> server.setFlow(flow)))).as(flow)
+                    .isEmpty();
+        }
+    }
+
+    /** wg-quick reads the addresses of an Address line split on spaces as well as on commas. */
+    @Test
+    void interfaceAddressesSeparatedBySpacesAreReadOneByOne() {
+        assertThat(CoreSettings.interfaceAddresses("10.0.0.2/32 fd00::2/128"))
+                .containsExactly("10.0.0.2/32", "fd00::2/128");
+        assertThat(CoreSettings.interfaceAddresses(" 10.0.0.2/32 ,\tfd00::2/128 , "))
+                .containsExactly("10.0.0.2/32", "fd00::2/128");
+    }
+
     static ServerConfig wireguard(Consumer<ServerConfig> change) {
         ServerConfig server = TestServers.server()
                 .id("wireguard")

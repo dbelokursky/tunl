@@ -454,7 +454,18 @@ class SingBoxRealBinarySmokeTest {
                 pathServer("ws-path-escaped", com.vlessclient.model.TransportType.WEBSOCKET,
                         "/ws%20x"),
                 pathServer("ws-path-early-data-percent",
-                        com.vlessclient.model.TransportType.WEBSOCKET, "/ws?ed=50%"));
+                        com.vlessclient.model.TransportType.WEBSOCKET, "/ws?ed=50%"),
+                // The local address as a .conf or the form gives it.
+                wireguardServer("wg-address-prefix-too-long", "10.0.0.2/33"),
+                wireguardServer("wg-address-not-an-ip", "not-an-ip"),
+                wireguardServer("wg-address-semicolon", "10.0.0.2/32;fd00::2/128"),
+                wireguardServer("wg-address-leading-zero", "010.0.0.2/32"),
+                wireguardServer("wg-address-five-digit-group", "02001:db8::2/128"),
+                wireguardServer("wg-address-zone", "fe80::1%eth0/64"),
+                wireguardServer("wg-address-spaces", "10.0.0.2/32 fd00::2/128"),
+                wireguardServer("wg-address-commas", "10.0.0.2/32, fd00::2/128"),
+                wireguardServer("wg-address-mapped", "::ffff:10.0.0.9/128"),
+                wireguardServer("wg-address-embedded-v4", "64:ff9b::10.0.0.9/128"));
 
         for (ServerConfig server : servers) {
             boolean coreAccepts = checkPasses(generator.generate(server, new AppSettings()));
