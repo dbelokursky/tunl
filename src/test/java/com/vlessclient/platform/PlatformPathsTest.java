@@ -1,10 +1,16 @@
 package com.vlessclient.platform;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class PlatformPathsTest {
 
@@ -49,6 +55,98 @@ class PlatformPathsTest {
 
         assertThat(paths.dataDir())
                 .isEqualTo(home.resolve(".local").resolve("share").resolve("vless-client"));
+    }
+
+    // --- where a session's plain-text configuration and stop signal go ----
+
+    /**
+     * A session's configuration carries every server's credential in plain
+     * text. In {@code %APPDATA%} it went with the roaming profile, and onto
+     * the file server where AppData is redirected; the local part of the
+     * profile does neither.
+     */
+    @Test
+    void windows_keepsSessionFilesInTheLocalProfile() {
+        Path profile = Path.of("C:", "Users", "John O'Brien", "AppData");
+        WindowsPlatformPaths paths = new WindowsPlatformPaths(
+                profile.resolve("Roaming"), profile.resolve("Local"));
+
+        assertThat(paths.runDir())
+                .isEqualTo(profile.resolve("Local").resolve("VlessClient").resolve("run"));
+        assertThat(paths.runDir().startsWith(paths.dataDir())).as("out of the roaming data dir")
+                .isFalse();
+    }
+
+    /**
+     * {@code $XDG_RUNTIME_DIR} is a tmpfs only its user can open, which no
+     * home backup copies; the data dir is in the home that Déjà Dup and
+     * most other backups take whole.
+     */
+    @Test
+    void linux_keepsSessionFilesInThePrivateRuntimeDir(@TempDir Path tmp) throws IOException {
+        assumePosix();
+        Path runtime = directory(tmp.resolve("run user 1000"), "rwx------");
+        LinuxPlatformPaths paths = new LinuxPlatformPaths(tmp.resolve("home"), null,
+                runtime.toString());
+
+        assertThat(paths.runDir()).isEqualTo(runtime.resolve("vless-client"));
+    }
+
+    /**
+     * No runtime dir, or one that is not this user's alone (set by hand,
+     * inherited through su, or left by a session manager that sets it loosely),
+     * keeps the data dir's run folder: never a folder another user can write in.
+     */
+    @Test
+    void linux_keepsSessionFilesInTheDataDirWithoutAPrivateRuntimeDir(@TempDir Path tmp)
+            throws IOException {
+        assumePosix();
+        Path home = tmp.resolve("home");
+        Path shared = directory(tmp.resolve("shared"), "rwxr-xr-x");
+        Path dataRun = home.resolve(".local").resolve("share").resolve("vless-client")
+                .resolve("run");
+
+        for (String runtime : new String[] {null, "", "  ", "relative/runtime",
+                tmp.resolve("missing").toString(), shared.toString()}) {
+            assertThat(new LinuxPlatformPaths(home, null, runtime).runDir())
+                    .as("XDG_RUNTIME_DIR=%s", runtime).isEqualTo(dataRun);
+        }
+    }
+
+    /**
+     * macOS's per-user temporary folder ({@code $TMPDIR}, under
+     * /private/var/folders) is the user's alone and left out of Time Machine;
+     * the data dir in ~/Library/Application Support is backed up every hour
+     * while the tunnel is up.
+     */
+    @Test
+    void mac_keepsSessionFilesInThePerUserTemporaryFolder(@TempDir Path tmp) throws IOException {
+        assumePosix();
+        Path perUser = directory(tmp.resolve("T"), "rwx------");
+
+        assertThat(new MacPlatformPaths(perUser).runDir())
+                .isEqualTo(perUser.resolve("VlessClient").resolve("run"));
+    }
+
+    /** A java.io.tmpdir pointed at a shared /tmp keeps the data dir's run folder. */
+    @Test
+    void mac_keepsSessionFilesInTheDataDirWhenTheTemporaryFolderIsShared(@TempDir Path tmp)
+            throws IOException {
+        assumePosix();
+        MacPlatformPaths paths = new MacPlatformPaths(directory(tmp.resolve("tmp"), "rwxrwxrwx"));
+
+        assertThat(paths.runDir()).isEqualTo(paths.dataDir().resolve("run"));
+    }
+
+    private static void assumePosix() {
+        assumeTrue(FileSystems.getDefault().supportedFileAttributeViews().contains("posix"),
+                "owner-only modes are POSIX");
+    }
+
+    private static Path directory(Path dir, String mode) throws IOException {
+        Files.createDirectory(dir);
+        Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString(mode));
+        return dir;
     }
 
     @Test

@@ -18,12 +18,16 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class SingBoxEngineSessionConfigTest {
 
+    /**
+     * The run folder, which each OS keeps private and out of backups and
+     * roaming profiles (PlatformPathsTest); the data dir's run folder, which
+     * this used to pin, is backed up by Time Machine and Déjà Dup and roams
+     * on Windows. The suite redirects the data dir, and the run folder with
+     * it.
+     */
     @Test
-    void sessionConfigsLiveInThePrivateDataFolder() {
-        // Not java.io.tmpdir, which surefire points into target/ too, so the
-        // assertion is on where it is rather than where it is not.
-        assertThat(SingBoxEngine.sessionConfigDir())
-                .isEqualTo(PlatformPaths.current().dataDir().resolve("run"));
+    void sessionConfigsLiveInTheRunFolder() {
+        assertThat(SingBoxEngine.sessionConfigDir()).isEqualTo(PlatformPaths.current().runDir());
     }
 
     @Test

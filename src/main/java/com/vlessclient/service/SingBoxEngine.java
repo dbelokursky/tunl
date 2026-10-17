@@ -857,6 +857,14 @@ public class SingBoxEngine {
             return;
         }
         try {
+            // The run folder may be one the system empties of what has sat
+            // unused for days (macOS's temporary folder, a runtime dir). With
+            // it gone the file could not be made, and a root core would run
+            // on after the Disconnect.
+            Path folder = SecureFiles.parentDirectory(stopSignalFile);
+            if (Files.notExists(folder)) {
+                SecureFiles.createPrivateDir(folder);
+            }
             Files.createFile(stopSignalFile);
         } catch (java.nio.file.FileAlreadyExistsException ignored) {
             // Already signalled — the wrapper will notice regardless.
@@ -1396,20 +1404,23 @@ public class SingBoxEngine {
     static final String SESSION_CONFIG_PREFIX = "singbox-";
 
     /**
-     * Where a session's configuration is written: the private run folder of
-     * the data directory, beside the stop signals.
+     * Where a session's configuration is written: the private run folder
+     * ({@link PlatformPaths#runDir()}), beside the stop signals.
      *
      * <p>It used to be the system temp dir. The file holds every configured
      * server's credential in plain text, the same values servers.json keeps
      * sealed in the Keychain, DPAPI or the Secret Service, and only a clean
      * stop in this JVM deleted it. A crash, a kill from Task Manager or a
      * power cut left it in %TEMP%, which Windows never empties, one more copy
-     * per crash.</p>
+     * per crash. Then it was the data directory's run folder, which Time
+     * Machine and Déjà Dup back up while the tunnel is up and Windows roams
+     * with the profile: every backup and every roam took a copy along. The
+     * run folder is outside both on each OS that has such a place.</p>
      *
      * @return the folder session configurations go in
      */
     static Path sessionConfigDir() {
-        return PlatformPaths.current().dataDir().resolve("run");
+        return PlatformPaths.current().runDir();
     }
 
     /**

@@ -28,6 +28,23 @@ public interface PlatformPaths {
     }
 
     /**
+     * Where a running session keeps its files: the configuration the core is
+     * started on, which carries every configured server's credential in plain
+     * text, and the file that stops a TUN core. Both have to stay the user's
+     * alone and readable by the elevated core, and each OS's paths also keep
+     * them out of what backups copy and profiles roam.
+     *
+     * <p>This default is the data dir's {@code run} folder, which a
+     * redirected data dir keeps: a test run then never sweeps the folder of
+     * the copy that holds the developer's tunnel.</p>
+     *
+     * @return the folder a session's files go in
+     */
+    default Path runDir() {
+        return dataDir().resolve("run");
+    }
+
+    /**
      * System property that redirects {@link #dataDir()} away from the real
      * per-user location. Mirrors {@code vless.singbox.installDir}, and exists
      * for the same reason: without it every service built on
@@ -78,7 +95,9 @@ public interface PlatformPaths {
      * <p>{@code delegate} is kept because the per-OS answer is still the right
      * one for anything this record does not override — today that is nothing,
      * and the field is what keeps adding such a thing from meaning rewriting
-     * the redirect.</p>
+     * the redirect. The run folder is not such a thing: it stays in the
+     * redirected data dir, since the per-OS one is shared by every copy of
+     * the user's and each session start sweeps it.</p>
      */
     record OverriddenPlatformPaths(Path dataDir, PlatformPaths delegate) implements PlatformPaths {
     }

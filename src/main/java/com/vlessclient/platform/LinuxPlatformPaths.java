@@ -7,20 +7,30 @@ import java.nio.file.Path;
  * in {@code $XDG_DATA_HOME/vless-client}, defaulting to
  * {@code ~/.local/share/vless-client}. Downloads resolve through the
  * {@code user-dirs.dirs} mechanism with {@code ~/Downloads} as the fallback.
+ * A running session's files go to {@code $XDG_RUNTIME_DIR} where it is
+ * private.
  */
 public final class LinuxPlatformPaths implements PlatformPaths {
 
     private final Path home;
     private final String xdgDataHome;
+    private final String xdgRuntimeDir;
 
     public LinuxPlatformPaths() {
-        this(Path.of(System.getProperty("user.home")), System.getenv("XDG_DATA_HOME"));
+        this(Path.of(System.getProperty("user.home")), System.getenv("XDG_DATA_HOME"),
+                System.getenv("XDG_RUNTIME_DIR"));
     }
 
     /** Test seam: inject the home directory and the {@code $XDG_DATA_HOME} value. */
     LinuxPlatformPaths(Path home, String xdgDataHome) {
+        this(home, xdgDataHome, null);
+    }
+
+    /** Test seam: also inject the {@code $XDG_RUNTIME_DIR} value. */
+    LinuxPlatformPaths(Path home, String xdgDataHome, String xdgRuntimeDir) {
         this.home = home;
         this.xdgDataHome = xdgDataHome;
+        this.xdgRuntimeDir = xdgRuntimeDir;
     }
 
     @Override
@@ -29,5 +39,26 @@ public final class LinuxPlatformPaths implements PlatformPaths {
                 ? Path.of(xdgDataHome)
                 : home.resolve(".local").resolve("share");
         return base.resolve("vless-client");
+    }
+
+    /**
+     * {@code $XDG_RUNTIME_DIR/vless-client}: a tmpfs only its user can open,
+     * which root (the PolicyKit fallback) reads by its full path, no home
+     * backup includes, and logout empties. In the data dir, which Déjà Dup
+     * and most other backups take with the rest of the home folder, each
+     * backup made while connected took a plain-text copy of every server's
+     * credential along. Without a runtime dir that is this user's alone (none
+     * set, or another user's inherited through su), the data dir's run
+     * folder.
+     */
+    @Override
+    public Path runDir() {
+        if (xdgRuntimeDir != null && !xdgRuntimeDir.isBlank()) {
+            Path runtime = Path.of(xdgRuntimeDir);
+            if (runtime.isAbsolute() && SecureFiles.isPrivateDir(runtime)) {
+                return runtime.resolve("vless-client");
+            }
+        }
+        return PlatformPaths.super.runDir();
     }
 }
