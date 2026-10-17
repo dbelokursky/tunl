@@ -3,6 +3,10 @@ package com.vlessclient.service.mcp;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.vlessclient.model.ConnectionState;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ProxyMode;
@@ -33,18 +37,26 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
- * The agent's connect against the real connection flow.
+ * The agent's connect and set_proxy_mode against the real connection flow.
  *
  * <p>A connect with a server or a mode while another start was under way and
  * had no core yet (the user's TUN start at its setup prompt, or in the core's
  * check) saved the pick and the mode, waited for that start, and was then
  * refused as "already running"; the service moved the new tunnel to the
- * agent's server as it came up.</p>
+ * agent's server as it came up. A set_proxy_mode without a string mode was
+ * answered with a NullPointerException's text.</p>
  */
 @ExtendWith(FxToolkitExtension.class)
 class McpConnectionControlTest {
+
+    private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
     @TempDir
     Path tempDir;
@@ -56,6 +68,7 @@ class McpConnectionControlTest {
     void setUp() {
         store = new ConfigStore(tempDir);
         store.getSettings().setHealthCheckEnabled(false);
+        store.getSettings().setMcpAllowMutations(true);
         store.addServer(server("srv-1", "Tokyo"));
         store.addServer(server("srv-2", "Osaka"));
         store.setActiveServer("srv-1");
@@ -213,5 +226,52 @@ class McpConnectionControlTest {
 
         assertThat(agent.get()).as("the agent's answer").isEqualTo("srv-1");
         assertThat(engine.starts).containsExactly(ProxyMode.TUN);
+    }
+
+    // ===== set_proxy_mode =====
+
+    private JsonNode setProxyMode(McpServer server, ObjectNode arguments) {
+        ObjectNode params = MAPPER.createObjectNode();
+        params.put("name", "set_proxy_mode");
+        params.set("arguments", arguments);
+        ObjectNode message = MAPPER.createObjectNode();
+        message.put("jsonrpc", "2.0");
+        message.put("id", 1);
+        message.put("method", "tools/call");
+        message.set("params", params);
+        return server.handle(message).path("result");
+    }
+
+    /**
+     * Without a mode, or with one that is no string, the agent was answered
+     * "Cannot invoke String.toLowerCase(java.util.Locale) because mode is
+     * null", and tunl.log got a warning with the stack trace, as for a
+     * failure of the app's own. It is a missing argument.
+     */
+    @Test
+    void setProxyModeWithoutAStringModeIsAMissingArgument() {
+        SingBoxEngine engine = new SingBoxEngine(tempDir.resolve("sing-box"));
+        McpServer server = new McpServerService(store, controlOver(engine)).buildServer();
+        Logger mcpLog = (Logger) LoggerFactory.getLogger(McpServer.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        mcpLog.addAppender(appender);
+        try {
+            for (ObjectNode arguments : List.of(MAPPER.createObjectNode(),
+                    MAPPER.createObjectNode().put("mode", 1),
+                    MAPPER.createObjectNode().putNull("mode"),
+                    MAPPER.createObjectNode().put("mode", " "))) {
+                JsonNode answer = setProxyMode(server, arguments);
+                assertThat(answer.path("isError").asBoolean()).as("%s", arguments).isTrue();
+                assertThat(answer.path("content").get(0).path("text").asString())
+                        .as("%s", arguments)
+                        .isEqualTo("Error: 'mode' is required: 'system_proxy' or 'tun'.");
+            }
+            assertThat(appender.list).as("what tunl.log got")
+                    .noneMatch(event -> event.getLevel().isGreaterOrEqual(Level.WARN));
+            assertThat(store.getSettings().getProxyMode()).isEqualTo(ProxyMode.SYSTEM_PROXY);
+        } finally {
+            mcpLog.detachAppender(appender);
+        }
     }
 }

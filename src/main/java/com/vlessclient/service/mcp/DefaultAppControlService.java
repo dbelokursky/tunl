@@ -804,6 +804,12 @@ public final class DefaultAppControlService implements AppControlService {
     }
 
     private ProxyMode parseMode(String mode) throws McpToolException {
+        // An absent mode, or one that is no string, comes here as null: the
+        // agent was answered with a NullPointerException's text, and
+        // tunl.log got its stack trace, as for a failure of the app's own.
+        if (mode == null || mode.isBlank()) {
+            throw new McpToolException("'mode' is required: 'system_proxy' or 'tun'.");
+        }
         return switch (mode.toLowerCase(Locale.ROOT)) {
             case "tun" -> ProxyMode.TUN;
             case "system", "system_proxy" -> ProxyMode.SYSTEM_PROXY;
