@@ -189,6 +189,28 @@ class ShareLinkUnrunnableFeatureTest {
         }
     }
 
+    /**
+     * A VMess link whose JSON escapes half an emoji in a field the core is
+     * given, as a panel that cuts a string between the halves writes it. It
+     * was stored, and the configuration of every connect, which holds every
+     * server, could no longer be written. A name is never given to the core.
+     */
+    @Test
+    void aVmessLinkHoldingHalfAnEmojiIsRefused() {
+        for (String field : new String[] {"\"path\":\"/\\ud83c\"", "\"host\":\"\\ud83c.example\"",
+            "\"sni\":\"\\udc00\""}) {
+            String link = vmess("{\"add\":\"vm.example\",\"port\":\"443\",\"id\":\"" + UUID
+                    + "\",\"net\":\"ws\",\"tls\":\"tls\"," + field + "}");
+
+            assertThatThrownBy(() -> parser.parseForImport(link)).as(field)
+                    .isInstanceOfSatisfying(ShareLinkParser.UnsupportedFeatureException.class,
+                            e -> assertThat(e.feature()).isEqualTo("broken character"));
+        }
+        String named = vmess("{\"add\":\"vm.example\",\"port\":\"443\",\"id\":\"" + UUID
+                + "\",\"net\":\"ws\",\"tls\":\"tls\",\"ps\":\"Name \\ud83c\"}");
+        assertThat(parser.parseForImport(named).getAddress()).isEqualTo("vm.example");
+    }
+
     private static String userInfo() {
         return Base64.getUrlEncoder().withoutPadding()
                 .encodeToString("aes-256-gcm:password".getBytes(StandardCharsets.UTF_8));

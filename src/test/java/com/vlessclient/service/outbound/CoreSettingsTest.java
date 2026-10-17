@@ -540,6 +540,41 @@ class CoreSettingsTest {
         assertThat(CoreSettings.refusal(grpc)).isEmpty();
     }
 
+    /**
+     * Half of a surrogate pair, from a link whose JSON escaped half an emoji
+     * ("path":"/\ud83c"): a configuration holding it cannot be written as
+     * UTF-8, and every configuration holds every server, so every connect
+     * failed, whichever server was picked, with an error naming none.
+     */
+    @Test
+    void aServerHoldingHalfAnEmojiIsRefused() {
+        String half = "\ud83c";
+        List<Consumer<ServerConfig>> breaks = List.of(
+                server -> server.getTransport().setPath("/" + half),
+                server -> server.getTransport().setHost("cdn" + half + ".example"),
+                server -> server.getTransport().getHeaders().put("X-Note", half),
+                server -> server.getTls().setServerName(half + "a.example"),
+                server -> server.getTls().setAlpn("h2," + "\udc00"),
+                server -> server.setUuid(half),
+                server -> server.setAddress("h" + half + ".example"),
+                server -> server.setId("id" + half));
+        for (Consumer<ServerConfig> change : breaks) {
+            ServerConfig server = withPath(com.vlessclient.model.TransportType.WEBSOCKET, "/ws");
+            change.accept(server);
+
+            assertThat(CoreSettings.refusal(server))
+                    .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                            .isEqualTo("broken character"));
+        }
+        ServerConfig plugin = withPlugin("v2ray-plugin", "host=v" + half + ".example");
+        assertThat(CoreSettings.refusal(plugin)).isPresent();
+
+        ServerConfig named = withPath(com.vlessclient.model.TransportType.WEBSOCKET, "/🎉");
+        named.setName("Name " + half);
+        assertThat(CoreSettings.refusal(named)).as("a whole emoji, and a name that reaches "
+                + "no configuration").isEmpty();
+    }
+
     static ServerConfig withPath(com.vlessclient.model.TransportType type, String path) {
         return TestServers.server()
                 .id("path")

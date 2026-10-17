@@ -822,6 +822,49 @@ class ConnectionServiceTest {
         assertThat(engine.calls).as("what the engine was asked to do").doesNotContain("start");
     }
 
+    /**
+     * A server stored with half an emoji in its path, as earlier builds
+     * imported it from a VMess link and saved it: every configuration holds
+     * every server, so the configuration of every connect could not be
+     * written as UTF-8, and every connect failed with an error that named no
+     * server. Such a spare is left out, and the configuration is written.
+     */
+    @Test
+    void aStoredServerHoldingHalfAnEmojiIsLeftOutAndTheConfigurationIsWritten()
+            throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        ServerConfig broken = server("srv-2", "Frankfurt");
+        broken.getTransport().setType(com.vlessclient.model.TransportType.WEBSOCKET);
+        broken.getTransport().setPath("/\ud83c");
+        store.addServer(broken);
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+
+        ConnectionService.ConnectAttempt attempt = service.connect();
+
+        assertThat(attempt.started()).isTrue();
+        assertThat(attempt.skipped()).extracting(ConnectionService.SkippedServer::id)
+                .containsExactly("srv-2");
+        String config = engine.configs.getFirst();
+        assertThat(config).doesNotContain(tag("srv-2"));
+        assertThat(SingBoxEngine.writeSessionConfig(tempDir.resolve("run"), config)).exists();
+    }
+
+    @Test
+    void anActiveServerHoldingHalfAnEmojiIsNamed() {
+        ServerConfig broken = server("srv-1", "Tokyo");
+        broken.getTls().setEnabled(true);
+        broken.getTls().setServerName("\udc00");
+        store.addServer(broken);
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+
+        assertThatThrownBy(service::connect)
+                .isInstanceOf(ConfigRejectedException.class)
+                .hasMessageStartingWith("The VPN core rejected the settings of server \"Tokyo\": ");
+        assertThat(engine.calls).doesNotContain("start");
+    }
+
     /** A REALITY server with the given short ID and an otherwise valid key. */
     private static ServerConfig withShortId(ServerConfig server, String shortId) {
         com.vlessclient.model.TlsConfig tls = new com.vlessclient.model.TlsConfig();

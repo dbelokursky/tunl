@@ -9,7 +9,9 @@ import com.vlessclient.model.TransportConfig;
 import com.vlessclient.model.TransportType;
 import com.vlessclient.platform.SecretSealer;
 import java.net.InetAddress;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -523,6 +525,12 @@ public final class CoreSettings {
             // does; handed to the core, the tag failed in words about neither.
             return refused("unreadable credential", "refusal.credential.unreadable");
         }
+        if (holdsLoneSurrogate(server)) {
+            // Half an emoji, from a link whose JSON escaped one: the
+            // configuration, which holds every server, could not be written
+            // as UTF-8, and every connect failed with an error naming none.
+            return refused("broken character", "refusal.broken.character");
+        }
         int port = server.getPort();
         if (port < 1 || port > 65535) {
             return refused("port " + port, "refusal.port", String.valueOf(port));
@@ -774,6 +782,52 @@ public final class CoreSettings {
             return refused("obfs " + obfs, "refusal.hysteria2.obfs", obfs);
         }
         return Optional.empty();
+    }
+
+    /**
+     * Whether a value the core is given for {@code server} holds half of a
+     * surrogate pair, which no UTF-8 text can: its id, which tags it, its
+     * address, credentials and plugin, and its TLS and transport settings.
+     * The name is not given to the core.
+     */
+    private static boolean holdsLoneSurrogate(ServerConfig server) {
+        List<String> values = new ArrayList<>();
+        Collections.addAll(values, server.getId(), server.getAddress(), server.getUuid(),
+                server.getEncryption(), server.getFlow(), server.getPlugin(),
+                server.getPluginOpts(), server.getServerPorts());
+        TlsConfig tls = server.getTls();
+        if (tls != null) {
+            Collections.addAll(values, tls.getServerName(), tls.getAlpn(),
+                    tls.getFingerprint(), tls.getRealityPublicKey(), tls.getRealityShortId());
+        }
+        TransportConfig transport = server.getTransport();
+        if (transport != null) {
+            Collections.addAll(values, transport.getPath(), transport.getHost(),
+                    transport.getServiceName());
+            if (transport.getHeaders() != null) {
+                transport.getHeaders().forEach((name, value) -> {
+                    values.add(name);
+                    values.add(value);
+                });
+            }
+        }
+        return values.stream().anyMatch(CoreSettings::hasLoneSurrogate);
+    }
+
+    private static boolean hasLoneSurrogate(String value) {
+        if (value == null) {
+            return false;
+        }
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (Character.isHighSurrogate(c) && i + 1 < value.length()
+                    && Character.isLowSurrogate(value.charAt(i + 1))) {
+                i++;
+            } else if (Character.isSurrogate(c)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
