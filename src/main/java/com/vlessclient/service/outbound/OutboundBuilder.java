@@ -54,11 +54,19 @@ public abstract class OutboundBuilder {
         }
 
         if (tls.getAlpn() != null && !tls.getAlpn().isEmpty()) {
+            // Without empty items, from h2,,http/1.1 or a list that starts
+            // with a comma: the core's check took ["h2", "", "http/1.1"], and
+            // then every dial failed before a ClientHello went out ("tls:
+            // invalid NextProtos value").
             ArrayNode alpnArray = mapper.createArrayNode();
             for (String a : tls.getAlpn().split(",")) {
-                alpnArray.add(a.trim());
+                if (!a.isBlank()) {
+                    alpnArray.add(a.trim());
+                }
             }
-            tlsNode.set("alpn", alpnArray);
+            if (!alpnArray.isEmpty()) {
+                tlsNode.set("alpn", alpnArray);
+            }
         }
 
         String fingerprint = CoreSettings.fingerprintToSend(server);
