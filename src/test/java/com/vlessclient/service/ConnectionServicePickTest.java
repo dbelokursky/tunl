@@ -1,6 +1,7 @@
 package com.vlessclient.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.sun.net.httpserver.HttpServer;
 import com.vlessclient.model.ConnectionState;
@@ -8,8 +9,12 @@ import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.ServerSelection;
+import com.vlessclient.model.TlsConfig;
 import com.vlessclient.model.TunnelHealth;
 import com.vlessclient.platform.ElevationDeclinedException;
+import com.vlessclient.service.mcp.DefaultAppControlService;
+import com.vlessclient.service.mcp.McpToolException;
+import com.vlessclient.service.outbound.OutboundTags;
 import com.vlessclient.testing.Await;
 import com.vlessclient.testing.FxToolkitExtension;
 import com.vlessclient.testing.TestServers;
@@ -28,6 +33,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import org.junit.jupiter.api.AfterEach;
@@ -46,8 +52,9 @@ import tools.jackson.databind.json.JsonMapper;
  * Disconnect that met a pick was undone: the pick's switch, run after the
  * stop or queued behind it, found no core and started one in the saved mode,
  * or switched the core the Disconnect then stopped and left the tunnel
- * wanted with nothing running. A refresh's re-pick under a TUN core whose
- * every launch prompts raised the prompt unasked.</p>
+ * wanted with nothing running. A pick of a server the core refuses stopped
+ * the working tunnel before the refusal was found, and a refresh's re-pick
+ * under a TUN core whose every launch prompts raised the prompt unasked.</p>
  */
 @ExtendWith(FxToolkitExtension.class)
 class ConnectionServicePickTest {
@@ -77,13 +84,15 @@ class ConnectionServicePickTest {
     }
 
     /**
-     * Launches nothing. Records the mode of each start, can take as long to
-     * stop as a test says, and can be told what the next start throws, as a
-     * dismissed elevation prompt does.
+     * Launches nothing. Records the mode of each start and the starts and
+     * stops asked of it in order, can take as long to stop as a test says,
+     * and can be told what the next start throws, as a dismissed elevation
+     * prompt or the core's check does.
      */
     static final class PickEngine extends SingBoxEngine {
 
         final List<ProxyMode> modes = new CopyOnWriteArrayList<>();
+        final List<String> calls = new CopyOnWriteArrayList<>();
         final ReadOnlyObjectWrapper<ConnectionState> state =
                 new ReadOnlyObjectWrapper<>(ConnectionState.DISCONNECTED);
         volatile boolean running;
@@ -93,6 +102,8 @@ class ConnectionServicePickTest {
         volatile boolean declined;
         /** What the next start throws instead of starting. */
         volatile IOException failNextStart;
+        /** A refusal of the configuration, as the core's check gives one; null for none. */
+        volatile Function<String, String> refuseWith;
         /** Counted down as a stop begins, when set. */
         volatile CountDownLatch stopEntered;
         /** Waited for before a stop ends, when set. */
@@ -114,10 +125,16 @@ class ConnectionServicePickTest {
 
         @Override
         public void start(String configJson, ProxyMode proxyMode) throws IOException {
+            calls.add("start");
             IOException failure = failNextStart;
             if (failure != null) {
                 failNextStart = null;
                 throw failure;
+            }
+            Function<String, String> refusal = refuseWith;
+            String reason = refusal != null ? refusal.apply(configJson) : null;
+            if (reason != null) {
+                throw new ConfigRejectedException(reason);
             }
             modes.add(proxyMode);
             running = true;
@@ -125,6 +142,7 @@ class ConnectionServicePickTest {
 
         @Override
         public void stop() {
+            calls.add("stop");
             CountDownLatch entered = stopEntered;
             CountDownLatch release = stopRelease;
             if (running && entered != null && release != null) {
@@ -595,6 +613,34 @@ class ConnectionServicePickTest {
         assertThat(service.appliedServerId()).isEqualTo("srv-2");
     }
 
+    /**
+     * The store's re-pick landing on a server the core refuses: nobody picked
+     * it, so nothing is put up about it, and the core is not stopped for a
+     * start that would fail. The tunnel stays as it is until a reconnect.
+     */
+    @Test
+    void aRepickOfAServerTheCoreRefusesKeepsTheCoreQuietly() throws Exception {
+        ServerConfig tokyo = server("srv-1", "Tokyo");
+        tokyo.setSubscriptionId("sub-1");
+        ServerConfig frankfurt = withUnbuildableShortId(server("srv-2", "Frankfurt"));
+        frankfurt.setSubscriptionId("sub-1");
+        store.addServer(tokyo);
+        store.addServer(frankfurt);
+        store.setActiveServer("srv-1");
+        PickEngine engine = engine();
+        serviceOver(engine);
+        assertThat(service.connect().skipped()).hasSize(1);
+
+        store.applyServerBatch(List.of(), List.of("srv-1"));
+        assertThat(picked("srv-2")).as("the store's pick").isTrue();
+
+        assertThat(service.switchToActiveServer().outcome())
+                .isEqualTo(ConnectionService.Outcome.DEFERRED);
+        assertThat(engine.calls).as("no stop for a start the core would refuse")
+                .containsExactly("start");
+        assertThat(engine.isRunning()).isTrue();
+    }
+
     /** A pick the user makes is asked for, prompt or not, and restarts as before. */
     @Test
     void aPickOfTheUsersUnderAPromptingTunCoreStillRestartsIt() throws Exception {
@@ -690,5 +736,145 @@ class ConnectionServicePickTest {
 
         assertThat(service.isTunnelWanted()).isFalse();
         assertThat(service.getRecoveryService().isReconnectNeeded()).isFalse();
+    }
+
+    // ===== a server the core refuses =====
+
+    /** A REALITY server with a short ID the core cannot build, longer than 16 hex digits. */
+    private static ServerConfig withUnbuildableShortId(ServerConfig server) {
+        TlsConfig tls = new TlsConfig();
+        tls.setEnabled(true);
+        tls.setServerName("www.example.com");
+        tls.setReality(true);
+        tls.setRealityPublicKey("jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0");
+        tls.setRealityShortId("0123456789abcdef01");
+        server.setTls(tls);
+        return server;
+    }
+
+    /**
+     * A pick of a server the running core was started without, because it
+     * cannot build it: the working core was stopped first, and only the
+     * start after it found the refusal. The refusal was known before the
+     * stop.
+     */
+    @Test
+    void aPickOfAServerTheCoreCannotBuildKeepsTheRunningTunnel() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(withUnbuildableShortId(server("srv-2", "Frankfurt")));
+        store.setActiveServer("srv-1");
+        PickEngine engine = engine();
+        serviceOver(engine);
+        assertThat(service.connect().skipped()).extracting(ConnectionService.SkippedServer::id)
+                .containsExactly("srv-2");
+        store.setActiveServer("srv-2");
+
+        assertThatThrownBy(service::switchToActiveServer)
+                .isInstanceOf(ConfigRejectedException.class)
+                .hasMessageStartingWith("The VPN core rejected the settings of server "
+                        + "\"Frankfurt\": ");
+
+        assertThat(engine.isRunning()).as("the working tunnel").isTrue();
+        assertThat(engine.calls).as("what the engine was asked to do")
+                .containsExactly("start");
+        assertThat(service.isTunnelWanted()).isTrue();
+        assertThat(picked("srv-1")).as("the pick put back on the server the core runs")
+                .isTrue();
+    }
+
+    /** The position the core would quote for this server's outbound. */
+    private static int outboundIndex(String configJson, String serverId) {
+        var outbounds = JsonMapper.builder().build().readTree(configJson).path("outbounds");
+        String tag = OutboundTags.server(serverId);
+        for (int i = 0; i < outbounds.size(); i++) {
+            if (tag.equals(outbounds.path(i).path("tag").asString(""))) {
+                return i;
+            }
+        }
+        throw new AssertionError("no outbound tagged " + tag);
+    }
+
+    /** Frankfurt refused at the check, as a subscription's flow the core does not know is. */
+    private static String refusingFrankfurt(String config) {
+        return config.contains(OutboundTags.server("srv-2"))
+                ? "initialize outbound[" + outboundIndex(config, "srv-2")
+                        + "]: unsupported flow: xtls-rprx-direct"
+                : null;
+    }
+
+    /** The same for a server the core's own check refused when the run started. */
+    @Test
+    void aPickOfAServerTheCoreRefusedAtItsCheckKeepsTheRunningTunnel() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(server("srv-2", "Frankfurt"));
+        store.setActiveServer("srv-1");
+        PickEngine engine = engine();
+        engine.refuseWith = ConnectionServicePickTest::refusingFrankfurt;
+        serviceOver(engine);
+        assertThat(service.connect().skipped()).extracting(ConnectionService.SkippedServer::id)
+                .containsExactly("srv-2");
+        store.setActiveServer("srv-2");
+
+        assertThatThrownBy(service::switchToActiveServer)
+                .isInstanceOf(ConfigRejectedException.class)
+                .hasMessage("The VPN core rejected the settings of server \"Frankfurt\": "
+                        + "unsupported flow: xtls-rprx-direct");
+
+        assertThat(engine.isRunning()).as("the working tunnel").isTrue();
+        assertThat(engine.calls).as("no stop, and no start the core would refuse")
+                .doesNotContain("stop");
+        assertThat(picked("srv-1")).as("the pick put back on the server the core runs")
+                .isTrue();
+    }
+
+    /**
+     * A server the check refused and that changed since, as a refresh that
+     * fixed it changes it, is the core's to judge again: the pick restarts.
+     */
+    @Test
+    void aPickOfALeftOutServerThatChangedSinceIsTried() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(server("srv-2", "Frankfurt"));
+        store.setActiveServer("srv-1");
+        PickEngine engine = engine();
+        engine.refuseWith = ConnectionServicePickTest::refusingFrankfurt;
+        serviceOver(engine);
+        assertThat(service.connect().skipped()).hasSize(1);
+        engine.refuseWith = null;
+        ServerConfig fixed = server("srv-2", "Frankfurt");
+        fixed.setAddress("frankfurt-2.example.com");
+        store.updateServer(fixed);
+        store.setActiveServer("srv-2");
+
+        ConnectionService.ConnectAttempt pick = service.switchToActiveServer();
+
+        assertThat(pick.outcome()).isEqualTo(ConnectionService.Outcome.STARTED);
+        assertThat(service.appliedServerId()).isEqualTo("srv-2");
+        assertThat(engine.isRunning()).isTrue();
+    }
+
+    /**
+     * select_server of a server the running core refuses said
+     * {"active": true} and that the tunnel "switches at once"; the switch
+     * then stopped the tunnel, and the agent never heard why. It is a tool
+     * error now, and the pick stays where it was.
+     */
+    @Test
+    void selectServerReportsAServerTheRunningCoreRefuses() throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(withUnbuildableShortId(server("srv-2", "Frankfurt")));
+        store.setActiveServer("srv-1");
+        PickEngine engine = engine();
+        serviceOver(engine);
+        DefaultAppControlService control = new DefaultAppControlService(store, null, null,
+                new RoutingService(), service, null, null, engine);
+        assertThat(service.connect().started()).isTrue();
+
+        assertThatThrownBy(() -> control.selectServer("srv-2"))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining("Frankfurt");
+
+        assertThat(picked("srv-1")).as("Tokyo still picked").isTrue();
+        assertThat(engine.isRunning()).isTrue();
     }
 }

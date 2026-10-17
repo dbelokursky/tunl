@@ -1,6 +1,7 @@
 package com.vlessclient.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.sun.net.httpserver.HttpServer;
 import com.vlessclient.app.ServiceLocator;
@@ -10,9 +11,11 @@ import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.model.TlsConfig;
 import com.vlessclient.model.TunnelHealth;
 import com.vlessclient.platform.TunLauncher;
 import com.vlessclient.service.mcp.DefaultAppControlService;
+import com.vlessclient.service.mcp.McpToolException;
 import com.vlessclient.testing.Await;
 import com.vlessclient.testing.TestServers;
 import com.vlessclient.testing.UiTest;
@@ -46,17 +49,19 @@ import org.testfx.util.WaitForAsyncUtils;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Server picks against a Disconnect, a recovery restart and a refresh, with
- * the real engine driving a fake core whose SIGTERM takes a while, as a real
- * core's close and the system proxy's restore do, and the real Dashboard.
- * Nothing is paused or patched.
+ * Server picks against a Disconnect, a recovery restart and a refresh, and
+ * of a server the core refuses, with the real engine driving a fake core
+ * whose SIGTERM takes a while, as a real core's close and the system proxy's
+ * restore do, and the real Dashboard. Nothing is paused or patched.
  *
  * <p>The engine says Disconnected only at the end of its stop, so the card
  * and the tray read Connected for the whole stop, and a pick then reached
  * the service: its switch asked for the tunnel again and started it after
  * the Disconnect. A pick during a recovery restart's stop called the restart
  * off and started in the saved mode. A refresh that withdrew the picked
- * server under a TUN core whose every launch prompts raised the prompt.</p>
+ * server under a TUN core whose every launch prompts raised the prompt. An
+ * agent's pick of a server the core had left out was reported made, and its
+ * switch stopped the tunnel before the start found the server refused.</p>
  */
 @UiTest
 @EnabledOnOs({OS.MAC, OS.LINUX})
@@ -343,6 +348,37 @@ public class RealCorePickRaceTest extends ApplicationTest {
                 .as("[a core runs, the tunnel wanted] after the dismissal")
                 .containsExactly(false, true);
         assertThat(engine.lastExitWasDeclined()).isTrue();
+    }
+
+    /**
+     * select_server of a server the running core was started without, as it
+     * cannot build it: refused as a tool error, before anything stops.
+     */
+    @Test
+    void anAgentsPickOfAServerTheCoreRefusesKeepsTheTunnel() throws Exception {
+        ServerConfig frankfurt = server("Frankfurt", "203.0.113.11");
+        TlsConfig tls = new TlsConfig();
+        tls.setEnabled(true);
+        tls.setServerName("www.example.com");
+        tls.setReality(true);
+        tls.setRealityPublicKey("jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0");
+        tls.setRealityShortId("0123456789abcdef01");
+        frankfurt.setTls(tls);
+        store.addServer(frankfurt);
+        ConnectionService.ConnectAttempt start = service.connect();
+        assertThat(start.skipped()).extracting(ConnectionService.SkippedServer::id)
+                .containsExactly(frankfurt.getId());
+        awaitState(ConnectionState.CONNECTED);
+
+        assertThatThrownBy(() -> control.selectServer(frankfurt.getId()))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining("Frankfurt");
+        Thread.sleep(500);
+
+        assertThat(engine.isRunning()).as("the working tunnel").isTrue();
+        assertThat(engine.starts).hasSize(1);
+        assertThat(store.getServerById(tokyo.getId()).orElseThrow().isActive()).isTrue();
+        assertThat(control.getStatus().state()).isEqualTo(ConnectionState.CONNECTED.name());
     }
 
     /** A control API that takes any selector pick, as a running core's does. */

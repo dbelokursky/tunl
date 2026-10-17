@@ -18,8 +18,10 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -37,7 +39,9 @@ import javafx.beans.value.ChangeListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Owns the tunnel lifecycle: resolve the active server and its candidates,
@@ -111,8 +115,8 @@ public class ConnectionService {
         /**
          * A pick the store made itself, as a removal took the picked server,
          * left the running core as it was: the restart it needs would raise
-         * an elevation prompt nobody asked for, so it waits for the user's
-         * reconnect.
+         * an elevation prompt nobody asked for, or start a core that refuses
+         * the server picked, so it waits for the user's reconnect.
          */
         DEFERRED
     }
@@ -222,13 +226,26 @@ public class ConnectionService {
     /**
      * What a core was started from: the configuration it loaded, the mode, the
      * ports the user chose, which its own may have moved off, the ids of the
-     * servers it was started without, and the request a pick restarted it
-     * under, or {@link #NOT_A_PICK}. Set as one, before the core starts: it
-     * reports CONNECTED from its own thread, and a reader asking then got the
-     * mode and the left-out servers of the start before.
+     * servers it was started without and what the core's check said of those
+     * it refused, and the request a pick restarted it under, or
+     * {@link #NOT_A_PICK}. Set as one, before the core starts: it reports
+     * CONNECTED from its own thread, and a reader asking then got the mode and
+     * the left-out servers of the start before.
      */
     private record Run(LiveSelector selector, ProxyMode mode, List<Integer> chosenPorts,
-                       Set<String> leftOut, HostFacts host, long pickedUnder) {
+                       Set<String> leftOut, Map<String, Refused> refused, HostFacts host,
+                       long pickedUnder) {
+    }
+
+    /**
+     * A server the core's check refused as a run started, as it was then.
+     *
+     * @param content the server as the check refused it, but for whether it
+     *                was picked: one that changed since is the core's to judge
+     *                again
+     * @param reason  what the core said about it
+     */
+    private record Refused(JsonNode content, String reason) {
     }
 
     /** The request of a start no pick made, which no request ever is. */
@@ -627,6 +644,7 @@ public class ConnectionService {
         settings.setClashApiSecret(ConfigStore.newClashApiSecret());
         List<SkippedServer> skipped = new ArrayList<>();
         List<ServerConfig> members = withoutRefused(candidates, active, skipped);
+        Map<String, Refused> refusedAtCheck = new LinkedHashMap<>();
         int refusedByTheCore = 0;
         RoutingConfig routing = safeRoutingConfig();
         // The run's own: comparing with the settings later reads the host as
@@ -641,8 +659,8 @@ public class ConnectionService {
                         configGenerator.generate(members, active, generatedFrom, routing, host));
                 Run previous = run;
                 String previousServer = appliedServerId;
-                run = new Run(prepared, mode, chosenPorts(settings), idsOf(skipped), host,
-                        pickedUnder);
+                run = new Run(prepared, mode, chosenPorts(settings), idsOf(skipped),
+                        Map.copyOf(refusedAtCheck), host, pickedUnder);
                 // Set with the run, for the same reason: followActiveServer and
                 // the Dashboard ask which server the core runs as it reports
                 // Connected. Set only once the start had returned, it could
@@ -670,6 +688,8 @@ public class ConnectionService {
                             refused.getName(), refusal.detail());
                     skipped.add(new SkippedServer(
                             refused.getId(), refused.getName(), refusal.detail()));
+                    refusedAtCheck.put(refused.getId(),
+                            new Refused(contentOf(refused), refusal.detail()));
                     members = members.stream()
                             .filter(server -> !server.getId().equals(refused.getId()))
                             .toList();
@@ -712,6 +732,13 @@ public class ConnectionService {
     }
 
     private static final JsonMapper SETTINGS_COPIER = JsonMapper.builder().build();
+
+    /** A server as a configuration is built from it, but for whether it is picked. */
+    private static JsonNode contentOf(ServerConfig server) {
+        ObjectNode content = SETTINGS_COPIER.valueToTree(server);
+        content.remove("active");
+        return content;
+    }
 
     /**
      * {@code settings} in {@code mode}: themselves when that is their mode,
@@ -936,6 +963,8 @@ public class ConnectionService {
      * @return the selected server, and whether it was switched or restarted,
      *     or left to the next start ({@link Outcome#NOT_RUNNING}) or to the
      *     user's reconnect ({@link Outcome#DEFERRED})
+     * @throws ConfigRejectedException if the core refuses the picked server,
+     *     which is said before anything is stopped for it
      * @throws IOException if the fallback start fails
      */
     public ConnectAttempt switchToActiveServer() throws IOException {
@@ -998,21 +1027,96 @@ public class ConnectionService {
                 engine.forgetRealityRefusal();
                 return new ConnectAttempt(Outcome.SWITCHED, active);
             }
-            if (picked.byTheStore() && mode == ProxyMode.TUN
-                    && engine.restartNeedsElevationPrompt()) {
+            // A server the core refuses was found refused only by the start
+            // after the stop: the working tunnel went down for a pick that
+            // could not run, and the refusal was known before it.
+            ConfigRejectedException refused = refusalOfPick(active, current);
+            if (picked.byTheStore()) {
                 // A refresh that withdrew the picked server, or a delete,
                 // stopped the working core for a launch whose prompt came up
                 // with nobody asking, and a dismissal left the VPN off.
-                // Recovery leaves such a restart to the user; so does this.
-                log.info("The picked server was withdrawn; the tunnel stays on the server it "
-                        + "runs until a reconnect, which asks for administrator rights");
-                return new ConnectAttempt(Outcome.DEFERRED, active);
+                // Recovery leaves such a restart to the user; so does this,
+                // and so for a server picked in its place the core refuses.
+                if (refused != null) {
+                    log.info("The picked server was withdrawn, and the core cannot run '{}', "
+                            + "picked in its place; the tunnel stays as it is", active.getName());
+                    return new ConnectAttempt(Outcome.DEFERRED, active);
+                }
+                if (mode == ProxyMode.TUN && engine.restartNeedsElevationPrompt()) {
+                    log.info("The picked server was withdrawn; the tunnel stays on the server "
+                            + "it runs until a reconnect, which asks for administrator rights");
+                    return new ConnectAttempt(Outcome.DEFERRED, active);
+                }
+            }
+            if (refused != null) {
+                putThePickBack(appliedServerId, active);
+                throw refused;
             }
             if (!recovery.isWanted(request)) {
                 return new ConnectAttempt(Outcome.CANCELLED, active);
             }
             return restart(mode, () -> recovery.isWanted(request), request);
         }
+    }
+
+    /**
+     * Why the running core cannot take {@code server} as a pick, as far as
+     * that is known before anything is stopped for it: select_server said a
+     * pick of a server the core refuses was made, while the switch it set
+     * off stopped the tunnel and then failed.
+     *
+     * @param server the server a pick would make the active one
+     * @return the refusal, naming the server, or empty when nothing says the
+     *     core would refuse it or no core runs
+     */
+    public Optional<String> pickRefusal(ServerConfig server) {
+        Run current = run;
+        if (!isRunning() || current == null) {
+            return Optional.empty();
+        }
+        ConfigRejectedException refused = refusalOfPick(server, current);
+        return refused == null ? Optional.empty() : Optional.of(refused.getMessage());
+    }
+
+    /**
+     * The refusal a start would meet for a pick of {@code server}, as far as
+     * it is known without one: what {@link CoreSettings#refusal} finds, or
+     * what the core's check said of the server as {@code current} started,
+     * while it is as it was then.
+     */
+    private static ConfigRejectedException refusalOfPick(ServerConfig server, Run current) {
+        String reason = CoreSettings.refusal(server).map(CoreSettings.Refusal::reason)
+                .orElse(null);
+        Refused atCheck = current.refused().get(server.getId());
+        if (reason == null && atCheck != null && atCheck.content().equals(contentOf(server))) {
+            reason = atCheck.reason();
+        }
+        return reason == null ? null : new ConfigRejectedException(
+                I18n.get("engine.config.rejected.server", server.getName(), reason), reason);
+    }
+
+    /**
+     * Puts the pick back on the server the core runs, after a pick it
+     * refuses. Left on the refused one, the list and the tray named a server
+     * the tunnel did not run, each later change of the list asked for the
+     * same switch and its refusal again, and the next Connect failed on it.
+     * Left as it is when the server the core runs has left the list, or the
+     * pick moved on meanwhile.
+     */
+    private void putThePickBack(String running, ServerConfig pick) {
+        if (running == null) {
+            return;
+        }
+        String pickId = pick.getId();
+        FxExecutor.run(() -> {
+            boolean stillPicked = configStore.getServers().stream()
+                    .anyMatch(server -> server.isActive() && server.getId().equals(pickId));
+            boolean runningListed = configStore.getServers().stream()
+                    .anyMatch(server -> server.getId().equals(running));
+            if (stillPicked && runningListed) {
+                configStore.setActiveServer(running);
+            }
+        });
     }
 
     /**

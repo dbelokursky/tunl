@@ -451,6 +451,17 @@ public final class DefaultAppControlService implements AppControlService {
 
     @Override
     public ServerSummary selectServer(String serverId) throws McpToolException {
+        // A server the running core refuses is said before anything changes:
+        // the pick was reported made, and the switch it set off stopped the
+        // tunnel and then failed, which only the window heard of.
+        ServerConfig wanted = configStore.getServerById(serverId)
+                .orElseThrow(() -> new McpToolException("No server with id: " + serverId));
+        Optional<String> refused = connectionService == null ? Optional.empty()
+                : connectionService.pickRefusal(wanted);
+        if (refused.isPresent()) {
+            throw new McpToolException(refused.get() + " Nothing was changed: the running "
+                    + "tunnel stays on the server it runs.");
+        }
         ServerConfig s = activate(serverId);
         ensureSaved(ConfigStore.SERVERS_FILE);
         return new ServerSummary(s.getId(), s.getName(),

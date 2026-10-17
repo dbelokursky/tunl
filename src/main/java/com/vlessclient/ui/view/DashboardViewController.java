@@ -170,6 +170,19 @@ public class DashboardViewController implements ViewShownAware {
      * is compared again once it is done, with the server it switched to.
      */
     private boolean applyingServer;
+    /**
+     * A pick the running core refused that stayed the pick, as the server the
+     * core runs had left the list: each later change of the list asked for
+     * it, and put up its refusal, again. Asked for again once another server
+     * is picked.
+     */
+    private String refusedPick;
+    /**
+     * The server the switch under way was asked for, while
+     * {@link #applyingServer} holds: a refusal is remembered for that server
+     * alone, and a pick made while the switch ran is still compared again.
+     */
+    private String switchingTo;
     /** The run's engine, which has no core until one is installed. */
     private SingBoxEngine singBoxEngine;
     private ProxyGroupMonitor groupMonitor;
@@ -1023,6 +1036,7 @@ public class DashboardViewController implements ViewShownAware {
 
     private void runConnect(ConnectionService service, boolean restart, boolean switchServer) {
         ConnectionService.Outcome outcome = null;
+        boolean pickRefused = false;
         try {
             ConnectionService.ConnectAttempt attempt =
                     switchServer ? service.switchToActiveServer()
@@ -1057,8 +1071,20 @@ public class DashboardViewController implements ViewShownAware {
                 });
             }
         } catch (IOException e) {
-            log.error("Failed to start sing-box", e);
+            // A pick the core refuses is refused before anything stops, and
+            // the tunnel runs on: the card does not say a start failed.
+            boolean keptRunning = switchServer && service.isRunning();
+            pickRefused = keptRunning;
+            log.error(keptRunning ? "Could not switch servers" : "Failed to start sing-box", e);
             Platform.runLater(() -> {
+                if (keptRunning) {
+                    rememberRefusedPick();
+                    ServerConfig running = runningServer();
+                    showError(I18n.get("dashboard.error.pick.title"),
+                            I18n.get("dashboard.error.pick.body", e.getMessage(),
+                                    running != null ? running.getName() : ""));
+                    return;
+                }
                 statusLabel.setText(I18n.get("error.connection.failed", e.getMessage()));
                 showError(I18n.get("dashboard.error.start.title"), e.getMessage());
             });
@@ -1074,24 +1100,38 @@ public class DashboardViewController implements ViewShownAware {
             Platform.runLater(() ->
                     statusLabel.setText(I18n.get("error.connection.failed", detail)));
         } finally {
-            // Compared again only once the core moved, for a pick made while
-            // it did. After a switch a Disconnect called off, the stop it
-            // waited for still read Connected here, and the second look
-            // started another switch, which asked for the tunnel again and
-            // started it after the stop; after one that moved nothing it only
-            // asked for the same again, and again.
-            boolean moved = outcome == ConnectionService.Outcome.SWITCHED
-                    || outcome == ConnectionService.Outcome.STARTED;
+            // Compared again only once the core moved, or a pick was refused
+            // with the core running on, for a pick made while it did. After a
+            // switch a Disconnect called off, the stop it waited for still
+            // read Connected here, and the second look started another
+            // switch, which asked for the tunnel again and started it after
+            // the stop; after one that moved nothing it only asked for the
+            // same again, and again.
+            boolean compareAgain = outcome == ConnectionService.Outcome.SWITCHED
+                    || outcome == ConnectionService.Outcome.STARTED || pickRefused;
             Platform.runLater(() -> {
                 refreshConnectButtonAvailability();
                 if (switchServer) {
                     applyingServer = false;
-                    if (moved) {
+                    if (compareAgain) {
                         reconnectIfActiveServerChanged();
                     }
                 }
             });
         }
+    }
+
+    /**
+     * Remembers a pick the running core refused that is still the pick: the
+     * service puts a refused pick back on the server the core runs, unless
+     * that one has left the list. Only the server the switch was asked for:
+     * another one picked while it ran is compared again, not taken for it.
+     */
+    private void rememberRefusedPick() {
+        ServerConfig pick = findActiveServer();
+        String applied = appliedServerId();
+        refusedPick = pick != null && pick.getId().equals(switchingTo)
+                && !pick.getId().equals(applied) ? pick.getId() : null;
     }
 
     private void disconnect() {
@@ -1146,6 +1186,10 @@ public class DashboardViewController implements ViewShownAware {
             return;
         }
         ServerConfig nowActive = findActiveServer();
+        if (nowActive != null && nowActive.getId().equals(refusedPick)) {
+            return;
+        }
+        refusedPick = null;
         String applied = appliedServerId();
         if (nowActive == null || applied == null || nowActive.getId().equals(applied)) {
             return;
@@ -1162,6 +1206,7 @@ public class DashboardViewController implements ViewShownAware {
         // would start a second switch, or, if it went back to that server,
         // none at all.
         applyingServer = true;
+        switchingTo = nowActive.getId();
         holdConnect();
         Thread.startVirtualThread(() -> runConnect(service, true, true));
     }
