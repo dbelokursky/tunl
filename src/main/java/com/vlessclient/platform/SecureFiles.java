@@ -126,12 +126,20 @@ public final class SecureFiles {
      * and whenever it cannot be told.
      */
     static boolean isPrivateDir(Path dir) {
+        return isPrivateDir(dir, System.getProperty("user.name"));
+    }
+
+    /**
+     * {@link #isPrivateDir(Path)} for the user named {@code userName}; a seam
+     * for tests, which cannot hand a folder to another user without root.
+     */
+    static boolean isPrivateDir(Path dir, String userName) {
         if (!POSIX) {
             return false;
         }
         try {
             UserPrincipal user = dir.getFileSystem().getUserPrincipalLookupService()
-                    .lookupPrincipalByName(System.getProperty("user.name"));
+                    .lookupPrincipalByName(userName);
             return Files.isDirectory(dir)
                     && Files.getOwner(dir).equals(user)
                     && Files.getPosixFilePermissions(dir)
