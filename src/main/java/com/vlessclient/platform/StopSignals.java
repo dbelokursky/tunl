@@ -34,7 +34,19 @@ final class StopSignals {
      * @throws IOException if the private run directory cannot be created
      */
     static Path newStopSignalFile() throws IOException {
-        Path dir = PlatformPaths.current().runDir();
+        return newStopSignalFile(PlatformPaths.current());
+    }
+
+    /**
+     * {@link #newStopSignalFile()} by the given paths; a seam for tests, whose
+     * own paths keep the run folder in the data dir.
+     *
+     * @param paths the paths whose run folder it goes in
+     * @return a path in that run folder that does not exist yet
+     * @throws IOException if the private run directory cannot be created
+     */
+    static Path newStopSignalFile(PlatformPaths paths) throws IOException {
+        Path dir = paths.runDir();
         SecureFiles.createPrivateDir(dir);
         byte[] token = new byte[12];
         RANDOM.nextBytes(token);

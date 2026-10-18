@@ -24,6 +24,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyBooleanProperty;
 import javafx.beans.property.ReadOnlyBooleanWrapper;
@@ -131,6 +132,8 @@ public class SingBoxEngine {
     private TunLauncher tunLauncher = TunLauncher.current();
     private SingBoxConfigCheck configCheck =
             new SingBoxConfigCheck(SingBoxConfigCheck.DEFAULT_TIMEOUT);
+    /** The paths whose run folder a session's configuration goes in. */
+    private Supplier<PlatformPaths> paths = PlatformPaths::current;
 
     /** Listen endpoint of the inbound that carries {@code set_system_proxy}. */
     record SystemProxyTarget(String host, int port) {
@@ -1281,6 +1284,14 @@ public class SingBoxEngine {
     }
 
     /**
+     * Test seam: the paths a session's configuration goes by, in place of
+     * this OS's ({@link PlatformPaths#current()}, asked at each start).
+     */
+    void setPaths(PlatformPaths given) {
+        this.paths = () -> given;
+    }
+
+    /**
      * Takes back the CONNECTING a start published once nothing was launched.
      * Left in place, the status keeps saying "Connecting" and the dashboard's
      * Connect button stops a connection that never began. It is queued while
@@ -1419,8 +1430,8 @@ public class SingBoxEngine {
      *
      * @return the folder session configurations go in
      */
-    static Path sessionConfigDir() {
-        return PlatformPaths.current().runDir();
+    Path sessionConfigDir() {
+        return paths.get().runDir();
     }
 
     /**
