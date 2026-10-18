@@ -179,6 +179,30 @@ class DiagnosticsBundleTest {
     }
 
     /**
+     * A WireGuard endpoint whose peer the system reaches through another
+     * interface is bound there, on Windows by this machine's own address on
+     * that network, which can be a public one. Left out wherever it stands,
+     * the loopback's included.
+     */
+    @Test
+    void theLocalAddressAWireguardEndpointIsBoundToIsLeftOut() throws IOException {
+        ServerConfig wireguard = new ServerConfig();
+        wireguard.setName("WG relay");
+        wireguard.setProtocol(Protocol.WIREGUARD);
+        wireguard.setAddress("127.0.0.1");
+        wireguard.setPort(51820);
+        wireguard.setUuid("xunATixZ9R2SMbEghGvNz1fen77h9i5gNCPfxxgxtWk=");
+        wireguard.setEncryption("bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=");
+        wireguard.setFlow("10.13.0.2/32");
+        store.addServer(wireguard);
+
+        tools.jackson.databind.JsonNode endpoint = tools.jackson.databind.json.JsonMapper.builder()
+                .build().readTree(unzip(write()).get("sing-box.json")).path("endpoints").get(0);
+
+        assertThat(endpoint.path("inet4_bind_address").asString()).isEqualTo(Redact.REDACTED);
+    }
+
+    /**
      * A Shadowsocks plugin's options name the server as much as its address
      * does: v2ray-plugin carries the host and path the server answers on, and
      * obfs-local the host it disguises itself as. They reached the bundle,
