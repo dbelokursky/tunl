@@ -128,14 +128,20 @@ public class LargerTextFitTest extends ApplicationTest {
      * At the usual text size the rows that can now wrap stay on one line, as
      * they were laid out before, in both windows and both languages.
      *
-     * <p>All but one: in the smallest window in Russian the Servers header did
-     * not fit on one line at the usual size either, and its title, its menus
-     * and its button were all drawn cut ("Б...", "Им..."). It goes on to a
-     * second line there now, and the checks above read its menus whole.</p>
+     * <p>The Servers header is held to one line only where its children fit
+     * there at their preferred widths, which is where the HBox it replaced
+     * drew them whole. Where that is depends on the font: with the Inter of a
+     * developer machine the header misses only in the smallest window in
+     * Russian; with the DejaVu Sans of the CI runners it also misses in the
+     * default window in Russian and in the smallest in English. The HBox drew
+     * its title, its menus and its button cut there ("Серве...", "Бэ...",
+     * "Back..."); the header goes on to a second line now, and the checks
+     * above read its menus whole.</p>
      */
     @Test
     void atTheUsualTextSizeTheRowsStayOnOneLine() {
         List<String> wrapped = new ArrayList<>();
+        boolean headerHadRoom = false;
         for (int[] window : WINDOWS) {
             for (Locale language : LANGUAGES) {
                 interact(() -> I18n.setLocale(language));
@@ -145,18 +151,58 @@ public class LargerTextFitTest extends ApplicationTest {
                 oneLine(where, mainView(window, 1.0, MainViewController::showLogs),
                         "#logLevelFilter", "#clearButton", wrapped);
                 Scene servers = mainView(window, 1.0, MainViewController::showServers);
-                boolean headerFitBefore = window[0] != 760 || !"ru".equals(language.getLanguage());
-                if (headerFitBefore) {
-                    oneLine(where, servers, "#titleLabel", "#addServerButton", wrapped);
-                }
+                headerHadRoom |= oneLineWhereItFits(where, servers, "#titleLabel",
+                        "#addServerButton", wrapped);
                 oneLine(where, servers, "#searchField", "#measureButton", wrapped);
             }
         }
 
+        assertThat(headerHadRoom)
+                .as("the Servers header had room for one line in no window, so the check"
+                        + " proved nothing")
+                .isTrue();
         assertThat(wrapped)
                 .withFailMessage("rows that wrap at the usual text size:%n  %s",
                         String.join("\n  ", wrapped))
                 .isEmpty();
+    }
+
+    /**
+     * {@link #oneLine} where the row holding both nodes has the room to put
+     * all of its children on one line at their preferred widths.
+     *
+     * @return whether it had that room
+     */
+    private boolean oneLineWhereItFits(String where, Scene scene, String first, String second,
+                                       List<String> wrapped) {
+        boolean[] room = new boolean[1];
+        interact(() -> {
+            WrappingRow row = rowHolding(scene.lookup(first), scene.lookup(second));
+            room[0] = row != null && row.prefWidth(-1) <= row.getWidth() + 0.5;
+        });
+        if (room[0]) {
+            oneLine(where, scene, first, second, wrapped);
+        }
+        return room[0];
+    }
+
+    /** The innermost WrappingRow that holds both nodes. */
+    private static WrappingRow rowHolding(Node first, Node second) {
+        for (Node node = second.getParent(); node != null; node = node.getParent()) {
+            if (node instanceof WrappingRow row && holds(row, first)) {
+                return row;
+            }
+        }
+        return null;
+    }
+
+    private static boolean holds(Node ancestor, Node node) {
+        for (Node n = node; n != null; n = n.getParent()) {
+            if (n == ancestor) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
