@@ -169,6 +169,46 @@ class TunnelRecoveryServiceTest {
         assertThat(scheduler.jobs).hasSize(1);
     }
 
+    /**
+     * A pick that moves the tunnel to another server starts recovery over
+     * under the user's request: the restart the old server's checks asked
+     * for, and its backoff, were that server's, and one already under way
+     * restarts nothing once it gets to run.
+     */
+    @Test
+    void aPickThatMovesTheTunnelStartsRecoveryOver() {
+        long request = recovery.currentRequest();
+        recovery.onConnectionState(ConnectionState.CONNECTED);
+        recovery.onHealth(TunnelHealth.BROKEN);
+        scheduler.jobs.getFirst().run();
+        assertThat(scheduler.jobs).extracting(job -> job.seconds).containsExactly(10L, 20L);
+
+        long moved = recovery.startOver(request);
+
+        assertThat(moved).as("the request recovery runs under").isPositive()
+                .isNotEqualTo(request);
+        assertThat(recovery.isWanted(moved)).isTrue();
+        assertThat(scheduler.jobs.get(1).isCancelled()).as("the old server's restart").isTrue();
+        scheduler.jobs.get(1).raw.run();
+        assertThat(starts).as("restarts, one for the old server").hasValue(1);
+        recovery.keptUp(moved);
+        assertThat(scheduler.jobs.get(2).seconds).as("the backoff's first step").isEqualTo(10);
+    }
+
+    /** A request the user withdrew is not asked for again by a pick. */
+    @Test
+    void aPickStartsNothingOverForAWithdrawnRequest() {
+        long request = recovery.currentRequest();
+        recovery.cancel();
+
+        assertThat(recovery.startOver(request)).isEqualTo(-1);
+        assertThat(recovery.isTunnelWanted()).isFalse();
+        long superseded = recovery.connectionRequested();
+        recovery.connectionRequested();
+        assertThat(recovery.startOver(superseded)).as("a request a newer one replaced")
+                .isEqualTo(-1);
+    }
+
     @Test
     void staleTimerCannotCancelANewerUserRequest() {
         recovery.onConnectionState(ConnectionState.ERROR);

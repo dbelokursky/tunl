@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.sun.net.httpserver.HttpServer;
 import com.vlessclient.model.ConnectionState;
+import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
@@ -495,6 +496,112 @@ class ConnectionServicePickTest {
         } finally {
             api.stop(0);
         }
+    }
+
+    // ===== a pick that moves the tunnel starts recovery over =====
+
+    /**
+     * Tokyo keeps failing its checks: recovery restarted it once, and the
+     * next countdown is its second, at twice the delay. The user picks
+     * Osaka, taken live. Once the pick took no request of its own, the
+     * countdown and the backoff stayed Tokyo's: their restart hit Osaka,
+     * and a failing Osaka waited out a backoff grown on Tokyo, up to five
+     * minutes.
+     */
+    @Test
+    void aLivePickStartsTheCountdownOverForTheNewExit() throws Exception {
+        tokyoAndOsaka();
+        store.getSettings().setHealthCheckAutoReconnect(true);
+        store.getSettings().setHealthCheckDelaySeconds(1);
+        PickEngine engine = engine();
+        serviceOver(engine);
+        assertThat(service.connect().started()).isTrue();
+        engine.report(ConnectionState.CONNECTED);
+        TunnelRecoveryService recovery = service.getRecoveryService();
+        recovery.onHealth(TunnelHealth.BROKEN);
+        Await.until("recovery's first restart", () -> engine.modes.size() == 2,
+                Duration.ofSeconds(10));
+        Await.until("its end", () -> !recovery.isRecovering(), Duration.ofSeconds(5));
+        recovery.onHealth(TunnelHealth.BROKEN);
+        Await.untilValue("the second countdown",
+                () -> FxExecutor.get(() -> recovery.retryProperty().get()),
+                retry -> retry != null && retry.attempt() == 2, Duration.ofSeconds(5));
+        HttpServer api = fakeClashApi(store.getSettings().listenClashApiPort());
+        try {
+            store.setActiveServer("srv-2");
+
+            assertThat(service.switchToActiveServer().outcome())
+                    .isEqualTo(ConnectionService.Outcome.SWITCHED);
+
+            TunnelRecoveryService.Retry after = FxExecutor.get(
+                    () -> recovery.retryProperty().get());
+            assertThat(after).as("the countdown, for the new exit's broken verdict").isNotNull();
+            assertThat(List.of(after.attempt(), after.delaySeconds()))
+                    .as("[attempt, delay] of the countdown after the pick")
+                    .containsExactly(1, 1);
+        } finally {
+            api.stop(0);
+        }
+    }
+
+    /**
+     * The same where the pick restarts the core: health checks on, so the
+     * restarted core's Connected does not call the countdown off, and the
+     * old server's restart ran on the new core before its first verdict.
+     */
+    @Test
+    void aPickThatRestartsTheCoreCallsOffTheOldServersCountdown() throws Exception {
+        tokyoAndOsaka();
+        store.getSettings().setHealthCheckAutoReconnect(true);
+        store.getSettings().setHealthCheckDelaySeconds(1);
+        PickEngine engine = engine();
+        serviceOver(engine);
+        assertThat(service.connect().started()).isTrue();
+        engine.report(ConnectionState.CONNECTED);
+        TunnelRecoveryService recovery = service.getRecoveryService();
+        recovery.onHealth(TunnelHealth.BROKEN);
+        // Something the core does not run yet, so the pick restarts it.
+        store.getSettings().setCoreLogLevel(CoreLogLevel.DEBUG);
+        store.setActiveServer("srv-2");
+
+        assertThat(service.switchToActiveServer().outcome())
+                .isEqualTo(ConnectionService.Outcome.STARTED);
+
+        assertThat(FxExecutor.get(() -> recovery.retryProperty().get()))
+                .as("the countdown of the server the tunnel left").isNull();
+        Thread.sleep(1_500);
+        assertThat(engine.modes).as("starts: the connect and the pick's restart").hasSize(2);
+    }
+
+    /**
+     * The old server's restart already ran when the pick came, waiting for
+     * the lock the pick's switch holds: once the switch was done it
+     * restarted the core the pick had just brought up.
+     */
+    @Test
+    void aRestartThatWaitsForThePicksSwitchIsCalledOff() throws Exception {
+        tokyoAndOsaka();
+        store.getSettings().setHealthCheckAutoReconnect(true);
+        store.getSettings().setHealthCheckDelaySeconds(1);
+        PickEngine engine = engine();
+        serviceOver(engine);
+        assertThat(service.connect().started()).isTrue();
+        engine.report(ConnectionState.CONNECTED);
+        TunnelRecoveryService recovery = service.getRecoveryService();
+        store.getSettings().setCoreLogLevel(CoreLogLevel.DEBUG);
+        store.setActiveServer("srv-2");
+
+        synchronized (operationsOf(service)) {
+            recovery.onHealth(TunnelHealth.BROKEN);
+            Await.until("recovery's restart waiting for the lock", recovery::isRecovering,
+                    Duration.ofSeconds(5));
+            assertThat(service.switchToActiveServer().outcome())
+                    .isEqualTo(ConnectionService.Outcome.STARTED);
+        }
+        Await.until("recovery done", () -> !recovery.isRecovering(), Duration.ofSeconds(5));
+
+        assertThat(engine.modes).as("starts: the connect and the pick's restart").hasSize(2);
+        assertThat(service.appliedServerId()).isEqualTo("srv-2");
     }
 
     /**

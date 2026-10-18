@@ -265,6 +265,35 @@ public final class TunnelRecoveryService implements AutoCloseable {
     }
 
     /**
+     * Starts recovery over for a tunnel a pick moves to another server,
+     * under the user's request as it stands. The restart counted down to and
+     * the backoff were for the server the tunnel leaves; they go, as for a
+     * new request, and so does a restart already under way, once it gets to
+     * run. The request stays the user's: one a Disconnect withdrew, or a
+     * newer request replaced, is not asked for again.
+     *
+     * <p>A pick took a request of its own, which a Disconnect made before it
+     * could not withdraw. Taking none, the countdown of the server the
+     * tunnel left ran on: its restart hit the server just picked, a healthy
+     * one too, and a failing one waited out a backoff that had grown on
+     * another.</p>
+     *
+     * @param request the user's request the pick was made under
+     * @return the request recovery runs under now, or -1 when
+     *     {@code request} no longer stands
+     */
+    public synchronized long startOver(long request) {
+        if (!isWanted(request)) {
+            return -1;
+        }
+        stoppedBecause = null;
+        cancelPending();
+        attempts = 0;
+        connectedSinceRequest = false;
+        return ++generation;
+    }
+
+    /**
      * Leaves the tunnel to the user's reconnect: a restart of a pick's ended
      * at an elevation prompt the user dismissed. The pick stopped the working
      * tunnel before the prompt came up, and the dismissal withdrew the request

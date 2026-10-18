@@ -989,7 +989,9 @@ public class ConnectionService {
      * Disconnect then stopped and left the tunnel wanted with nothing
      * running. A pick that met a recovery restart's stop called the restart
      * off the same way and started in the saved mode itself. With no core to
-     * move a pick now changes nothing: the next start reads it.</p>
+     * move a pick now changes nothing: the next start reads it. A pick that
+     * moves the core starts recovery over, under the user's request
+     * ({@link TunnelRecoveryService#startOver}).</p>
      *
      * @return the selected server, and whether it was switched or restarted,
      *     or left to the next start ({@link Outcome#NOT_RUNNING}) or to the
@@ -1048,11 +1050,14 @@ public class ConnectionService {
                 return new ConnectAttempt(Outcome.SWITCHED, active);
             }
             if (live.accepts(generated) && live.select(OutboundTags.server(active))) {
-                if (!recovery.isWanted(request)) {
+                // The traffic leaves through another server now, and the
+                // countdown and backoff recovery had were the old one's.
+                long moved = recovery.startOver(request);
+                if (moved < 0) {
                     return new ConnectAttempt(Outcome.CANCELLED, active);
                 }
                 // The core kept running, so no state change will tell recovery.
-                recovery.keptUp(request);
+                recovery.keptUp(moved);
                 appliedServerId = active.getId();
                 // Nor tell the engine that its log so far was another server's.
                 engine.forgetRealityRefusal();
@@ -1083,10 +1088,13 @@ public class ConnectionService {
                 putThePickBack(appliedServerId, active);
                 throw refused;
             }
-            if (!recovery.isWanted(request)) {
+            // As for a live switch: the countdown of the server the restart
+            // leaves would restart the one it brings up once more.
+            long moved = recovery.startOver(request);
+            if (moved < 0) {
                 return new ConnectAttempt(Outcome.CANCELLED, active);
             }
-            return restart(mode, () -> recovery.isWanted(request), request);
+            return restart(mode, () -> recovery.isWanted(moved), moved);
         }
     }
 
