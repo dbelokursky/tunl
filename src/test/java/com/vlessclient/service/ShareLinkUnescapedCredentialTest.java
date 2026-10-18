@@ -34,8 +34,6 @@ class ShareLinkUnescapedCredentialTest {
                 "trojan://s3cr3t@Tail#More@tr.example.com:443?security=tls&type=tcp#Remark",
                 "trojan://s3cr3t@Tail?More@tr.example.com:443#Remark",
                 "trojan://s3cr3t@Tail/More@tr.example.com:443#Remark",
-                "trojan://s3cr3t@Ta.il#More@tr.example.com:443#Remark",
-                "trojan://s3cr3t@Tail:9#More@tr.example.com:443#Remark",
                 "vless://s3cr3t@Tail?More@1.2.3.4:443",
                 "hysteria2://s3cr3t@Tail?More@[2001:db8::1]:443#Hy2");
         for (String link : links) {
@@ -48,20 +46,72 @@ class ShareLinkUnescapedCredentialTest {
         }
     }
 
+    /**
+     * Read as a name after an authority that is a server: a name with a dot,
+     * an IPv6 literal or localhost, with its port or without one, as VLESS,
+     * Trojan and Hysteria2 default to 443; any name with its port; and any
+     * authority after a UUID, which holds no @. Each of these was refused
+     * once the check came in, though it had imported correctly, and a
+     * subscription holding one became partial at every refresh.
+     */
     @Test
     void aNameHoldingAnAddressAfterARealServerIsStillAName() {
-        ServerConfig vless = parser.parseForImport("vless://" + UUID
-                + "@real.example.com:443?security=tls#Me@backup.example:8443");
-        ServerConfig trojan = parser.parseForImport("trojan://pw@1.2.3.4:443#user@5.6.7.8:22");
-        ServerConfig handle = parser.parseForImport("trojan://pw@tr.example.com:443#%40channel");
-        ServerConfig hopping = parser.parseForImport(
-                "hy2://pw@hy.example.com:443,20000-30000#a@b.example:1");
+        String[][] links = {
+            {"vless://" + UUID + "@real.example.com:443?security=tls#Me@backup.example:8443",
+                "real.example.com", "443", "Me@backup.example:8443"},
+            {"trojan://pw@1.2.3.4:443#user@5.6.7.8:22", "1.2.3.4", "443", "user@5.6.7.8:22"},
+            {"trojan://pw@tr.example.com:443#%40channel", "tr.example.com", "443", "@channel"},
+            {"hy2://pw@hy.example.com:443,20000-30000#a@b.example:1",
+                "hy.example.com", "443", "a@b.example:1"},
+            {"trojan://pw@tr.example.com?security=tls&sni=tr.example.com#Me@backup.example:8443",
+                "tr.example.com", "443", "Me@backup.example:8443"},
+            {"hy2://pw@hy.example.com/?sni=hy.example.com#Me@backup.example:8443",
+                "hy.example.com", "443", "Me@backup.example:8443"},
+            {"vless://" + UUID + "@real.example.com?security=tls&sni=real.example.com"
+                + "#Me@backup.example:8443", "real.example.com", "443", "Me@backup.example:8443"},
+            {"trojan://pw@tr.example.com:#Me@backup.example:8443",
+                "tr.example.com", "443", "Me@backup.example:8443"},
+            {"trojan://pw@[2001:db8::1]?security=tls#a@b.example:1",
+                "[2001:db8::1]", "443", "a@b.example:1"},
+            {"trojan://pw@[fe80::1%25eth0]:443?security=tls#x@y.example:1",
+                "[fe80::1%25eth0]", "443", "x@y.example:1"},
+            {"hy2://pw@localhost?insecure=1#a@b.example:1", "localhost", "443", "a@b.example:1"},
+            {"hy2://pw@myserver:443?insecure=1#Me@backup.example:8443",
+                "myserver", "443", "Me@backup.example:8443"},
+            {"hy2://pw@myserver:443,20000-30000#a@b.example:1", "myserver", "443", "a@b.example:1"},
+            {"vless://" + UUID + "@myserver:443?security=tls&sni=example.com"
+                + "#Me@backup.example:8443", "myserver", "443", "Me@backup.example:8443"},
+            {"vless://" + UUID + "@nas#Me@backup.example:8443", "nas", "443",
+                "Me@backup.example:8443"},
+            {"trojan://" + UUID + "@nas?security=tls#Me@backup.example:8443", "nas", "443",
+                "Me@backup.example:8443"}};
+        for (String[] link : links) {
+            ServerConfig server = parser.parseForImport(link[0]);
 
-        assertThat(vless.getAddress()).isEqualTo("real.example.com");
-        assertThat(vless.getName()).isEqualTo("Me@backup.example:8443");
-        assertThat(trojan.getAddress()).isEqualTo("1.2.3.4");
-        assertThat(handle.getName()).isEqualTo("@channel");
-        assertThat(hopping.getAddress()).isEqualTo("hy.example.com");
+            assertThat(server.getAddress()).as(link[0]).isEqualTo(link[1]);
+            assertThat(server.getPort()).as(link[0]).isEqualTo(Integer.parseInt(link[2]));
+            assertThat(server.getName()).as(link[0]).isEqualTo(link[3]);
+            assertThat(server.getUuid()).as(link[0]).isIn("pw", UUID);
+        }
+    }
+
+    /**
+     * What the check cannot tell from a server, and so reads as written, as
+     * any parser of URIs does: a part of a password with a dot, which stands
+     * where a server's name without a port would, and one with a port. A
+     * password with an @ and then a name with no dot and no port, the shape
+     * of the links that made the finding, is the one refused.
+     */
+    @Test
+    void aPasswordPartShapedLikeAServerIsReadAsWritten() {
+        ServerConfig dotted = parser.parseForImport(
+                "trojan://s3cr3t@Ta.il#More@tr.example.com:443#Remark");
+        ServerConfig withPort = parser.parseForImport(
+                "trojan://s3cr3t@Tail:9#More@tr.example.com:443#Remark");
+
+        assertThat(dotted.getAddress()).isEqualTo("Ta.il");
+        assertThat(withPort.getAddress()).isEqualTo("Tail");
+        assertThat(withPort.getPort()).isEqualTo(9);
     }
 
     @Test

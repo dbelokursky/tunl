@@ -139,6 +139,23 @@ class SubscriptionServiceTest {
     }
 
     /**
+     * A link without a port, the default-port form, whose name holds an
+     * address was refused as a password with an unescaped @, and counted as
+     * an unreadable line: every refresh of the list was partial, and none of
+     * them removed a server the provider withdrew.
+     */
+    @Test
+    void parseContent_aNameHoldingAnAddressAfterAServerWithoutAPortIsAServer() {
+        SubscriptionService.ParsedContent parsed = service.parseContent(
+                "trojan://pw@tr.example.com?security=tls#Me@backup.example:8443\n"
+                        + "trojan://pw2@tr2.example.com:443?security=tls#Second\n");
+
+        assertThat(parsed.servers()).extracting(ServerConfig::getName)
+                .containsExactly("Me@backup.example:8443", "Second");
+        assertThat(parsed.skipped()).as("no unreadable line, so no partial refresh").isZero();
+    }
+
+    /**
      * The mark can stand inside the base64 too, when a provider encodes a
      * file saved with one. Only the body lost it, so the decoded list started
      * with it, and its first line, a comment, was no longer one: it counted

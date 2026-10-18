@@ -149,10 +149,20 @@ public class ShareLinkParser {
     private static final Pattern SERVER_AFTER_AT = Pattern.compile(
             "@(?:\\[[0-9A-Fa-f:.]+]|[A-Za-z0-9-]*\\.[A-Za-z0-9.-]*|localhost):[0-9]");
 
-    /** An authority's host and port as a share link writes them, Hysteria2's port list included. */
+    /**
+     * An authority's host and port as a share link writes them: an IPv6
+     * literal, its zone included, a name with a dot or localhost, each with a
+     * port or without one, since VLESS, Trojan and Hysteria2 default to 443;
+     * or any other name with its port. Hysteria2's port list included.
+     */
     private static final Pattern SERVER_AUTHORITY = Pattern.compile(
-            "(?:\\[[0-9A-Fa-f:.]+]|[^:\\[\\].]*\\.[^:\\[\\]]*|localhost):[0-9,-]+",
+            "(?:\\[[0-9A-Fa-f:.]+(?:%[^\\[\\]]*)?]|[^:\\[\\].]*\\.[^:\\[\\]]*|localhost)"
+                    + "(?::[0-9,-]*)?|[^:\\[\\]]+:[0-9][0-9,-]*",
             Pattern.CASE_INSENSITIVE);
+
+    /** A credential that is a UUID, as VLESS ids and many passwords are: it holds no @. */
+    private static final Pattern UUID_CREDENTIAL = Pattern.compile(
+            "[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}");
 
     /**
      * A display name safe to store, render and log.
@@ -220,8 +230,18 @@ public class ShareLinkParser {
      * as the name, the query or the path. The address went into the list,
      * the resolver and MCP's answers, and the name into the log on every
      * connect. Told apart from a name that holds an address by the authority
-     * it leaves, which is no server: no port, or a host with no dot. The
+     * it leaves, which is no server: a name with no dot and no port. The
      * refusal repeats nothing of the link.
+     *
+     * <p>Only that shape is refused, and never after a credential that is a
+     * UUID. Refused for a missing port or a missing dot alone, links that had
+     * always imported were turned away: the default-port form, tr.example.com
+     * without :443, which the Hysteria2 scheme documents; a name on the local
+     * network with its port; an IPv6 literal with a zone; and VLESS links,
+     * whose UUID holds no @ at all. In a subscription each counted as an
+     * unreadable line, so every refresh was partial and removed no server the
+     * provider withdrew. A part of a password that reads as a server, with a
+     * dot or a port, is read as written, as any parser of URIs reads it.</p>
      *
      * @param link the link after its {@code scheme://}
      */
@@ -235,7 +255,8 @@ public class ShareLinkParser {
         }
         String authority = link.substring(0, end);
         int at = authority.lastIndexOf('@');
-        if (at < 0 || !SERVER_AFTER_AT.matcher(link).region(end, link.length()).find()
+        if (at < 0 || UUID_CREDENTIAL.matcher(authority.substring(0, at)).matches()
+                || !SERVER_AFTER_AT.matcher(link).region(end, link.length()).find()
                 || SERVER_AUTHORITY.matcher(authority.substring(at + 1)).matches()) {
             return;
         }
