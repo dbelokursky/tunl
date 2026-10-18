@@ -481,6 +481,70 @@ class LinuxTunLauncherTest {
         assertThat(wrapper).contains("kill -0 " + ProcessHandle.current().pid() + " ");
     }
 
+    /**
+     * A stop that came before the root wrapper started: Disconnect or Quit
+     * while the PolicyKit dialog was up, and the dialog answered within the
+     * engine's grace. The loop ended on its first pass, and its SIGTERM
+     * reached the core's background child before that had exec'd. Under
+     * dash, Debian's and Ubuntu's /bin/sh, the child still had the wrapper's
+     * TERM trap, which took the signal and lost it at the exec: the root core
+     * ran on with its TUN up, the wrapper waited on it deaf to the stop file
+     * and the app, and Disconnect could not end it.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"/bin/sh", "/bin/bash", "/bin/dash"})
+    @org.junit.jupiter.api.condition.EnabledOnOs({org.junit.jupiter.api.condition.OS.MAC,
+            org.junit.jupiter.api.condition.OS.LINUX})
+    void aStopThatCameBeforeTheWrapperStartedLeavesNoCore(String shell, @TempDir Path dir)
+            throws Exception {
+        Assumptions.assumeTrue(Files.isExecutable(Path.of(shell)), shell + " is not installed");
+        Path started = dir.resolve("started");
+        Path core = coreThatMarks(dir, started);
+        for (int run = 0; run < 10; run++) {
+            Path stop = Files.createFile(dir.resolve("stop-" + run));
+            Process sh = new ProcessBuilder(shell, "-c", LinuxTunLauncher.wrapperCommand(
+                    core, dir.resolve("c.json"), stop)).redirectErrorStream(true).start();
+            spawned.add(sh.toHandle());
+
+            assertThat(sh.waitFor(3, TimeUnit.SECONDS))
+                    .as("run %d: the wrapper ends on a stop that came first", run).isTrue();
+        }
+        assertThat(started).as("a core whose stop came first").doesNotExist();
+    }
+
+    /** The same for an app that died while the dialog was up, answered after. */
+    @ParameterizedTest
+    @ValueSource(strings = {"/bin/sh", "/bin/bash", "/bin/dash"})
+    @org.junit.jupiter.api.condition.EnabledOnOs({org.junit.jupiter.api.condition.OS.MAC,
+            org.junit.jupiter.api.condition.OS.LINUX})
+    void anAppGoneBeforeTheWrapperStartedLeavesNoCore(String shell, @TempDir Path dir)
+            throws Exception {
+        Assumptions.assumeTrue(Files.isExecutable(Path.of(shell)), shell + " is not installed");
+        Path started = dir.resolve("started");
+        Path core = coreThatMarks(dir, started);
+        for (int run = 0; run < 10; run++) {
+            Process sh = new ProcessBuilder(shell, "-c", LinuxTunLauncher.wrapperCommand(
+                    core, dir.resolve("c.json"), dir.resolve("stop-" + run), NO_SUCH_PID))
+                    .redirectErrorStream(true).start();
+            spawned.add(sh.toHandle());
+
+            assertThat(sh.waitFor(3, TimeUnit.SECONDS))
+                    .as("run %d: the wrapper ends when the app is already gone", run).isTrue();
+        }
+        assertThat(started).as("a core whose app was gone").doesNotExist();
+    }
+
+    /** A pid no process has: above every system's pid range. */
+    private static final long NO_SUCH_PID = Integer.MAX_VALUE;
+
+    /** A stand-in core that leaves {@code marker} when it starts, then runs on. */
+    private static Path coreThatMarks(Path dir, Path marker) throws IOException {
+        Path core = Files.writeString(dir.resolve("core.sh"),
+                "#!/bin/sh\n: > '" + marker + "'\nexec sleep 60\n");
+        core.toFile().setExecutable(true, true);
+        return core;
+    }
+
     /** A core that failed reached the app as "exited with code 0". */
     @Test
     @org.junit.jupiter.api.condition.EnabledOnOs({org.junit.jupiter.api.condition.OS.MAC,

@@ -211,6 +211,34 @@ class MacTunLauncherTest {
         assertThat(wrapper).contains("kill -0 " + ProcessHandle.current().pid() + " ");
     }
 
+    /**
+     * A stop that came before the root wrapper started, while the password
+     * dialog was up: the loop ended on its first pass and its SIGTERM reached
+     * the core's background child before the exec. A dash child still had
+     * the wrapper's TERM trap, which lost the signal at the exec, and the root
+     * core ran on with nothing watching it. macOS's /bin/sh can be dash.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"/bin/sh", "/bin/bash", "/bin/dash"})
+    void aStopThatCameBeforeTheOsascriptWrapperStartedLeavesNoCore(String shell,
+            @TempDir Path dir) throws Exception {
+        assumeTrue(Files.isExecutable(Path.of(shell)), shell + " is not installed");
+        Path started = dir.resolve("started");
+        Path core = Files.writeString(dir.resolve("core.sh"),
+                "#!/bin/sh\n: > '" + started + "'\nexec sleep 60\n");
+        core.toFile().setExecutable(true, true);
+        for (int run = 0; run < 10; run++) {
+            Path stop = Files.createFile(dir.resolve("stop-" + run));
+            Process sh = new ProcessBuilder(shell, "-c", MacTunLauncher.osascriptWrapperCommand(
+                    core, dir.resolve("c.json"), stop)).redirectErrorStream(true).start();
+            spawned.add(sh.toHandle());
+
+            assertThat(sh.waitFor(3, TimeUnit.SECONDS))
+                    .as("run %d: the wrapper ends on a stop that came first", run).isTrue();
+        }
+        assertThat(started).as("a core whose stop came first").doesNotExist();
+    }
+
     @Test
     void launcherWrapper_handsTheConfigOnStdinAndWatchesItsOwnStdin() {
         String wrapper = MacTunLauncher.launcherWrapperCommand(

@@ -415,7 +415,12 @@ public final class LinuxTunLauncher implements TunLauncher {
      * Mirrors the macOS osascript wrapper.
      */
     static String wrapperCommand(Path binary, Path configFile, Path stopSignalFile) {
-        long parentPid = ProcessHandle.current().pid();
+        return wrapperCommand(binary, configFile, stopSignalFile, ProcessHandle.current().pid());
+    }
+
+    /** Test seam: {@link #wrapperCommand(Path, Path, Path)} watching {@code parentPid}. */
+    static String wrapperCommand(Path binary, Path configFile, Path stopSignalFile,
+                                 long parentPid) {
         String singBoxCmd = shellQuote(binary.toAbsolutePath().toString());
         String configPath = shellQuote(configFile.toAbsolutePath().toString());
         String stopPath = shellQuote(stopSignalFile.toAbsolutePath().toString());
@@ -444,18 +449,33 @@ public final class LinuxTunLauncher implements TunLauncher {
         // "kill -0 ۱۲۳۴۵", which no shell takes for a pid. The loop ended on
         // its first pass, and the root core was stopped as it started or,
         // under dash, left running with nothing watching it.
+        // The core starts in a subshell that first sets TERM back to its
+        // default, then looks at the stop file and the app once more and ends
+        // there if either says stop. A stop that came before the wrapper
+        // started (Disconnect or Quit while the PolicyKit dialog was up, the
+        // dialog answered within the engine's grace) ended the loop on its
+        // first pass, and its SIGTERM reached the background child before the
+        // exec. A dash child still had the wrapper's TERM trap then, which
+        // took the signal and lost it at the exec: the root core ran on, and
+        // the wrapper waited on it deaf to the stop file and the app. A
+        // SIGTERM lost that way was sent after the stop it answers, so the
+        // subshell, looking after its reset, sees that stop; one sent later
+        // finds TERM at its default, or the core. The ids go before exec,
+        // which hands them to the core.
         return String.format(Locale.ROOT,
                 "SBSTOP=%s; "
                         + StdinWatch.SIGNAL_TRAP + "rm -f \"$SBSTOP\"; exit 143' INT TERM; "
                         + StdinWatch.EXIT_TRAP
-                        + "%s%s run -c %s & SBPID=$!; "
+                        + "( trap - EXIT TERM; [ -f \"$SBSTOP\" ] && exit 0; "
+                        + "kill -0 %d 2>/dev/null || exit 0; "
+                        + "%sexec %s run -c %s ) & SBPID=$!; "
                         + "while kill -0 $SBPID 2>/dev/null "
                         + "&& kill -0 %d 2>/dev/null "
                         + "&& [ ! -f \"$SBSTOP\" ]; do sleep 0.3; done; "
                         + "kill $SBPID 2>/dev/null; "
                         + "wait $SBPID 2>/dev/null; RC=$?; "
                         + "rm -f \"$SBSTOP\"; exit $RC",
-                stopPath, appUserIds(), singBoxCmd, configPath, parentPid);
+                stopPath, parentPid, appUserIds(), singBoxCmd, configPath, parentPid);
     }
 
     /**
