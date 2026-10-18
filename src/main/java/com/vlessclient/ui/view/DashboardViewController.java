@@ -44,7 +44,6 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
-import javafx.scene.control.ListCell;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
@@ -570,20 +569,10 @@ public class DashboardViewController implements ViewShownAware {
 
     private void initProxyModeCombo() {
         proxyModeCombo.getItems().addAll(ProxyMode.values());
-        proxyModeCombo.setCellFactory(cb -> new ListCell<>() {
-            @Override
-            protected void updateItem(ProxyMode item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : formatProxyMode(item));
-            }
-        });
-        proxyModeCombo.setButtonCell(new ListCell<>() {
-            @Override
-            protected void updateItem(ProxyMode item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : formatProxyMode(item));
-            }
-        });
+        // Drawn again on a language switch, value untouched. Cells of its own
+        // drew each item once, so the closed combo and a list opened before
+        // the switch said "System Proxy" in a Russian window until a restart.
+        ComboLabels.follow(proxyModeCombo, this::formatProxyMode);
 
         proxyModeCombo.setValue(ServiceLocator.find(AppSettings.class)
                 .map(AppSettings::getProxyMode)
@@ -621,20 +610,9 @@ public class DashboardViewController implements ViewShownAware {
         }
         serverSelectionLabel.textProperty().bind(I18n.binding("dashboard.selection"));
         serverSelectionCombo.getItems().addAll(ServerSelection.values());
-        serverSelectionCombo.setCellFactory(cb -> new ListCell<>() {
-            @Override
-            protected void updateItem(ServerSelection item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : formatSelection(item));
-            }
-        });
-        serverSelectionCombo.setButtonCell(new ListCell<>() {
-            @Override
-            protected void updateItem(ServerSelection item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : formatSelection(item));
-            }
-        });
+        // As the mode combo: setting the value again to redraw it would be
+        // taken for a pick, which restarts a connected tunnel.
+        ComboLabels.follow(serverSelectionCombo, this::formatSelection);
 
         serverSelectionCombo.setValue(ServiceLocator.find(AppSettings.class)
                 .map(AppSettings::getServerSelection)
