@@ -348,13 +348,39 @@ public class DashboardServerPickTest extends ApplicationTest {
                 .isFalse();
 
         // SubscriptionService.diffAndApply, off the FX thread: Tokyo withdrawn.
-        store.applyServerBatch(List.of(), List.of(tokyo.getId()));
+        store.applyServerBatch(List.of(), List.of(tokyo.getId()), ConfigStore.Removal.UNASKED);
 
         Await.until("the reconnect offered", () -> visible("#pendingChangesBanner"),
                 Duration.ofSeconds(5));
         assertThat(engine.starts).as("TUN launches, each one a prompt")
                 .containsExactly(ProxyMode.TUN);
         assertThat(engine.isRunning()).isTrue();
+    }
+
+    /**
+     * The user deletes Tokyo, the server the TUN tunnel runs on, on the
+     * Servers page, under a core whose every launch prompts. The tunnel
+     * leaves it for the server picked in its place, as it does for a pick
+     * of the user's. It was held as a re-pick nobody asked for: the card
+     * said traffic went through Tokyo, which no list held any more, while
+     * the list and the tray named Osaka.
+     */
+    @Test
+    void theUsersDeleteOfTheRunningServerMovesTheTunnelOffIt() throws Exception {
+        store.getSettings().setProxyMode(ProxyMode.TUN);
+        engine.prompts = true;
+        interact(controller::toggleConnection);
+        awaitState(ConnectionState.CONNECTED);
+
+        // ServersViewController.deleteServer, once the user confirmed it.
+        interact(() -> store.removeServer(tokyo.getId()));
+
+        Await.until("the tunnel off Tokyo", () -> osaka.getId().equals(service.appliedServerId()),
+                Duration.ofSeconds(10));
+        assertThat(engine.starts).containsExactly(ProxyMode.TUN, ProxyMode.TUN);
+        Await.until("the card naming Osaka", () -> onFx(() -> lookup("#statusLabel")
+                .queryLabeled().getText()).equals(I18n.get("dashboard.status.routing.through",
+                        "Osaka")), Duration.ofSeconds(5));
     }
 
     /**
@@ -452,7 +478,7 @@ public class DashboardServerPickTest extends ApplicationTest {
         awaitState(ConnectionState.CONNECTED);
         // A refresh withdraws Tokyo, which the core runs: the store's pick
         // in its place waits for the user's reconnect.
-        store.applyServerBatch(List.of(), List.of(tokyo.getId()));
+        store.applyServerBatch(List.of(), List.of(tokyo.getId()), ConfigStore.Removal.UNASKED);
         Await.until("the reconnect offered", () -> visible("#pendingChangesBanner"),
                 Duration.ofSeconds(5));
 

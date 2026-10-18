@@ -711,7 +711,7 @@ class ConnectionServicePickTest {
         engine.failNextStart = new ElevationDeclinedException("the UAC prompt was dismissed");
 
         // The provider no longer lists Tokyo; the store picks Osaka.
-        store.applyServerBatch(List.of(), List.of("srv-1"));
+        store.applyServerBatch(List.of(), List.of("srv-1"), ConfigStore.Removal.UNASKED);
         assertThat(picked("srv-2")).isTrue();
         ConnectionService.ConnectAttempt pick = service.switchToActiveServer();
 
@@ -723,22 +723,66 @@ class ConnectionServicePickTest {
         assertThat(service.isTunnelWanted()).isTrue();
     }
 
-    /** The same for a delete of the picked server, from the list or an agent. */
+    /** The same for an agent's delete_server of the picked server. */
     @Test
-    void aRepickADeleteMadeUnderAPromptingTunCoreKeepsTheCore() throws Exception {
+    void aRepickAnAgentsDeleteMadeUnderAPromptingTunCoreKeepsTheCore() throws Exception {
         subscribedPairInTun();
         PickEngine engine = engine();
         engine.prompts = true;
         serviceOver(engine);
         assertThat(service.connect().started()).isTrue();
 
-        store.removeServer("srv-1");
+        new DefaultAppControlService(store, null, null, new RoutingService(), service, null,
+                null, engine).deleteServer("srv-1", true);
         assertThat(picked("srv-2")).isTrue();
 
         assertThat(service.switchToActiveServer().outcome())
                 .isEqualTo(ConnectionService.Outcome.DEFERRED);
         assertThat(engine.modes).containsExactly(ProxyMode.TUN);
         assertThat(engine.isRunning()).isTrue();
+    }
+
+    /**
+     * The user's own delete of the server the tunnel runs on, confirmed on
+     * the Servers page, under a TUN core whose every launch prompts. The
+     * user asked the tunnel to leave that server, and it moves to the pick
+     * made in its place, prompt and all. It was held as a re-pick nobody
+     * asked for, and the traffic went on through the deleted server while
+     * the list, the tray and get_status named the new pick.
+     */
+    @Test
+    void theUsersDeleteOfTheServerTheTunnelRunsOnMovesTheTunnelOffIt() throws Exception {
+        subscribedPairInTun();
+        PickEngine engine = engine();
+        engine.prompts = true;
+        serviceOver(engine);
+        assertThat(service.connect().started()).isTrue();
+
+        // ServersViewController.deleteServer, once the user confirmed it.
+        FxExecutor.run(() -> store.removeServer("srv-1"));
+        ConnectionService.ConnectAttempt pick = service.switchToActiveServer();
+
+        assertThat(pick.outcome()).isEqualTo(ConnectionService.Outcome.STARTED);
+        assertThat(service.appliedServerId()).isEqualTo("srv-2");
+        assertThat(engine.modes).containsExactly(ProxyMode.TUN, ProxyMode.TUN);
+    }
+
+    /** The same for several servers deleted at once, or a subscription removed with them. */
+    @Test
+    void theUsersDeleteOfSeveralServersMovesTheTunnelOffThem() throws Exception {
+        subscribedPairInTun();
+        store.addServer(server("srv-3", "Nagoya"));
+        PickEngine engine = engine();
+        engine.prompts = true;
+        serviceOver(engine);
+        assertThat(service.connect().started()).isTrue();
+
+        // ServersViewController.deleteSelected, and removeSubscription, call this.
+        store.applyServerBatch(List.of(), List.of("srv-1", "srv-2"));
+        ConnectionService.ConnectAttempt pick = service.switchToActiveServer();
+
+        assertThat(pick.outcome()).isEqualTo(ConnectionService.Outcome.STARTED);
+        assertThat(service.appliedServerId()).isEqualTo("srv-3");
     }
 
     /**
@@ -752,7 +796,7 @@ class ConnectionServicePickTest {
         serviceOver(engine);
         assertThat(service.connect().started()).isTrue();
 
-        store.applyServerBatch(List.of(), List.of("srv-1"));
+        store.applyServerBatch(List.of(), List.of("srv-1"), ConfigStore.Removal.UNASKED);
         ConnectionService.ConnectAttempt pick = service.switchToActiveServer();
 
         assertThat(pick.outcome()).isEqualTo(ConnectionService.Outcome.STARTED);
@@ -778,7 +822,7 @@ class ConnectionServicePickTest {
         serviceOver(engine);
         assertThat(service.connect().skipped()).hasSize(1);
 
-        store.applyServerBatch(List.of(), List.of("srv-1"));
+        store.applyServerBatch(List.of(), List.of("srv-1"), ConfigStore.Removal.UNASKED);
         assertThat(picked("srv-2")).as("the store's pick").isTrue();
 
         assertThat(service.switchToActiveServer().outcome())
@@ -796,7 +840,7 @@ class ConnectionServicePickTest {
         engine.prompts = true;
         serviceOver(engine);
         assertThat(service.connect().started()).isTrue();
-        store.applyServerBatch(List.of(), List.of("srv-1"));
+        store.applyServerBatch(List.of(), List.of("srv-1"), ConfigStore.Removal.UNASKED);
         service.switchToActiveServer();
 
         store.addServer(server("srv-3", "Nagoya"));

@@ -681,7 +681,10 @@ public final class DefaultAppControlService implements AppControlService {
         }
         ServerConfig existing = configStore.getServerById(id)
                 .orElseThrow(() -> new McpToolException("No server with id: " + id));
-        configStore.removeServer(id);
+        // Asks nothing of a running tunnel: a pick made in place of the
+        // deleted one waits for the user's reconnect where its restart would
+        // raise an elevation prompt.
+        configStore.removeServer(id, ConfigStore.Removal.UNASKED);
         ensureSaved(ConfigStore.SERVERS_FILE);
         return "Deleted server '" + existing.getName() + "'.";
     }

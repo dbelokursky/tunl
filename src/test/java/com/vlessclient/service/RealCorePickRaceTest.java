@@ -310,7 +310,8 @@ public class RealCorePickRaceTest extends ApplicationTest {
             assertThat(tunLauncher.launches).as("a plain pick, taken live").hasSize(1);
 
             // SubscriptionService.diffAndApply, off the FX thread: Osaka withdrawn.
-            store.applyServerBatch(List.of(), List.of(osaka.getId()));
+            store.applyServerBatch(List.of(), List.of(osaka.getId()),
+                    ConfigStore.Removal.UNASKED);
             Thread.sleep(2_000);
 
             assertThat(tunLauncher.launches).as("TUN launches, each one a UAC prompt")

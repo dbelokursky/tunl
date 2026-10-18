@@ -113,10 +113,12 @@ public class ConnectionService {
          */
         NOT_RUNNING,
         /**
-         * A pick the store made itself, as a removal took the picked server,
-         * left the running core as it was: the restart it needs would raise
-         * an elevation prompt nobody asked for, or start a core that refuses
-         * the server picked, so it waits for the user's reconnect.
+         * A pick the store made itself, as a removal nobody asked the tunnel
+         * to follow (a refresh's withdrawal, an agent's delete) took the
+         * picked server, left the running core as it was: the restart it
+         * needs would raise an elevation prompt nobody asked for, or start a
+         * core that refuses the server picked, so it waits for the user's
+         * reconnect.
          */
         DEFERRED
     }
@@ -1068,9 +1070,10 @@ public class ConnectionService {
             // could not run, and the refusal was known before it.
             ConfigRejectedException refused = refusalOfPick(active, current);
             if (picked.byTheStore()) {
-                // A refresh that withdrew the picked server, or a delete,
-                // stopped the working core for a launch whose prompt came up
-                // with nobody asking, and a dismissal left the VPN off.
+                // A refresh that withdrew the picked server, or an agent's
+                // delete, stopped the working core for a launch whose prompt
+                // came up with nobody asking, and a dismissal left the VPN off.
+                // The user's own delete is the user's pick (ConfigStore.Removal).
                 // Recovery leaves such a restart to the user; so does this,
                 // and so for a server picked in its place the core refuses.
                 if (refused != null) {
