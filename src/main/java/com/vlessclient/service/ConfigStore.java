@@ -1226,6 +1226,21 @@ public class ConfigStore {
             } else if (!tunAddress.equals(tunAddress.trim())) {
                 settings.setTunIpv4Address(tunAddress.trim());
             }
+            // A health target saved before the add-service dialog refused a
+            // port past 65535 was probed on that port's low 16 bits: it never
+            // asked what the user typed, and as the only target it read as a
+            // broken tunnel, which was restarted again and again. A null from
+            // a hand edit stopped the dashboard drawing its rows.
+            settings.getHealthCheckTargets().removeIf(target -> {
+                boolean unusable = target == null
+                        || ServiceReachabilityChecker.hasPortNoConnectionHas(target.getUrl());
+                if (unusable) {
+                    log.warn("Leaving out health target {}: {}",
+                            target == null ? null : target.getUrl(),
+                            target == null ? "it is empty" : "its port is past 65535");
+                }
+                return unusable;
+            });
             // Future incompatible versions dispatch their migrations here;
             // saving always stamps the version this build writes.
             settings.setConfigVersion(AppSettings.CURRENT_CONFIG_VERSION);

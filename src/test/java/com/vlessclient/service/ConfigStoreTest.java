@@ -338,6 +338,30 @@ class ConfigStoreTest {
     }
 
     /**
+     * A health target saved before the add-service dialog refused a port past
+     * 65535 was probed on that port's low 16 bits: it never asked what the
+     * user typed, and as the only target it read as a broken tunnel and had
+     * it restarted again and again. It is left out at load, as a null entry
+     * from a hand edit is, which the dashboard's rows could not draw; the
+     * other targets stay as they were.
+     */
+    @Test
+    void aHealthTargetWithAPortNoConnectionHasIsLeftOutAtLoad(@TempDir Path dir)
+            throws Exception {
+        java.nio.file.Files.writeString(dir.resolve("settings.json"), """
+                {"config_version": 1, "health_check_targets": [
+                  {"name": "Typo", "url": "https://example.com:70000/"},
+                  null,
+                  {"name": "Google", "url": "https://www.google.com/generate_204"},
+                  {"name": "Site", "url": "http://site.example:8080/"},
+                  {"name": "DNS", "url": "1.1.1.1:53"}]}""");
+
+        assertThat(new ConfigStore(dir).getSettings().getHealthCheckTargets())
+                .extracting(com.vlessclient.model.HealthCheckTarget::getName)
+                .containsExactly("Google", "Site", "DNS");
+    }
+
+    /**
      * A new install spoke English whatever the system's language, while its
      * theme already followed the system; most people who install Tunl read
      * Russian. It now takes the system's language when that is one the app
