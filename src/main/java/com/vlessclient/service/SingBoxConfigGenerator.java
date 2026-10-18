@@ -343,21 +343,36 @@ public class SingBoxConfigGenerator {
         ObjectNode dns = mapper.createObjectNode();
         dns.set("servers", servers);
 
-        // Local names first, in every mode. The LAN's suffixes were added only
-        // where system-proxy mode resolves names before its IP rules, so in
-        // TUN mode, where the core is the system's resolver, openwrt.lan or
-        // router.home.arpa went to the remote resolver: it answered that they
-        // do not exist, and learned them.
+        // localhost and mDNS names first, in every mode, as the route sends
+        // them direct ahead of the user's rules.
         ObjectNode localRule = mapper.createObjectNode();
         localRule.putArray("domain").add("localhost");
-        ArrayNode localSuffixes = localRule.putArray("domain_suffix");
-        LOCAL_NAME_SUFFIXES.forEach(localSuffixes::add);
+        localRule.putArray("domain_suffix").add(".local");
         localRule.put("server", DnsTags.LOCAL);
         ArrayNode dnsRules = mapper.createArrayNode();
         dnsRules.add(localRule);
-        if (route != null) {
-            routeDnsRules(route).forEach(dnsRules::add);
+        List<ObjectNode> mirrored = route == null ? List.of() : routeDnsRules(route);
+        // The names the LAN's own router serves, in every mode, ahead of the
+        // rules that mirror the route. Left to dns.final in TUN mode, where
+        // the core is the system's resolver, openwrt.lan or router.home.arpa
+        // went to the remote resolver: it answered that they do not exist,
+        // and learned them. A name under them that a rule of the user's
+        // names itself comes first, in the route's order: asked of the LAN,
+        // corp.internal, which the user sends through the tunnel, was not
+        // known, and nothing under it connected. One sent direct stays the
+        // LAN's, which a Direct DNS such as 8.8.8.8 does not know.
+        for (ObjectNode rule : mirrored) {
+            ObjectNode named = lanNamesOf(rule);
+            if (named != null) {
+                dnsRules.add(named);
+            }
         }
+        ObjectNode lanRule = mapper.createObjectNode();
+        ArrayNode lanSuffixes = lanRule.putArray("domain_suffix");
+        LAN_NAME_SUFFIXES.forEach(lanSuffixes::add);
+        lanRule.put("server", DnsTags.LOCAL);
+        dnsRules.add(lanRule);
+        mirrored.forEach(dnsRules::add);
         dns.set("rules", dnsRules);
 
         // In sing-box 1.13 the dns.rules[].outbound match-all form and
@@ -385,9 +400,45 @@ public class SingBoxConfigGenerator {
     private static final List<String> DNS_NAME_MATCHERS =
             List.of("domain", "domain_suffix", "domain_keyword", "domain_regex");
 
-    /** The names the LAN's own resolver answers: mDNS, and the suffixes routers serve. */
-    private static final List<String> LOCAL_NAME_SUFFIXES =
-            List.of(".local", ".lan", ".home.arpa", ".internal");
+    /** The suffixes the LAN's own router serves names under. */
+    private static final List<String> LAN_NAME_SUFFIXES =
+            List.of(".lan", ".home.arpa", ".internal");
+
+    /**
+     * The names under the LAN's suffixes that a mirrored rule names itself,
+     * by domain or domain suffix, with the resolver to ask: the one behind the
+     * tunnel when the route sends them through it, else the LAN's. A keyword,
+     * a regex or a list names none: such a rule leaves the LAN's names to it.
+     *
+     * @return the DNS rule, or null when the rule names none
+     */
+    private ObjectNode lanNamesOf(ObjectNode mirrored) {
+        ObjectNode named = mapper.createObjectNode();
+        for (String matcher : List.of("domain", "domain_suffix")) {
+            ArrayNode values = mapper.createArrayNode();
+            for (JsonNode value : mirrored.path(matcher)) {
+                if (isUnderLanSuffix(value.asString())) {
+                    values.add(value.asString());
+                }
+            }
+            if (!values.isEmpty()) {
+                named.set(matcher, values);
+            }
+        }
+        if (named.isEmpty()) {
+            return null;
+        }
+        named.put("server", DnsTags.PROXY.equals(mirrored.path("server").asString())
+                ? DnsTags.PROXY : DnsTags.LOCAL);
+        return named;
+    }
+
+    /** Whether a domain, or a suffix with its dot or without, is a LAN suffix or under one. */
+    private static boolean isUnderLanSuffix(String name) {
+        String bare = name.startsWith(".") ? name.substring(1) : name;
+        return LAN_NAME_SUFFIXES.stream().anyMatch(suffix ->
+                bare.equals(suffix.substring(1)) || bare.endsWith(suffix));
+    }
 
     /**
      * DNS rules that resolve each name the way the route sends its traffic,

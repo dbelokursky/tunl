@@ -241,12 +241,17 @@ class SingBoxConfigGeneratorTunTest {
         assertThat(servers.get(2).get("tag").asString()).isEqualTo("local-dns");
         assertThat(servers.get(2).get("type").asString()).isEqualTo("local");
 
+        // localhost and .local first, the LAN's own suffixes last, below
+        // whatever rules the user has.
         JsonNode dnsRules = dns.get("rules");
         assertThat(dnsRules).isNotNull();
-        assertThat(dnsRules.size()).isEqualTo(1);
+        assertThat(dnsRules.size()).isEqualTo(2);
         assertThat(dnsRules.get(0).get("domain").get(0).asString()).isEqualTo("localhost");
         assertThat(dnsRules.get(0).get("domain_suffix").get(0).asString()).isEqualTo(".local");
         assertThat(dnsRules.get(0).get("server").asString()).isEqualTo("local-dns");
+        assertThat(dnsRules.get(1).get("domain_suffix").toString())
+                .isEqualTo("[\".lan\",\".home.arpa\",\".internal\"]");
+        assertThat(dnsRules.get(1).get("server").asString()).isEqualTo("local-dns");
 
         // sing-box 1.13 uses dns.final instead of a match-all rule
         assertThat(dns.get("final").asString()).isEqualTo("proxy-dns");
@@ -634,14 +639,104 @@ class SingBoxConfigGeneratorTunTest {
     @Test
     void tunMode_theLansOwnNamesResolveOnTheLan() throws Exception {
         for (RoutingConfig routingConfig : java.util.Arrays.asList(null, new RoutingConfig())) {
-            JsonNode dnsRules = parse(generator.generate(createVlessServer(), tunSettings(),
-                    routingConfig)).get("dns").get("rules");
+            JsonNode dns = parse(generator.generate(createVlessServer(), tunSettings(),
+                    routingConfig)).get("dns");
 
-            JsonNode local = dnsRules.get(0);
-            assertThat(local.get("server").asString()).isEqualTo("local-dns");
-            assertThat(local.get("domain_suffix").valueStream().map(JsonNode::asString))
-                    .contains(".local", ".lan", ".home.arpa", ".internal");
+            for (String name : List.of("localhost", "printer.local", "openwrt.lan",
+                    "router.home.arpa", "nas.internal")) {
+                assertThat(resolverFor(dns, name)).as(name).isEqualTo("local-dns");
+            }
+            assertThat(resolverFor(dns, "example.com")).isEqualTo("proxy-dns");
         }
+    }
+
+    /**
+     * The LAN's suffixes went to its resolver ahead of every rule of the
+     * user's: a Proxy rule for corp.internal sent the connection into the
+     * tunnel, and the name was asked of the LAN's resolver, which does not
+     * know it, so nothing connected. A name the user's rule names itself is
+     * asked where the route sends it; one sent direct stays the LAN's, which
+     * knows it where a Direct DNS such as 8.8.8.8 does not.
+     */
+    @Test
+    void tunMode_aNameTheUserSendsThroughTheTunnelIsResolvedThereUnderALanSuffixToo()
+            throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "corp.internal",
+                        RoutingRule.RuleAction.PROXY),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN, "vpn.home.arpa",
+                        RoutingRule.RuleAction.PROXY),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "nas.lan",
+                        RoutingRule.RuleAction.DIRECT)));
+        AppSettings settings = tunSettings();
+        settings.setDirectDns("8.8.8.8");
+
+        JsonNode dns = parse(generator.generate(createVlessServer(), settings,
+                routingConfig)).get("dns");
+
+        assertThat(resolverFor(dns, "db.corp.internal")).isEqualTo("proxy-dns");
+        assertThat(resolverFor(dns, "vpn.home.arpa")).isEqualTo("proxy-dns");
+        assertThat(resolverFor(dns, "nas.lan")).isEqualTo("local-dns");
+        assertThat(resolverFor(dns, "other.internal")).isEqualTo("local-dns");
+        assertThat(resolverFor(dns, "printer.local")).isEqualTo("local-dns");
+    }
+
+    /**
+     * Only a name a rule of the user's names itself is taken from the LAN: a
+     * keyword, a regex or a list says nothing of the LAN's own names, and the
+     * bypass list's "*.lan" sends them direct, which the LAN answers. Put
+     * above the LAN's suffixes, every rule of the user's took them: a Proxy
+     * keyword "home" sent router.home.arpa to the remote resolver, and with a
+     * Direct DNS of 8.8.8.8 the NAS was asked of Google. Where two rules name
+     * the same name, the first decides, as in the route.
+     */
+    @Test
+    void tunMode_aRuleThatDoesNotNameALanNameLeavesItToTheLan() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setBypassList(List.of("*.lan"));
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_KEYWORD, "home",
+                        RoutingRule.RuleAction.PROXY),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN, "db.corp.internal",
+                        RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "internal",
+                        RoutingRule.RuleAction.PROXY)));
+        AppSettings settings = tunSettings();
+        settings.setDirectDns("8.8.8.8");
+
+        JsonNode dns = parse(generator.generate(createVlessServer(), settings,
+                routingConfig)).get("dns");
+
+        assertThat(resolverFor(dns, "nas.lan")).isEqualTo("local-dns");
+        assertThat(resolverFor(dns, "router.home.arpa")).isEqualTo("local-dns");
+        assertThat(resolverFor(dns, "db.corp.internal")).isEqualTo("local-dns");
+        assertThat(resolverFor(dns, "wiki.corp.internal")).isEqualTo("proxy-dns");
+    }
+
+    /**
+     * The server the core asks for {@code name}: the first rule whose domain,
+     * domain suffix or keyword names it, as the core reads them, or dns.final.
+     */
+    private static String resolverFor(JsonNode dns, String name) {
+        for (JsonNode rule : dns.get("rules")) {
+            boolean matches = false;
+            for (JsonNode domain : rule.path("domain")) {
+                matches |= domain.asString().equals(name);
+            }
+            for (JsonNode suffix : rule.path("domain_suffix")) {
+                String s = suffix.asString();
+                matches |= s.startsWith(".") ? name.endsWith(s)
+                        : name.equals(s) || name.endsWith("." + s);
+            }
+            for (JsonNode keyword : rule.path("domain_keyword")) {
+                matches |= name.contains(keyword.asString());
+            }
+            if (matches) {
+                return rule.get("server").asString();
+            }
+        }
+        return dns.get("final").asString();
     }
 
     /**
