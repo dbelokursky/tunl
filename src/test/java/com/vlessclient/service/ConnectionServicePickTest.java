@@ -37,6 +37,8 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
+import javafx.beans.property.ReadOnlyStringProperty;
+import javafx.beans.property.ReadOnlyStringWrapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -830,6 +832,70 @@ class ConnectionServicePickTest {
         assertThat(engine.calls).as("no stop for a start the core would refuse")
                 .containsExactly("start");
         assertThat(engine.isRunning()).isTrue();
+    }
+
+    /**
+     * A refresh's re-pick left the tunnel on the withdrawn server; then an
+     * agent's select_server of the server the store picked, which says a
+     * connected tunnel switches to it at once. It was answered active:true
+     * and moved nothing, as the pick changed nothing in the list: the user's
+     * pick now, it restarts the tunnel there.
+     */
+    @Test
+    void anAgentsSelectServerOfTheStoresPickMovesTheTunnelThere() throws Exception {
+        subscribedPairInTun();
+        PickEngine engine = engine();
+        engine.prompts = true;
+        serviceOver(engine);
+        assertThat(service.connect().started()).isTrue();
+        store.applyServerBatch(List.of(), List.of("srv-1"), ConfigStore.Removal.UNASKED);
+        assertThat(service.switchToActiveServer().outcome())
+                .isEqualTo(ConnectionService.Outcome.DEFERRED);
+        DefaultAppControlService control = new DefaultAppControlService(store, null, null,
+                new RoutingService(), service, null, null, engine);
+
+        assertThat(control.selectServer("srv-2").active()).isTrue();
+        ConnectionService.ConnectAttempt pick = service.switchToActiveServer();
+
+        assertThat(pick.outcome()).isEqualTo(ConnectionService.Outcome.STARTED);
+        assertThat(service.appliedServerId()).isEqualTo("srv-2");
+        assertThat(engine.modes).containsExactly(ProxyMode.TUN, ProxyMode.TUN);
+    }
+
+    /**
+     * get_status while the tunnel stays on a server a refresh withdrew: the
+     * server the core routes through was looked up in the list alone, and
+     * read as none, so an agent could not tell the tunnel ran anything but
+     * the active server.
+     */
+    @Test
+    void getStatusNamesTheWithdrawnServerTheTunnelStaysOn() throws Exception {
+        subscribedPairInTun();
+        PickEngine engine = engine();
+        engine.prompts = true;
+        serviceOver(engine);
+        assertThat(service.connect().started()).isTrue();
+        engine.report(ConnectionState.CONNECTED);
+        store.applyServerBatch(List.of(), List.of("srv-1"), ConfigStore.Removal.UNASKED);
+        assertThat(service.switchToActiveServer().outcome())
+                .isEqualTo(ConnectionService.Outcome.DEFERRED);
+        ReadOnlyStringWrapper routedTag = new ReadOnlyStringWrapper(OutboundTags.server("srv-1"));
+        ProxyGroupMonitor monitor = new ProxyGroupMonitor() {
+            @Override
+            public ReadOnlyStringProperty currentMemberTagProperty() {
+                return routedTag.getReadOnlyProperty();
+            }
+        };
+        DefaultAppControlService control = new DefaultAppControlService(store, null, null,
+                new RoutingService(), service, null, null, engine, null, monitor);
+
+        com.vlessclient.service.mcp.StatusInfo status = control.getStatus();
+
+        assertThat(List.of(String.valueOf(status.activeServerId()),
+                        String.valueOf(status.currentServerId()),
+                        String.valueOf(status.currentServer())))
+                .as("[the active server, the server routed through, its name]")
+                .containsExactly("srv-2", "srv-1", "Tokyo");
     }
 
     /** A pick the user makes is asked for, prompt or not, and restarts as before. */

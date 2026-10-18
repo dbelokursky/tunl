@@ -358,6 +358,33 @@ public class DashboardServerPickTest extends ApplicationTest {
     }
 
     /**
+     * A refresh's re-pick left the TUN tunnel on the withdrawn server; the
+     * user then clicks the ticked server in the tray (or its row in the list,
+     * or an agent selects it). The click changed nothing in the list, so the
+     * card heard nothing, and the tunnel stayed on the withdrawn server: the
+     * user's pick now, it moves the tunnel there, prompt and all.
+     */
+    @Test
+    void aClickOnTheStoresPickMovesTheTunnelThere() throws Exception {
+        store.getSettings().setProxyMode(ProxyMode.TUN);
+        engine.prompts = true;
+        interact(controller::toggleConnection);
+        awaitState(ConnectionState.CONNECTED);
+        store.applyServerBatch(List.of(), List.of(tokyo.getId()), ConfigStore.Removal.UNASKED);
+        Await.until("the reconnect offered", () -> visible("#pendingChangesBanner"),
+                Duration.ofSeconds(5));
+        awaitTheCardsSwitchDone();
+        assertThat(engine.starts).containsExactly(ProxyMode.TUN);
+
+        // TrayIconService's Servers menu: Platform.runLater(() -> selectActiveServer(id)).
+        interact(() -> store.setActiveServer(osaka.getId()));
+
+        Await.until("the tunnel on Osaka", () -> osaka.getId().equals(service.appliedServerId()),
+                Duration.ofSeconds(10));
+        assertThat(engine.starts).containsExactly(ProxyMode.TUN, ProxyMode.TUN);
+    }
+
+    /**
      * The user deletes Tokyo, the server the TUN tunnel runs on, on the
      * Servers page, under a core whose every launch prompts. The tunnel
      * leaves it for the server picked in its place, as it does for a pick
@@ -511,6 +538,13 @@ public class DashboardServerPickTest extends ApplicationTest {
         tls.setRealityShortId("0123456789abcdef01");
         frankfurt.setTls(tls);
         return frankfurt;
+    }
+
+    /** Waits for the card's switch to be done: Connect is held while one runs. */
+    private void awaitTheCardsSwitchDone() {
+        Await.until("the card's switch done",
+                () -> onFx(() -> !lookup("#connectButton").query().isDisabled()),
+                Duration.ofSeconds(10));
     }
 
     private boolean visible(String id) {

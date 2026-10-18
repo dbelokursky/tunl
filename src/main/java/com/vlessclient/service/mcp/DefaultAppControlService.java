@@ -194,9 +194,18 @@ public final class DefaultAppControlService implements AppControlService {
                     ? healthState.get() : TunnelHealth.UNMONITORED;
             String tag = state == ConnectionState.CONNECTED && groupMonitor != null
                     ? groupMonitor.currentMemberTagProperty().get() : null;
+            // A server the core runs that has left the list, as one a refresh
+            // withdrew while the tunnel stays on it until a reconnect, is named
+            // as the core was started with it: looked up in the list alone, it
+            // read as no server at all, beside the active one the next start
+            // takes.
             ServerConfig routed = tag == null ? null : configStore.getServers().stream()
                     .filter(server -> tag.equals(OutboundTags.server(server)))
-                    .findFirst().orElse(null);
+                    .findFirst()
+                    .or(() -> connectionService == null ? Optional.empty()
+                            : connectionService.appliedServer().filter(
+                                    server -> tag.equals(OutboundTags.server(server))))
+                    .orElse(null);
             // The settings' mode is what the next start uses; a mode changed
             // there does not change the running core's, and get_status said
             // the new one as if it were running.

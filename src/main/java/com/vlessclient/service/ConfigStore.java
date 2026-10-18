@@ -307,6 +307,19 @@ public class ConfigStore {
             }
             if (any) {
                 pickedByTheStore = false;
+            } else if (pickedByTheStore) {
+                // The store's own pick, picked again: the user's now. Nothing
+                // in the list changed, so nothing heard of it, and a tunnel
+                // that leaves the store's pick to the user's reconnect stayed
+                // on the server it ran, while select_server, a click on the
+                // ticked server in the tray or a click on its row answered as
+                // if it had moved. Its listeners hear of it now; nothing is
+                // saved, as nothing saved has changed.
+                int at = indexOfServer(serverId);
+                if (at >= 0 && servers.get(at).isActive()) {
+                    pickedByTheStore = false;
+                    servers.set(at, servers.get(at));
+                }
             }
             return any;
         });

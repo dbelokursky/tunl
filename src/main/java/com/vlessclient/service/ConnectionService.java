@@ -184,8 +184,12 @@ public class ConnectionService {
     private volatile Run run;
     /** The ports the last core listened on, which a restart may find in its TIME_WAIT. */
     private volatile Set<Integer> lastCorePorts = Set.of();
-    /** The server the running core was last pointed at, by a start or a live switch. */
-    private volatile String appliedServerId;
+    /**
+     * The server the running core was last pointed at, by a start or a live
+     * switch, as it was then: kept as the object, so it is still named once
+     * it has left the list.
+     */
+    private volatile ServerConfig appliedServer;
 
     /** What the running core was started without, for the UI; changed on the FX thread. */
     private final ReadOnlyObjectWrapper<List<SkippedServer>> skippedServers =
@@ -683,7 +687,7 @@ public class ConnectionService {
                 LiveSelector prepared = new LiveSelector(
                         configGenerator.generate(members, active, generatedFrom, routing, host));
                 Run previous = run;
-                String previousServer = appliedServerId;
+                ServerConfig previousServer = appliedServer;
                 run = new Run(prepared, mode, chosenPorts(settings), idsOf(skipped),
                         Map.copyOf(refusedAtCheck), host, pickedUnder);
                 // Set with the run, for the same reason: followActiveServer and
@@ -692,13 +696,13 @@ public class ConnectionService {
                 // read as none on a first start, so a pick made while
                 // connecting was not applied, and on a later start as the
                 // server of the start before.
-                appliedServerId = active.getId();
+                appliedServer = active;
                 try {
                     engine.start(prepared.config(), mode);
                     break;
                 } catch (ConfigRejectedException e) {
                     run = previous;
-                    appliedServerId = previousServer;
+                    appliedServer = previousServer;
                     Refusal refusal = refusalOf(e, prepared.config(), members).orElse(null);
                     if (refusal == null) {
                         throw e;
@@ -727,7 +731,7 @@ public class ConnectionService {
                     // restart had stopped the working tunnel before the
                     // prompt, which leaves the reconnect to the user.
                     run = previous;
-                    appliedServerId = previousServer;
+                    appliedServer = previousServer;
                     if (!recovery.offerReconnect(pickedUnder)) {
                         recovery.cancel();
                     }
@@ -735,7 +739,7 @@ public class ConnectionService {
                     return new ConnectAttempt(Outcome.CANCELLED, active);
                 } catch (IOException | IllegalStateException e) {
                     run = previous;
-                    appliedServerId = previousServer;
+                    appliedServer = previousServer;
                     throw e;
                 }
             }
@@ -920,7 +924,7 @@ public class ConnectionService {
      * follow.</p>
      */
     void followActiveServer() {
-        String applied = appliedServerId;
+        String applied = appliedServerId();
         if (applied == null || configStore == null
                 || configStore.getSettings().getServerSelection() != ServerSelection.SINGLE) {
             return;
@@ -950,7 +954,20 @@ public class ConnectionService {
      * @return the server's id, or null before any start
      */
     public String appliedServerId() {
-        return appliedServerId;
+        ServerConfig applied = appliedServer;
+        return applied != null ? applied.getId() : null;
+    }
+
+    /**
+     * The server the running core was last pointed at ({@link #appliedServerId}),
+     * as it was then: one that has left the list since, as a server a refresh
+     * withdrew while the tunnel stays on it until a reconnect, is still there
+     * to name.
+     *
+     * @return the server, or empty before any start
+     */
+    public Optional<ServerConfig> appliedServer() {
+        return Optional.ofNullable(appliedServer);
     }
 
     /**
@@ -1033,7 +1050,7 @@ public class ConnectionService {
             LiveSelector live = current.selector();
             String generated = generatedNow(candidates, active, inMode(settings, mode),
                     current.leftOut(), current.host());
-            if (active.getId().equals(appliedServerId) && live.matches(generated)) {
+            if (active.getId().equals(appliedServerId()) && live.matches(generated)) {
                 // The core runs the pick already: a start that read it, the
                 // recovery restart this pick waited for among them.
                 return new ConnectAttempt(Outcome.SWITCHED, active);
@@ -1048,7 +1065,7 @@ public class ConnectionService {
                     return new ConnectAttempt(Outcome.CANCELLED, active);
                 }
                 recovery.keptUp(request);
-                appliedServerId = active.getId();
+                appliedServer = active;
                 return new ConnectAttempt(Outcome.SWITCHED, active);
             }
             if (live.accepts(generated) && live.select(OutboundTags.server(active))) {
@@ -1060,7 +1077,7 @@ public class ConnectionService {
                 }
                 // The core kept running, so no state change will tell recovery.
                 recovery.keptUp(moved);
-                appliedServerId = active.getId();
+                appliedServer = active;
                 // Nor tell the engine that its log so far was another server's.
                 engine.forgetRealityRefusal();
                 return new ConnectAttempt(Outcome.SWITCHED, active);
@@ -1088,7 +1105,7 @@ public class ConnectionService {
                 }
             }
             if (refused != null) {
-                putThePickBack(appliedServerId, active);
+                putThePickBack(appliedServerId(), active);
                 throw refused;
             }
             // As for a live switch: the countdown of the server the restart

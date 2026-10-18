@@ -10,6 +10,8 @@ import com.vlessclient.testing.TestServers;
 import java.net.http.HttpClient;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import javafx.collections.ListChangeListener;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -122,5 +124,32 @@ class RemovalRepickTest {
 
         assertThat(theStoresOwn()).isFalse();
         assertThat(List.of(picked())).containsExactly("My own");
+    }
+
+    /**
+     * The store's own pick picked again, by select_server or a click on the
+     * ticked server in the tray or its row in the list, is the user's pick
+     * now, and the list's listeners hear of it: nothing changed in the list,
+     * so nothing heard of it, and the tunnel left on the withdrawn server
+     * stayed there while the pick was answered as made.
+     */
+    @Test
+    void theStoresOwnPickPickedAgainIsTheUsersAndHeard() {
+        subscribed();
+        served = ONLY_B;
+        subscriptions.refreshSubscription(subscriptions.getSubscriptions().getFirst().getId());
+        String b = FxExecutor.get(() -> store.getServers().stream().filter(ServerConfig::isActive)
+                .findFirst().orElseThrow().getId());
+        AtomicInteger changes = new AtomicInteger();
+        FxExecutor.run(() -> store.getServers().addListener(
+                (ListChangeListener<ServerConfig>) change -> changes.incrementAndGet()));
+
+        FxExecutor.run(() -> store.setActiveServer(b));
+
+        assertThat(theStoresOwn()).isFalse();
+        assertThat(changes).as("changes the list's listeners heard").hasValue(1);
+        assertThat(picked()).isEqualTo("[P] B");
+        FxExecutor.run(() -> store.setActiveServer(b));
+        assertThat(changes).as("a pick of the user's picked again changes nothing").hasValue(1);
     }
 }
