@@ -714,12 +714,14 @@ class LinuxTunLauncherTest {
     @Test
     void onlyTheExactGrantAnEarlierTunlMadeCountsAsIts() {
         Path core = Path.of("/usr/local/bin/my tools/sing-box");
+        // getcap prints the absolute path, which on a Windows build host carries a drive letter.
+        String path = core.toAbsolutePath().toString();
 
-        assertThat(LinuxTunLauncher.isEarlierGrant(core, core + " cap_net_admin=ep\n")).isTrue();
-        assertThat(LinuxTunLauncher.isEarlierGrant(core, core + " = cap_net_admin+ep")).isTrue();
-        assertThat(LinuxTunLauncher.isEarlierGrant(core, core + " cap_net_admin=eip")).isFalse();
+        assertThat(LinuxTunLauncher.isEarlierGrant(core, path + " cap_net_admin=ep\n")).isTrue();
+        assertThat(LinuxTunLauncher.isEarlierGrant(core, path + " = cap_net_admin+ep")).isTrue();
+        assertThat(LinuxTunLauncher.isEarlierGrant(core, path + " cap_net_admin=eip")).isFalse();
         assertThat(LinuxTunLauncher.isEarlierGrant(core,
-                core + " cap_net_admin,cap_net_bind_service=ep")).isFalse();
+                path + " cap_net_admin,cap_net_bind_service=ep")).isFalse();
         assertThat(LinuxTunLauncher.isEarlierGrant(core, "")).isFalse();
         assertThat(LinuxTunLauncher.isEarlierGrant(core, "/other/sing-box cap_net_admin=ep"))
                 .isFalse();
