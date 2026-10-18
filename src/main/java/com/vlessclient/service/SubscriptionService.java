@@ -102,9 +102,17 @@ public class SubscriptionService {
      * The last URL sealed under each subscription id, and the tag it produced.
      * Every save used to seal every URL again, one secret-tool process each on
      * macOS, and a refresh saves the list. Loading fills it with the tags the
-     * file already holds. Guarded by this object's monitor.
+     * file already holds. Guarded by this object's monitor, which a save
+     * holds only to read and fill it: the keychain runs outside.
      */
     private final Map<String, SealedUrl> urlSealCache = new HashMap<>();
+
+    /**
+     * Keeps the writes of subscriptions.json in order: a save takes it before
+     * its snapshot and lets it go after its write. Taken before this object's
+     * monitor, and never on the FX thread, which saves nothing.
+     */
+    private final Object writeOrder = new Object();
 
     /** A sealed URL and the plaintext that produced it. */
     private record SealedUrl(String plaintext, String tag) {
@@ -1457,77 +1465,113 @@ public class SubscriptionService {
         saveSubscriptions();
     }
 
-    synchronized void saveSubscriptions() {
-        if (configStore.getPersistenceState().isHeld(SUBSCRIPTIONS_FILE)) {
+    /**
+     * Writes subscriptions.json as the list is now, its URLs sealed when
+     * secure storage is on.
+     *
+     * <p>The whole save used to run inside this object's monitor, its
+     * keychain processes and its fsync included, and the FX thread takes that
+     * monitor for the list change of every add, edit and delete: one made
+     * while another save sealed a new URL froze the window until the keychain
+     * answered, which for a locked one is its unlock prompt, for up to two
+     * minutes. Now only the snapshot is taken, and the seal cache read and
+     * filled, under the monitor, as ConfigStore does for servers.json; the
+     * saves keep their order under a lock of their own, which the FX thread,
+     * saving nothing, never takes.</p>
+     */
+    void saveSubscriptions() {
+        PersistenceState persistence = configStore.getPersistenceState();
+        if (persistence.isHeld(SUBSCRIPTIONS_FILE)) {
             log.warn("Not saving {}: it could not be opened at startup", SUBSCRIPTIONS_FILE);
             return;
         }
         Path file = dataDir.resolve(SUBSCRIPTIONS_FILE);
-        try {
-            ObjectNode envelope = objectMapper.createObjectNode();
-            envelope.put("config_version", SUBSCRIPTIONS_CONFIG_VERSION);
-            ArrayNode list = objectMapper.valueToTree(serializableSubscriptions());
-            // An entry this build cannot read goes back as it came: it comes
-            // from a newer build, and its sealed URL names a keychain entry.
-            unreadableSubscriptions.forEach(entry -> list.add(entry.deepCopy()));
-            envelope.set("subscriptions", list);
-            if (envelopeExtras != null) {
-                envelope.setAll(envelopeExtras.deepCopy());
+        // Snapshot to write, under one lock: a later snapshot cannot land
+        // before an earlier one.
+        synchronized (writeOrder) {
+            try {
+                ArrayNode list;
+                List<JsonNode> keep;
+                ObjectNode extras;
+                synchronized (this) {
+                    list = objectMapper.valueToTree(new ArrayList<>(subscriptions));
+                    keep = List.copyOf(unreadableSubscriptions);
+                    extras = envelopeExtras;
+                }
+                if (configStore.getSettings().isStoreSecretsSecurely() && sealer.isAvailable()) {
+                    sealUrls(list);
+                }
+                // An entry this build cannot read goes back as it came: it comes
+                // from a newer build, and its sealed URL names a keychain entry.
+                keep.forEach(entry -> list.add(entry.deepCopy()));
+                ObjectNode envelope = objectMapper.createObjectNode();
+                envelope.put("config_version", SUBSCRIPTIONS_CONFIG_VERSION);
+                envelope.set("subscriptions", list);
+                if (extras != null) {
+                    envelope.setAll(extras.deepCopy());
+                }
+                SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(envelope));
+                persistence.saved(SUBSCRIPTIONS_FILE);
+                ConfigStore.dropLegacyBackupOnceMigrated(file, objectMapper, "subscriptions");
+            } catch (IOException | JacksonException e) {
+                // JacksonException is unchecked in Jackson 3: a serialization that
+                // failed escaped past the unsaved banner.
+                log.error("Failed to save subscriptions to {}", file, e);
+                persistence.failed(SUBSCRIPTIONS_FILE, this::saveSubscriptions);
             }
-            SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(envelope));
-            configStore.getPersistenceState().saved(SUBSCRIPTIONS_FILE);
-            ConfigStore.dropLegacyBackupOnceMigrated(file, objectMapper, "subscriptions");
-        } catch (IOException | JacksonException e) {
-            // JacksonException is unchecked in Jackson 3: a serialization that
-            // failed escaped past the unsaved banner.
-            log.error("Failed to save subscriptions to {}", file, e);
-            configStore.getPersistenceState().failed(SUBSCRIPTIONS_FILE, this::saveSubscriptions);
         }
     }
 
     /**
-     * The on-disk view of the subscription list. Subscription URLs usually
-     * embed the account token, so they get the same treatment as server
-     * credentials: plaintext in memory, sealed in the file when secure
-     * storage is enabled and a backend is available. A failed seal keeps the
-     * plaintext — a readable config always wins over a lost URL.
+     * Replaces the URLs in a snapshot of the list with their sealed tags.
+     * Subscription URLs usually embed the account token, so they get the same
+     * treatment as server credentials: plaintext in memory, sealed in the
+     * file. A failed seal keeps the plaintext — a readable config always wins
+     * over a lost URL.
      */
-    private List<Subscription> serializableSubscriptions() {
-        boolean sealing = configStore.getSettings().isStoreSecretsSecurely()
-                && sealer.isAvailable();
-        if (!sealing) {
-            return new ArrayList<>(subscriptions);
-        }
-        List<Subscription> out = new ArrayList<>(subscriptions.size());
-        for (Subscription live : subscriptions) {
-            String url = live.getUrl();
-            if (url == null || url.isBlank() || SecretSealer.isSealed(url)) {
-                out.add(live);
+    private void sealUrls(ArrayNode list) {
+        for (JsonNode node : list) {
+            if (!(node instanceof ObjectNode subscription)
+                    || !subscription.path("url").isString()) {
                 continue;
             }
-            SealedUrl cached = urlSealCache.get(live.getId());
-            String sealed = cached != null && cached.plaintext().equals(url)
-                    ? cached.tag()
-                    : sealer.seal(urlSecretKey(live.getId()), url);
+            String url = subscription.path("url").asString();
+            if (url.isBlank() || SecretSealer.isSealed(url)) {
+                continue;
+            }
+            String sealed = sealUrl(subscription.path("id").asString(""), url);
             if (sealed == null) {
                 log.warn("Could not seal URL for subscription '{}'; keeping plaintext",
-                        live.getName());
-                out.add(live);
+                        subscription.path("name").asString(""));
                 continue;
             }
-            urlSealCache.put(live.getId(), new SealedUrl(url, sealed));
-            try {
-                Subscription copy = objectMapper.readValue(
-                        objectMapper.writeValueAsString(live), Subscription.class);
-                copy.setUrl(sealed);
-                out.add(copy);
-            } catch (JacksonException e) {
-                log.warn("Could not copy subscription '{}' for sealing; keeping plaintext",
-                        live.getName(), e);
-                out.add(live);
+            subscription.put("url", sealed);
+        }
+    }
+
+    /**
+     * Seals one subscription's URL, or reuses the tag the cache holds for it;
+     * null when the seal failed. The keychain runs outside this object's
+     * monitor.
+     */
+    private String sealUrl(String subscriptionId, String url) {
+        synchronized (this) {
+            SealedUrl cached = urlSealCache.get(subscriptionId);
+            if (cached != null && cached.plaintext().equals(url)) {
+                return cached.tag();
             }
         }
-        return out;
+        String sealed = sealer.seal(urlSecretKey(subscriptionId), url);
+        if (sealed != null) {
+            synchronized (this) {
+                // Not for a subscription removed meanwhile, whose keychain
+                // entry is being deleted: the tag would name nothing.
+                if (findById(subscriptionId) != null) {
+                    urlSealCache.put(subscriptionId, new SealedUrl(url, sealed));
+                }
+            }
+        }
+        return sealed;
     }
 
     private static String urlSecretKey(String subscriptionId) {
