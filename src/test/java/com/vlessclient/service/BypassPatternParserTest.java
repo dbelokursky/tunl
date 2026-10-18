@@ -144,7 +144,7 @@ class BypassPatternParserTest {
     void anAddressTheCoreCannotReadIsLeftOutWithTheReason() {
         for (String line : java.util.List.of("192.168.1.256", "10.0.0.0/33", "192.168.01.1",
                 "010.0.0.1", "10.0.0.0/08", "cafe::/200", "1:2:3:4:5:6:7:8:9", "dead:beef",
-                "300.1.1.1:8080", "https://999.0.0.1/path")) {
+                "300.1.1.1:8080", "https://999.0.0.1/path", "02001:db8::/32", "00000::1")) {
             assertThat(BypassPatternParser.parse(line)).as(line).isNull();
             assertThat(BypassPatternParser.problem(line)).as(line).isPresent();
         }

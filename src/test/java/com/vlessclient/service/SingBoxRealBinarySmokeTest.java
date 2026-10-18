@@ -674,7 +674,7 @@ class SingBoxRealBinarySmokeTest {
         RoutingConfig routing = new RoutingConfig();
         routing.setBypassList(List.of("192.168.1.256", "10.0.0.0/33", "192.168.01.1",
                 "cafe::/200", "1:2:3:4:5:6:7:8:9", "dead:beef", ".", "*.", "example.com",
-                "10.0.0.0/8",
+                "10.0.0.0/8", "02001:db8::/32",
                 // Globs carrying what IDN cannot convert: an invisible mark from
                 // right-to-left text, a character outside the BMP.
                 "mail.*.example.com‏", "‏mail.*.example.org‎",

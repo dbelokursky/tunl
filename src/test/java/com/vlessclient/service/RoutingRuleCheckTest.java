@@ -63,13 +63,17 @@ class RoutingRuleCheckTest {
     static final List<String> CIDRS_THE_CORE_TAKES = List.of(
             "10.0.0.0/8", "10.0.0.1", "10.0.0.1/32", "0.0.0.0/0", "2001:db8::/32",
             "2001:db8::1", "::/0", "::ffff:10.0.0.1/128", "fe80::1%en0", "fe80::1%en0/64",
-            "2001:0db8:0000::/48");
+            "2001:0db8:0000::/48", "0002:db8::/32", "FE80::A/10", "1:2:3:4:5:6:1.2.3.4",
+            "::1.2.3.4");
 
     static final List<String> CIDRS_THE_CORE_REFUSES = List.of(
             "999.1.1.1/8", "010.0.0.0/8", "10.0.0.0/08", "10.0.0.0/+8", "10.0.0/24",
             "10.0.0.0.0/8", "10.0.0.256/32", "10.0.0.0/", "/8", "10.0.0.0/33",
             "2001:db8::/129", "2001:db8:::1/64", "g::1/64", "[2001:db8::]/32", "1.2.3.4/32/5",
-            " 10.0.0.0/8", "10.0.0.0/8 ", "example.com");
+            " 10.0.0.0/8", "10.0.0.0/8 ", "example.com",
+            // A group of five digits, a dotted quad with a leading zero, an
+            // empty zone: Java's literal parser takes each, netip does not.
+            "02001:db8::/32", "00000::1", "::ffff:010.0.0.1/128", "::01.2.3.4", "fe80::1%");
 
     @Test
     void aRegularExpressionIsCheckedAsGoReadsIt() {

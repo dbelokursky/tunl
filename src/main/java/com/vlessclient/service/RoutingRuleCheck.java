@@ -703,8 +703,24 @@ public final class RoutingRuleCheck {
     static boolean isIpv6Address(String address) {
         int zone = address.indexOf('%');
         String bare = zone < 0 ? address : address.substring(0, zone);
-        if (!bare.contains(":") || !bare.matches("[0-9A-Fa-f:.]+")) {
+        if (!bare.contains(":") || !bare.matches("[0-9A-Fa-f:.]+")
+                || zone == address.length() - 1) {
             return false;
+        }
+        // Java's literal parser also takes a group of five digits with a
+        // leading zero, a dotted quad with one, and an empty zone, all of which
+        // netip refuses ("each group must have 4 or less digits"): such a rule
+        // or bypass line passed here, and the core refused the configuration.
+        int lastColon = bare.lastIndexOf(':');
+        String quad = bare.substring(lastColon + 1);
+        boolean endsInQuad = quad.contains(".");
+        if (endsInQuad && !isIpv4Address(quad)) {
+            return false;
+        }
+        for (String group : bare.substring(0, endsInQuad ? lastColon : bare.length()).split(":")) {
+            if (group.length() > 4) {
+                return false;
+            }
         }
         try {
             // A literal only: nothing is looked up.
