@@ -1,12 +1,20 @@
 package com.vlessclient.app;
 
 import com.vlessclient.platform.Autostart;
+import com.vlessclient.platform.PlatformPaths;
 import com.vlessclient.service.TrayIconService;
+import com.vlessclient.testing.Await;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -20,6 +28,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * has to be ended before the service graph exists (#285).</p>
  */
 class AppStepsTest {
+
+    private static final String EARLIER_SESSION_CONFIGS = "earlier session configs";
 
     private final List<String> ran = new ArrayList<>();
 
@@ -150,6 +160,83 @@ class AppStepsTest {
         }
     }
 
+    /**
+     * The plain-text session configurations an earlier release left behind
+     * are removed at startup, before the graph, whose keychain read can wait
+     * on the user, and without holding the window back while the removal
+     * lists a temp dir that on Windows can hold tens of thousands of files.
+     */
+    @Test
+    void earlierReleasesSessionConfigsAreRemovedWithoutHoldingTheStartBack(@TempDir Path dataDir)
+            throws InterruptedException {
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch removed = new CountDownLatch(1);
+        AtomicReference<Thread> removedOn = new AtomicReference<>();
+        VlessClientApp app = new VlessClientApp(() -> {
+            try {
+                release.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            removedOn.set(Thread.currentThread());
+            removed.countDown();
+        });
+        List<String> names = names(app.startupSteps());
+        assertThat(names.indexOf(EARLIER_SESSION_CONFIGS)).isNotNegative()
+                .isLessThan(names.indexOf("services"));
+        SingleInstance held = SingleInstance.acquire(dataDir).orElseThrow();
+        try {
+            step(app, EARLIER_SESSION_CONFIGS).action().run();
+
+            assertThat(removed.getCount())
+                    .as("the step returned while the removal was still listing").isEqualTo(1);
+            release.countDown();
+            assertThat(removed.await(10, TimeUnit.SECONDS)).as("the removal still ran").isTrue();
+            assertThat(removedOn.get()).isNotSameAs(Thread.currentThread());
+        } finally {
+            release.countDown();
+            held.close();
+        }
+    }
+
+    /**
+     * Only the copy that holds the data dir removes them. Without the lock
+     * another copy may be running, of an earlier release perhaps, and still
+     * writing where the removal looks.
+     */
+    @Test
+    void aCopyWithoutTheLockLeavesEarlierReleasesSessionConfigsAlone()
+            throws InterruptedException {
+        assertThat(SingleInstance.current()).as("this test's copy holds no data dir").isEmpty();
+        CountDownLatch removed = new CountDownLatch(1);
+
+        step(new VlessClientApp(removed::countDown), EARLIER_SESSION_CONFIGS).action().run();
+
+        assertThat(removed.await(1, TimeUnit.SECONDS)).as("removed without the lock").isFalse();
+    }
+
+    /** The startup's own removal: a configuration a crash under 1.24 left in the temp dir. */
+    @Test
+    void theStartupRemovesAConfigurationA124CrashLeftInTheTempDir(@TempDir Path lockDir)
+            throws Exception {
+        Path dataDir = Files.createDirectories(PlatformPaths.current().dataDir());
+        String cache = JsonMapper.builder().build().writeValueAsString(
+                dataDir.resolve("cache").resolve("sing-box-tun.db").toString());
+        Path left = Files.writeString(Files.createTempFile(
+                        Path.of(System.getProperty("java.io.tmpdir")), "singbox-", ".json"),
+                "{\"experimental\":{\"cache_file\":{\"enabled\":true,\"path\":" + cache + "}}}");
+        SingleInstance held = SingleInstance.acquire(lockDir).orElseThrow();
+        try {
+            step(new VlessClientApp(), EARLIER_SESSION_CONFIGS).action().run();
+
+            Await.until("the configuration " + left + " is removed", () -> Files.notExists(left),
+                    Duration.ofSeconds(10));
+        } finally {
+            held.close();
+            Files.deleteIfExists(left);
+        }
+    }
+
     /** With no core installed, the lookup of the engine threw, and there was no tray. */
     @Test
     void theTrayIsMadeFromTheServicesBeforeAnyCoreIsInstalled() {
@@ -163,5 +250,11 @@ class AppStepsTest {
 
     private static List<String> names(List<AppSteps.Step> steps) {
         return steps.stream().map(AppSteps.Step::name).toList();
+    }
+
+    private static AppSteps.Step step(VlessClientApp app, String name) {
+        return app.startupSteps().stream()
+                .filter(step -> step.name().equals(name))
+                .findFirst().orElseThrow();
     }
 }
