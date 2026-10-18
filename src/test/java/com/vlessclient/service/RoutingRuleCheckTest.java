@@ -92,6 +92,60 @@ class RoutingRuleCheckTest {
         }
     }
 
+    /**
+     * The core has no wildcard in a domain, a suffix or a keyword: it compares
+     * the text, so "*.example.net" matched nothing while the bypass list on
+     * the same page read it as every name under example.net. A star is read
+     * the bypass list's way where the rule's type can say the same, a final
+     * dot is the root's, and anything else is refused with what to use.
+     */
+    @Test
+    void aWildcardIsReadAsTheBypassListReadsIt() {
+        assertThat(RoutingRuleCheck.coreName(RuleType.DOMAIN_SUFFIX, "*.Example.net"))
+                .isEqualTo("example.net");
+        assertThat(RoutingRuleCheck.coreName(RuleType.DOMAIN_SUFFIX, "*.пример.рф"))
+                .isEqualTo("xn--e1afmkfd.xn--p1ai");
+        assertThat(RoutingRuleCheck.coreName(RuleType.DOMAIN_SUFFIX, "example.org."))
+                .isEqualTo("example.org");
+        assertThat(RoutingRuleCheck.coreName(RuleType.DOMAIN_SUFFIX, ".example.org"))
+                .as("a leading dot is the core's own: every name under it, not itself")
+                .isEqualTo(".example.org");
+        assertThat(RoutingRuleCheck.coreName(RuleType.DOMAIN, "example.org."))
+                .isEqualTo("example.org");
+        assertThat(RoutingRuleCheck.coreName(RuleType.DOMAIN_KEYWORD, "*tracker*"))
+                .isEqualTo("tracker");
+        assertThat(RoutingRuleCheck.coreName(RuleType.DOMAIN_KEYWORD, "*.vk.com*"))
+                .isEqualTo("vk.com");
+        assertThat(RoutingRuleCheck.coreName(RuleType.DOMAIN_KEYWORD, "tracker."))
+                .as("no star: a keyword's dots are its own").isEqualTo("tracker.");
+        for (String value : List.of("*.example.net", "example.org.", ".example.org")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_SUFFIX, value)).as(value)
+                    .isEmpty();
+        }
+        assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_KEYWORD, "*tracker*")).isEmpty();
+        assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN, "example.org.")).isEmpty();
+
+        for (String value : List.of("*.example.net", "mail.*.com", "*example.net", ".example.net",
+                ".", "*")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN, value)).as("domain %s", value)
+                    .isPresent();
+        }
+        for (String value : List.of("*example.net", "example.*", "*.*.example.net",
+                "mail.*.com", "*.", ".", "*")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_SUFFIX, value))
+                    .as("suffix %s", value).isPresent();
+        }
+        // An empty keyword is in every name: the rule would have caught everything.
+        for (String value : List.of("foo*bar", "*", "**", "*.*", "*.")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_KEYWORD, value))
+                    .as("keyword %s", value).isPresent();
+        }
+        // Without a star a keyword is the core's own, a dot as well: it is in
+        // every name with one, and a rule stored with it worked.
+        assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_KEYWORD, ".")).isEmpty();
+        assertThat(RoutingRuleCheck.coreName(RuleType.DOMAIN_KEYWORD, ".")).isEqualTo(".");
+    }
+
     /** The core takes a space in a domain, but no hostname has one: the rule never matched. */
     @Test
     void aDomainWithASpaceIsRefused() {

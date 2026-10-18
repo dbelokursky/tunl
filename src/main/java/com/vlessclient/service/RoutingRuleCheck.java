@@ -101,13 +101,100 @@ public final class RoutingRuleCheck {
             case DOMAIN, DOMAIN_SUFFIX, DOMAIN_KEYWORD ->
                     value.chars().anyMatch(Character::isWhitespace)
                             ? Optional.of(I18n.get("routing.rule.problem.space"))
-                            : Optional.empty();
+                            : nameProblem(type, value);
             case DOMAIN_REGEX -> regexProblem(value);
             case IP_CIDR -> isCidr(value)
                     ? Optional.empty()
                     : Optional.of(I18n.get("routing.rule.problem.cidr"));
             case GEOSITE, GEOIP -> listProblem(type, ruleSetName(value));
         };
+    }
+
+    /**
+     * A domain, suffix or keyword as the core compares it: lower case,
+     * internationalized labels in punycode, a star read as the bypass list
+     * reads it and the root's final dot dropped. The core has no wildcard and
+     * compares the text, so "*.example.org", the bypass list's way to say
+     * every name under example.org, matched nothing as a suffix rule.
+     *
+     * @param type  {@code DOMAIN}, {@code DOMAIN_SUFFIX} or {@code DOMAIN_KEYWORD}
+     * @param value the rule's value, one {@link #problem} takes
+     * @return the value to write into the configuration
+     */
+    public static String coreName(RoutingRule.RuleType type, String value) {
+        String name = withoutWildcards(type, value.strip().toLowerCase(Locale.ROOT));
+        return BypassPatternParser.coreName(name == null ? value : name);
+    }
+
+    /**
+     * Why the core would not match this name as {@code type} says: a star it
+     * cannot read, or nothing left once the stars and the root's dot are
+     * gone. The core refuses an empty domain or suffix, and an empty keyword
+     * is in every name.
+     */
+    private static Optional<String> nameProblem(RoutingRule.RuleType type, String value) {
+        String name = withoutWildcards(type, value.strip().toLowerCase(Locale.ROOT));
+        if (name != null && !name.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(switch (type) {
+            case DOMAIN -> I18n.get("routing.rule.problem.name.domain");
+            case DOMAIN_SUFFIX -> I18n.get("routing.rule.problem.name.suffix");
+            default -> I18n.get("routing.rule.problem.name.keyword");
+        });
+    }
+
+    /**
+     * The name with the stars its type can read dropped, as the bypass list
+     * drops them: "*." in front of a suffix (every name under the rest), and
+     * stars at either end of a keyword, with the dots beside them. Null where
+     * a star is left: in a domain, which matches one name, or in the middle.
+     * A domain does not start with a dot either; a suffix that does is the
+     * core's own, for the names under it but not itself.
+     */
+    private static String withoutWildcards(RoutingRule.RuleType type, String name) {
+        return switch (type) {
+            case DOMAIN -> name.contains("*") || name.startsWith(".")
+                    ? null : withoutRootDot(name);
+            case DOMAIN_SUFFIX -> {
+                String suffix = name.startsWith("*.") ? name.substring(2) : name;
+                yield suffix.contains("*") ? null : withoutRootDot(suffix);
+            }
+            case DOMAIN_KEYWORD -> {
+                if (!name.contains("*")) {
+                    yield name;
+                }
+                int from = 0;
+                int to = name.length();
+                while (from < to && name.charAt(from) == '*') {
+                    from++;
+                }
+                while (to > from && name.charAt(to - 1) == '*') {
+                    to--;
+                }
+                String keyword = name.substring(from, to);
+                yield keyword.contains("*") ? null : stripDots(keyword);
+            }
+            default -> name;
+        };
+    }
+
+    /** The name without the root's dot at its end, which no name a connection carries has. */
+    private static String withoutRootDot(String name) {
+        int end = name.length();
+        while (end > 0 && name.charAt(end - 1) == '.') {
+            end--;
+        }
+        return name.substring(0, end);
+    }
+
+    /** The name without the dots at either end that stood beside a star. */
+    private static String stripDots(String name) {
+        int from = 0;
+        while (from < name.length() && name.charAt(from) == '.') {
+            from++;
+        }
+        return withoutRootDot(name.substring(from));
     }
 
     /**

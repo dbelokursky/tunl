@@ -674,6 +674,41 @@ class SingBoxConfigGeneratorRoutingTest {
                 .contains("^\\\\D+\\\\.Example$");
     }
 
+    /**
+     * A star or a final dot reached the core as typed, and the core compares
+     * text: "*.example.org" matched nothing while the bypass list on the same
+     * page read it as every name under example.org. A Direct rule left those
+     * sites in the tunnel, and in the blocked-only mode a Proxy rule left a
+     * blocked site and its lookups with the provider. The DNS mirror copied
+     * the same dead values.
+     */
+    @Test
+    void aWildcardInACustomRuleIsWrittenAsTheBypassListReadsIt() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setMode(com.vlessclient.model.RouteMode.BLOCKED_IN_RUSSIA);
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "*.example.org",
+                        RoutingRule.RuleAction.PROXY),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_KEYWORD, "*tracker*",
+                        RoutingRule.RuleAction.BLOCK),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN, "example.net.",
+                        RoutingRule.RuleAction.PROXY)));
+        AppSettings tun = new AppSettings();
+        tun.setProxyMode(com.vlessclient.model.ProxyMode.TUN);
+
+        JsonNode root = parse(generator.generate(createVlessServer(), tun, routingConfig));
+        String route = root.get("route").get("rules").toString();
+        String dns = root.get("dns").get("rules").toString();
+
+        assertThat(route).contains("{\"domain_suffix\":[\"example.org\"],\"action\":\"route\"")
+                .contains("{\"domain_keyword\":[\"tracker\"],\"action\":\"reject\"}")
+                .contains("{\"domain\":[\"example.net\"],\"action\":\"route\"")
+                .doesNotContain("*").doesNotContain("example.net.\"");
+        assertThat(dns).contains("{\"domain_suffix\":[\"example.org\"],\"server\":\"proxy-dns\"}")
+                .contains("{\"domain\":[\"example.net\"],\"server\":\"proxy-dns\"}")
+                .doesNotContain("*");
+    }
+
     /** The repository names its lists in lower case: "Google" was a 404, and no core. */
     @Test
     void aListNameIsWrittenInLowerCase() throws Exception {
