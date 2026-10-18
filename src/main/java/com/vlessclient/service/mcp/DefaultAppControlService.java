@@ -316,12 +316,35 @@ public final class DefaultAppControlService implements AppControlService {
      * A resolver's address as an agent sees it. A private DNS-over-HTTPS
      * resolver keeps the account in its path ({@code https://dns.nextdns.io/ab12cd}),
      * which the diagnostics bundle redacts; get_settings, which works with
-     * changes off, returned it whole. A bare address or {@code system} names
-     * no account and is shown as it is.
+     * changes off, returned it whole. Over DNS-over-TLS and DNS-over-QUIC the
+     * account is a label of the host ({@code tls://ab12cd.dns.nextdns.io}),
+     * and get_settings still gave it: a host name keeps only its last two
+     * labels, the provider's domain. An IP address or {@code system} names no
+     * account and is shown as it is.
      */
     private static String dnsForAgents(String address) {
-        return address == null || (address.indexOf('/') < 0 && address.indexOf('@') < 0)
+        String shown = address == null || (address.indexOf('/') < 0 && address.indexOf('@') < 0)
                 ? address : Redact.url(address);
+        return shown == null ? null : HOST_NAME.matcher(shown).replaceAll(
+                host -> java.util.regex.Matcher.quoteReplacement(providerDomain(host.group())));
+    }
+
+    /**
+     * A host name of three labels or more, in any script, where an account
+     * label can sit under the provider's domain. Read off the whole value, so
+     * a list typed before the field was checked is covered too.
+     */
+    private static final java.util.regex.Pattern HOST_NAME = java.util.regex.Pattern.compile(
+            "(?<![\\w.-])(?:[\\w-]{1,63}\\.){2,}[\\w-]{1,63}(?![\\w-])",
+            java.util.regex.Pattern.UNICODE_CHARACTER_CLASS);
+
+    /** {@code host} cut to its last two labels, or as it is when it is an IPv4 address. */
+    private static String providerDomain(String host) {
+        if (host.chars().allMatch(c -> c == '.' || (c >= '0' && c <= '9'))) {
+            return host;
+        }
+        int last = host.lastIndexOf('.');
+        return Redact.REDACTED + host.substring(host.lastIndexOf('.', last - 1));
     }
 
     @Override
