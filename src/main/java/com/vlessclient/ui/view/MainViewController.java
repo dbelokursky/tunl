@@ -81,9 +81,9 @@ public class MainViewController {
 
         // base.css sets the log and the bypass list in monospace, which
         // JavaFX draws in Courier New on a Mac; under this class it names
-        // Menlo there, as it always meant to.
-        if (rootNode != null && com.vlessclient.platform.Platform.current().isMac()) {
-            rootNode.getStyleClass().add("os-mac");
+        // Menlo there, as it always meant to. The dialogs get it too.
+        if (rootNode != null) {
+            OsStyleClass.applyTo(rootNode);
         }
 
         if (rootNode != null) {
