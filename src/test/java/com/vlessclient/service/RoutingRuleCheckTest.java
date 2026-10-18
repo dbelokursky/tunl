@@ -68,6 +68,34 @@ class RoutingRuleCheckTest {
     }
 
     /**
+     * The core matches a regex against the name in lower case and in
+     * punycode, the way SNI, DNS and a browser's CONNECT carry it: "^Mail\."
+     * or "\.рф$" passed here, the core took it, and the rule matched nothing.
+     */
+    @Test
+    void aRegexTheCoreCanNeverMatchIsRefused() {
+        for (String regex : List.of("^Mail\\.", "Gosuslugi\\.ru$", "(?-i)Mail", "\\QMail\\E",
+                "(?s:Mail)", "(?P<Sub>Mail)\\.ru")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .hasValueSatisfying(reason -> assertThat(reason).contains("(?i)"));
+        }
+        assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_REGEX, "^mail\\.Example"))
+                .hasValueSatisfying(reason -> assertThat(reason).contains(" E "));
+        for (String regex : List.of("\\.рф$", "яндекс", "^\\Qпочта\\E\\.")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .hasValueSatisfying(reason -> assertThat(reason).contains("punycode"));
+        }
+        // Upper case where it is not a letter of the name, and (?i).
+        for (String regex : List.of("(?i)^Mail\\.", "(?i:Mail)\\.ru$", "(?im)^Mail",
+                "[A-Za-z]+\\.ru$", "[[:upper:]a-z]+", "^\\D+\\.example$", "\\p{Lu}", "\\PL",
+                "\\x4A", "\\x{4A}", "(?P<Sub>mail)\\.ru", "(?<Sub>mail)", "(?U)a+",
+                "\\.xn--p1ai$", "[а-яa-z]+\\.ru$", "\\x{0440}\\x{0444}")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .isEmpty();
+        }
+    }
+
+    /**
      * The add-rule dialog names what the core would not take. For {@code \x{2014}}
      * it named "{2014}", a code point read as a repeat count.
      */

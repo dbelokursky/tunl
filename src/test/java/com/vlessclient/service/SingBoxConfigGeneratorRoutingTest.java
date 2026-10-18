@@ -659,7 +659,7 @@ class SingBoxConfigGeneratorRoutingTest {
                         RoutingRule.RuleAction.PROXY),
                 new RoutingRule(RoutingRule.RuleType.DOMAIN_KEYWORD, "Ads",
                         RoutingRule.RuleAction.BLOCK),
-                new RoutingRule(RoutingRule.RuleType.DOMAIN_REGEX, "^\\D+\\.Example$",
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_REGEX, "^\\D+\\.example$",
                         RoutingRule.RuleAction.BLOCK)));
 
         JsonNode rules = parse(generator.generate(createVlessServer(), defaultSettings,
@@ -671,7 +671,7 @@ class SingBoxConfigGeneratorRoutingTest {
                 .contains("\".xn--e1afmkfd.xn--p1ai\"")
                 .contains("\"ads\"")
                 .as("a regex is left alone: lower case would turn \\D into \\d")
-                .contains("^\\\\D+\\\\.Example$");
+                .contains("^\\\\D+\\\\.example$");
     }
 
     /**

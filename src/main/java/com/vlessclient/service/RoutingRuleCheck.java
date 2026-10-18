@@ -77,6 +77,10 @@ public final class RoutingRuleCheck {
     /** The inline flags Go has, as in (?i) or (?s-m:, with a flag after any "-". */
     private static final Pattern RE2_FLAGS = Pattern.compile("[imsU]*(?:-[imsU]+)?");
 
+    /** Flags that make an expression, or a part of it, take either case: (?i), (?im-s:. */
+    private static final Pattern CASE_INSENSITIVE =
+            Pattern.compile("\\(\\?[msU]*i[imsU]*(?:-[imsU]+)?[:)]");
+
     private RoutingRuleCheck() {
     }
 
@@ -279,8 +283,113 @@ public final class RoutingRuleCheck {
         }
         String construct = re2Unsupported(regex);
         return construct == null
-                ? Optional.empty()
+                ? letterProblem(regex)
                 : Optional.of(I18n.get("routing.rule.problem.regex.go", construct));
+    }
+
+    /**
+     * A letter the expression asks for that the core never sees: it matches
+     * the name in lower case and in punycode, as SNI, DNS and a browser's
+     * CONNECT carry it, so "^Mail\." or "\.рф$" passed here, the core took it,
+     * and the rule matched nothing. What a class, an escape, a group's name or
+     * its flags hold is not a letter of the name, and (?i) lets upper case
+     * through.
+     */
+    private static Optional<String> letterProblem(String regex) {
+        boolean anyCase = CASE_INSENSITIVE.matcher(regex).find();
+        int length = regex.length();
+        int i = 0;
+        while (i < length) {
+            int c = regex.codePointAt(i);
+            if (c == '\\' && i + 1 < length) {
+                char next = regex.charAt(i + 1);
+                if (next == 'Q') {
+                    // Literal text up to \E, or to the end.
+                    int end = regex.indexOf("\\E", i + 2);
+                    Optional<String> problem = literalProblem(
+                            regex.substring(i + 2, end < 0 ? length : end), anyCase);
+                    if (problem.isPresent()) {
+                        return problem;
+                    }
+                    i = end < 0 ? length : end + 2;
+                } else if ("pPx".indexOf(next) >= 0 && i + 2 < length
+                        && regex.charAt(i + 2) == '{') {
+                    int close = regex.indexOf('}', i + 3);
+                    i = close < 0 ? length : close + 1;
+                } else {
+                    // \xHH and \pL carry their letters after the escape's own.
+                    int letters = next == 'x' ? 2 : next == 'p' || next == 'P' ? 1 : 0;
+                    i += 1 + Character.charCount(regex.codePointAt(i + 1)) + letters;
+                }
+                continue;
+            }
+            if (c == '[') {
+                i = classEnd(regex, i);
+                continue;
+            }
+            if (regex.startsWith("(?", i)) {
+                // Flags or a group's name, up to what ends them.
+                int end = i + 2;
+                while (end < length && ":)>".indexOf(regex.charAt(end)) < 0) {
+                    end++;
+                }
+                i = end + 1;
+                continue;
+            }
+            Optional<String> problem = literalProblem(Character.toString(c), anyCase);
+            if (problem.isPresent()) {
+                return problem;
+            }
+            i += Character.charCount(c);
+        }
+        return Optional.empty();
+    }
+
+    /** Why a literal in an expression can never match a name as the core compares it. */
+    private static Optional<String> literalProblem(String literal, boolean anyCase) {
+        for (int c : literal.codePoints().toArray()) {
+            if (c > 0x7f) {
+                return Optional.of(I18n.get("routing.rule.problem.regex.ascii",
+                        Character.toString(c)));
+            }
+            if (!anyCase && c >= 'A' && c <= 'Z') {
+                return Optional.of(I18n.get("routing.rule.problem.regex.case",
+                        Character.toString(c)));
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * The index past the character class that opens at {@code start}, as Go
+     * reads one: a {@code ]} first belongs to it, and so does the {@code ]}
+     * of a POSIX class such as {@code [:alpha:]} inside it.
+     */
+    private static int classEnd(String regex, int start) {
+        int length = regex.length();
+        int i = start + 1;
+        if (i < length && regex.charAt(i) == '^') {
+            i++;
+        }
+        if (i < length && regex.charAt(i) == ']') {
+            i++;
+        }
+        while (i < length) {
+            char c = regex.charAt(i);
+            if (c == '\\') {
+                i += 2;
+                continue;
+            }
+            if (regex.startsWith("[:", i) && regex.indexOf(":]", i + 2) >= 0) {
+                i = regex.indexOf(":]", i + 2) + 2;
+                continue;
+            }
+            if (c == ']') {
+                return i + 1;
+            }
+            i++;
+        }
+        return length;
     }
 
     /**
