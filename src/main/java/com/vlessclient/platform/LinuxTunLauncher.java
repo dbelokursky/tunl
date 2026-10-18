@@ -126,12 +126,21 @@ public final class LinuxTunLauncher implements TunLauncher {
         // the chmod fails there, and setcap as root then made CAP_NET_ADMIN
         // available to every account on the machine, with no prompt. A grant
         // whose result getcap cannot show would be a prompt for nothing.
-        if (restrictToOwner(binary) && tool("getcap").isPresent()
+        boolean ownersAlone = restrictToOwner(binary);
+        if (ownersAlone && tool("getcap").isPresent()
                 && !hasNetAdminCapability(binary)) {
             grantNetAdminCapability(binary);
         }
 
-        boolean direct = hasNetAdminCapability(binary);
+        // Nor is a capability every account can use this user's to start on.
+        // Up to 1.24 such a core got the grant all the same, and after an
+        // upgrade the launch found it and took the promptless path, while the
+        // log said the core got no capability. It elevates per connect, as
+        // a fresh install does, and that elevated start removes the grant.
+        String capabilities = capabilitiesOf(binary);
+        boolean capable = capabilities.contains("cap_net_admin");
+        boolean direct = ownersAlone && capable;
+        String revoke = !ownersAlone && capable ? revokeEarlierGrant(binary, capabilities) : "";
         // An interrupt is the start being called off (at quit the recovery
         // scheduler and the MCP server interrupt their threads). It used to
         // fail getcap and the grant, which read as "no capability", and the
@@ -144,7 +153,7 @@ public final class LinuxTunLauncher implements TunLauncher {
         }
         String wrapper = direct
                 ? directWrapperCommand(binary, configFile)
-                : wrapperCommand(binary, configFile, stopSignalFile);
+                : revoke + wrapperCommand(binary, configFile, stopSignalFile);
         ProcessBuilder pb = direct
                 ? new ProcessBuilder("/bin/sh", "-c", wrapper)
                 : new ProcessBuilder(elevator, "/bin/sh", "-c", wrapper);
@@ -198,21 +207,80 @@ public final class LinuxTunLauncher implements TunLauncher {
      * survives restarts but not file replacement (core updates).
      */
     boolean hasNetAdminCapability(Path binary) throws InterruptedIOException {
+        return capabilitiesOf(binary).contains("cap_net_admin");
+    }
+
+    /**
+     * What getcap prints for the binary: its path and the capabilities it
+     * carries, or empty when it carries none or getcap cannot tell.
+     */
+    private String capabilitiesOf(Path binary) throws InterruptedIOException {
         Optional<Path> getcap = tool("getcap");
         if (getcap.isEmpty()) {
             log.debug("getcap not found in {} or {}", toolDirs, searchDirs);
-            return false;
+            return "";
         }
         try {
             CommandRunner.Result result = runner.run(List.of(
                     getcap.get().toString(), binary.toAbsolutePath().toString()));
-            return result.exitCode() == 0 && result.output().contains("cap_net_admin");
+            return result.exitCode() == 0 ? result.output() : "";
         } catch (InterruptedIOException e) {
             throw e;
         } catch (IOException e) {
             log.debug("getcap unavailable: {}", e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * The root wrapper's first command for a core that carries a capability
+     * every account can use: remove the grant an earlier Tunl gave it. The
+     * per-connect start runs as root anyway, so this costs no prompt of its
+     * own. Capabilities Tunl never gave are left alone.
+     *
+     * @param binary       the core
+     * @param getcapOutput what getcap printed for it
+     * @return the command, or empty when there is nothing of Tunl's to remove
+     */
+    private String revokeEarlierGrant(Path binary, String getcapOutput) {
+        if (!isEarlierGrant(binary, getcapOutput)) {
+            log.warn("{} carries capabilities every account on this machine can use ({});"
+                    + " they are not Tunl's, so it leaves them and elevates each connect",
+                    binary, getcapOutput.strip());
+            return "";
+        }
+        Optional<Path> setcap = tool("setcap");
+        if (setcap.isEmpty()) {
+            log.warn("{} carries the cap_net_admin grant an earlier Tunl gave it, which every"
+                    + " account on this machine can use; setcap was not found to remove it",
+                    binary);
+            return "";
+        }
+        log.warn("{} carries the cap_net_admin grant an earlier Tunl gave it, which every"
+                + " account on this machine can use; the elevated start removes it", binary);
+        return shellQuote(setcap.get().toString()) + " -r "
+                + shellQuote(binary.toAbsolutePath().toString()) + " 2>/dev/null; ";
+    }
+
+    /**
+     * Whether getcap's line for {@code binary} shows exactly the grant Tunl
+     * made up to 1.24, {@code setcap cap_net_admin+ep}: libcap 2.27 and later
+     * print it as {@code cap_net_admin=ep}, earlier ones as
+     * {@code = cap_net_admin+ep}. Any other set, such as an administrator's
+     * own, is not Tunl's to remove.
+     *
+     * @param binary       the core, by the path getcap was given
+     * @param getcapOutput what getcap printed for it
+     * @return true for that grant alone
+     */
+    static boolean isEarlierGrant(Path binary, String getcapOutput) {
+        String line = getcapOutput.strip();
+        String path = binary.toAbsolutePath().toString();
+        if (!line.startsWith(path + " ")) {
             return false;
         }
+        String caps = line.substring(path.length()).strip();
+        return caps.equals("cap_net_admin=ep") || caps.equals("= cap_net_admin+ep");
     }
 
     /** {@code name} by absolute path, where {@link #findTool} finds it. */

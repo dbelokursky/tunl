@@ -646,4 +646,101 @@ class LinuxTunLauncherTest {
         assertThat(runner.calls).extracting(List::getFirst).doesNotContain("elevator-that-must-not-launch")
                 .allMatch(tools.getFirst().resolve("getcap").toString()::equals);
     }
+
+    /**
+     * Up to 1.24 a system-wide core, root's and runnable by every account, got
+     * the grant all the same: the chmod failed and setcap still ran. Such a
+     * core gets no grant since, but an upgraded install still carried the old
+     * one: the launch read it and took the promptless path on a CAP_NET_ADMIN
+     * every account could use, while the log said the core got none. It
+     * elevates per connect now, and that elevated start takes the earlier
+     * grant off before it starts the core. libcap before 2.27 printed the
+     * same grant as "= cap_net_admin+ep".
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {" cap_net_admin=ep", " = cap_net_admin+ep"})
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+    void aSystemCoreAnEarlierTunlGrantedElevatesAndLosesTheGrant(String getcapSays,
+            @TempDir Path dir) throws Exception {
+        Path core = coreThisUserCannotRestrict(dir);
+        Path asked = dir.resolve("asked-to-elevate");
+        List<Path> tools = toolsIn(dir);
+        FakeRunner caps = new FakeRunner(cmd -> new CommandRunner.Result(0,
+                core.toAbsolutePath() + getcapSays + "\n"));
+        LinuxTunLauncher launcher =
+                new LinuxTunLauncher(caps, recordingElevator(dir, asked).toString(), tools);
+
+        TunLauncher.Launched launched = launcher.launch(core, dir.resolve("config.json"),
+                new TunLauncher.Prompt("setup", "each connect"));
+        spawned.add(launched.process().toHandle());
+        assertThat(launched.process().waitFor(10, TimeUnit.SECONDS)).isTrue();
+
+        assertThat(launched.promptsEachLaunch())
+                .as("a capability every account can use is not this user's to start on")
+                .isTrue();
+        List<String> elevated = Files.readAllLines(asked);
+        assertThat(elevated.subList(0, 2)).containsExactly("/bin/sh", "-c");
+        assertThat(elevated.get(2)).startsWith("'" + tools.getFirst().resolve("setcap") + "' -r '"
+                + core.toAbsolutePath() + "' 2>/dev/null; SBSTOP=");
+        assertThat(caps.calls).as("no new grant was asked for")
+                .noneMatch(cmd -> cmd.contains("cap_net_admin+ep"));
+    }
+
+    /**
+     * Capabilities Tunl never gave, such as an administrator's own broader
+     * grant, are left as they are; the connect still elevates rather than
+     * run on them.
+     */
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+    void aSystemCoreWithCapabilitiesTunlNeverGaveElevatesAndKeepsThem(@TempDir Path dir)
+            throws Exception {
+        Path core = coreThisUserCannotRestrict(dir);
+        Path asked = dir.resolve("asked-to-elevate");
+        FakeRunner caps = new FakeRunner(cmd -> new CommandRunner.Result(0,
+                core.toAbsolutePath() + " cap_net_admin,cap_net_raw=ep\n"));
+        LinuxTunLauncher launcher = new LinuxTunLauncher(caps,
+                recordingElevator(dir, asked).toString(), toolsIn(dir));
+
+        TunLauncher.Launched launched = launcher.launch(core, dir.resolve("config.json"),
+                new TunLauncher.Prompt("setup", "each connect"));
+        spawned.add(launched.process().toHandle());
+        assertThat(launched.process().waitFor(10, TimeUnit.SECONDS)).isTrue();
+
+        assertThat(launched.promptsEachLaunch()).isTrue();
+        assertThat(Files.readAllLines(asked).get(2)).startsWith("SBSTOP=").doesNotContain(" -r ");
+    }
+
+    @Test
+    void onlyTheExactGrantAnEarlierTunlMadeCountsAsIts() {
+        Path core = Path.of("/usr/local/bin/my tools/sing-box");
+
+        assertThat(LinuxTunLauncher.isEarlierGrant(core, core + " cap_net_admin=ep\n")).isTrue();
+        assertThat(LinuxTunLauncher.isEarlierGrant(core, core + " = cap_net_admin+ep")).isTrue();
+        assertThat(LinuxTunLauncher.isEarlierGrant(core, core + " cap_net_admin=eip")).isFalse();
+        assertThat(LinuxTunLauncher.isEarlierGrant(core,
+                core + " cap_net_admin,cap_net_bind_service=ep")).isFalse();
+        assertThat(LinuxTunLauncher.isEarlierGrant(core, "")).isFalse();
+        assertThat(LinuxTunLauncher.isEarlierGrant(core, "/other/sing-box cap_net_admin=ep"))
+                .isFalse();
+    }
+
+    /**
+     * A core whose permissions this user cannot change, as with root's own
+     * {@code /usr/bin/sing-box}: here a link to a file that is not there, so
+     * the chmod fails whoever runs the test.
+     */
+    private static Path coreThisUserCannotRestrict(Path dir) throws IOException {
+        Path core = Files.createSymbolicLink(dir.resolve("sing-box"), dir.resolve("root-owned"));
+        assertThat(LinuxTunLauncher.restrictToOwner(core)).isFalse();
+        return core;
+    }
+
+    /** A stand-in for pkexec that writes the command it was asked to run, one argument a line. */
+    private static Path recordingElevator(Path dir, Path record) throws IOException {
+        Path elevator = Files.writeString(dir.resolve("elevator"),
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" + record + "'\n");
+        elevator.toFile().setExecutable(true, true);
+        return elevator;
+    }
 }
