@@ -133,6 +133,16 @@ public class DashboardViewController implements ViewShownAware {
             new javafx.beans.property.SimpleStringProperty("dashboard.pending.changes");
 
     /**
+     * Whether a comparison of the running core with the settings is under
+     * way, whether a repaint asked for another meanwhile, and how many times
+     * the tunnel has been down: an answer read from a run that has ended is
+     * not shown. FX thread only.
+     */
+    private boolean pendingChecking;
+    private boolean pendingCheckAgain;
+    private long pendingRun;
+
+    /**
      * Set only while {@link #onViewShown()} copies persisted settings into the
      * combos. Both value listeners persist, and the server-selection one also
      * restarts a live tunnel — neither may fire for a change the user did not
@@ -987,9 +997,64 @@ public class DashboardViewController implements ViewShownAware {
             case IPV6_LOST -> "dashboard.network.ipv6.lost";
             case NONE -> "dashboard.pending.changes";
         });
-        boolean pending = connected
-                && (network != ConnectionService.NetworkChange.NONE
-                        || !service.runsCurrentSettings());
+        if (!connected) {
+            // A run that ended is not the one a comparison under way read.
+            pendingRun++;
+            showPendingChanges(false);
+            return;
+        }
+        if (network != ConnectionService.NetworkChange.NONE) {
+            showPendingChanges(true);
+            return;
+        }
+        // runsCurrentSettings generates the whole configuration again, from
+        // every server, and compares it with the running one. On this thread
+        // that took 84 ms at 10,000 servers, and up to 225, at every repaint
+        // while connected: each state change, health verdict and live switch
+        // froze the window. One asked for while one runs is made once it ends.
+        if (pendingChecking) {
+            pendingCheckAgain = true;
+            return;
+        }
+        checkPendingChanges(service);
+    }
+
+    /**
+     * Compares the running core with the settings off the FX thread, and
+     * shows the answer if the run it read is still the one connected on the
+     * network it started on. The answer shows even when asked again meanwhile,
+     * before the next comparison: asked for faster than one takes, the offer
+     * would never be shown.
+     */
+    private void checkPendingChanges(ConnectionService service) {
+        pendingChecking = true;
+        pendingCheckAgain = false;
+        long run = pendingRun;
+        Thread.startVirtualThread(() -> {
+            boolean pending;
+            try {
+                pending = !service.runsCurrentSettings();
+            } catch (RuntimeException e) {
+                log.debug("Could not compare the running core with the settings", e);
+                pending = false;
+            }
+            boolean offer = pending;
+            Platform.runLater(() -> {
+                pendingChecking = false;
+                if (run == pendingRun && currentConnectionState() == ConnectionState.CONNECTED
+                        && service.networkChangeProperty().get()
+                                == ConnectionService.NetworkChange.NONE) {
+                    showPendingChanges(offer);
+                }
+                if (pendingCheckAgain) {
+                    pendingCheckAgain = false;
+                    refreshPendingChanges(currentConnectionState());
+                }
+            });
+        });
+    }
+
+    private void showPendingChanges(boolean pending) {
         pendingChangesBanner.setVisible(pending);
         pendingChangesBanner.setManaged(pending);
     }

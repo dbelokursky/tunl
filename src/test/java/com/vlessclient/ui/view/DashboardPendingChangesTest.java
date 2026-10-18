@@ -12,12 +12,15 @@ import com.vlessclient.service.ConnectionService.ConnectAttempt;
 import com.vlessclient.service.ConnectionService.NetworkChange;
 import com.vlessclient.service.ConnectionService.Outcome;
 import com.vlessclient.service.SingBoxEngine;
+import com.vlessclient.testing.Await;
 import com.vlessclient.testing.UiTest;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
@@ -28,6 +31,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.layout.HBox;
 import javafx.stage.Stage;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
@@ -59,14 +63,23 @@ public class DashboardPendingChangesTest extends ApplicationTest {
     }
 
     private static final FakeEngine ENGINE = new FakeEngine();
-    /** What the stub service answers; read on the FX thread. */
+    /** What the stub service answers. */
     private static volatile boolean runsCurrentSettings = true;
+    /** How long the stub takes to answer, as a long server list makes it. */
+    private static volatile long comparisonMillis;
+    /** The comparisons made, and how many of them ran on the FX thread. */
+    private static final AtomicInteger COMPARISONS = new AtomicInteger();
+    private static final AtomicInteger COMPARISONS_ON_FX = new AtomicInteger();
+    /** Comparisons the stub has started and not answered yet. */
+    private static final AtomicInteger IN_FLIGHT = new AtomicInteger();
     /** The mode each reconnect asked for, and whether it ran on the FX thread. */
     private static final List<String> RECONNECTS = new CopyOnWriteArrayList<>();
     private static final CountDownLatch RECONNECTED = new CountDownLatch(1);
     /** How the network changed under the tunnel, as the stub service reports it. */
     private static final SimpleObjectProperty<NetworkChange> NETWORK =
             new SimpleObjectProperty<>(NetworkChange.NONE);
+
+    private static final Duration PATIENCE = Duration.ofSeconds(10);
 
     private ViewShownAware controller;
 
@@ -80,6 +93,18 @@ public class DashboardPendingChangesTest extends ApplicationTest {
                 new ConnectionService(null, null, null, SingBoxEngine.withoutCore()) {
                     @Override
                     public boolean runsCurrentSettings() {
+                        IN_FLIGHT.incrementAndGet();
+                        COMPARISONS.incrementAndGet();
+                        if (Platform.isFxApplicationThread()) {
+                            COMPARISONS_ON_FX.incrementAndGet();
+                        }
+                        try {
+                            Thread.sleep(comparisonMillis);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        } finally {
+                            IN_FLIGHT.decrementAndGet();
+                        }
                         return runsCurrentSettings;
                     }
 
@@ -98,6 +123,12 @@ public class DashboardPendingChangesTest extends ApplicationTest {
                 });
     }
 
+    @AfterEach
+    void disconnect() {
+        comparisonMillis = 0;
+        interact(() -> ENGINE.state.set(ConnectionState.DISCONNECTED));
+    }
+
     @Override
     public void start(Stage stage) throws Exception {
         FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/DashboardView.fxml"));
@@ -107,24 +138,99 @@ public class DashboardPendingChangesTest extends ApplicationTest {
         stage.show();
     }
 
+    /**
+     * The comparison is made off the FX thread, so whether the offer shows is
+     * waited for; that it goes once the tunnel is down is not.
+     */
     @Test
     void theOfferFollowsWhetherTheRunningCoreHasTheSettings() {
         assertThat(bannerShown()).as("nothing runs").isFalse();
 
         runsCurrentSettings = false;
         interact(() -> ENGINE.state.set(ConnectionState.CONNECTED));
-        assertThat(bannerShown()).as("connected on settings changed since").isTrue();
+        awaitBanner(true, "connected on settings changed since");
 
         runsCurrentSettings = true;
         interact(controller::onViewShown);
-        assertThat(bannerShown()).as("shown again, the core running the settings").isFalse();
+        awaitBanner(false, "shown again, the core running the settings");
 
         runsCurrentSettings = false;
         interact(controller::onViewShown);
-        assertThat(bannerShown()).as("back from a page that changed a setting").isTrue();
+        awaitBanner(true, "back from a page that changed a setting");
 
         interact(() -> ENGINE.state.set(ConnectionState.DISCONNECTED));
         assertThat(bannerShown()).as("disconnected").isFalse();
+    }
+
+    /**
+     * The comparison regenerates the whole configuration from every server
+     * and compares it with the running one: at 10,000 servers that took 84 ms,
+     * and up to 225, on every repaint while connected, and froze the window
+     * each time.
+     */
+    @Test
+    void theComparisonIsMadeOffTheFxThread() {
+        runsCurrentSettings = false;
+        COMPARISONS.set(0);
+        COMPARISONS_ON_FX.set(0);
+
+        interact(() -> ENGINE.state.set(ConnectionState.CONNECTED));
+        interact(controller::onViewShown);
+        awaitBanner(true, "connected on settings changed since");
+
+        assertThat(COMPARISONS).as("comparisons made").hasPositiveValue();
+        assertThat(COMPARISONS_ON_FX).as("comparisons made on the FX thread").hasValue(0);
+    }
+
+    @Test
+    void aSlowComparisonLeavesTheWindowFree() {
+        runsCurrentSettings = false;
+        comparisonMillis = 1500;
+
+        long started = System.nanoTime();
+        interact(() -> ENGINE.state.set(ConnectionState.CONNECTED));
+        long tookMillis = (System.nanoTime() - started) / 1_000_000;
+
+        assertThat(tookMillis).as("the state change's repaint, in ms").isLessThan(750);
+        awaitBanner(true, "connected on settings changed since");
+    }
+
+    /**
+     * Repaints come in bursts: a state change, a health verdict, the group
+     * monitor. Those asked for while a comparison runs are answered by one
+     * more, made once it ends, rather than by one each.
+     */
+    @Test
+    void repaintsDuringAComparisonAreAnsweredByOneMore() {
+        runsCurrentSettings = false;
+        comparisonMillis = 600;
+        interact(() -> ENGINE.state.set(ConnectionState.CONNECTED));
+        awaitBanner(true, "connected on settings changed since");
+        awaitComparisonsAnswered();
+        COMPARISONS.set(0);
+
+        for (int i = 0; i < 10; i++) {
+            interact(controller::onViewShown);
+        }
+        Await.until("the one more comparison", () -> COMPARISONS.get() >= 2, PATIENCE);
+        awaitComparisonsAnswered();
+
+        assertThat(COMPARISONS).as("comparisons for ten repaints").hasValue(2);
+    }
+
+    /** An answer the tunnel's going down overtook is not shown. */
+    @Test
+    void aComparisonOvertakenByADisconnectIsNotShown() throws InterruptedException {
+        runsCurrentSettings = false;
+        comparisonMillis = 600;
+        COMPARISONS.set(0);
+
+        interact(() -> ENGINE.state.set(ConnectionState.CONNECTED));
+        Await.until("a comparison to start", () -> COMPARISONS.get() > 0, PATIENCE);
+        interact(() -> ENGINE.state.set(ConnectionState.DISCONNECTED));
+        awaitComparisonsAnswered();
+
+        assertThat(bannerShown()).as("disconnected before the answer came").isFalse();
     }
 
     /**
@@ -166,12 +272,32 @@ public class DashboardPendingChangesTest extends ApplicationTest {
                 .isEqualTo(I18n.get("dashboard.network.ipv6.lost"));
 
         interact(() -> NETWORK.set(NetworkChange.NONE));
-        assertThat(bannerShown()).as("reconnected, or the network changed back").isFalse();
+        awaitBanner(false, "reconnected, or the network changed back");
         interact(() -> ENGINE.state.set(ConnectionState.DISCONNECTED));
     }
 
     private boolean bannerShown() {
         HBox banner = lookup("#pendingChangesBanner").queryAs(HBox.class);
         return banner.isVisible() && banner.isManaged();
+    }
+
+    private void awaitBanner(boolean shown, String when) {
+        Await.until((shown ? "the offer to show: " : "the offer to go: ") + when,
+                () -> onFx(this::bannerShown) == shown, PATIENCE);
+    }
+
+    /**
+     * Waits for the comparisons under way to answer, and for the answer each
+     * posts to the FX thread as it ends to land.
+     */
+    private void awaitComparisonsAnswered() {
+        Await.until("the comparisons under way to answer", () -> IN_FLIGHT.get() == 0, PATIENCE);
+        interact(() -> { });
+    }
+
+    private <T> T onFx(java.util.function.Supplier<T> work) {
+        List<T> result = new java.util.ArrayList<>(1);
+        interact(() -> result.add(work.get()));
+        return result.get(0);
     }
 }
