@@ -28,19 +28,23 @@ import org.slf4j.LoggerFactory;
  *       disappears — so a crashed app never leaks a privileged core.</li>
  * </ol>
  *
- * <p><b>Nothing on disk is ever elevated.</b> Both commands travel as
+ * <p><b>No script is read from disk.</b> Both commands travel as
  * {@code -EncodedCommand} blobs — base64 of UTF-16LE, the encoding PowerShell
  * requires — rather than as {@code .ps1} files passed to {@code -File}. Writing
- * them to {@code java.io.tmpdir} and elevating them by path was a local
- * privilege escalation: that directory is writable by the very user we are
- * elevating away from, {@code RunAs} reads the file at elevation time, and the
- * UAC prompt holds that window open for as long as the user takes to click
- * Yes. Any code already running as the user could swap the wrapper — or the
- * outer script that builds the elevation request — and ride a prompt the user
- * fully expects into administrator. The script bodies are compile-time
- * constants in the jar and the per-connect values are bound by
- * {@link #wrapperCommand} and {@link #outerCommand}, so there is no file to
- * swap and no window to win.</p>
+ * them to {@code java.io.tmpdir} and elevating them by path let the scripts be
+ * swapped while the UAC prompt waited for a click. The script bodies are
+ * compile-time constants in the jar and the per-connect values are bound by
+ * {@link #wrapperCommand} and {@link #outerCommand}.</p>
+ *
+ * <p><b>What the elevated side still runs.</b> The core in
+ * {@code %APPDATA%\VlessClient\bin}, on the session config the app wrote:
+ * files the user can write, as the per-user install's jar, runtime and
+ * {@code Tunl.cfg} under {@code %LOCALAPPDATA%\Tunl} are too. Code already
+ * running as the user can therefore make this prompt run what it likes,
+ * through the core or through the app that builds the request. The prompt is
+ * the user's consent to TUN mode, not a boundary against such code, and
+ * Microsoft does not count UAC as a security boundary either. Closing that
+ * takes a per-machine install with a privileged service.</p>
  */
 public final class WindowsTunLauncher implements TunLauncher {
 

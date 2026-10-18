@@ -158,7 +158,7 @@ class WindowsTunLauncherTest {
         }
     }
 
-    // --- nothing on disk gets elevated -----------------------------------
+    // --- no script is read from disk -------------------------------------
 
     /** The app recognises a declined prompt by this line, so the script has to write it. */
     @Test
