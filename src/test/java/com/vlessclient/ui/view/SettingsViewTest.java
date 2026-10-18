@@ -280,7 +280,10 @@ public class SettingsViewTest extends ApplicationTest {
         String storedAddress = store.getSettings().getTunIpv4Address();
         String storedName = store.getSettings().getTunInterfaceName();
         try {
-            for (String refused : List.of("172.19.0.1", "", "172.19.0.1/32", "300.1.1.1/30")) {
+            // The last three the core's netip refuses: a dropped octet, a
+            // leading zero and a signed prefix, which the check took.
+            for (String refused : List.of("172.19.0.1", "", "172.19.0.1/32", "300.1.1.1/30",
+                    "172.19.1/30", "172.19.0.01/30", "172.19.0.1/+30")) {
                 commit(address, refused, http);
                 assertThat(store.getSettings().getTunIpv4Address())
                         .as("the address stored after '%s'", refused).isEqualTo(storedAddress);

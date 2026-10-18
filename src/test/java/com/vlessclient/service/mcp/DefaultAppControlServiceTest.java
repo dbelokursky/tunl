@@ -492,8 +492,11 @@ class DefaultAppControlServiceTest {
                 .isInstanceOf(McpToolException.class).hasMessageContaining("true or false");
         assertThatThrownBy(() -> service.setSetting("server_selection", stringNode("fastest")))
                 .isInstanceOf(McpToolException.class).hasMessageContaining("single, auto_best");
+        // The core's netip also refuses a dropped octet, a leading zero and a
+        // prefix with a sign or a leading zero; each was stored.
         for (String network : new String[] {"172.20.0.1", "172.20.0.1/31", "fd00::1/126",
-                "tun0/30", "172.20.0.1/x"}) {
+                "tun0/30", "172.20.0.1/x", "172.20.1/30", "172.20.0.01/30", "172.20.0.1/030",
+                "172.20.0.1/+30"}) {
             assertThatThrownBy(() -> service.setSetting("tun_ipv4_address", stringNode(network)))
                     .as(network)
                     .isInstanceOf(McpToolException.class).hasMessageContaining("IPv4 network");

@@ -4,6 +4,7 @@ import com.vlessclient.app.I18n;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.model.TunSettings;
 import com.vlessclient.platform.PlatformPaths;
 import com.vlessclient.platform.SecretSealer;
 import com.vlessclient.platform.SecretSealers;
@@ -1212,6 +1213,18 @@ public class ConfigStore {
                 settings.setDirectDns(AppSettings.SYSTEM_DNS);
                 log.info("Direct DNS moved from the retired default {} to the system resolver",
                         AppSettings.RETIRED_DIRECT_DNS_DEFAULT);
+            }
+            // Settings and MCP stored a TUN address the core refuses, such as
+            // "172.19.0.01/30", and every TUN start failed over it. Read as the
+            // default, which the Settings page then shows. The core is given
+            // the address as it is, so space around it goes too.
+            String tunAddress = settings.getTunIpv4Address();
+            if (!TunSettings.isIpv4Network(tunAddress)) {
+                log.warn("TUN IPv4 address {} is not one the core takes; using {}",
+                        tunAddress, AppSettings.DEFAULT_TUN_IPV4_ADDRESS);
+                settings.setTunIpv4Address(AppSettings.DEFAULT_TUN_IPV4_ADDRESS);
+            } else if (!tunAddress.equals(tunAddress.trim())) {
+                settings.setTunIpv4Address(tunAddress.trim());
             }
             // Future incompatible versions dispatch their migrations here;
             // saving always stamps the version this build writes.

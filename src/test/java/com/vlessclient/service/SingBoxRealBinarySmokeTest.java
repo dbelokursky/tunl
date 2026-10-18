@@ -559,6 +559,29 @@ class SingBoxRealBinarySmokeTest {
     }
 
     /**
+     * The Settings field and MCP store a TUN address TunSettings takes, and
+     * the core is given it as it is: what one takes, the other has to. A
+     * leading zero, a dropped octet or a signed prefix passed the check, and
+     * every TUN start failed over it.
+     */
+    @Test
+    void tunSettingsTakesTheAddressesTheCoreTakes() throws Exception {
+        for (String network : List.of("172.19.0.1/30", "10.66.0.1/30", "10.0.0.1/8",
+                "192.168.100.1/24", "172.19.0.01/30", "172.019.0.1/30", "172.19.1/30",
+                "10.1/30", "172.19.0.1/030", "172.19.0.1/+30")) {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(ProxyMode.TUN);
+            settings.setTunIpv4Address(network);
+
+            boolean coreAccepts = checkPasses(generator.generate(serverFor(Protocol.VLESS),
+                    settings));
+            assertThat(com.vlessclient.model.TunSettings.isIpv4Network(network))
+                    .as("%s: sing-box check %s it", network, coreAccepts ? "accepts" : "refuses")
+                    .isEqualTo(coreAccepts);
+        }
+    }
+
+    /**
      * TUN mode with IPv6 turned off asks the core to resolve names to IPv4
      * only, and the core has to accept that as generated.
      */

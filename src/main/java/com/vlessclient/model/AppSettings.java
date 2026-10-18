@@ -134,8 +134,11 @@ public class AppSettings extends KeepsUnknownFields {
                 : "utun99";
     }
 
+    /** The TUN device's IPv4 network until the user picks another. */
+    public static final String DEFAULT_TUN_IPV4_ADDRESS = "172.19.0.1/30";
+
     @JsonProperty("tun_ipv4_address")
-    private String tunIpv4Address = "172.19.0.1/30";
+    private String tunIpv4Address = DEFAULT_TUN_IPV4_ADDRESS;
 
     /**
      * Whether the TUN device also takes an IPv6 address, so auto_route
