@@ -2,6 +2,7 @@ package com.vlessclient.service;
 
 import com.vlessclient.app.I18n;
 import java.net.IDN;
+import java.text.Normalizer;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
@@ -137,7 +138,7 @@ public final class BypassPatternParser {
         if (raw == null) {
             return null;
         }
-        String line = withoutFormatCharacters(raw).trim().toLowerCase(Locale.ROOT);
+        String line = lowerCase(withoutFormatCharacters(raw).trim());
         if (line.isEmpty() || line.startsWith("#")) {
             return null;
         }
@@ -203,22 +204,67 @@ public final class BypassPatternParser {
      * @return the name to write into the configuration
      */
     static String coreName(String name) {
-        String lower = name.strip().toLowerCase(Locale.ROOT);
+        String lower = lowerCase(name.strip());
         // IDN refuses the empty label before a leading dot.
         return lower.startsWith(".") ? "." + ascii(lower.substring(1)) : ascii(lower);
     }
 
     /**
+     * Lower case as UTS #46 has it, which browsers follow: as the locale-free
+     * lower case, but a capital sigma is the medial one wherever it stands,
+     * where Java's makes it final at the end of a word, and a capital sharp s
+     * is "ss".
+     */
+    private static String lowerCase(String name) {
+        return name.replace("Σ", "σ").replace("ẞ", "ss").toLowerCase(Locale.ROOT);
+    }
+
+    /**
      * The name as the core compares it: punycode for an internationalized
-     * one, which is all SNI and DNS carry. A name IDN cannot convert is kept
-     * as typed.
+     * one, which is all SNI and DNS carry, spelled as browsers spell it. A
+     * name IDN cannot convert is kept as typed.
+     *
+     * <p>Java's IDN is IDNA 2003, which maps a German sharp s to "ss", a final
+     * sigma to a medial one and drops a joiner; browsers follow UTS #46
+     * without transitional processing, which keeps all four. "straße.de"
+     * became strasse.de, another registrable domain, while browsers send
+     * xn--strae-oqa.de. A label holding one of the four is put in punycode
+     * as it is; the rest of what IDN maps, both read alike.</p>
      */
     private static String ascii(String name) {
+        if (name.codePoints().noneMatch(BypassPatternParser::isDeviation)) {
+            return idnaAscii(name);
+        }
+        StringBuilder out = new StringBuilder();
+        // The dots IDN reads as a name's dots.
+        String[] labels = name.split("[.。．｡]", -1);
+        for (int i = 0; i < labels.length; i++) {
+            if (i > 0) {
+                out.append('.');
+            }
+            String label = labels[i];
+            out.append(label.codePoints().anyMatch(BypassPatternParser::isDeviation)
+                    ? Punycode.label(Normalizer.normalize(label, Normalizer.Form.NFC))
+                    : label.isEmpty() ? "" : idnaAscii(label));
+        }
+        return out.toString();
+    }
+
+    private static String idnaAscii(String name) {
         try {
             return IDN.toASCII(name, IDN.ALLOW_UNASSIGNED);
         } catch (IllegalArgumentException notConvertible) {
             return name;
         }
+    }
+
+    /**
+     * The characters UTS #46 keeps where IDNA 2003 maps them: the sharp s,
+     * the final sigma, and the zero-width non-joiner and joiner.
+     */
+    private static boolean isDeviation(int c) {
+        return c == 0x00df || c == 0x03c2 || c == ZERO_WIDTH_NON_JOINER
+                || c == ZERO_WIDTH_JOINER;
     }
 
     /**

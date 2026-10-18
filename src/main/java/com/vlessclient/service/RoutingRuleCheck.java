@@ -137,7 +137,9 @@ public final class RoutingRuleCheck {
      * @return the value to write into the configuration
      */
     public static String coreName(RoutingRule.RuleType type, String value) {
-        String name = withoutWildcards(type, value.strip().toLowerCase(Locale.ROOT));
+        // Lower case is the name's own to do: Java's makes a capital sigma a
+        // final one at a word's end, which browsers do not send.
+        String name = withoutWildcards(type, value.strip());
         return BypassPatternParser.coreName(name == null ? value : name);
     }
 
@@ -148,7 +150,7 @@ public final class RoutingRuleCheck {
      * is in every name.
      */
     private static Optional<String> nameProblem(RoutingRule.RuleType type, String value) {
-        String name = withoutWildcards(type, value.strip().toLowerCase(Locale.ROOT));
+        String name = withoutWildcards(type, value.strip());
         if (name != null && !name.isEmpty()) {
             return Optional.empty();
         }

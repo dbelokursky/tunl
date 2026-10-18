@@ -173,6 +173,45 @@ class BypassPatternParserTest {
     }
 
     /**
+     * A name is written as browsers send it, by UTS #46 without transitional
+     * processing, as Chrome, Firefox and Safari do. Java's IDN is IDNA 2003,
+     * which turns a German sharp s into "ss", a final sigma into a medial one
+     * and drops a joiner: "straße.de" became strasse.de, another registrable
+     * domain, so a Direct rule for it sent strasse.de's traffic and lookups
+     * around the tunnel, while xn--strae-oqa.de, the name browsers send, still
+     * went through it. Expected values are what Node's WHATWG URL gives.
+     */
+    @Test
+    void aNameIsSpelledAsBrowsersSendIt() {
+        java.util.Map<String, String> sent = new java.util.LinkedHashMap<>();
+        sent.put("straße.de", "xn--strae-oqa.de");
+        sent.put("Straße.DE", "xn--strae-oqa.de");
+        sent.put("www.straße.de", "www.xn--strae-oqa.de");
+        sent.put("faß.de", "xn--fa-hia.de");
+        sent.put("ελληνικός.gr", "xn--qxaegecap6byf.gr");
+        sent.put("σοφίας.gr", "xn--kxae4bobt.gr");
+        sent.put("می‌خواهم.ir",
+                "xn--mgbn2ecje63gr19l.ir");
+        // Unchanged: a capital sigma is a medial one wherever it stands, and a
+        // capital sharp s is "ss", as UTS #46 maps them.
+        sent.put("ΕΛΛΗΝΙΚΌΣ.GR", "xn--qxaegecap4c9d.gr");
+        sent.put("STRAẞE.de", "strasse.de");
+        sent.put("Βουλή.gr", "xn--jxah1ap4a.gr");
+        sent.put("ÖBB.at", "xn--bb-eka.at");
+        sent.put("пример.рф", "xn--e1afmkfd.xn--p1ai");
+        sent.put("İstanbul.com", "xn--istanbul-o0e.com");
+        sent.forEach((typed, browser) ->
+                assertThat(BypassPatternParser.coreName(typed)).as(typed).isEqualTo(browser));
+
+        assertThat(BypassPatternParser.parse("*.maße.de")).isEqualTo(
+                new BypassPatternParser.Parsed(
+                        BypassPatternParser.Kind.DOMAIN_SUFFIX, "xn--mae-6ka.de"));
+        // No longer abc.com, a name of its own: the joiner stays, and no
+        // browser sends the name, which UTS #46 refuses.
+        assertThat(BypassPatternParser.coreName("ab‍c.com")).isNotEqualTo("abc.com");
+    }
+
+    /**
      * Text copied out of a right-to-left chat brings invisible directional
      * marks along. IDN refuses a label holding one, the label was kept as
      * typed, and the backslash put before every character but a letter or

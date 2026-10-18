@@ -675,6 +675,31 @@ class SingBoxConfigGeneratorRoutingTest {
     }
 
     /**
+     * A Direct rule for "straße.de" was written as strasse.de, another
+     * registrable domain: its traffic and lookups went around the tunnel,
+     * while xn--strae-oqa.de, the name browsers send, stayed in it.
+     */
+    @Test
+    void aRuleForANameWithASharpSNamesTheHostBrowsersSend() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "straße.de",
+                        RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN, "ελληνικός.gr",
+                        RoutingRule.RuleAction.BLOCK)));
+        AppSettings tun = new AppSettings();
+        tun.setProxyMode(com.vlessclient.model.ProxyMode.TUN);
+
+        JsonNode root = parse(generator.generate(createVlessServer(), tun, routingConfig));
+        String route = root.get("route").get("rules").toString();
+
+        assertThat(route).contains("\"xn--strae-oqa.de\"").contains("\"xn--qxaegecap6byf.gr\"")
+                .doesNotContain("strasse").doesNotContain("xn--qxaegecap4c9d");
+        assertThat(root.get("dns").get("rules").toString()).contains("\"xn--strae-oqa.de\"")
+                .doesNotContain("strasse");
+    }
+
+    /**
      * A star or a final dot reached the core as typed, and the core compares
      * text: "*.example.org" matched nothing while the bypass list on the same
      * page read it as every name under example.org. A Direct rule left those
