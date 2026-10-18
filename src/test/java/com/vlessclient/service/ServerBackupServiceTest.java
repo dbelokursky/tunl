@@ -324,6 +324,79 @@ class ServerBackupServiceTest {
     }
 
     /**
+     * Jackson's message quotes the token it could not read, and in a backup
+     * edited by hand whose credential lost its quotes, that token is the
+     * credential: the dialog showed it, and the log line the Servers view
+     * writes kept it in tunl.log, the file users attach to bug reports.
+     */
+    @Test
+    void aBackupWhoseCredentialLostItsQuotesFailsWithoutQuotingIt() throws IOException {
+        Path file = tempDir.resolve("backup.json");
+        for (String credential : List.of("Pw7SecretQx9", WG_PRIVATE_KEY.substring(0, 6) + "Qx9",
+                "b831381d-6324-4d53-ad4f-8cda48b30811")) {
+            Files.writeString(file, "{\"config_version\":1,\"servers\":[\n  {\"name\":\"DE\","
+                    + "\"protocol\":\"trojan\",\"address\":\"tr.example.com\",\"port\":443,"
+                    + "\"uuid\":" + credential + "}]}", StandardCharsets.UTF_8);
+
+            // What the Servers view shows, and what it logs (Redact.urlsIn of
+            // toString()); without a cause, no stack trace can print one either.
+            assertThatThrownBy(() -> backup.importFile(file))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("not valid JSON")
+                    .as("where the problem is, which is what a hand edit needs")
+                    .hasMessageContaining("line 2")
+                    .hasMessageNotContaining(credential.substring(0, 6))
+                    .hasNoCause()
+                    .satisfies(e -> assertThat(Redact.urlsIn(e.toString()))
+                            .doesNotContain(credential.substring(0, 6)));
+        }
+        assertThat(store.getServers()).isEmpty();
+    }
+
+    /**
+     * A value in a field of another type, as a hand edit leaves a credential
+     * pasted into the wrong one: Jackson's reason quoted it, and the import
+     * report showed it, as the error did when no entry could be read.
+     */
+    @Test
+    void aSkippedEntryIsReportedWithoutTheValueThatCouldNotBeRead() throws IOException {
+        Path file = tempDir.resolve("backup.json");
+        Files.writeString(file, """
+                {"config_version": 1, "servers": [
+                 {"name": "tls", "protocol": "trojan", "address": "198.51.100.7",
+                  "port": 443, "uuid": "pw", "tls": "Pw7SecretQx9"},
+                 {"name": "port", "protocol": "trojan", "address": "198.51.100.7",
+                  "port": "Pw7SecretQx9", "uuid": "pw"},
+                 {"name": "transport", "protocol": "vless", "address": "198.51.100.7",
+                  "port": 443, "uuid": "pw", "transport": {"type": "Pw7SecretQx9"}},
+                 "Pw7SecretQx9",
+                 {"name": "ok", "protocol": "vless", "address": "198.51.100.7",
+                  "port": 443, "uuid": "11111111-2222-3333-4444-555555555555"}]}
+                """, StandardCharsets.UTF_8);
+
+        ServerBackupService.ImportResult result = backup.importFile(file);
+
+        assertThat(result.added()).isEqualTo(1);
+        assertThat(result.skipped()).extracting(ServerBackupService.Skip::reason)
+                .allSatisfy(reason -> assertThat(reason).doesNotContain("Pw7"))
+                .containsExactly(
+                        com.vlessclient.app.I18n.get("servers.backup.import.unreadable.field",
+                                "tls"),
+                        com.vlessclient.app.I18n.get("servers.backup.import.unreadable.field",
+                                "port"),
+                        com.vlessclient.app.I18n.get("servers.backup.import.unreadable.field",
+                                "transport"),
+                        com.vlessclient.app.I18n.get("servers.backup.import.not.server"));
+        Files.writeString(file, "[{\"name\": \"port\", \"protocol\": \"trojan\", "
+                + "\"address\": \"198.51.100.7\", \"port\": \"Pw7SecretQx9\"}]",
+                StandardCharsets.UTF_8);
+        assertThatThrownBy(() -> backup.importFile(file))
+                .as("a file with no readable entry fails with the first reason")
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageNotContaining("Pw7");
+    }
+
+    /**
      * The name goes into the log on every connect. A link's name is cleaned of
      * control characters so it cannot forge a log line; a restored one was not.
      */

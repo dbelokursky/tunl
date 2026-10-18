@@ -1544,8 +1544,10 @@ public class SubscriptionService {
                     loaded.add(subscription);
                 } catch (JacksonException e) {
                     unreadable++;
-                    log.warn("Skipping a subscription entry this build cannot read: {}",
-                            e.getMessage());
+                    // By its field: Jackson's message quotes the value, and
+                    // this file's values include the account's URL.
+                    log.warn("Skipping a subscription entry this build cannot read ({})",
+                            StoredJson.where(e));
                     synchronized (this) {
                         unreadableSubscriptions.add(item);
                     }

@@ -18,6 +18,7 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.core.JacksonException;
+import tools.jackson.core.TokenStreamLocation;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.SerializationFeature;
@@ -251,7 +252,11 @@ public class ServerBackupService {
         try {
             root = objectMapper.readTree(text);
         } catch (JacksonException e) {
-            throw new IllegalArgumentException("File is not valid JSON: " + e.getMessage(), e);
+            // Where it broke, and not with the exception as the cause: its
+            // message quotes the token it could not read, and in a backup
+            // whose credential lost its quotes that token is the credential.
+            // The dialog showed it, and the Servers view logged it.
+            throw new IllegalArgumentException(notJson(e));
         }
         JsonNode items = root.isArray() ? root : root.path("servers");
         if (!items.isArray()) {
@@ -269,11 +274,28 @@ public class ServerBackupService {
                 } else {
                     skipped.add(new Skip(entryName(item, i), refusal));
                 }
-            } catch (IllegalArgumentException | JacksonException e) {
+            } catch (IllegalArgumentException e) {
                 skipped.add(new Skip(entryName(item, i), e.getMessage()));
+            } catch (JacksonException e) {
+                // By the field, never Jackson's reason, which quotes the value:
+                // a credential pasted into a field of another type was shown in
+                // the import report, and in the error when no entry was read.
+                String field = StoredJson.field(e);
+                skipped.add(new Skip(entryName(item, i), field == null
+                        ? I18n.get("servers.backup.import.not.server")
+                        : I18n.get("servers.backup.import.unreadable.field", field)));
             }
         }
         return parsed;
+    }
+
+    /** A backup that does not parse, worded by where it broke. */
+    private static String notJson(JacksonException failure) {
+        TokenStreamLocation at = failure.getLocation();
+        return at != null && at.getLineNr() > 0
+                ? I18n.get("servers.backup.import.not.json.at",
+                        String.valueOf(at.getLineNr()), String.valueOf(at.getColumnNr()))
+                : I18n.get("servers.backup.import.not.json");
     }
 
     /**

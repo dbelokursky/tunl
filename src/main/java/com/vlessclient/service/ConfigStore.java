@@ -977,8 +977,10 @@ public class ConfigStore {
                     // build wrote used to fail the whole list, quarantine
                     // servers.json and leave a downgraded install with nothing.
                     unreadable++;
-                    log.warn("Skipping a server entry this build cannot read: {}",
-                            e.getMessage());
+                    // By its field, not Jackson's message, which quotes the
+                    // value: a credential pasted into a field of another type.
+                    log.warn("Skipping a server entry this build cannot read ({})",
+                            StoredJson.where(e));
                     synchronized (this) {
                         unreadableServers.add(item);
                     }
