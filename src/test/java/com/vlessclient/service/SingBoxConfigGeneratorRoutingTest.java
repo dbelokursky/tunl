@@ -596,6 +596,31 @@ class SingBoxConfigGeneratorRoutingTest {
     }
 
     /**
+     * A Geosite or GeoIP rule naming a list the repositories do not publish
+     * passed sing-box check, and then the core did not start, whichever server
+     * was picked: its first download of the list was a 404. Such a rule,
+     * stored before the dialog checked the name, is left out.
+     */
+    @Test
+    void aStoredRuleForAListNobodyPublishesIsLeftOut() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.GEOSITE, "youtub",
+                        RoutingRule.RuleAction.PROXY),
+                new RoutingRule(RoutingRule.RuleType.GEOIP, "rus",
+                        RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.GEOSITE, "youtube",
+                        RoutingRule.RuleAction.PROXY)));
+
+        String json = generator.generate(createVlessServer(), defaultSettings, routingConfig);
+
+        assertThat(json).doesNotContain("geosite-youtub\"").doesNotContain("geosite-youtub.srs")
+                .doesNotContain("geoip-rus");
+        assertThat(parse(json).get("route").get("rule_set").toString())
+                .contains("geosite-youtube.srs");
+    }
+
+    /**
      * A rule without a type or an action threw a NullPointerException here,
      * so every connect failed. It is left out, and the rules around it stay.
      */

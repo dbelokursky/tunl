@@ -107,12 +107,39 @@ class RoutingRuleCheckTest {
     void aListNameIsReadInLowerCaseAndCheckedForWhatAUrlCannotCarry() {
         assertThat(RoutingRuleCheck.ruleSetName(" Google ")).isEqualTo("google");
         for (String name : List.of("google", "Google", "category-ads-all", "geolocation-!cn",
-                "apple@cn", "ru")) {
+                "apple@cn", "category-ru")) {
             assertThat(RoutingRuleCheck.problem(RuleType.GEOSITE, name)).as(name).isEmpty();
         }
         for (String name : List.of("google ads", "google/ads", "google?x", "#cn")) {
             assertThat(RoutingRuleCheck.problem(RuleType.GEOSITE, name)).as(name).isPresent();
             assertThat(RoutingRuleCheck.problem(RuleType.GEOIP, name)).as(name).isPresent();
+        }
+    }
+
+    /**
+     * A list the repositories do not publish was a 404 when the core fetched
+     * it at start, and the core does not start without its rule-sets: a typo
+     * such as "youtub" stopped every server from connecting, with a message
+     * that read like a blocked network. sing-geosite has no list "ru" (it is
+     * "category-ru"), and sing-geoip one per country with addresses of its own.
+     */
+    @Test
+    void aListNameIsOneTheRepositoryPublishes() {
+        for (String name : List.of("youtub", "ru", "category-ruu", "google@ru")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.GEOSITE, name)).as(name)
+                    .hasValueSatisfying(reason -> assertThat(reason).contains(name));
+        }
+        // The country bypass's own lists among them.
+        for (String name : List.of("youtube", "YouTube", "cn", "netflix", "google@cn",
+                "category-ads-all", "category-ru", "category-ir")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.GEOSITE, name)).as(name).isEmpty();
+        }
+        for (String name : List.of("rus", "private", "bv", "category-ru", "zz")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.GEOIP, name)).as(name)
+                    .hasValueSatisfying(reason -> assertThat(reason).contains(name));
+        }
+        for (String name : List.of("ru", "RU", "cn", "us", "ir")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.GEOIP, name)).as(name).isEmpty();
         }
     }
 

@@ -1,8 +1,15 @@
 package com.vlessclient.service;
 
 import com.vlessclient.app.I18n;
+import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.RoutingRule;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
 import java.net.Inet6Address;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Locale;
@@ -11,6 +18,9 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
+import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * What sing-box accepts as the value of a routing rule.
@@ -23,6 +33,8 @@ import java.util.regex.PatternSyntaxException;
  * pinned core.</p>
  */
 public final class RoutingRuleCheck {
+
+    private static final Logger log = LoggerFactory.getLogger(RoutingRuleCheck.class);
 
     /** An IPv4 field as Go reads it: 0 to 255, without a leading zero. */
     private static final String OCTET = "(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9][0-9]|[0-9])";
@@ -94,10 +106,64 @@ public final class RoutingRuleCheck {
             case IP_CIDR -> isCidr(value)
                     ? Optional.empty()
                     : Optional.of(I18n.get("routing.rule.problem.cidr"));
-            case GEOSITE, GEOIP -> RULE_SET_NAME.matcher(ruleSetName(value)).matches()
-                    ? Optional.empty()
-                    : Optional.of(I18n.get("routing.rule.problem.rule.set"));
+            case GEOSITE, GEOIP -> listProblem(type, ruleSetName(value));
         };
+    }
+
+    /**
+     * Why there is no list of this name to download. The core fetches a rule's
+     * list when it starts and does not start without it, and a name the
+     * repository does not publish, such as the typo "youtub", was a 404: every
+     * server failed to connect, with a message that read like a blocked
+     * network, until the rule was found and deleted.
+     */
+    private static Optional<String> listProblem(RoutingRule.RuleType type, String name) {
+        if (!RULE_SET_NAME.matcher(name).matches()) {
+            return Optional.of(I18n.get("routing.rule.problem.rule.set"));
+        }
+        if (type == RoutingRule.RuleType.GEOSITE) {
+            return GeositeLists.published(name)
+                    ? Optional.empty()
+                    : Optional.of(I18n.get("routing.rule.problem.geosite", name));
+        }
+        // sing-geoip has one list for each country with addresses of its own.
+        return RoutingConfig.isBypassCountry(name)
+                ? Optional.empty()
+                : Optional.of(I18n.get("routing.rule.problem.geoip", name));
+    }
+
+    /** The lists sing-geosite publishes, as {@code geosite-lists.txt} has them. */
+    private static final class GeositeLists {
+
+        private static final Set<String> NAMES = read();
+
+        private GeositeLists() {
+        }
+
+        static boolean published(String name) {
+            // Without the file every name passes, as before it existed: it
+            // must not leave out each Geosite rule the user has.
+            return NAMES.isEmpty() || NAMES.contains(name);
+        }
+
+        private static Set<String> read() {
+            try (InputStream in = RoutingRuleCheck.class.getResourceAsStream(
+                    "/geosite-lists.txt")) {
+                if (in == null) {
+                    log.error("geosite-lists.txt is missing; Geosite names go unchecked");
+                    return Set.of();
+                }
+                try (BufferedReader lines = new BufferedReader(
+                        new InputStreamReader(in, StandardCharsets.UTF_8))) {
+                    return lines.lines().map(String::strip)
+                            .filter(line -> !line.isEmpty() && !line.startsWith("#"))
+                            .collect(Collectors.toUnmodifiableSet());
+                }
+            } catch (IOException | UncheckedIOException e) {
+                log.error("Could not read geosite-lists.txt; Geosite names go unchecked", e);
+                return Set.of();
+            }
+        }
     }
 
     /**
