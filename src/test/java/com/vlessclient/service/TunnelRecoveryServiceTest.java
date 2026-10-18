@@ -106,6 +106,69 @@ class TunnelRecoveryServiceTest {
         assertThat(scheduler.jobs).hasSize(1);
     }
 
+    /**
+     * The health card's "reconnecting in 10 s [Cancel]" for failed checks,
+     * cancelled while the core runs on. The Cancel withdrew the user's
+     * request, so the core ran on for a tunnel nobody wanted: a pick in the
+     * list, the tray or by an agent was never applied to it, and a crash of
+     * it was never restarted. Only the restart goes now, and failed checks
+     * restart nothing more until the user asks for something.
+     */
+    @Test
+    void theCountdownsCancelUnderARunningCoreCallsOffTheRestartAndKeepsTheRequest() {
+        recovery.onConnectionState(ConnectionState.CONNECTED);
+        recovery.onHealth(TunnelHealth.BROKEN);
+        assertThat(scheduler.jobs).hasSize(1);
+
+        recovery.cancelCountdown();
+
+        assertThat(scheduler.jobs.getFirst().isCancelled()).as("the restart counted down to")
+                .isTrue();
+        assertThat(recovery.isTunnelWanted()).as("the user's request").isTrue();
+        recovery.onHealth(TunnelHealth.HEALTHY);
+        recovery.onHealth(TunnelHealth.BROKEN);
+        assertThat(scheduler.jobs).as("restarts for a failed check after the Cancel").hasSize(1);
+
+        recovery.onConnectionState(ConnectionState.ERROR);
+        assertThat(scheduler.jobs).as("a crash of the core, restarted").hasSize(2);
+        scheduler.jobs.get(1).run();
+        assertThat(starts).hasValue(1);
+    }
+
+    /** What the countdown's Cancel held off ends with the user's next request. */
+    @Test
+    void theNextRequestEndsWhatTheCountdownsCancelHeldOff() {
+        recovery.onConnectionState(ConnectionState.CONNECTED);
+        recovery.onHealth(TunnelHealth.BROKEN);
+        recovery.cancelCountdown();
+
+        recovery.connectionRequested();
+        recovery.onConnectionState(ConnectionState.CONNECTED);
+        recovery.onHealth(TunnelHealth.BROKEN);
+
+        assertThat(scheduler.jobs).hasSize(2);
+        assertThat(scheduler.jobs.get(1).seconds).as("the backoff's first step").isEqualTo(10);
+    }
+
+    /**
+     * With no core running, a crashed one counting down to its restart, the
+     * Cancel is the user giving up the tunnel, and withdraws the request as a
+     * Disconnect does.
+     */
+    @Test
+    void theCountdownsCancelOfACrashedCoresRestartWithdrawsTheRequest() {
+        recovery.onConnectionState(ConnectionState.CONNECTED);
+        recovery.onConnectionState(ConnectionState.ERROR);
+        assertThat(scheduler.jobs).hasSize(1);
+
+        recovery.cancelCountdown();
+
+        assertThat(scheduler.jobs.getFirst().isCancelled()).isTrue();
+        assertThat(recovery.isTunnelWanted()).isFalse();
+        recovery.onConnectionState(ConnectionState.ERROR);
+        assertThat(scheduler.jobs).hasSize(1);
+    }
+
     @Test
     void staleTimerCannotCancelANewerUserRequest() {
         recovery.onConnectionState(ConnectionState.ERROR);

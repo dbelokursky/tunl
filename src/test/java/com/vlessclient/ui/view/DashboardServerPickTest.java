@@ -12,6 +12,7 @@ import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.RoutingConfig;
 import com.vlessclient.model.ServerConfig;
 import com.vlessclient.model.TlsConfig;
+import com.vlessclient.model.TunnelHealth;
 import com.vlessclient.platform.ElevationDeclinedException;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
@@ -293,6 +294,40 @@ public class DashboardServerPickTest extends ApplicationTest {
         assertThat(engine.isRunning()).as("a core runs after the Disconnect").isFalse();
         assertThat(service.isTunnelWanted()).as("the tunnel wanted again").isFalse();
         assertThat(stateOnFx()).isEqualTo(ConnectionState.DISCONNECTED);
+    }
+
+    // ===== the countdown's Cancel is no Disconnect =====
+
+    /**
+     * The health card counts down to a restart for failed checks, and the
+     * user presses its Cancel, which leaves the core running; then picks
+     * Osaka in the list (the tray and an agent's select_server go the same
+     * way). The Cancel had withdrawn the request for the tunnel, so the pick
+     * was called off without a word: the list and the tray named Osaka while
+     * the traffic stayed on Tokyo.
+     */
+    @Test
+    void aPickAfterTheCountdownsCancelMovesTheTunnel() throws Exception {
+        store.getSettings().setHealthCheckAutoReconnect(true);
+        store.getSettings().setHealthCheckDelaySeconds(60);
+        interact(controller::toggleConnection);
+        awaitState(ConnectionState.CONNECTED);
+        service.getRecoveryService().onHealth(TunnelHealth.BROKEN);
+        Await.until("the countdown shown", () -> visible("#reconnectBanner"),
+                Duration.ofSeconds(5));
+
+        interact(() -> lookup("#cancelReconnectButton").queryButton().fire());
+        assertThat(visible("#reconnectBanner")).as("the countdown after its Cancel").isFalse();
+        assertThat(engine.isRunning()).as("the core after the Cancel").isTrue();
+        // Something the core does not run yet, so the pick restarts it.
+        store.getSettings().setCoreLogLevel(CoreLogLevel.DEBUG);
+
+        interact(() -> store.setActiveServer(osaka.getId()));
+
+        Await.until("the tunnel on Osaka", () -> osaka.getId().equals(service.appliedServerId()),
+                Duration.ofSeconds(10));
+        assertThat(engine.starts).containsExactly(ProxyMode.SYSTEM_PROXY, ProxyMode.SYSTEM_PROXY);
+        assertThat(service.isTunnelWanted()).isTrue();
     }
 
     // ===== a pick the tunnel does not take =====

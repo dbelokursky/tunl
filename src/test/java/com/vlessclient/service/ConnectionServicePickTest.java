@@ -458,6 +458,46 @@ class ConnectionServicePickTest {
     }
 
     /**
+     * The health card counts down to a restart for failed checks, and the
+     * user presses its Cancel; the core runs on. Then the user picks another
+     * server, in the list, the tray or through an agent. The Cancel had
+     * withdrawn the request for the tunnel, which a pick moves only while
+     * the user wants it: the pick was silently called off, and the traffic
+     * stayed on the server the checks had just found unreachable while the
+     * list, the tray and get_status named the new one.
+     */
+    @Test
+    void aPickAfterTheCountdownsCancelMovesTheRunningTunnel() throws Exception {
+        tokyoAndOsaka();
+        store.getSettings().setHealthCheckAutoReconnect(true);
+        store.getSettings().setHealthCheckDelaySeconds(60);
+        PickEngine engine = engine();
+        serviceOver(engine);
+        assertThat(service.connect().started()).isTrue();
+        engine.report(ConnectionState.CONNECTED);
+        TunnelRecoveryService recovery = service.getRecoveryService();
+        recovery.onHealth(TunnelHealth.BROKEN);
+        Await.until("the countdown", () -> FxExecutor.get(
+                () -> recovery.retryProperty().get()) != null, Duration.ofSeconds(5));
+        // The banner's Cancel.
+        recovery.cancelCountdown();
+        HttpServer api = fakeClashApi(store.getSettings().listenClashApiPort());
+        try {
+            store.setActiveServer("srv-2");
+
+            ConnectionService.ConnectAttempt pick = service.switchToActiveServer();
+
+            assertThat(pick.outcome()).isEqualTo(ConnectionService.Outcome.SWITCHED);
+            assertThat(service.appliedServerId()).as("the server the core runs")
+                    .isEqualTo("srv-2");
+            assertThat(engine.modes).as("starts").hasSize(1);
+            assertThat(service.isTunnelWanted()).isTrue();
+        } finally {
+            api.stop(0);
+        }
+    }
+
+    /**
      * A pick that reaches the service while a recovery restart is stopping
      * the core: the card still reads Connected, so the Dashboard asks for a
      * switch. The pick's own request called the restart off after its stop,

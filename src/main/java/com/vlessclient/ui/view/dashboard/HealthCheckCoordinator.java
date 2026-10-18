@@ -452,11 +452,13 @@ public final class HealthCheckCoordinator {
 
     /**
      * Stops a pending auto-reconnect countdown and hides the banner, wired to
-     * the banner's "Cancel" button.
+     * the banner's "Cancel" button. A core that runs on keeps the user's
+     * request, so a pick still moves it; with none running the request goes
+     * ({@link TunnelRecoveryService#cancelCountdown()}).
      */
     public void cancelReconnectCountdown() {
         if (recovery != null) {
-            recovery.cancel();
+            recovery.cancelCountdown();
         }
         hideReconnectBanner();
     }

@@ -62,6 +62,12 @@ public final class TunnelRecoveryService implements AutoCloseable {
      * one stands until they connect, disconnect or cancel.
      */
     private String stoppedBecause;
+    /**
+     * The request under which the user called off a countdown with a core
+     * running ({@link #cancelCountdown()}), or -1: under it, a failed health
+     * check restarts nothing.
+     */
+    private long countdownCancelledFor = -1;
     private ConnectionState lastState = ConnectionState.DISCONNECTED;
     /** The last reachability verdict, to re-arm a retry a request cancelled. */
     private TunnelHealth lastHealth = TunnelHealth.UNMONITORED;
@@ -278,6 +284,30 @@ public final class TunnelRecoveryService implements AutoCloseable {
         return true;
     }
 
+    /**
+     * Calls off the countdown the recovery banner shows, as its Cancel
+     * button does. While the core still runs, the restart alone goes: the
+     * user's request stands, and failed health checks restart nothing more
+     * until the user's next request (a connect, a reconnect, a disconnect,
+     * or a pick that moves the tunnel). With no core running, a crashed one
+     * counting down or recovery stopped, it withdraws the request, as a
+     * disconnect does.
+     *
+     * <p>It withdrew the request in every case, which left a running core
+     * with a tunnel nobody wanted: a server picked afterwards in the list,
+     * the tray or by an agent was never applied, since a pick moves only a
+     * tunnel the user wants, and a crash of that core was not restarted.</p>
+     */
+    public synchronized void cancelCountdown() {
+        if (stoppedBecause != null || lastState != ConnectionState.CONNECTED) {
+            cancel();
+            return;
+        }
+        attempts = 0;
+        countdownCancelledFor = generation;
+        cancelPending();
+    }
+
     /** Cancels automatic recovery, including a restart that has not reached start() yet. */
     public synchronized void cancel() {
         wanted = false;
@@ -354,6 +384,13 @@ public final class TunnelRecoveryService implements AutoCloseable {
         AppSettings config = settings.get();
         if (!wanted || closed || running || pending != null || stoppedBecause != null
                 || !config.isHealthCheckAutoReconnect()) {
+            return;
+        }
+        if (why == Reason.UNREACHABLE && countdownCancelledFor == generation) {
+            // The user called the last such restart off and kept the tunnel;
+            // a crash of its core is still restarted.
+            log.info("Not restarting the tunnel: {}, but the user cancelled the restart",
+                    why.described());
             return;
         }
         if (why == Reason.UNREACHABLE && !power.isAwake()) {
