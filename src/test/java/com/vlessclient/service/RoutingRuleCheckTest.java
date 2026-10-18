@@ -29,7 +29,12 @@ class RoutingRuleCheckTest {
             "^xn--\\x{30}{2}", "(?:\\x{41}){1000}", "((a{500}){0}){3}",
             "((a{500}){0}|a{300}){3}", "(?:(a{600}){0}b{2}){3}", "a{2}{01}", "a{01000}",
             // The inline flags Go has.
-            "(?im)a", "(?s-m)a", "(?U)a", "(?-i)a", "(?iU-ms:a)");
+            "(?im)a", "(?s-m)a", "(?U)a", "(?-i)a", "(?iU-ms:a)",
+            // A repeat of what an assertion, a group or a quote holds, and
+            // POSIX classes Go has.
+            "x(?i){2}", "^{2}", "\\b{2}", "\\Qab\\E{2}", "(?:){2}", "(|a)", "a{2}(?i){3}",
+            "^(www\\.)?example\\.com$", "[[:alnum:]]+", "[[:^alpha:]]", "[[:word:]-]",
+            "[]a]", "[^]a]");
 
     static final List<String> REGEXES_THE_CORE_REFUSES = List.of(
             "(", "[a", "a{2,1}", "*a", "(?=a)", "(?!a)", "(?<=a)b", "(?<!a)b", "(?>a)",
@@ -43,7 +48,17 @@ class RoutingRuleCheckTest {
             "a{2}{3}", "a*{2}", "\\™", "\\é", "((a{500}){0}|a{400}){3}",
             "((a{600}){0,}){2}",
             // Inline flags Java alone has, and a "-" with no flag after it.
-            "(?x)a b", "(?u)a", "(?d)a", "(?c)a", "(?ix)a", "(?x:a)", "(?-)a", "(?i-:a)");
+            "(?x)a b", "(?u)a", "(?d)a", "(?c)a", "(?ix)a", "(?x:a)", "(?-)a", "(?i-:a)",
+            // A repeat with nothing before it to repeat, a POSIX class Go does
+            // not have, and \Q inside a class.
+            "{1,3}\\.example\\.org$", "(www|{2})\\.example\\.com$", "(?i){2}example\\.com$",
+            "(?:{2})", "(?i:{2})", "a|{2}", "\\Q\\E{2}", "(?i)(?s){2}",
+            "^[[:alnum_:]]+\\.example\\.com$", "[[:ALPHA:]]", "[a[:b]c:]]",
+            "[\\Q.\\E]example\\.com$",
+            // A class inside a class, which Java has and Go reads as a "[":
+            // the range a-[, or what Java read inside it read by Go outside.
+            "^(?P<sub>[a-[\\-]z]+)\\.example\\.com$", "[a-[b]]", "[a-[:alpha:]]", "[]-[b]]",
+            "[a[b]+*]", "[a[b]**]", "[a[b](]", "[a[b])]");
 
     static final List<String> CIDRS_THE_CORE_TAKES = List.of(
             "10.0.0.0/8", "10.0.0.1", "10.0.0.1/32", "0.0.0.0/0", "2001:db8::/32",
@@ -90,6 +105,27 @@ class RoutingRuleCheckTest {
                 "[A-Za-z]+\\.ru$", "[[:upper:]a-z]+", "^\\D+\\.example$", "\\p{Lu}", "\\PL",
                 "\\x4A", "\\x{4A}", "(?P<Sub>mail)\\.ru", "(?<Sub>mail)", "(?U)a+",
                 "\\.xn--p1ai$", "[а-яa-z]+\\.ru$", "\\x{0440}\\x{0444}")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .isEmpty();
+        }
+    }
+
+    /**
+     * Java reads a "[" inside a class as a class of its own, and Go as the
+     * character: where Go then found the expression broken, the core refused
+     * the whole configuration, and where it did not, the rule meant something
+     * else to the core than it said. Both are refused, with what to write; a
+     * POSIX class and an escaped "[" are Go's own.
+     */
+    @Test
+    void aClassInsideAClassIsRefused() {
+        for (String regex : List.of("[a-z[0-9]]+\\.example\\.com$", "[a[b]]", "[A-[b]]",
+                "[a-z&&[^b]]")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .hasValueSatisfying(reason -> assertThat(reason).contains("\\["));
+        }
+        for (String regex : List.of("[[:alpha:]]+\\.ru$", "[[:digit:][:lower:]]", "[a\\[b]",
+                "[\\[\\]]", "\\[a[b]")) {
             assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_REGEX, regex)).as(regex)
                     .isEmpty();
         }

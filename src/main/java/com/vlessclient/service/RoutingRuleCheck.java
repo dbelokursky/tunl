@@ -63,6 +63,11 @@ public final class RoutingRuleCheck {
             "Pi", "Po", "Ps", "S", "Sc", "Sk", "Sm", "So", "Z", "Zl", "Zp", "Zs",
             "ASCII", "Cntrl", "Digit", "Punct");
 
+    /** The POSIX classes Go has, as in [[:alpha:]] or [[:^digit:]]. */
+    private static final Set<String> RE2_POSIX_CLASSES = Set.of(
+            "alnum", "alpha", "ascii", "blank", "cntrl", "digit", "graph", "lower", "print",
+            "punct", "space", "upper", "word", "xdigit");
+
     /** Go's limit on a repeat count, and on the counts of nested repeats multiplied. */
     private static final int RE2_MAX_REPEAT = 1000;
 
@@ -80,6 +85,12 @@ public final class RoutingRuleCheck {
     /** Flags that make an expression, or a part of it, take either case: (?i), (?im-s:. */
     private static final Pattern CASE_INSENSITIVE =
             Pattern.compile("\\(\\?[msU]*i[imsU]*(?:-[imsU]+)?[:)]");
+
+    /**
+     * What {@link #re2Unsupported} names for a "[" inside a class that opens
+     * no POSIX class; no other construct it names is a lone "[".
+     */
+    private static final String NESTED_CLASS = "[";
 
     private RoutingRuleCheck() {
     }
@@ -282,9 +293,12 @@ public final class RoutingRuleCheck {
             return Optional.of(I18n.get("routing.rule.problem.regex"));
         }
         String construct = re2Unsupported(regex);
-        return construct == null
-                ? letterProblem(regex)
-                : Optional.of(I18n.get("routing.rule.problem.regex.go", construct));
+        if (construct == null) {
+            return letterProblem(regex);
+        }
+        return Optional.of(NESTED_CLASS.equals(construct)
+                ? I18n.get("routing.rule.problem.regex.nested")
+                : I18n.get("routing.rule.problem.regex.go", construct));
     }
 
     /**
@@ -400,11 +414,24 @@ public final class RoutingRuleCheck {
      * ({@code \p{Lower}}, {@code \p{IsLatin}}), an inline flag only Java has
      * ({@code (?x)}, {@code (?u)}), a repeat of a repeat ({@code a{2}{3}}),
      * or repeat counts over Go's limit of 1000, alone or multiplied along
-     * nested repeats ({@code (a{100}){100}}). Each of those passed here and
-     * then stopped every connect. Null when there is none.
+     * nested repeats ({@code (a{100}){100}}). A repeat with nothing before it
+     * to repeat ({@code {2}} at the start, or after {@code |}, {@code (} or
+     * {@code (?:}), a POSIX class Go does not have ({@code [[:alnum_:]]}) and
+     * {@code \Q} inside a class, which Java reads as a literal brace, a
+     * nested class and a quote. Each of those passed here and then stopped
+     * every connect. A class inside a class ({@link #NESTED_CLASS}), which Go
+     * does not have. Null when there is none.
      */
     private static String re2Unsupported(String regex) {
         boolean inClass = false;
+        // In a class, as Go reads it: whether a character stands before, so
+        // that a "-" after it opens a range, and whether what comes next ends
+        // one.
+        boolean classChar = false;
+        boolean rangeEnd = false;
+        // Something before a repeat for it to repeat: not the start of the
+        // expression or of a group, nor a "|".
+        boolean canRepeat = false;
         // Per open group, the largest product of nested repeat counts among
         // its finished atoms; the whole expression is the first.
         Deque<int[]> groups = new ArrayDeque<>();
@@ -423,12 +450,22 @@ public final class RoutingRuleCheck {
                 char next = regex.charAt(i + 1);
                 atomWeight = 1;
                 afterRepeat = false;
+                if (inClass) {
+                    // A character's escape, but not a class's such as \d.
+                    classChar = !rangeEnd && "dDsSwWpP".indexOf(next) < 0;
+                    rangeEnd = false;
+                }
                 if (next == 'Q') {
-                    // Literal text up to \E, or to the end.
+                    if (inClass) {
+                        return "\\Q";
+                    }
+                    // Literal text up to \E, or to the end; \Q\E holds nothing.
                     int end = regex.indexOf("\\E", i + 2);
+                    canRepeat |= (end < 0 ? length : end) > i + 2;
                     i = end < 0 ? length : end + 1;
                     continue;
                 }
+                canRepeat = true;
                 String escape = regex.substring(i, i + 2);
                 if (next > 0x7f) {
                     // Go takes an escaped ASCII punctuation mark alone.
@@ -468,20 +505,57 @@ public final class RoutingRuleCheck {
                 continue;
             }
             if (inClass) {
-                inClass = c != ']';
+                boolean endsRange = rangeEnd;
+                rangeEnd = false;
+                // A POSIX class, as in [[:alpha:]]: Go reads "[:" up to the
+                // next ":]" as one where an item starts, and refuses a name it
+                // does not have. As the end of a range "[" is a character.
+                int posixEnd = !endsRange && regex.startsWith("[:", i)
+                        ? regex.indexOf(":]", i + 2) : -1;
+                if (posixEnd >= 0) {
+                    String name = regex.substring(i + 2, posixEnd);
+                    if (!RE2_POSIX_CLASSES.contains(
+                            name.startsWith("^") ? name.substring(1) : name)) {
+                        return regex.substring(i, posixEnd + 2);
+                    }
+                    classChar = false;
+                    i = posixEnd + 1;
+                    continue;
+                }
+                if (c == '[') {
+                    // Any other "[" is a character to Go, where Java opens a
+                    // class of its own and reads what follows it as that
+                    // class's. "[a-[b]]" was the range a-[ to Go, and the "+*"
+                    // of "[a[b]+*]", characters to Java, a repeat of a repeat:
+                    // the core refused either, and with it the configuration.
+                    return NESTED_CLASS;
+                }
+                if (c == ']') {
+                    inClass = false;
+                    continue;
+                }
+                // A "-" after a character, and before anything but the "]"
+                // that ends the class, opens a range.
+                rangeEnd = c == '-' && classChar && i + 1 < length
+                        && regex.charAt(i + 1) != ']';
+                classChar = !endsRange && !rangeEnd;
                 continue;
             }
             if (c == '[') {
                 inClass = true;
+                canRepeat = true;
                 settle(groups, atomWeight);
                 atomWeight = 1;
                 afterRepeat = false;
+                classChar = false;
+                rangeEnd = false;
                 // A ] straight after [ or [^ belongs to the class.
                 if (i + 1 < length && regex.charAt(i + 1) == '^') {
                     i++;
                 }
                 if (i + 1 < length && regex.charAt(i + 1) == ']') {
                     i++;
+                    classChar = true;
                 }
                 continue;
             }
@@ -493,6 +567,24 @@ public final class RoutingRuleCheck {
             String flags = c == '(' ? unsupportedFlags(regex, i) : null;
             if (flags != null) {
                 return flags;
+            }
+            if (regex.startsWith("(?", i)) {
+                // Flags, or a group's name, up to what ends them. Flags alone,
+                // as in (?i), hold nothing to repeat; (?:, (?i: and (?P<n>
+                // open a group as ( does.
+                int end = i + 2;
+                while (end < length && ":)>".indexOf(regex.charAt(end)) < 0) {
+                    end++;
+                }
+                afterRepeat = false;
+                if (end < length && regex.charAt(end) != ')') {
+                    settle(groups, atomWeight);
+                    groups.push(new int[] {1});
+                    atomWeight = 1;
+                    canRepeat = false;
+                }
+                i = end;
+                continue;
             }
             if ((c == '*' || c == '+' || c == '?') && i + 1 < length
                     && regex.charAt(i + 1) == '+' && !isGroupFlag(regex, i)) {
@@ -509,7 +601,7 @@ public final class RoutingRuleCheck {
                         : repeat.group(3) == null ? -1 : repeatCount(repeat.group(3));
                 // Go counts an open-ended repeat by its minimum.
                 int count = max < 0 ? min : max;
-                if (afterRepeat || min > RE2_MAX_REPEAT || max > RE2_MAX_REPEAT
+                if (!canRepeat || afterRepeat || min > RE2_MAX_REPEAT || max > RE2_MAX_REPEAT
                         || count >= 2 && (long) count * atomWeight > RE2_MAX_REPEAT) {
                     return text;
                 }
@@ -529,10 +621,13 @@ public final class RoutingRuleCheck {
             if (c == '(') {
                 groups.push(new int[] {1});
                 atomWeight = 1;
+                canRepeat = false;
             } else if (c == ')' && groups.size() > 1) {
                 atomWeight = groups.pop()[0];
+                canRepeat = true;
             } else {
                 atomWeight = 1;
+                canRepeat = c != '|';
             }
         }
         return null;
