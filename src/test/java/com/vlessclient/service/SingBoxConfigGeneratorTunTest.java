@@ -407,6 +407,30 @@ class SingBoxConfigGeneratorTunTest {
     }
 
     /**
+     * A cleared DNS field shows what it stands for: "system" under Direct DNS,
+     * Cloudflare's DoH under Proxy DNS. Both were asked as plain UDP to
+     * 1.1.1.1: the names the rules send direct went to Cloudflare in the clear
+     * from the user's own address, not to the network's resolver.
+     */
+    @Test
+    void tunMode_aClearedDnsFieldMeansWhatItShows() throws Exception {
+        for (String blank : java.util.Arrays.asList("", "  ", null)) {
+            AppSettings settings = tunSettings();
+            settings.setProxyDns(blank);
+            settings.setDirectDns(blank);
+
+            JsonNode servers = parse(generator.generate(createVlessServer(), settings))
+                    .get("dns").get("servers");
+
+            assertThat(servers.get(0).toString()).as("proxy [%s]", blank)
+                    .isEqualTo("{\"tag\":\"proxy-dns\",\"type\":\"https\",\"server\":\"1.1.1.1\","
+                            + "\"path\":\"/dns-query\",\"detour\":\"proxy\"}");
+            assertThat(servers.get(1).toString()).as("direct [%s]", blank)
+                    .isEqualTo("{\"tag\":\"direct-dns\",\"type\":\"local\"}");
+        }
+    }
+
+    /**
      * MCP stored the value untrimmed, and a space around one address is not a
      * second one. A path is the core's only for DNS over HTTPS: written for
      * {@code quic://}, the core refused the whole configuration over it.

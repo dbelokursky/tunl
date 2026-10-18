@@ -772,19 +772,17 @@ public class SingBoxConfigGenerator {
         }
     }
 
-    /** Proxy DNS as Settings has it by default. */
+    /** Proxy DNS as Settings has it by default, and shows in the field when it is empty. */
     private static final String DEFAULT_PROXY_DNS = "https://1.1.1.1/dns-query";
-
-    /** What an empty DNS field was asked for. */
-    private static final DnsAddress BLANK_DNS = new DnsAddress("udp", "1.1.1.1", 0, "");
 
     /**
      * The resolver Proxy DNS names, or the default when it names none the
-     * core can use: see {@link DnsAddress}.
+     * core can use: see {@link DnsAddress}. An empty field shows the default,
+     * and was asked as plain UDP to 1.1.1.1.
      */
     private static DnsAddress proxyResolver(String stored) {
         if (stored == null || stored.isBlank()) {
-            return BLANK_DNS;
+            return DnsAddress.parse(DEFAULT_PROXY_DNS).orElseThrow();
         }
         return DnsAddress.parse(stored).orElseGet(() -> {
             log.warn("Proxy DNS {} is not one address the core can use; using {}",
@@ -795,15 +793,14 @@ public class SingBoxConfigGenerator {
 
     /**
      * The resolver Direct DNS names, or empty for the system's: the setting
-     * says {@link AppSettings#SYSTEM_DNS}, or names no resolver the core can
-     * use, as {@link DnsAddress} reads it.
+     * says {@link AppSettings#SYSTEM_DNS}, is empty, which the field shows as
+     * "system", or names no resolver the core can use, as {@link DnsAddress}
+     * reads it. An empty field was asked as plain UDP to 1.1.1.1, so the names
+     * the rules send direct went to Cloudflare, not to the network's resolver.
      */
     private static Optional<DnsAddress> directResolver(String stored) {
-        if (isSystemDns(stored)) {
+        if (stored == null || stored.isBlank() || isSystemDns(stored)) {
             return Optional.empty();
-        }
-        if (stored == null || stored.isBlank()) {
-            return Optional.of(BLANK_DNS);
         }
         Optional<DnsAddress> resolver = DnsAddress.parse(stored);
         if (resolver.isEmpty()) {
