@@ -142,6 +142,19 @@ public class ShareLinkParser {
     private static final int MAX_FEATURE_LENGTH = 40;
 
     /**
+     * An @ and then what reads as a server, host:port, as it stands in the
+     * text after an authority when a credential holding an @ and a #, ? or /
+     * was not percent-encoded.
+     */
+    private static final Pattern SERVER_AFTER_AT = Pattern.compile(
+            "@(?:\\[[0-9A-Fa-f:.]+]|[A-Za-z0-9-]*\\.[A-Za-z0-9.-]*|localhost):[0-9]");
+
+    /** An authority's host and port as a share link writes them, Hysteria2's port list included. */
+    private static final Pattern SERVER_AUTHORITY = Pattern.compile(
+            "(?:\\[[0-9A-Fa-f:.]+]|[^:\\[\\].]*\\.[^:\\[\\]]*|localhost):[0-9,-]+",
+            Pattern.CASE_INSENSITIVE);
+
+    /**
      * A display name safe to store, render and log.
      *
      * <p>The name comes straight out of the link's fragment, URL-decoded, and
@@ -197,6 +210,36 @@ public class ShareLinkParser {
         }
         bytes.writeBytes(text.toString().getBytes(StandardCharsets.UTF_8));
         return bytes.toString(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Refuses a link whose credential holds an @ and then a #, ? or /,
+     * written without percent-encoding. The link is cut at the first of
+     * those, so its authority ended at the credential's own @: a part of the
+     * credential was read as the host, and the rest, the real host with it,
+     * as the name, the query or the path. The address went into the list,
+     * the resolver and MCP's answers, and the name into the log on every
+     * connect. Told apart from a name that holds an address by the authority
+     * it leaves, which is no server: no port, or a host with no dot. The
+     * refusal repeats nothing of the link.
+     *
+     * @param link the link after its {@code scheme://}
+     */
+    private static void refuseUnescapedCredential(String link) {
+        int end = link.length();
+        for (char stop : new char[] {'/', '?', '#'}) {
+            int at = link.indexOf(stop);
+            if (at >= 0 && at < end) {
+                end = at;
+            }
+        }
+        String authority = link.substring(0, end);
+        int at = authority.lastIndexOf('@');
+        if (at < 0 || !SERVER_AFTER_AT.matcher(link).region(end, link.length()).find()
+                || SERVER_AUTHORITY.matcher(authority.substring(at + 1)).matches()) {
+            return;
+        }
+        throw new IllegalArgumentException(I18n.get("import.credential.unescaped"));
     }
 
     /**
@@ -321,6 +364,7 @@ public class ShareLinkParser {
         if (!uri.toLowerCase().startsWith("vless://")) {
             throw new IllegalArgumentException("URI must start with vless://");
         }
+        refuseUnescapedCredential(uri.substring("vless://".length()));
 
         // Extract fragment (server name) before parsing
         String fragment = null;
@@ -498,6 +542,7 @@ public class ShareLinkParser {
         if (!uri.toLowerCase().startsWith("trojan://")) {
             throw new IllegalArgumentException("URI must start with trojan://");
         }
+        refuseUnescapedCredential(uri.substring("trojan://".length()));
 
         String fragment = null;
         int fragmentIndex = uri.indexOf('#');
@@ -751,6 +796,7 @@ public class ShareLinkParser {
         }
 
         int schemeEnd = uri.indexOf("://");
+        refuseUnescapedCredential(uri.substring(schemeEnd + 3));
         String fragment = null;
         int fragmentIndex = uri.indexOf('#');
         if (fragmentIndex >= 0) {
