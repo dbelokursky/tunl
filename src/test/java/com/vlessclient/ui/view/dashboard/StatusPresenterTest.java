@@ -288,6 +288,45 @@ class StatusPresenterTest {
         assertThat(flag.getChildren()).isEmpty();
     }
 
+    /**
+     * A known country is drawn once per repaint. It was drawn from the cache
+     * and then asked for again; the cached answer came back at once, as the
+     * real resolver hands it over, and the task queued with it built a second
+     * flag over the first on the next pulse, at every repaint while connected.
+     */
+    @Test
+    void aKnownCountryIsDrawnOncePerRepaint() throws Exception {
+        ServiceLocator.register(CountryResolver.class, new CountryResolver(null) {
+            @Override
+            public Optional<String> countryOf(ServerConfig server) {
+                return Optional.of("NL");
+            }
+
+            @Override
+            public void resolveAsync(ServerConfig server, Consumer<String> onResolved) {
+                onResolved.accept("NL");
+            }
+        });
+        ServerConfig exit = server("Exit", "203.0.113.7");
+        active.set(exit);
+        routed.set(exit);
+        health.set(TunnelHealth.HEALTHY);
+        core.state.set(ConnectionState.CONNECTED);
+        AtomicInteger drawn = new AtomicInteger();
+        flag.getChildren().addListener((javafx.collections.ListChangeListener<javafx.scene.Node>)
+                change -> {
+                    while (change.next()) {
+                        drawn.addAndGet(change.getAddedSize());
+                    }
+                });
+
+        presenter.update(ConnectionState.CONNECTED);
+        flushFxEvents();
+
+        assertThat(drawn).as("flags drawn by one repaint").hasValue(1);
+        assertThat(flag.isVisible()).isTrue();
+    }
+
     @Test
     void aLateCountryAnswerIsPaintedOnlyWhileStillConnectedToThatServer() throws Exception {
         ServerConfig exit = server("Exit", "203.0.113.8");
