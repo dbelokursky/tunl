@@ -910,66 +910,114 @@ public final class CoreSettings {
 
     /**
      * Why the core would refuse a SIP003 plugin: one it does not have ("plugin
-     * not found"), or a mode it does not run. It has obfs-local, in http and
-     * tls mode ("unknown obfs mode"), and v2ray-plugin, in websocket mode and
-     * in quic mode with tls ("unknown mode", "TLS required"), whose mux in
-     * websocket mode has to be a number ("parse mux value"). Names and modes
-     * match exactly, as in the core.
+     * not found"), options it cannot read ("parse plugin_opts"), or a mode it
+     * does not run. It has obfs-local, in http and tls mode ("unknown obfs
+     * mode"), and v2ray-plugin, in websocket mode and in quic mode with tls
+     * ("unknown mode", "TLS required"), whose mux in websocket mode has to be
+     * a number ("parse mux value") and whose path there is read as escaped,
+     * as the WebSocket transport's is ("parse path"). Names and modes match
+     * exactly, as in the core.
      */
     private static Optional<Refusal> pluginRefusal(String plugin, String options) {
         String name = shadowsocksPlugin(plugin);
         if (name == null || name.isEmpty()) {
             return Optional.empty();
         }
-        Map<String, String> settings = pluginOptions(options);
-        switch (name) {
-            case "obfs-local" -> {
-                String mode = settings.getOrDefault("obfs", "http");
-                if (!OBFS_MODES.contains(mode)) {
-                    return refused("obfs-local mode " + mode, "refusal.plugin.mode", name, mode);
-                }
-                return Optional.empty();
-            }
-            case "v2ray-plugin" -> {
-                String mode = settings.getOrDefault("mode", "websocket");
-                if ("quic".equals(mode) && !settings.containsKey("tls")) {
-                    return refused("v2ray-plugin QUIC without TLS", "refusal.plugin.quic.tls");
-                }
-                if (!V2RAY_PLUGIN_MODES.contains(mode)) {
-                    return refused("v2ray-plugin mode " + mode, "refusal.plugin.mode", name, mode);
-                }
-                String mux = settings.get("mux");
-                if ("websocket".equals(mode) && mux != null && !isGoInt(mux)) {
-                    // "parse mux value: strconv.Atoi: parsing "true": invalid syntax"
-                    return refused("v2ray-plugin mux", "refusal.plugin.mux");
-                }
-                return Optional.empty();
-            }
-            default -> {
-                return refused("plugin " + name, "refusal.plugin", name);
-            }
+        if (!"obfs-local".equals(name) && !"v2ray-plugin".equals(name)) {
+            return refused("plugin " + name, "refusal.plugin", name);
         }
+        Map<String, String> settings = pluginOptions(options);
+        if (settings == null) {
+            // "parse plugin_opts: empty key in """, or "nothing following
+            // final escape". Not quoted: the options can hold a path's token.
+            return refused(name + " options", "refusal.plugin.options", name);
+        }
+        if ("obfs-local".equals(name)) {
+            String mode = settings.getOrDefault("obfs", "http");
+            if (!OBFS_MODES.contains(mode)) {
+                return refused("obfs-local mode " + mode, "refusal.plugin.mode", name, mode);
+            }
+            return Optional.empty();
+        }
+        String mode = settings.getOrDefault("mode", "websocket");
+        if ("quic".equals(mode) && !settings.containsKey("tls")) {
+            return refused("v2ray-plugin QUIC without TLS", "refusal.plugin.quic.tls");
+        }
+        if (!V2RAY_PLUGIN_MODES.contains(mode)) {
+            return refused("v2ray-plugin mode " + mode, "refusal.plugin.mode", name, mode);
+        }
+        String mux = settings.get("mux");
+        if ("websocket".equals(mode) && mux != null && !isGoInt(mux)) {
+            // "parse mux value: strconv.Atoi: parsing "true": invalid syntax"
+            return refused("v2ray-plugin mux", "refusal.plugin.mux");
+        }
+        if ("websocket".equals(mode) && !isEscapedPath(settings.get("path"))) {
+            // "parse path: invalid URL escape "%"". Not quoted, as above.
+            return refused("v2ray-plugin path", "refusal.plugin.path");
+        }
+        return Optional.empty();
     }
 
     /**
-     * SIP003 plugin options, {@code key=value;flag}, as the core splits them:
-     * a flag such as {@code tls} maps to {@code 1}, and a key given twice
-     * keeps its first value. Nothing is trimmed, since the core trims nothing
-     * either.
+     * SIP003 plugin options, {@code key=value;flag}, as the core's
+     * ParsePluginOptions reads them: a backslash makes the character after it
+     * plain, so a key or a value can hold {@code \;} or {@code \=}; a flag
+     * such as {@code tls} maps to {@code 1}; and a key given twice keeps its
+     * first value. Nothing is trimmed, and options that are blank are not
+     * given to the core at all. Split at every {@code ;} without its escapes,
+     * options the core refuses were taken, and mux=\1 was refused, which the
+     * core reads as 1.
+     *
+     * @return the options, or null when the core cannot read them: an option
+     *     without a key, from {@code ;;} or a {@code ;} at the start, or a
+     *     backslash with nothing after it
      */
     private static Map<String, String> pluginOptions(String options) {
         Map<String, String> settings = new HashMap<>();
-        if (options == null || options.isEmpty()) {
+        if (options == null || options.isBlank()) {
             return settings;
         }
-        for (String option : options.split(";")) {
-            int equals = option.indexOf('=');
-            String key = equals < 0 ? option : option.substring(0, equals);
-            if (!key.isEmpty()) {
-                settings.putIfAbsent(key, equals < 0 ? "1" : option.substring(equals + 1));
+        int at = 0;
+        while (at < options.length()) {
+            StringBuilder key = new StringBuilder();
+            at = readUnescaped(options, at, "=;", key);
+            if (at < 0 || key.isEmpty()) {
+                return null;
             }
+            String value = "1";
+            if (at < options.length() && options.charAt(at) == '=') {
+                StringBuilder read = new StringBuilder();
+                at = readUnescaped(options, at + 1, ";", read);
+                if (at < 0) {
+                    return null;
+                }
+                value = read.toString();
+            }
+            settings.putIfAbsent(key.toString(), value);
+            at++;
         }
         return settings;
+    }
+
+    /**
+     * Reads {@code text} from {@code start} up to the first of {@code stops}
+     * that no backslash escapes, into {@code into} without the escapes.
+     *
+     * @return where it stopped, or -1 when a backslash ends the text
+     */
+    private static int readUnescaped(String text, int start, String stops, StringBuilder into) {
+        int at = start;
+        while (at < text.length() && stops.indexOf(text.charAt(at)) < 0) {
+            if (text.charAt(at) == '\\') {
+                at++;
+                if (at == text.length()) {
+                    return -1;
+                }
+            }
+            into.append(text.charAt(at));
+            at++;
+        }
+        return at;
     }
 
     /** Whether {@code value} is a number Go's strconv.Atoi reads: a sign, digits, an int64. */

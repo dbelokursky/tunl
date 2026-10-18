@@ -369,7 +369,9 @@ class CoreSettingsTest {
                     quic(Protocol.VLESS, false),
                     withPlugin("kcptun", "mode=fast"),
                     withPlugin("obfs-local", "obfs=xyz"),
-                    withPlugin("v2ray-plugin", "mode=quic"));
+                    withPlugin("v2ray-plugin", "mode=quic"),
+                    withPlugin("obfs-local", "obfs=http;;"),
+                    withPlugin("v2ray-plugin", "path=/ws%"));
             for (ServerConfig server : refused) {
                 assertThat(CoreSettings.refusal(server)).hasValueSatisfying(refusal -> {
                     assertThat(refusal.reason()).as(refusal.feature())
@@ -506,6 +508,67 @@ class CoreSettingsTest {
         for (String options : List.of("mux=1;host=v.example", "mux=0", "mux=-1", "mux=+1",
                 "mux=01", "mux;host=v.example", "mux=1;mux=true", "mode=quic;tls;mux=true",
                 "mux=9223372036854775807")) {
+            assertThat(CoreSettings.refusal(withPlugin("v2ray-plugin", options))).as(options)
+                    .isEmpty();
+        }
+    }
+
+    /**
+     * SIP003 options as the core reads them (ParsePluginOptions): a backslash
+     * makes the character after it plain, and an option without a name, from
+     * ;; or a ; at the start, or a backslash with nothing after it, stops the
+     * whole configuration ("parse plugin_opts: empty key", "nothing following
+     * final escape"). Such options were stored and failed every connect, and
+     * read without their escapes, mux=\1 was refused though the core reads 1.
+     */
+    @Test
+    void pluginOptionsAreReadAsTheCoreReadsThem() {
+        String[][] refused = {
+            {"obfs-local", "obfs=http;;obfs-host=www.bing.com"},
+            {"v2ray-plugin", "mode=websocket;;host=cdn.example.com"},
+            {"obfs-local", ";obfs=http"},
+            {"obfs-local", "=http"},
+            {"obfs-local", ";"},
+            {"obfs-local", "obfs=http;obfs-host=www.bing.com;;"},
+            {"v2ray-plugin", "host=example.com\\"},
+            {"v2ray-plugin", "mux=1\\"}};
+        for (String[] plugin : refused) {
+            assertThat(CoreSettings.refusal(withPlugin(plugin[0], plugin[1]))).as(plugin[1])
+                    .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                            .isEqualTo(plugin[0] + " options"));
+        }
+        String[][] accepted = {
+            {"v2ray-plugin", "mux=\\1;host=example.com"},
+            {"obfs-local", "obfs=ht\\tp;obfs-host=www.bing.com"},
+            {"obfs-local", "obfs=http;obfs-host=www.bing.com;"},
+            {"obfs-local", "obfs\\=x=http"},
+            {"obfs-local", "obfs=http;obfs-host=a\\;b"},
+            {"v2ray-plugin", "mode=web\\socket"},
+            {"obfs-local", " "}};
+        for (String[] plugin : accepted) {
+            assertThat(CoreSettings.refusal(withPlugin(plugin[0], plugin[1]))).as(plugin[1])
+                    .isEmpty();
+        }
+        assertThat(CoreSettings.refusal(withPlugin("v2ray-plugin", "mux=\\t")))
+                .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                        .isEqualTo("v2ray-plugin mux"));
+    }
+
+    /**
+     * "parse path: invalid URL escape "%"": in websocket mode v2ray-plugin
+     * sends its path the way the WebSocket transport does, read as escaped.
+     * Its quic mode sends no path.
+     */
+    @Test
+    void aV2rayPluginPathWithAPercentThatStartsNoEscapeIsRefused() {
+        for (String options : List.of("path=/ws%;host=cdn.example.com", "path=/a%4",
+                "mode=websocket;path=/a\\;b%", "path=/bad%;path=/ok")) {
+            assertThat(CoreSettings.refusal(withPlugin("v2ray-plugin", options))).as(options)
+                    .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                            .isEqualTo("v2ray-plugin path"));
+        }
+        for (String options : List.of("path=/ws%25;host=cdn.example.com", "path=/a\\%41",
+                "mode=quic;tls;path=/ws%", "path=/ok;path=/bad%", "path=/ws?ed=2048")) {
             assertThat(CoreSettings.refusal(withPlugin("v2ray-plugin", options))).as(options)
                     .isEmpty();
         }
