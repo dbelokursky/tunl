@@ -362,11 +362,14 @@ public class SingBoxEngine {
             realityRefused.set(false);
         });
 
-        tempConfigFile = writeSessionConfig(sessionConfigDir(), configJson);
-
-        // Ask the core first: a configuration it refuses has to fail here,
-        // before a TUN start raises the administrator or UAC prompt for nothing.
         try {
+            // Written where a failure takes CONNECTING back: a full disk or a
+            // run folder that could not be made threw past it, and the status
+            // said Connecting with nothing launched until a Disconnect.
+            tempConfigFile = writeSessionConfig(sessionConfigDir(), configJson);
+            // Ask the core first: a configuration it refuses has to fail here,
+            // before a TUN start raises the administrator or UAC prompt for
+            // nothing.
             String refusal = configCheck.rejection(singBoxBinary, tempConfigFile).orElse(null);
             if (refusal != null) {
                 throw new ConfigRejectedException(refusal);
