@@ -65,8 +65,9 @@ public final class WindowsTunLauncher implements TunLauncher {
         String token = Long.toString(System.nanoTime());
         Path stopSignalFile = StopSignals.newStopSignalFile();
 
-        Path logOut = tempDir.resolve("vless-tun-" + token + ".out.log");
-        Path logErr = tempDir.resolve("vless-tun-" + token + ".err.log");
+        Path logDir = logDirectory(tempDir, stopSignalFile);
+        Path logOut = logDir.resolve("vless-tun-" + token + ".out.log");
+        Path logErr = logDir.resolve("vless-tun-" + token + ".err.log");
 
         // The elevated command is encoded here, in the trusted process, and
         // travels to RunAs as an argument: no intermediate file exists for
@@ -83,6 +84,30 @@ public final class WindowsTunLauncher implements TunLauncher {
         log.info("Started sing-box TUN launch via UAC elevation (prompt expected)");
         // UAC asks on every launch: there is no one-time grant to fall back on.
         return new Launched(process, stopSignalFile, true);
+    }
+
+    /**
+     * Where the core's two log files go: the system temp dir, unless its path
+     * holds [ or ], the only wildcard characters a Windows path can.
+     *
+     * <p>The elevated wrapper hands both paths to Start-Process, which reads
+     * them as wildcard patterns. Under a TEMP set by hand to "R:\Temp [ram]"
+     * they matched nothing, Start-Process threw, no core started, and every
+     * TUN connect failed after the UAC prompt. Escaping them does not help:
+     * given both redirects, Start-Process resolves each path once to see that
+     * they differ and again to open it, and the second pass reads the path
+     * the first one returned. The stop file's folder is in the profile, and a
+     * Windows user name cannot hold a bracket.</p>
+     *
+     * @param tempDir        {@code java.io.tmpdir}
+     * @param stopSignalFile this session's stop file
+     * @return the folder to put the logs in
+     * @throws IOException if the stop file's path names no folder
+     */
+    static Path logDirectory(Path tempDir, Path stopSignalFile) throws IOException {
+        String temp = tempDir.toString();
+        return temp.indexOf('[') >= 0 || temp.indexOf(']') >= 0
+                ? SecureFiles.parentDirectory(stopSignalFile) : tempDir;
     }
 
     /**

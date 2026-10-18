@@ -1,11 +1,14 @@
 package com.vlessclient.platform;
 
+import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -66,6 +69,80 @@ class WindowsTunLauncherTest {
         assertThat(wrapper).contains("Get-Process -Id ([int]$OwnerPid)");
         assertThat(wrapper).contains("Stop-Process -Id $proc.Id -Force");
         assertThat(wrapper).contains("Remove-Item -LiteralPath $StopFile");
+    }
+
+    /**
+     * java.io.tmpdir can be a folder with [ ] in its name, a TEMP set by hand
+     * to "R:\Temp [ram]". The elevated wrapper handed its two log paths there
+     * to Start-Process -RedirectStandardOutput and -RedirectStandardError,
+     * which read them as wildcard patterns, matched nothing and threw: no core
+     * started, and every TUN connect failed right after the UAC prompt.
+     * Escaping them does not help, as Start-Process resolves both paths twice
+     * when it is given both. Run here by the real PowerShell: Windows
+     * PowerShell on Windows, pwsh where it is installed elsewhere; the core
+     * and its config sit under the brackets too, which takes no escaping.
+     */
+    @Test
+    @Timeout(120)
+    void theElevatedWrapperStartsTheCoreWhenTheTempFolderHasBrackets(@TempDir Path dir)
+            throws Exception {
+        String powerShell = powerShell();
+        Assumptions.assumeTrue(powerShell != null, "no PowerShell to run the wrapper with");
+        Path temp = Files.createDirectories(dir.resolve("Temp [fast]"));
+        Path stop = Files.createDirectories(dir.resolve("run")).resolve("stop-1.signal");
+        Path core;
+        if (OS.WINDOWS.isCurrentOs()) {
+            core = Files.writeString(temp.resolve("core.cmd"), "@echo started %*\r\n");
+        } else {
+            core = Files.writeString(temp.resolve("core.sh"), "#!/bin/sh\necho started \"$@\"\n");
+            assertThat(core.toFile().setExecutable(true, true)).isTrue();
+        }
+        Path logs = WindowsTunLauncher.logDirectory(temp, stop);
+        Path logOut = logs.resolve("vless-tun-1.out.log");
+        Path logErr = logs.resolve("vless-tun-1.err.log");
+        // As the outer script does before it elevates the wrapper.
+        Files.createFile(logOut);
+        Files.createFile(logErr);
+
+        Process wrapper = new ProcessBuilder(powerShell, "-NoProfile", "-NonInteractive",
+                "-EncodedCommand", WindowsTunLauncher.encode(WindowsTunLauncher.wrapperCommand(
+                        core, temp.resolve("session config.json"), logOut, logErr,
+                        stop, ProcessHandle.current().pid())))
+                .redirectErrorStream(true)
+                .start();
+        wrapper.getOutputStream().close();
+        String said = new String(wrapper.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+        assertThat(wrapper.waitFor(60, TimeUnit.SECONDS)).isTrue();
+        assertThat(Files.readString(logOut))
+                .as("what the core wrote; the wrapper said:%n%s", said)
+                .contains("started run -c");
+    }
+
+    @Test
+    void theLogsStayInTheTempDirUnlessItsPathHoldsABracket(@TempDir Path dir) throws Exception {
+        Path stop = dir.resolve("VlessClient").resolve("run").resolve("stop-1.signal");
+
+        assertThat(WindowsTunLauncher.logDirectory(dir.resolve("Temp"), stop))
+                .isEqualTo(dir.resolve("Temp"));
+        assertThat(WindowsTunLauncher.logDirectory(dir.resolve("Temp [ram]"), stop))
+                .isEqualTo(dir.resolve("VlessClient").resolve("run"));
+        assertThat(WindowsTunLauncher.logDirectory(dir.resolve("Temp]"), stop))
+                .isEqualTo(dir.resolve("VlessClient").resolve("run"));
+    }
+
+    /** Windows PowerShell on Windows, as the launcher uses; pwsh from the PATH elsewhere. */
+    private static String powerShell() {
+        if (OS.WINDOWS.isCurrentOs()) {
+            return "powershell";
+        }
+        String path = System.getenv("PATH");
+        for (String entry : path == null ? new String[0] : path.split(File.pathSeparator)) {
+            if (!entry.isEmpty() && Files.isExecutable(Path.of(entry, "pwsh"))) {
+                return Path.of(entry, "pwsh").toString();
+            }
+        }
+        return null;
     }
 
     @Test
