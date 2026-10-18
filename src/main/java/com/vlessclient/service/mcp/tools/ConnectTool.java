@@ -34,13 +34,16 @@ public class ConnectTool implements McpTool {
     public String description() {
         // A start under way, the user's at an administrator prompt say,
         // counts as running: the call saved the server and the mode it was
-        // given, and was then refused once that start was done.
+        // given, and was then refused once that start was done. A recovery
+        // restart's mode is the mode its tunnel ran in, which a connect with
+        // none, taken as the saved one, called off and replaced.
         return "Connect the VPN. Optional 'serverId' (defaults to the active server), "
                 + "'mode' (system_proxy|tun), and 'confirm' (required true for TUN mode). "
                 + "If a tunnel is already running or starting, connect changes nothing: it "
-                + "returns the current status when 'serverId' and 'mode' are omitted or match "
-                + "that tunnel, and is refused otherwise (select_server switches a "
-                + "running tunnel to another server; for another mode, disconnect first).";
+                + "returns the status, once a start under way is done, when 'serverId' and "
+                + "'mode' are omitted or match that tunnel, and is refused otherwise "
+                + "(select_server switches a running tunnel to another server; for another "
+                + "mode, disconnect first).";
     }
 
     @Override

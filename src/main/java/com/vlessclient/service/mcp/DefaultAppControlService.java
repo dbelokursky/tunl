@@ -359,14 +359,34 @@ public final class DefaultAppControlService implements AppControlService {
         // is. One at a setup prompt or in the core's check read as none: the
         // pick and the mode were saved, the connect then waited for that
         // start and was refused as "already running", and the new tunnel was
-        // moved to the agent's server as it came up.
-        boolean savesMode = modeGiven && effectiveMode != settings.getProxyMode();
-        if (connectionService != null && connectionService.isStarting()
-                && (savesMode || (serverGiven && !isPicked(serverId)))) {
-            throw new McpToolException("A tunnel is starting, and nothing was changed. Call "
-                    + "get_status until it is up: select_server then switches it to another "
-                    + "server, and another mode needs disconnect, then connect with that mode.");
+        // moved to the agent's server as it came up. It is compared with the
+        // start, whose mode a recovery restart or a pick's restart takes from
+        // the core it replaces: compared with the saved mode, a connect with
+        // none, or with the saved one, passed, its own request called that
+        // restart off after its stop, and it started in the saved mode, a TUN
+        // tunnel turned into a system proxy or the other way round.
+        Optional<ProxyMode> starting = connectionService == null ? Optional.empty()
+                : connectionService.startingMode();
+        if (starting.isPresent()) {
+            if ((modeGiven && effectiveMode != starting.get())
+                    || (serverGiven && !isPicked(serverId))) {
+                throw new McpToolException("A tunnel is starting, and nothing was changed. Call "
+                        + "get_status until it is up: select_server then switches it to another "
+                        + "server, and another mode needs disconnect, then connect with that "
+                        + "mode.");
+            }
+            // Asking for nothing that start does not bring: it is waited
+            // for, not called off by a request of this call's own.
+            Optional<ProxyMode> up = connectionService.awaitStartUnderWay()
+                    ? runningMode() : Optional.empty();
+            if (up.isEmpty()) {
+                throw new McpToolException("The tunnel that was starting did not come up, and "
+                        + "nothing was changed. Call get_status for why, then connect again.");
+            }
+            return alreadyConnected(serverGiven ? serverId : null,
+                    modeGiven ? effectiveMode : null, up.get());
         }
+        boolean savesMode = modeGiven && effectiveMode != settings.getProxyMode();
 
         // Gate the proxy mode before doing any work: TUN triggers a macOS
         // admin password prompt and captures all traffic, so it needs an

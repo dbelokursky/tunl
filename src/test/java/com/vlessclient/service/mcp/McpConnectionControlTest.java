@@ -8,15 +8,19 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.vlessclient.model.ConnectionState;
+import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.model.TunnelHealth;
+import com.vlessclient.platform.ElevationDeclinedException;
 import com.vlessclient.service.ConfigStore;
 import com.vlessclient.service.ConnectionService;
 import com.vlessclient.service.FxExecutor;
 import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.SingBoxConfigGenerator;
 import com.vlessclient.service.SingBoxEngine;
+import com.vlessclient.service.TunnelRecoveryService;
 import com.vlessclient.testing.Await;
 import com.vlessclient.testing.FxToolkitExtension;
 import com.vlessclient.testing.TestServers;
@@ -28,6 +32,7 @@ import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import javafx.beans.property.ReadOnlyObjectProperty;
@@ -93,9 +98,12 @@ class McpConnectionControlTest {
         final CountDownLatch atPrompt = new CountDownLatch(1);
         final CountDownLatch answered = new CountDownLatch(1);
         final List<ProxyMode> starts = new CopyOnWriteArrayList<>();
+        final AtomicInteger launches = new AtomicInteger();
         final ReadOnlyObjectWrapper<ConnectionState> state =
                 new ReadOnlyObjectWrapper<>(ConnectionState.DISCONNECTED);
         volatile boolean running;
+        /** What the next start throws once its prompt is answered, as a dismissal does. */
+        volatile IOException failNext;
 
         PromptingEngine(Path binary) {
             super(binary);
@@ -107,12 +115,18 @@ class McpConnectionControlTest {
         }
 
         @Override
-        public void start(String configJson, ProxyMode proxyMode) {
+        public void start(String configJson, ProxyMode proxyMode) throws IOException {
+            launches.incrementAndGet();
             atPrompt.countDown();
             try {
                 answered.await(10, TimeUnit.SECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+            }
+            IOException failure = failNext;
+            if (failure != null) {
+                failNext = null;
+                throw failure;
             }
             starts.add(proxyMode);
             running = true;
@@ -226,6 +240,209 @@ class McpConnectionControlTest {
 
         assertThat(agent.get()).as("the agent's answer").isEqualTo("srv-1");
         assertThat(engine.starts).containsExactly(ProxyMode.TUN);
+    }
+
+    /**
+     * The user's start ends at its dismissed prompt, while an agent's
+     * connect asking for nothing new waited for it. The connect then started
+     * a core of its own once the user's had ended, and raised the prompt the
+     * user had just dismissed again; it says the tunnel did not come up.
+     */
+    @Test
+    void aConnectWaitingForAStartThatEndsWithoutACoreStartsNone() throws Exception {
+        store.getSettings().setProxyMode(ProxyMode.TUN);
+        PromptingEngine engine = new PromptingEngine(tempDir.resolve("sing-box"));
+        engine.failNext = new ElevationDeclinedException("the setup dialog was dismissed");
+        DefaultAppControlService control = controlOver(engine);
+        AtomicReference<Object> user = new AtomicReference<>();
+        Thread userConnect = usersConnect(user);
+        assertThat(engine.atPrompt.await(5, TimeUnit.SECONDS)).isTrue();
+
+        AtomicReference<Object> agent = new AtomicReference<>();
+        Thread agentCall = Thread.startVirtualThread(() -> {
+            try {
+                agent.set(control.connect(null, null, false));
+            } catch (McpToolException e) {
+                agent.set(e);
+            }
+        });
+        awaitWaiting(agentCall);
+        engine.answered.countDown();
+        agentCall.join(5_000);
+        userConnect.join(5_000);
+
+        assertThat(user.get()).isEqualTo(ConnectionService.Outcome.CANCELLED);
+        assertThat(agent.get()).isInstanceOf(McpToolException.class);
+        assertThat(((McpToolException) agent.get()).getMessage())
+                .contains("did not come up").contains("nothing was changed");
+        assertThat(engine.launches).as("launches, each one a prompt").hasValue(1);
+    }
+
+    // ===== a start that replaces a running core =====
+
+    /** Launches nothing; a stop can be held, as a real core's SIGTERM grace holds it. */
+    static final class HeldStopEngine extends SingBoxEngine {
+        final List<ProxyMode> starts = new CopyOnWriteArrayList<>();
+        final ReadOnlyObjectWrapper<ConnectionState> state =
+                new ReadOnlyObjectWrapper<>(ConnectionState.DISCONNECTED);
+        volatile boolean running;
+        volatile CountDownLatch stopEntered;
+        volatile CountDownLatch stopRelease;
+
+        HeldStopEngine(Path binary) {
+            super(binary);
+        }
+
+        @Override
+        public ReadOnlyObjectProperty<ConnectionState> connectionStateProperty() {
+            return state.getReadOnlyProperty();
+        }
+
+        @Override
+        public void start(String configJson, ProxyMode proxyMode) {
+            starts.add(proxyMode);
+            running = true;
+        }
+
+        @Override
+        public void stop() {
+            CountDownLatch entered = stopEntered;
+            CountDownLatch release = stopRelease;
+            if (running && entered != null && release != null) {
+                entered.countDown();
+                try {
+                    release.await(10, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            running = false;
+        }
+
+        @Override
+        public boolean isRunning() {
+            return running;
+        }
+
+        @Override
+        public boolean isStopping() {
+            return false;
+        }
+
+        @Override
+        public boolean awaitStopped(Duration timeout, BooleanSupplier stillWanted) {
+            return !running;
+        }
+
+        @Override
+        public boolean awaitEarlierTunnel(Duration timeout, BooleanSupplier stillWanted) {
+            return true;
+        }
+
+        void holdTheNextStop() {
+            stopEntered = new CountDownLatch(1);
+            stopRelease = new CountDownLatch(1);
+        }
+    }
+
+    /** Waits until {@code thread} waits, for the lock a start holds, or has ended. */
+    private static void awaitWaiting(Thread thread) {
+        Await.until("the call to wait for the start",
+                () -> thread.getState() == Thread.State.WAITING
+                        || thread.getState() == Thread.State.BLOCKED
+                        || thread.getState() == Thread.State.TERMINATED,
+                Duration.ofSeconds(5));
+    }
+
+    /**
+     * A recovery restart of a TUN tunnel, the saved mode changed to a system
+     * proxy since (saved, not applied), and an agent's connect with no
+     * arguments during the restart's stop, as get_status read Connecting.
+     * The connect took the saved mode for its own, its request called the
+     * restart off after the stop, and it started a system proxy: apps that
+     * ignore it went around the tunnel. It waits for the restart now, and
+     * is answered with it.
+     */
+    @Test
+    void aConnectWithNothingNewDuringARecoveryRestartKeepsTheModeItRestartsIn()
+            throws Exception {
+        store.getSettings().setProxyMode(ProxyMode.TUN);
+        store.getSettings().setHealthCheckAutoReconnect(true);
+        store.getSettings().setHealthCheckDelaySeconds(1);
+        HeldStopEngine engine = new HeldStopEngine(tempDir.resolve("sing-box"));
+        DefaultAppControlService control = controlOver(engine);
+        assertThat(connection.connect().started()).isTrue();
+        store.getSettings().setProxyMode(ProxyMode.SYSTEM_PROXY);
+        engine.holdTheNextStop();
+        TunnelRecoveryService recovery = connection.getRecoveryService();
+        recovery.onConnectionState(ConnectionState.CONNECTED);
+        recovery.onHealth(TunnelHealth.BROKEN);
+        assertThat(engine.stopEntered.await(10, TimeUnit.SECONDS))
+                .as("recovery's restart stopping the TUN core").isTrue();
+
+        AtomicReference<Object> agent = new AtomicReference<>();
+        Thread agentCall = Thread.startVirtualThread(() -> {
+            try {
+                agent.set(control.connect(null, null, false));
+            } catch (McpToolException e) {
+                agent.set(e);
+            }
+        });
+        awaitWaiting(agentCall);
+        engine.stopRelease.countDown();
+        agentCall.join(10_000);
+
+        assertThat(engine.starts).as("the modes the core was started in")
+                .containsExactly(ProxyMode.TUN, ProxyMode.TUN);
+        assertThat(agent.get()).isInstanceOf(StatusInfo.class);
+        assertThat(((StatusInfo) agent.get()).runningProxyMode()).isEqualTo("tun");
+    }
+
+    /**
+     * A pick's restart of a system proxy, the saved mode changed to TUN
+     * since, and an agent's connect asking for TUN during the restart's
+     * stop. Compared with the saved mode it asked for nothing new: it called
+     * the restart off and started TUN without the pick's restart being done.
+     * Another server is refused as well, through the restart's stop.
+     */
+    @Test
+    void aConnectAskingForAnotherModeOrServerThanAPicksRestartIsRefused() throws Exception {
+        store.getSettings().setProxyMode(ProxyMode.SYSTEM_PROXY);
+        HeldStopEngine engine = new HeldStopEngine(tempDir.resolve("sing-box"));
+        DefaultAppControlService control = controlOver(engine);
+        assertThat(connection.connect().started()).isTrue();
+        // Saved, not applied, and something the core does not run yet, so
+        // the pick restarts it.
+        store.getSettings().setProxyMode(ProxyMode.TUN);
+        store.getSettings().setCoreLogLevel(CoreLogLevel.DEBUG);
+        engine.holdTheNextStop();
+        store.setActiveServer("srv-2");
+        AtomicReference<Object> switched = new AtomicReference<>();
+        Thread pick = Thread.ofPlatform().name("pick-switch").start(() -> {
+            try {
+                switched.set(connection.switchToActiveServer().outcome());
+            } catch (IOException | RuntimeException e) {
+                switched.set(e);
+            }
+        });
+        assertThat(engine.stopEntered.await(5, TimeUnit.SECONDS)).as("the restart's stop")
+                .isTrue();
+
+        assertThatThrownBy(() -> control.connect(null, "tun", true))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining("starting")
+                .hasMessageContaining("nothing was changed");
+        assertThatThrownBy(() -> control.connect("srv-1", null, false))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining("starting");
+
+        engine.stopRelease.countDown();
+        pick.join(10_000);
+        assertThat(switched.get()).isEqualTo(ConnectionService.Outcome.STARTED);
+        assertThat(engine.starts).as("the modes the core was started in")
+                .containsExactly(ProxyMode.SYSTEM_PROXY, ProxyMode.SYSTEM_PROXY);
+        assertThat(List.of(picked("srv-2"), store.getSettings().getProxyMode()))
+                .as("[Osaka picked, the saved mode]").containsExactly(true, ProxyMode.TUN);
     }
 
     // ===== set_proxy_mode =====
