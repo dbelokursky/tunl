@@ -265,6 +265,7 @@ public class ServerFormSwitchSweepTest extends ApplicationTest {
         load();
         stage.setScene(themed(root));
         stage.show();
+        skin();
         if (server != null) {
             controller.setServerConfig(server);
         }
@@ -280,6 +281,18 @@ public class ServerFormSwitchSweepTest extends ApplicationTest {
         controller.setServerConfig(server);
         stage.setScene(scene);
         stage.show();
+        skin();
+    }
+
+    /**
+     * Gives the form its skins now, as the first show of a dialog does. The
+     * stage is the one every UI test class shares, and a class that sized it
+     * leaves it showing at a set size; a scene set on it then gets its skins
+     * only at the next pulse, and until then the form's ScrollPane holds none
+     * of the form, so a lookup in the same step found no protocol combo.
+     */
+    private void skin() {
+        root.applyCss();
     }
 
     private void load() {
