@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
+<?import com.vlessclient.ui.view.WrappingRow?>
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.CheckBox?>
@@ -20,17 +21,22 @@
     <Label fx:id="titleLabel" text="Logs" styleClass="view-title"/>
 
     <!-- Toolbar. The search field is the single elastic element (HBox.hgrow);
-         every other control keeps its preferred size (minWidth=-Infinity =
-         USE_PREF_SIZE) so labels never get squeezed/truncated on a narrow
-         window — only the search field shrinks, down to its minWidth. -->
-    <HBox spacing="10" alignment="CENTER_LEFT" styleClass="logs-toolbar">
+         every other control keeps its preferred size so labels never get
+         squeezed/truncated on a narrow window — only the search field
+         shrinks, down to its minWidth. Where even that does not leave room,
+         the check box and the buttons go on to a line of their own, rather
+         than past the page: at 125% text size in Russian Clear was wholly
+         out of reach, and the list's scroll bar with it. -->
+    <WrappingRow hgap="10" vgap="6" styleClass="logs-toolbar">
         <padding>
             <Insets top="4" bottom="4"/>
         </padding>
 
         <!-- No prefWidth: a combo box sizes itself to its widest value, and
-             the 110 it had showed "Предупреждения" as "Пре…". -->
-        <ComboBox fx:id="logLevelFilter" minWidth="-Infinity" styleClass="form-field"/>
+             the 110 it had showed "Предупреждения" as "Пре…". Not pinned
+             either: the row gives it that width, and at 200% in the
+             smallest window that is wider than the page. -->
+        <ComboBox fx:id="logLevelFilter" styleClass="form-field"/>
 
         <!-- minWidth 40, not 90: the filter's extra width in Russian comes
              out of this field, or the row overflows the 500px viewport. 60
@@ -40,21 +46,24 @@
         <TextField fx:id="searchField" promptText="Search logs..." minWidth="40"
                    HBox.hgrow="ALWAYS" styleClass="form-field"/>
 
-        <CheckBox fx:id="autoScrollCheckBox" text="Auto-scroll" selected="true"
-                  minWidth="-Infinity" styleClass="form-checkbox"/>
+        <!-- Together, so they move as one when the line runs out. -->
+        <WrappingRow hgap="10" vgap="6">
+            <CheckBox fx:id="autoScrollCheckBox" text="Auto-scroll" selected="true"
+                      minWidth="-Infinity" styleClass="form-checkbox"/>
 
-        <Button fx:id="downloadButton" styleClass="icon-button" minWidth="-Infinity"
-                onAction="#onDownloadClicked"/>
+            <Button fx:id="downloadButton" styleClass="icon-button" minWidth="-Infinity"
+                    onAction="#onDownloadClicked"/>
 
-        <!-- Everything a bug report needs, zipped: log tail, versions and a
-             redacted config. Icon-only like its neighbours, because this row
-             is already at the width the 500px viewport allows. -->
-        <Button fx:id="diagnosticsButton" styleClass="icon-button" minWidth="-Infinity"
-                onAction="#onSaveDiagnosticsClicked"/>
+            <!-- Everything a bug report needs, zipped: log tail, versions and a
+                 redacted config. Icon-only like its neighbours, because this row
+                 is already at the width the 500px viewport allows. -->
+            <Button fx:id="diagnosticsButton" styleClass="icon-button" minWidth="-Infinity"
+                    onAction="#onSaveDiagnosticsClicked"/>
 
-        <Button fx:id="clearButton" styleClass="icon-button" minWidth="-Infinity"
-                onAction="#onClearClicked"/>
-    </HBox>
+            <Button fx:id="clearButton" styleClass="icon-button" minWidth="-Infinity"
+                    onAction="#onClearClicked"/>
+        </WrappingRow>
+    </WrappingRow>
 
     <!-- Log Lines. prefHeight is a floor, not a size: vgrow fills any taller
          window. Left at ListView's own 400, which it asks whatever it holds,
