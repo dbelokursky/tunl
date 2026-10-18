@@ -32,6 +32,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
@@ -168,6 +169,8 @@ public class DashboardServerPickTest extends ApplicationTest {
     private final ServerConfig osaka = server("Osaka", "203.0.113.10");
     private SlowStopEngine engine;
     private PausingGenerator generator;
+    /** The switches the card asked the service for. */
+    private final AtomicInteger switches = new AtomicInteger();
     private ConnectionService service;
     private ConfigStore store;
     private DashboardViewController controller;
@@ -183,7 +186,13 @@ public class DashboardServerPickTest extends ApplicationTest {
         engine = new SlowStopEngine();
         ServiceLocator.register(SingBoxEngine.class, engine);
         generator = new PausingGenerator();
-        service = new ConnectionService(store, generator, new RoutingService(), engine);
+        service = new ConnectionService(store, generator, new RoutingService(), engine) {
+            @Override
+            public ConnectAttempt switchToActiveServer() throws IOException {
+                switches.incrementAndGet();
+                return super.switchToActiveServer();
+            }
+        };
         ServiceLocator.register(ConnectionService.class, service);
         tokyo.setSubscriptionId("sub-1");
         osaka.setSubscriptionId("sub-1");
@@ -294,6 +303,9 @@ public class DashboardServerPickTest extends ApplicationTest {
         assertThat(engine.isRunning()).as("a core runs after the Disconnect").isFalse();
         assertThat(service.isTunnelWanted()).as("the tunnel wanted again").isFalse();
         assertThat(stateOnFx()).isEqualTo(ConnectionState.DISCONNECTED);
+        // Compared again after the called-off switch, the card asked for
+        // another while the stop still read Connected, and again.
+        assertThat(switches).as("switches the card asked for: the pick's alone").hasValue(1);
     }
 
     // ===== the countdown's Cancel is no Disconnect =====
@@ -355,6 +367,85 @@ public class DashboardServerPickTest extends ApplicationTest {
         assertThat(engine.starts).as("TUN launches, each one a prompt")
                 .containsExactly(ProxyMode.TUN);
         assertThat(engine.isRunning()).isTrue();
+    }
+
+    /**
+     * A refresh withdraws Tokyo under a TUN core whose every launch prompts,
+     * and the card's switch for the store's pick in its place is under way
+     * when the user picks Nagoya (or an agent's select_server does, right
+     * after its refresh_subscription). The card left picks alone while a
+     * switch ran and compared again only after one that moved the core, so
+     * the user's pick was lost: the tunnel stayed on Tokyo while the list and
+     * the tray named Nagoya.
+     */
+    @Test
+    void aPickMadeWhileADeferredSwitchRanIsApplied() throws Exception {
+        ServerConfig nagoya = server("Nagoya", "203.0.113.12");
+        interact(() -> store.addServer(nagoya));
+        store.getSettings().setProxyMode(ProxyMode.TUN);
+        engine.prompts = true;
+        interact(controller::toggleConnection);
+        awaitState(ConnectionState.CONNECTED);
+
+        generator.armed.set(true);
+        // SubscriptionService.diffAndApply, off the FX thread: Tokyo withdrawn.
+        Thread refresh = Thread.startVirtualThread(() -> store.applyServerBatch(List.of(),
+                List.of(tokyo.getId()), ConfigStore.Removal.UNASKED));
+        assertThat(generator.paused.await(5, TimeUnit.SECONDS))
+                .as("the switch for the store's pick under way").isTrue();
+        interact(() -> store.setActiveServer(nagoya.getId()));
+        generator.release.countDown();
+        refresh.join(10_000);
+
+        Await.until("the tunnel on Nagoya", () -> nagoya.getId().equals(
+                service.appliedServerId()), Duration.ofSeconds(10));
+        assertThat(engine.starts).containsExactly(ProxyMode.TUN, ProxyMode.TUN);
+    }
+
+    /** The same where the user picks the store's own pick, Osaka, as the switch runs. */
+    @Test
+    void aClickOnTheStoresPickWhileItsSwitchRanIsApplied() throws Exception {
+        store.getSettings().setProxyMode(ProxyMode.TUN);
+        engine.prompts = true;
+        interact(controller::toggleConnection);
+        awaitState(ConnectionState.CONNECTED);
+
+        generator.armed.set(true);
+        Thread refresh = Thread.startVirtualThread(() -> store.applyServerBatch(List.of(),
+                List.of(tokyo.getId()), ConfigStore.Removal.UNASKED));
+        assertThat(generator.paused.await(5, TimeUnit.SECONDS))
+                .as("the switch for the store's pick under way").isTrue();
+        interact(() -> store.setActiveServer(osaka.getId()));
+        generator.release.countDown();
+        refresh.join(10_000);
+
+        Await.until("the tunnel on Osaka", () -> osaka.getId().equals(service.appliedServerId()),
+                Duration.ofSeconds(10));
+        assertThat(engine.starts).containsExactly(ProxyMode.TUN, ProxyMode.TUN);
+    }
+
+    /**
+     * The switch a refresh's re-pick asks for, left to the user's reconnect,
+     * is asked for once: compared again after it, the store's pick would ask
+     * for the same switch, which would be left to the user again, back to
+     * back with nothing to stop it.
+     */
+    @Test
+    void aDeferredRepickAsksForOneSwitch() throws Exception {
+        store.getSettings().setProxyMode(ProxyMode.TUN);
+        engine.prompts = true;
+        interact(controller::toggleConnection);
+        awaitState(ConnectionState.CONNECTED);
+
+        store.applyServerBatch(List.of(), List.of(tokyo.getId()), ConfigStore.Removal.UNASKED);
+        Await.until("the reconnect offered", () -> visible("#pendingChangesBanner"),
+                Duration.ofSeconds(5));
+        awaitTheCardsSwitchDone();
+        Thread.sleep(1_000);
+        WaitForAsyncUtils.waitForFxEvents();
+
+        assertThat(switches).as("switches the card asked for").hasValue(1);
+        assertThat(engine.starts).containsExactly(ProxyMode.TUN);
     }
 
     /**

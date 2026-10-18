@@ -1036,12 +1036,16 @@ public class DashboardViewController implements ViewShownAware {
 
     private void runConnect(ConnectionService service, boolean restart, boolean switchServer) {
         ConnectionService.Outcome outcome = null;
+        String deferredPick = null;
         boolean pickRefused = false;
         try {
             ConnectionService.ConnectAttempt attempt =
                     switchServer ? service.switchToActiveServer()
                             : restart ? service.reconnect(null) : service.connect(null);
             outcome = attempt.outcome();
+            if (outcome == ConnectionService.Outcome.DEFERRED && attempt.server() != null) {
+                deferredPick = attempt.server().getId();
+            }
             switch (attempt.outcome()) {
                 case NO_ACTIVE_SERVER -> Platform.runLater(() -> {
                     log.warn("No active server selected");
@@ -1106,15 +1110,21 @@ public class DashboardViewController implements ViewShownAware {
             // read Connected here, and the second look started another
             // switch, which asked for the tunnel again and started it after
             // the stop; after one that moved nothing it only asked for the
-            // same again, and again.
+            // same again, and again. After one that left the store's own
+            // pick to the user's reconnect it is compared again too, but for
+            // that pick: a pick the user made while it ran was lost, and the
+            // tunnel stayed on the withdrawn server while the list and the
+            // tray named the new pick.
             boolean compareAgain = outcome == ConnectionService.Outcome.SWITCHED
-                    || outcome == ConnectionService.Outcome.STARTED || pickRefused;
+                    || outcome == ConnectionService.Outcome.STARTED || pickRefused
+                    || outcome == ConnectionService.Outcome.DEFERRED;
+            String leftToTheUser = deferredPick;
             Platform.runLater(() -> {
                 refreshConnectButtonAvailability();
                 if (switchServer) {
                     applyingServer = false;
                     if (compareAgain) {
-                        reconnectIfActiveServerChanged();
+                        reconnectIfActiveServerChanged(leftToTheUser);
                     }
                 }
             });
@@ -1181,6 +1191,18 @@ public class DashboardViewController implements ViewShownAware {
      * connecting, picking the first server again read as no change.</p>
      */
     private void reconnectIfActiveServerChanged() {
+        reconnectIfActiveServerChanged(null);
+    }
+
+    /**
+     * {@link #reconnectIfActiveServerChanged()}, leaving one pick alone.
+     *
+     * @param deferredPick the store's own pick that the switch just done left
+     *                     to the user's reconnect, or null: while it is still
+     *                     the store's, another switch for it would only be
+     *                     left to the user again, and again
+     */
+    private void reconnectIfActiveServerChanged(String deferredPick) {
         if (applyingServer
                 || singBoxEngine.connectionStateProperty().get() != ConnectionState.CONNECTED) {
             return;
@@ -1190,6 +1212,11 @@ public class DashboardViewController implements ViewShownAware {
             return;
         }
         refusedPick = null;
+        if (nowActive != null && nowActive.getId().equals(deferredPick)
+                && ServiceLocator.find(ConfigStore.class)
+                        .map(ConfigStore::isPickedByTheStore).orElse(false)) {
+            return;
+        }
         String applied = appliedServerId();
         if (nowActive == null || applied == null || nowActive.getId().equals(applied)) {
             return;
