@@ -415,6 +415,12 @@ public final class CoreSettings {
      * @return the refusal, or empty when the core accepts the server
      */
     public static Optional<Refusal> refusal(ServerConfig server) {
+        if (server.getProtocol() == null) {
+            // A servers.json entry edited by hand can lose its protocol. The
+            // set lookups below threw on it, and as every server is checked
+            // at every connect, no connect worked, whichever was picked.
+            return refused("no protocol", "refusal.protocol");
+        }
         if (hasUnreadableCredential(server)) {
             // Kept as its sealed tag so the entry recovers once the keychain
             // does; handed to the core, the tag failed in words about neither.

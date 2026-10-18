@@ -287,6 +287,11 @@ public class ServerBackupService {
      *     is cleaned either way
      */
     private static String admissionRefusal(ServerConfig server) {
+        if (server == null) {
+            // A null in the list maps to no server rather than failing, and
+            // cleaning its name threw: the whole restore failed over it.
+            return I18n.get("servers.backup.import.not.server");
+        }
         server.setName(ShareLinkParser.cleanName(server.getName()));
         if (server.getProtocol() == null) {
             return I18n.get("servers.backup.import.no.protocol");

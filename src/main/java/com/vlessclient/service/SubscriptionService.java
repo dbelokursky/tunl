@@ -1533,7 +1533,15 @@ public class SubscriptionService {
             int unreadable = 0;
             for (JsonNode item : items) {
                 try {
-                    loaded.add(objectMapper.treeToValue(item, Subscription.class));
+                    Subscription subscription = objectMapper.treeToValue(item, Subscription.class);
+                    if (subscription == null) {
+                        // A null holds nothing to keep; read as a subscription
+                        // it threw in the unsealing below, and the app did not
+                        // start, as servers.json's did.
+                        log.warn("Skipping an empty (null) entry in {}", SUBSCRIPTIONS_FILE);
+                        continue;
+                    }
+                    loaded.add(subscription);
                 } catch (JacksonException e) {
                     unreadable++;
                     log.warn("Skipping a subscription entry this build cannot read: {}",

@@ -192,6 +192,94 @@ class DataFileSurvivalTest {
                 .containsEntry("servers.json", 1);
     }
 
+    /**
+     * A null in a list, from a hand edit or a merge tool, read as no entry at
+     * all, and each store's load then dereferenced it: the app did not start
+     * until the file was deleted by hand.
+     */
+    @Test
+    @DisplayName("a null entry in servers.json, subscriptions.json or the traffic history is "
+            + "skipped, and the app starts with the rest")
+    void aNullEntryIsSkippedAndTheRestLoads() throws IOException {
+        Files.writeString(dir.resolve("servers.json"), """
+                {"config_version":1,"servers":[null,
+                  {"id":"s-1","name":"known","protocol":"vless",
+                   "address":"192.0.2.1","port":443,"uuid":"u-1"},
+                  {"id":"s-2","name":"second","protocol":"vless",
+                   "address":"192.0.2.2","port":443,"uuid":"u-2"}]}""", StandardCharsets.UTF_8);
+        Files.writeString(dir.resolve("subscriptions.json"), """
+                {"config_version":1,"subscriptions":[null,
+                  {"id":"a","name":"Work","url":"https://sub.example/a"},
+                  {"id":"b","name":"Home","url":"https://sub.example/b"}]}""",
+                StandardCharsets.UTF_8);
+        Files.writeString(dir.resolve("traffic-history.json"), """
+                {"version":1,"days":[null,{"date":"2026-10-01","servers":[null,
+                  {"serverId":"s-1","serverName":"known","upload":1,"download":2}]}]}""",
+                StandardCharsets.UTF_8);
+        Clock day = Clock.fixed(java.time.Instant.parse("2026-10-01T12:00:00Z"),
+                java.time.ZoneOffset.UTC);
+
+        ConfigStore store = new ConfigStore(dir);
+        SubscriptionService subscriptions;
+        try (HttpClient client = HttpClient.newHttpClient()) {
+            subscriptions = new SubscriptionService(store, new ShareLinkParser(), dir, client);
+        }
+        TrafficHistoryStore history = new TrafficHistoryStore(dir, day,
+                store.getPersistenceState());
+
+        assertThat(store.getServers()).extracting(ServerConfig::getName)
+                .containsExactly("known", "second");
+        assertThat(subscriptions.getSubscriptions())
+                .extracting(com.vlessclient.model.Subscription::getName)
+                .containsExactly("Work", "Home");
+        assertThat(history.totalRecorded()).isEqualTo(3);
+        assertThat(history.lastDays(1)).singleElement()
+                .extracting(TrafficHistoryStore.DayTotal::total).isEqualTo(3L);
+        assertThat(history.serversForDay(java.time.LocalDate.parse("2026-10-01")))
+                .extracting(TrafficHistoryStore.ServerTotal::serverName).containsExactly("known");
+        // The day that held the null takes a sample: it is today, and record
+        // walks that day's rows.
+        history.record(store.getServers().getFirst(), 10, 20);
+        assertThat(history.totalRecorded()).isEqualTo(33);
+        assertThat(store.getPersistenceState().unreadableEntries())
+                .as("a null is no entry from a newer build to keep and announce").isEmpty();
+
+        store.addServer(server("added"));
+        subscriptions.saveSubscriptions();
+        assertThat(read("servers.json").path("servers").valueStream()
+                .map(s -> s.path("name").asString()))
+                .as("the null holds nothing, so the save does not write it back")
+                .containsExactly("known", "second", "added");
+        assertThat(read("subscriptions.json").path("subscriptions").valueStream()
+                .map(s -> s.path("name").asString())).containsExactly("Work", "Home");
+    }
+
+    /**
+     * An entry without a protocol loaded, and the check every connect runs on
+     * every server threw on it: no connect worked, whichever server was
+     * picked. Refused, it is left out like any server the core cannot build.
+     */
+    @Test
+    @DisplayName("a servers.json entry without a protocol is refused, not thrown on")
+    void aServerWithoutAProtocolIsRefused() throws IOException {
+        Files.writeString(dir.resolve("servers.json"), """
+                {"config_version":1,"servers":[
+                  {"id":"s-1","name":"known","protocol":"vless",
+                   "address":"192.0.2.1","port":443,"uuid":"u-1"},
+                  {"id":"s-2","name":"no protocol",
+                   "address":"192.0.2.2","port":443,"uuid":"u-2"}]}""",
+                StandardCharsets.UTF_8);
+
+        List<ServerConfig> servers = List.copyOf(new ConfigStore(dir).getServers());
+
+        assertThat(servers).hasSize(2);
+        assertThat(com.vlessclient.service.outbound.CoreSettings.refusal(servers.get(0)))
+                .isEmpty();
+        assertThat(com.vlessclient.service.outbound.CoreSettings.refusal(servers.get(1)))
+                .get().extracting(com.vlessclient.service.outbound.CoreSettings.Refusal::reason)
+                .isEqualTo(com.vlessclient.app.I18n.get("refusal.protocol"));
+    }
+
     @Test
     @DisplayName("subscription entries a newer build wrote are written back too")
     void unreadableSubscriptionEntriesSurviveSaves() throws IOException {

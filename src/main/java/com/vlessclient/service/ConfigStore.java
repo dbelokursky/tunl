@@ -962,7 +962,16 @@ public class ConfigStore {
             int unreadable = 0;
             for (JsonNode item : items) {
                 try {
-                    loaded.add(objectMapper.treeToValue(item, ServerConfig.class));
+                    ServerConfig server = objectMapper.treeToValue(item, ServerConfig.class);
+                    if (server == null) {
+                        // A null in the list, from a hand edit or a merge
+                        // tool, holds nothing to keep. Read as a server, it
+                        // threw in the unsealing below, and the app did not
+                        // start until the file was deleted by hand.
+                        log.warn("Skipping an empty (null) entry in {}", SERVERS_FILE);
+                        continue;
+                    }
+                    loaded.add(server);
                 } catch (JacksonException e) {
                     // Per entry, not per file: a protocol or transport a newer
                     // build wrote used to fail the whole list, quarantine

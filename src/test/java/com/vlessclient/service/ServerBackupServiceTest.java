@@ -300,6 +300,30 @@ class ServerBackupServiceTest {
     }
 
     /**
+     * A null in the list reads as no server at all, and cleaning its name threw:
+     * the whole restore failed over an entry that held nothing.
+     */
+    @Test
+    void aNullBackupEntryIsSkippedAndTheRestRestored() throws IOException {
+        Path file = tempDir.resolve("backup.json");
+        Files.writeString(file, """
+                {"config_version": 1, "servers": [null,
+                 {"name": "ok", "protocol": "vless", "address": "198.51.100.7",
+                  "port": 443, "uuid": "11111111-2222-3333-4444-555555555555"}]}
+                """, StandardCharsets.UTF_8);
+
+        ServerBackupService.ImportResult result = backup.importFile(file);
+
+        assertThat(result.added()).isEqualTo(1);
+        assertThat(result.skipped()).singleElement().satisfies(skip -> {
+            assertThat(skip.entry()).isEqualTo("#1");
+            assertThat(skip.reason())
+                    .isEqualTo(com.vlessclient.app.I18n.get("servers.backup.import.not.server"));
+        });
+        assertThat(store.getServers()).extracting(ServerConfig::getName).containsExactly("ok");
+    }
+
+    /**
      * The name goes into the log on every connect. A link's name is cleaned of
      * control characters so it cannot forge a log line; a restored one was not.
      */
