@@ -94,6 +94,54 @@ class SubscriptionServiceSecretsTest {
         assertThat(reloaded.getSubscriptions().get(0).getUrl()).isEqualTo(TOKEN_URL);
     }
 
+    /**
+     * A URL is sealed only when the file is written, as a server's credential
+     * is: one saved while no keychain was there kept the account token in
+     * plaintext after a start that had one, until the next refresh.
+     */
+    @Test
+    void urlsLeftInPlaintextAreSealedAtAStartWithAKeychain() throws Exception {
+        InMemorySecretSealer offSealer = new InMemorySecretSealer();
+        offSealer.setAvailable(false);
+        Files.createDirectories(tempDir.resolve("subs"));
+        SubscriptionService before = serviceWith(offSealer);
+        before.getSubscriptions().add(subscription(TOKEN_URL));
+        before.saveSubscriptions();
+        assertThat(rawSubscriptionsJson()).contains("secret-token-123");
+
+        InMemorySecretSealer keychain = new InMemorySecretSealer();
+        serviceWith(keychain).sealUrlsLeftInPlaintext();
+
+        assertThat(rawSubscriptionsJson()).doesNotContain("secret-token-123")
+                .contains(InMemorySecretSealer.FAKE_TAG);
+        assertThat(serviceWith(keychain).getSubscriptions().get(0).getUrl())
+                .isEqualTo(TOKEN_URL);
+    }
+
+    /** No write and no keychain process at a start that has nothing to seal, or may not. */
+    @Test
+    void aStartWithNothingToSealWritesNothing() throws Exception {
+        InMemorySecretSealer keychain = new InMemorySecretSealer();
+        Files.createDirectories(tempDir.resolve("subs"));
+        SubscriptionService first = serviceWith(keychain);
+        first.getSubscriptions().add(subscription(TOKEN_URL));
+        first.saveSubscriptions();
+        String sealed = rawSubscriptionsJson();
+        keychain.resetSealCalls();
+
+        serviceWith(keychain).sealUrlsLeftInPlaintext();
+        assertThat(keychain.sealCalls()).isZero();
+        assertThat(rawSubscriptionsJson()).isEqualTo(sealed);
+
+        configStore.getSettings().setStoreSecretsSecurely(false);
+        SubscriptionService optedOut = serviceWith(keychain);
+        optedOut.saveSubscriptions();
+        serviceWith(keychain).sealUrlsLeftInPlaintext();
+        assertThat(rawSubscriptionsJson()).as("with secure storage off")
+                .contains("secret-token-123");
+        assertThat(keychain.sealCalls()).isZero();
+    }
+
     @Test
     void disabledSettingKeepsWritingPlaintext() throws Exception {
         configStore.getSettings().setStoreSecretsSecurely(false);

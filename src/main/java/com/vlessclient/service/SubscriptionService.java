@@ -114,6 +114,9 @@ public class SubscriptionService {
      */
     private final Object writeOrder = new Object();
 
+    /** Whether subscriptions.json held a URL in plaintext as it was read. */
+    private boolean urlsInPlaintext;
+
     /** A sealed URL and the plaintext that produced it. */
     private record SealedUrl(String plaintext, String tag) {
     }
@@ -1466,6 +1469,24 @@ public class SubscriptionService {
     }
 
     /**
+     * Writes subscriptions.json again, its URLs sealed, when it held one in
+     * plaintext as it was read and secure storage is on with a keychain there
+     * to take it, as {@link ConfigStore#sealCredentialsLeftInPlaintext} does
+     * for the servers: a URL saved while no keychain was there kept its
+     * account token in the file after a start that had one, until the next
+     * refresh. Off the FX thread: the keychain's probe and each seal are
+     * processes.
+     */
+    public void sealUrlsLeftInPlaintext() {
+        if (!urlsInPlaintext || !configStore.getSettings().isStoreSecretsSecurely()
+                || !sealer.isAvailable()) {
+            return;
+        }
+        log.info("Sealing the URLs {} holds in plaintext", SUBSCRIPTIONS_FILE);
+        saveSubscriptions();
+    }
+
+    /**
      * Writes subscriptions.json as the list is now, its URLs sealed when
      * secure storage is on.
      *
@@ -1644,6 +1665,9 @@ public class SubscriptionService {
                     }
                 }
             }
+            // Before the unsealing, which leaves every URL plaintext in memory.
+            urlsInPlaintext = loaded.stream().map(Subscription::getUrl).anyMatch(
+                    url -> url != null && !url.isBlank() && !SecretSealer.isSealed(url));
             Unsealing.each(loaded, this::unsealInPlace);
             subscriptions.addAll(loaded);
             synchronized (this) {

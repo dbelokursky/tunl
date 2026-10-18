@@ -180,6 +180,15 @@ public class ServiceLocator {
         SubscriptionService subscriptionService =
                 new SubscriptionService(configStore, shareLinkParser, sealer);
         register(SubscriptionService.class, subscriptionService);
+        // What an earlier run saved while no keychain was there stayed in
+        // plaintext until some change wrote it again, which for a server
+        // added by hand could be never. Sealed now when a keychain is there,
+        // off this thread, which the window waits for: the keychain's probe
+        // and each seal are processes. One after the other, so it is probed once.
+        Thread.ofVirtual().name("seal-left-in-plaintext").start(() -> {
+            configStore.sealCredentialsLeftInPlaintext();
+            subscriptionService.sealUrlsLeftInPlaintext();
+        });
 
         UpdateManager updateManager = new UpdateManager();
         register(UpdateManager.class, updateManager);
