@@ -171,4 +171,38 @@ class BypassPatternParserTest {
         assertThat(BypassPatternParser.parse("*.кремль.*.рф").value())
                 .isEqualTo("^.*\\.xn--e1ajeds9e\\..*\\.xn--p1ai$");
     }
+
+    /**
+     * Text copied out of a right-to-left chat brings invisible directional
+     * marks along. IDN refuses a label holding one, the label was kept as
+     * typed, and the backslash put before every character but a letter or
+     * digit made "\" + U+200F, an escape Go refuses: the core refused the
+     * whole configuration, and no server connected over a line the user never
+     * wrote as a regex. A character outside the BMP got its backslash between
+     * its two halves, and the configuration could not be written at all.
+     */
+    @Test
+    void anInvisibleMarkInAGlobLeavesARegexTheCoreCompiles() {
+        assertThat(BypassPatternParser.parse("mail.*.example.com‏"))
+                .isEqualTo(new BypassPatternParser.Parsed(
+                        BypassPatternParser.Kind.DOMAIN_REGEX, "^mail\\..*\\.example\\.com$"));
+        assertThat(BypassPatternParser.parse("‏mail.*.example.com‎").value())
+                .isEqualTo("^mail\\..*\\.example\\.com$");
+        assertThat(BypassPatternParser.parse("mail.*.‫example‬.com").value())
+                .isEqualTo("^mail\\..*\\.example\\.com$");
+        assertThat(BypassPatternParser.parse("*.example.*​")).isEqualTo(
+                new BypassPatternParser.Parsed(BypassPatternParser.Kind.DOMAIN_KEYWORD, "example"));
+        assertThat(BypassPatternParser.parse("example.com‏")).isEqualTo(
+                new BypassPatternParser.Parsed(BypassPatternParser.Kind.DOMAIN, "example.com"));
+
+        // What IDN still cannot convert is written as a code point Go reads.
+        for (String line : java.util.List.of("mail.*.󰀀.com", "mail.*.☃א.com",
+                "mail.*.пример.рф‎", "mail.*.𝅳.com")) {
+            String regex = BypassPatternParser.parse(line).value();
+            assertThat(regex).as(line).doesNotContain("\\‎").matches("\\p{ASCII}+");
+            assertThat(RoutingRuleCheck.problem(
+                    com.vlessclient.model.RoutingRule.RuleType.DOMAIN_REGEX, regex))
+                    .as("%s -> %s", line, regex).isEmpty();
+        }
+    }
 }

@@ -46,6 +46,9 @@ public final class BypassPatternParser {
     private static final Pattern IPV6 = Pattern.compile(
             "^[0-9a-fA-F:]+:[0-9a-fA-F:]+$");
 
+    private static final int ZERO_WIDTH_NON_JOINER = 0x200C;
+    private static final int ZERO_WIDTH_JOINER = 0x200D;
+
     private BypassPatternParser() {
     }
 
@@ -134,7 +137,7 @@ public final class BypassPatternParser {
         if (raw == null) {
             return null;
         }
-        String line = raw.trim().toLowerCase(Locale.ROOT);
+        String line = withoutFormatCharacters(raw).trim().toLowerCase(Locale.ROOT);
         if (line.isEmpty() || line.startsWith("#")) {
             return null;
         }
@@ -160,6 +163,22 @@ public final class BypassPatternParser {
             return line + "/128";
         }
         return null;
+    }
+
+    /**
+     * The line without the invisible format characters that text copied out
+     * of right-to-left writing carries (U+200E and U+200F, U+202A to U+202E,
+     * U+2066 to U+2069) and the like: no name has one, and IDN refuses a label
+     * that does, so the line kept it and matched nothing, or, in a glob, made
+     * a regex the core refuses. The joiners some scripts spell names with stay.
+     */
+    private static String withoutFormatCharacters(String raw) {
+        StringBuilder line = new StringBuilder(raw.length());
+        raw.codePoints()
+                .filter(c -> Character.getType(c) != Character.FORMAT
+                        || c == ZERO_WIDTH_NON_JOINER || c == ZERO_WIDTH_JOINER)
+                .forEach(line::appendCodePoint);
+        return line.toString();
     }
 
     /** Trims the dots a star leaves at either end: {@code *.google.*} → {@code google}. */
@@ -225,7 +244,11 @@ public final class BypassPatternParser {
     /**
      * A run of name characters as regex: labels in punycode, dots and any
      * other punctuation escaped. A converted label holds letters, digits and
-     * hyphens alone, none of which a regex reads specially.
+     * hyphens alone, none of which a regex reads specially. What IDN could
+     * not convert is written as the code point, which Go reads anywhere: a
+     * backslash before a character outside ASCII is an escape it refuses, and
+     * put before each half of a character outside the BMP, it left the
+     * configuration impossible to write.
      */
     private static String quote(String run) {
         StringBuilder out = new StringBuilder();
@@ -235,12 +258,16 @@ public final class BypassPatternParser {
                 out.append("\\.");
             }
             String label = labels[i].isEmpty() ? "" : ascii(labels[i]);
-            for (char c : label.toCharArray()) {
+            label.codePoints().forEach(c -> {
+                if (c > 0x7f) {
+                    out.append("\\x{").append(Integer.toHexString(c)).append('}');
+                    return;
+                }
                 if (!Character.isLetterOrDigit(c) && c != '-') {
                     out.append('\\');
                 }
-                out.append(c);
-            }
+                out.appendCodePoint(c);
+            });
         }
         return out.toString();
     }

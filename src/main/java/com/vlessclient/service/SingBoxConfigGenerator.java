@@ -1393,6 +1393,16 @@ public class SingBoxConfigGenerator {
                         log.warn("Leaving out bypass entry {}: {}", raw, reason));
                 continue;
             }
+            if (parsed.kind() == BypassPatternParser.Kind.DOMAIN_REGEX) {
+                // A glob's regex the core would refuse took the whole
+                // configuration with it, as a stray invisible mark once did.
+                Optional<String> refused = RoutingRuleCheck.problem(
+                        RoutingRule.RuleType.DOMAIN_REGEX, parsed.value());
+                if (refused.isPresent()) {
+                    log.warn("Leaving out bypass entry {}: {}", raw, refused.get());
+                    continue;
+                }
+            }
             switch (parsed.kind()) {
                 case DOMAIN -> domains.add(parsed.value());
                 case DOMAIN_SUFFIX -> domainSuffixes.add(parsed.value());
