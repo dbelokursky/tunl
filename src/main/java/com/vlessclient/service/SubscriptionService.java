@@ -1322,7 +1322,11 @@ public class SubscriptionService {
         // Stamped before the servers are saved: their membership is then on
         // disk with them even if the list saved after them never is.
         batch.upserts().forEach(server -> server.setSubscriptionId(sub.getId()));
-        configStore.applyServerBatch(batch.upserts(), batch.removals());
+        // The provider withdrew what it no longer lists, which nobody asked a
+        // running tunnel to follow: a pick made in place of a withdrawn one
+        // waits for the user's reconnect where its restart would prompt.
+        configStore.applyServerBatch(batch.upserts(), batch.removals(),
+                ConfigStore.Removal.UNASKED);
         sub.setServerIds(batch.serverIds());
     }
 

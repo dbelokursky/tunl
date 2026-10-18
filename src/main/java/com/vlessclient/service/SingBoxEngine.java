@@ -24,6 +24,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyBooleanProperty;
 import javafx.beans.property.ReadOnlyBooleanWrapper;
@@ -131,6 +132,8 @@ public class SingBoxEngine {
     private TunLauncher tunLauncher = TunLauncher.current();
     private SingBoxConfigCheck configCheck =
             new SingBoxConfigCheck(SingBoxConfigCheck.DEFAULT_TIMEOUT);
+    /** The paths whose run folder a session's configuration goes in. */
+    private Supplier<PlatformPaths> paths = PlatformPaths::current;
 
     /** Listen endpoint of the inbound that carries {@code set_system_proxy}. */
     record SystemProxyTarget(String host, int port) {
@@ -359,11 +362,14 @@ public class SingBoxEngine {
             realityRefused.set(false);
         });
 
-        tempConfigFile = writeSessionConfig(sessionConfigDir(), configJson);
-
-        // Ask the core first: a configuration it refuses has to fail here,
-        // before a TUN start raises the administrator or UAC prompt for nothing.
         try {
+            // Written where a failure takes CONNECTING back: a full disk or a
+            // run folder that could not be made threw past it, and the status
+            // said Connecting with nothing launched until a Disconnect.
+            tempConfigFile = writeSessionConfig(sessionConfigDir(), configJson);
+            // Ask the core first: a configuration it refuses has to fail here,
+            // before a TUN start raises the administrator or UAC prompt for
+            // nothing.
             String refusal = configCheck.rejection(singBoxBinary, tempConfigFile).orElse(null);
             if (refusal != null) {
                 throw new ConfigRejectedException(refusal);
@@ -857,6 +863,14 @@ public class SingBoxEngine {
             return;
         }
         try {
+            // The run folder may be one the system empties of what has sat
+            // unused for days (macOS's temporary folder, a runtime dir). With
+            // it gone the file could not be made, and a root core would run
+            // on after the Disconnect.
+            Path folder = SecureFiles.parentDirectory(stopSignalFile);
+            if (Files.notExists(folder)) {
+                SecureFiles.createPrivateDir(folder);
+            }
             Files.createFile(stopSignalFile);
         } catch (java.nio.file.FileAlreadyExistsException ignored) {
             // Already signalled — the wrapper will notice regardless.
@@ -1273,6 +1287,14 @@ public class SingBoxEngine {
     }
 
     /**
+     * Test seam: the paths a session's configuration goes by, in place of
+     * this OS's ({@link PlatformPaths#current()}, asked at each start).
+     */
+    void setPaths(PlatformPaths given) {
+        this.paths = () -> given;
+    }
+
+    /**
      * Takes back the CONNECTING a start published once nothing was launched.
      * Left in place, the status keeps saying "Connecting" and the dashboard's
      * Connect button stops a connection that never began. It is queued while
@@ -1396,27 +1418,31 @@ public class SingBoxEngine {
     static final String SESSION_CONFIG_PREFIX = "singbox-";
 
     /**
-     * Where a session's configuration is written: the private run folder of
-     * the data directory, beside the stop signals.
+     * Where a session's configuration is written: the private run folder
+     * ({@link PlatformPaths#runDir()}), beside the stop signals.
      *
      * <p>It used to be the system temp dir. The file holds every configured
      * server's credential in plain text, the same values servers.json keeps
      * sealed in the Keychain, DPAPI or the Secret Service, and only a clean
      * stop in this JVM deleted it. A crash, a kill from Task Manager or a
      * power cut left it in %TEMP%, which Windows never empties, one more copy
-     * per crash.</p>
+     * per crash. Then it was the data directory's run folder, which Time
+     * Machine and Déjà Dup back up while the tunnel is up and Windows roams
+     * with the profile: every backup and every roam took a copy along. The
+     * run folder is outside both on each OS that has such a place.</p>
      *
      * @return the folder session configurations go in
      */
-    static Path sessionConfigDir() {
-        return PlatformPaths.current().dataDir().resolve("run");
+    Path sessionConfigDir() {
+        return paths.get().runDir();
     }
 
     /**
      * Writes a session configuration into {@code dir}, owner-only, after
-     * removing any an earlier run left behind. Only one engine runs at a time
-     * and a session's file goes when the session ends, so whatever is still
-     * there was orphaned by a run that did not end cleanly.
+     * removing any an earlier run left behind. One engine at a time writes in
+     * a run folder, since each data dir has its own and one copy of the app
+     * holds a data dir, and a session's file goes when the session ends, so
+     * whatever is still there was orphaned by a run that did not end cleanly.
      *
      * @param dir        the folder to write in, created private if needed
      * @param configJson the configuration
