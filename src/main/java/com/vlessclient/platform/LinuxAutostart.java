@@ -132,14 +132,29 @@ public final class LinuxAutostart implements Autostart {
     /** Test seam: same as {@link #execLine()} with an explicit process command. */
     static String execLine(Optional<String> processCommand) {
         if (processCommand.isPresent() && !isJavaExecutable(processCommand.get())) {
-            return quoteExecArg(processCommand.get());
+            return execLine(List.of(processCommand.get()));
         }
+        return execLine(JvmLaunchCommand.current());
+    }
+
+    /**
+     * Test seam: the Exec value that runs {@code command}.
+     *
+     * <p>A program whose path holds a % runs through {@code env}. GLib, and
+     * systemd's autostart generator, look the program up before they expand
+     * {@code %%}, so a path written the spec's way was not found and the entry
+     * did nothing; as {@code env}'s argument it is expanded like any other.</p>
+     */
+    static String execLine(List<String> command) {
         StringBuilder exec = new StringBuilder();
-        for (String arg : JvmLaunchCommand.current()) {
+        if (command.getFirst().indexOf('%') >= 0) {
+            exec.append("env");
+        }
+        for (String arg : command) {
             if (!exec.isEmpty()) {
                 exec.append(' ');
             }
-            exec.append(quoteExecArg(arg));
+            exec.append(execArg(arg));
         }
         return exec.toString();
     }
@@ -151,18 +166,32 @@ public final class LinuxAutostart implements Autostart {
     }
 
     /**
-     * Desktop-entry Exec quoting: arguments with reserved characters go in
-     * double quotes with the inner specials backslash-escaped.
+     * One argument of an Exec value, written for the three passes the Desktop
+     * Entry spec reads it in, the last pass first: a % is doubled, as any
+     * other % starts a field code; an argument with a reserved character goes
+     * in double quotes, with {@code " ` $ \} backslash-escaped; and the value
+     * as a whole escapes a backslash, newline, tab or carriage return the way
+     * every string in a key file does.
+     *
+     * <p>The line was written for the quoting pass alone. GLib reads the
+     * string escapes first and refuses {@code \$}, {@code \`} and {@code \"},
+     * so for a path holding $, ` or " GNOME found no Exec at all, and Tunl did
+     * not start at login while the box in Settings stayed ticked. A % was
+     * read as a field code: "100%done" became "100one".</p>
      */
-    private static String quoteExecArg(String arg) {
-        if (!arg.isEmpty() && arg.chars().noneMatch(c ->
+    private static String execArg(String arg) {
+        String text = arg.replace("%", "%%");
+        if (text.isEmpty() || text.chars().anyMatch(c ->
                 Character.isWhitespace(c) || "\"'\\><~|&;$*?#()`".indexOf(c) >= 0)) {
-            return arg;
+            text = '"' + text.replace("\\", "\\\\")
+                    .replace("\"", "\\\"")
+                    .replace("`", "\\`")
+                    .replace("$", "\\$") + '"';
         }
-        return '"' + arg.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("`", "\\`")
-                .replace("$", "\\$") + '"';
+        return text.replace("\\", "\\\\")
+                .replace("\n", "\\n")
+                .replace("\t", "\\t")
+                .replace("\r", "\\r");
     }
 
     /**
