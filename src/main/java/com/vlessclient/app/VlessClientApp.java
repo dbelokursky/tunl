@@ -70,7 +70,23 @@ public class VlessClientApp extends Application {
 
     private final AtomicBoolean teardownReachedExit = new AtomicBoolean();
 
+    /** What the startup runs to remove earlier releases' session configurations. */
+    private final Runnable earlierSessionConfigs;
+
     private TrayIconService trayIconService;
+
+    /** The app as JavaFX starts it. */
+    public VlessClientApp() {
+        this(EarlierSessionConfigs::remove);
+    }
+
+    /**
+     * Test seam: the app with another removal of earlier releases' session
+     * configurations, which the real one looks for in the system temp dir.
+     */
+    VlessClientApp(Runnable earlierSessionConfigs) {
+        this.earlierSessionConfigs = earlierSessionConfigs;
+    }
 
     @Override
     public void init() {
@@ -162,7 +178,7 @@ public class VlessClientApp extends Application {
      */
     private void removeEarlierSessionConfigs() {
         if (SingleInstance.current().isPresent()) {
-            Thread.startVirtualThread(EarlierSessionConfigs::remove);
+            Thread.startVirtualThread(earlierSessionConfigs);
         }
     }
 
