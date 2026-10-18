@@ -559,7 +559,11 @@ public final class CoreSettings {
             // "create client transport: quic: TLS required"
             return refused("QUIC without TLS", "refusal.quic.tls");
         }
+        // A null type, which a servers.json or a backup written by hand can
+        // hold, is plain TCP to the builders, and Set.of throws on a null
+        // lookup: every connect, and every restore holding one, failed on it.
         if (TRANSPORT_PROTOCOLS.contains(server.getProtocol()) && server.getTransport() != null
+                && server.getTransport().getType() != null
                 && ESCAPED_PATHS.contains(server.getTransport().getType())
                 && !isEscapedPath(transportPath(server.getTransport()))) {
             // "create client transport: ws: parse path: invalid URL escape "%"".

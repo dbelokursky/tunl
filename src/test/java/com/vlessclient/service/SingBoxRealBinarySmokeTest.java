@@ -457,6 +457,10 @@ class SingBoxRealBinarySmokeTest {
                         "/ws%20x"),
                 pathServer("ws-path-early-data-percent",
                         com.vlessclient.model.TransportType.WEBSOCKET, "/ws?ed=50%"),
+                // A servers.json written by hand can give a transport no type.
+                with(pathServer("transport-type-null",
+                        com.vlessclient.model.TransportType.WEBSOCKET, "/ws%"),
+                        server -> server.getTransport().setType(null)),
                 // The local address as a .conf or the form gives it.
                 wireguardServer("wg-address-prefix-too-long", "10.0.0.2/33"),
                 wireguardServer("wg-address-not-an-ip", "not-an-ip"),

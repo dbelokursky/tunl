@@ -865,6 +865,49 @@ class ConnectionServiceTest {
         assertThat(engine.calls).doesNotContain("start");
     }
 
+    /**
+     * A servers.json written by hand or by another program can give a
+     * transport the type null, which the builders read as plain TCP. The
+     * check for a transport path's escapes looked the null type up in a set
+     * that throws on null, and every server is checked at every connect: no
+     * connect worked, whichever server was active, from the Dashboard, the
+     * tray, MCP, auto-connect or recovery.
+     */
+    @Test
+    void storedServersWhoseTransportHasNoTypeConnectAsPlainTcp() throws Exception {
+        Path dataDir = tempDir.resolve("hand-written");
+        java.nio.file.Files.createDirectories(dataDir);
+        java.nio.file.Files.writeString(dataDir.resolve("servers.json"), """
+                {"config_version": 1, "servers": [
+                 {"id": "srv-1", "name": "Tokyo", "protocol": "vless",
+                  "address": "tokyo.example.com", "port": 443,
+                  "uuid": "11111111-1111-1111-1111-111111111111", "active": true,
+                  "transport": {"type": null}},
+                 {"id": "srv-2", "name": "Plain", "protocol": "trojan",
+                  "address": "plain.example.com", "port": 443, "uuid": "trojan-password",
+                  "transport": {"type": null},
+                  "tls": {"enabled": true, "server_name": "plain.example.com"}}
+                ]}
+                """);
+        store = new ConfigStore(dataDir);
+        store.getSettings().setProxyMode(ProxyMode.SYSTEM_PROXY);
+        assertThat(store.getServers()).extracting(server -> server.getTransport().getType())
+                .as("the types as loaded").containsOnlyNulls();
+        RecordingEngine engine = engine();
+        ConnectionService service = service(engine);
+
+        ConnectionService.ConnectAttempt attempt = service.connect();
+
+        assertThat(attempt.started()).isTrue();
+        assertThat(attempt.server().getId()).isEqualTo("srv-1");
+        assertThat(attempt.skipped()).isEmpty();
+        JsonNode config = JsonMapper.builder().build().readTree(engine.configs.getFirst());
+        for (JsonNode outbound : config.path("outbounds")) {
+            assertThat(outbound.has("transport")).as(outbound.path("tag").asString()).isFalse();
+        }
+        assertThat(engine.configs.getFirst()).contains(tag("srv-1")).contains(tag("srv-2"));
+    }
+
     /** A REALITY server with the given short ID and an otherwise valid key. */
     private static ServerConfig withShortId(ServerConfig server, String shortId) {
         com.vlessclient.model.TlsConfig tls = new com.vlessclient.model.TlsConfig();

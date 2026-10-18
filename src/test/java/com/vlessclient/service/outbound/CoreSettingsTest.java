@@ -541,6 +541,23 @@ class CoreSettingsTest {
     }
 
     /**
+     * A transport with the type null, which a servers.json or a backup written
+     * by hand can hold, is built as plain TCP. Looking its path up threw on the
+     * null type, and as every server is checked at every connect, no connect
+     * worked.
+     */
+    @Test
+    void aTransportWithNoTypeIsPlainTcp() {
+        for (Protocol protocol : List.of(Protocol.VLESS, Protocol.VMESS, Protocol.TROJAN)) {
+            ServerConfig server = withPath(com.vlessclient.model.TransportType.WEBSOCKET, "/ws%");
+            server.setProtocol(protocol);
+            server.getTransport().setType(null);
+
+            assertThat(CoreSettings.refusal(server)).as(protocol.name()).isEmpty();
+        }
+    }
+
+    /**
      * Half of a surrogate pair, from a link whose JSON escaped half an emoji
      * ("path":"/\ud83c"): a configuration holding it cannot be written as
      * UTF-8, and every configuration holds every server, so every connect
