@@ -253,7 +253,36 @@ public class SubscriptionsViewController implements ViewShownAware {
                 window.sizeToScene();
             }
         });
-        // After the listener, so an http URL being edited shows its warning.
+        // A URL no refresh can read, one with a space or a quote in it, typed
+        // or opened from a link whose %20 decodes to a space: it was taken,
+        // every refresh failed on it, and the failure quoted it, token and all.
+        Label urlProblem = new Label(I18n.get("subscriptions.url.invalid"));
+        urlProblem.getStyleClass().add("subscription-error");
+        urlProblem.setWrapText(true);
+        urlProblem.setMaxWidth(350);
+        urlProblem.setMinHeight(Region.USE_PREF_SIZE);
+        urlProblem.setVisible(false);
+        urlProblem.setManaged(false);
+        urlField.textProperty().addListener((obs, oldVal, newVal) -> {
+            String typed = urlField.getText();
+            boolean unreadable = !typed.isBlank()
+                    && !SubscriptionService.isReadableUrl(typed.strip());
+            urlField.getStyleClass().remove("field-error");
+            if (unreadable) {
+                urlField.getStyleClass().add("field-error");
+            }
+            if (unreadable == urlProblem.isVisible()) {
+                return;
+            }
+            urlProblem.setVisible(unreadable);
+            urlProblem.setManaged(unreadable);
+            // A shown dialog keeps the size it opened with.
+            Window window = dialog.getDialogPane().getScene().getWindow();
+            if (window.isShowing()) {
+                window.sizeToScene();
+            }
+        });
+        // After the listeners, so a URL being edited shows its warning or problem.
         nameField.setText(name == null ? "" : name);
         urlField.setText(url == null ? "" : url);
 
@@ -262,17 +291,20 @@ public class SubscriptionsViewController implements ViewShownAware {
         grid.add(new Label(I18n.get("subscriptions.url.label")), 0, 1);
         grid.add(urlField, 1, 1);
         grid.add(httpWarning, 1, 2);
+        grid.add(urlProblem, 1, 3);
 
         dialog.getDialogPane().setContent(grid);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
         Dialogs.localizeButtons(dialog.getDialogPane());
-        // OK waits for the URL. The fields used to be checked after the dialog
-        // closed: OK on an incomplete form put up a warning and dropped what
-        // had been typed. A name left empty is the provider's own
-        // (profile-title), or the host's, from the first refresh.
+        // OK waits for a URL a refresh can read. The fields used to be checked
+        // after the dialog closed: OK on an incomplete form put up a warning
+        // and dropped what had been typed. A name left empty is the
+        // provider's own (profile-title), or the host's, from the first refresh.
         dialog.getDialogPane().lookupButton(ButtonType.OK).disableProperty().bind(
                 Bindings.createBooleanBinding(
-                        () -> urlField.getText().isBlank(), urlField.textProperty()));
+                        () -> urlField.getText().isBlank()
+                                || !SubscriptionService.isReadableUrl(urlField.getText().strip()),
+                        urlField.textProperty()));
         dialog.initOwner(ownerWindow());
 
         Platform.runLater(nameField::requestFocus);

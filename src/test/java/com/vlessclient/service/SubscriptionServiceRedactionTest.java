@@ -141,6 +141,81 @@ class SubscriptionServiceRedactionTest {
     }
 
     /**
+     * A URL that does not parse failed every refresh in URI.create, whose
+     * message quotes the whole URL, and the redaction of a URL in text stops
+     * at a space: the token after one went into lastError beside the sealed
+     * URL, onto the row, into MCP's answer and into the log. Such a URL was
+     * stored by every build before this one, so a file can still hold one.
+     */
+    @Test
+    @DisplayName("a stored URL that is not a URI fails its refresh without quoting the token")
+    void refreshSubscription_aUrlThatIsNotAUriKeepsItsTokenOut() throws IOException {
+        Files.writeString(tempDir.resolve("subscriptions.json"), """
+                {"config_version":1,"subscriptions":[
+                  {"id":"a","name":"Provider","url":"https://sub.example.com/api/sub/ %s"}]}
+                """.formatted(TOKEN), java.nio.charset.StandardCharsets.UTF_8);
+        SubscriptionService service = new SubscriptionService(
+                new ConfigStore(tempDir), new ShareLinkParser(), tempDir,
+                HttpClient.newHttpClient());
+
+        Logger serviceLog = (Logger) LoggerFactory.getLogger(SubscriptionService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        serviceLog.addAppender(appender);
+        try {
+            service.refreshSubscription("a");
+        } finally {
+            serviceLog.detachAppender(appender);
+        }
+
+        Subscription sub = service.getSubscriptions().get(0);
+        assertThat(sub.getLastErrorKey()).isEqualTo("subscriptions.error.url");
+        assertThat(sub.getLastError()).isNull();
+        assertThat(SubscriptionService.failureText(sub)).doesNotContain(TOKEN);
+        assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage)
+                .isNotEmpty()
+                .allSatisfy(message -> assertThat(message).doesNotContain(TOKEN));
+        JsonNode persisted = JsonMapper.builder().build()
+                .readTree(Files.readString(tempDir.resolve("subscriptions.json")))
+                .path("subscriptions").path(0);
+        assertThat(persisted.path("lastErrorKey").asString()).isEqualTo("subscriptions.error.url");
+        assertThat(persisted.path("lastError").isMissingNode()
+                || persisted.path("lastError").isNull()).isTrue();
+    }
+
+    /** One typed or opened from a link (where %20 decodes to a space) is not stored at all. */
+    @Test
+    @DisplayName("a URL that is not a URI is refused when added or edited")
+    void addAndUpdate_refuseAUrlThatIsNotAUri() {
+        SubscriptionService service = new SubscriptionService(
+                new ConfigStore(tempDir), new ShareLinkParser(), tempDir,
+                HttpClient.newHttpClient()) {
+            @Override
+            String fetchContent(String url) throws IOException {
+                throw new IOException("not fetched in this test");
+            }
+        };
+        String spaced = "https://sub.example.com/api/sub/ " + TOKEN;
+
+        for (String url : java.util.List.of(spaced, "https://sub.example.com/api/sub/\"" + TOKEN,
+                "sing-box://import-remote-profile?url=https%3A%2F%2Fsub.example.com%2Fsub%2F%20"
+                        + TOKEN)) {
+            assertThatThrownBy(() -> service.addSubscription("Provider", url))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage(com.vlessclient.app.I18n.get("subscriptions.url.invalid"));
+        }
+        assertThat(service.getSubscriptions()).isEmpty();
+
+        service.addSubscription("Provider", "https://sub.example.com/api/sub/" + TOKEN);
+        String id = service.getSubscriptions().get(0).getId();
+        assertThatThrownBy(() -> service.updateSubscription(id, "Provider", spaced))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageNotContaining(TOKEN);
+        assertThat(service.getSubscriptions().get(0).getUrl())
+                .isEqualTo("https://sub.example.com/api/sub/" + TOKEN);
+    }
+
+    /**
      * Not the token this time but a server's credential: every line of a
      * subscription is a share link, and one the parser rejects was logged with
      * the parser's message, which can quote the line back.

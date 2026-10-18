@@ -71,6 +71,7 @@ public class SubscriptionsHttpWarningTest extends ApplicationTest {
 
     private Stage stage;
     private SubscriptionService service;
+    private SubscriptionsViewController controller;
 
     @Override
     public void start(Stage stage) {
@@ -156,6 +157,55 @@ public class SubscriptionsHttpWarningTest extends ApplicationTest {
         assertTheWindowFits(dialog);
     }
 
+    /**
+     * A URL no refresh can read, one with a space in it, was taken: stored,
+     * it failed every refresh, and the failure quoted the URL, token and all.
+     * OK now waits for a URL a refresh can read, and the dialog says why.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"en", "ru"})
+    void aUrlThatIsNotAnAddressHoldsOkAndSaysWhy(String language) {
+        mountTheView(language);
+        DialogPane dialog = open(addButton()::fire);
+
+        typeUrl(dialog, "https://provider.example/sub/ token");
+
+        assertThat(onFx(() -> dialog.lookupButton(ButtonType.OK).isDisabled()))
+                .as("whether OK can be pressed").isTrue();
+        assertThat(drawnProblem(dialog)).isEqualTo(I18n.get("subscriptions.url.invalid"));
+        assertTheWindowFits(dialog);
+
+        typeUrl(dialog, "https://provider.example/sub/%20token");
+
+        assertThat(onFx(() -> dialog.lookupButton(ButtonType.OK).isDisabled())).isFalse();
+        assertThat(drawnProblem(dialog)).as("the problem, once the URL is one").isNull();
+        assertTheWindowFits(dialog);
+    }
+
+    /** A link opened from a page or another app, whose %20 decodes to a space, does the same. */
+    @Test
+    void aLinksUrlThatIsNotAnAddressOpensWithOkHeld() {
+        mountTheView("en");
+
+        DialogPane dialog = open(() -> controller.openAddSubscriptionDialog(
+                "https://provider.example/sub/ token"));
+
+        assertThat(onFx(() -> dialog.lookupButton(ButtonType.OK).isDisabled())).isTrue();
+        assertThat(drawnProblem(dialog)).isEqualTo(I18n.get("subscriptions.url.invalid"));
+        assertTheWindowFits(dialog);
+    }
+
+    /** The problem under the URL as the dialog draws it, or null when none is shown. */
+    private String drawnProblem(DialogPane dialog) {
+        return onFx(() -> {
+            dialog.applyCss();
+            dialog.layout();
+            Node problem = dialog.lookup(".subscription-error");
+            return problem != null && problem.isVisible()
+                    ? ((Text) problem.lookup(".text")).getText() : null;
+        });
+    }
+
     // ===== Opening and reading the dialog =====
 
     /**
@@ -175,6 +225,7 @@ public class SubscriptionsHttpWarningTest extends ApplicationTest {
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
+            controller = loader.getController();
             stage.getScene().getStylesheets().setAll(ThemeCss.of("light"));
         });
     }

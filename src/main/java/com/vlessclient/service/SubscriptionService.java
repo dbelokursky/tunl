@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.ConnectException;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.net.http.HttpHeaders;
@@ -573,6 +574,14 @@ public class SubscriptionService {
         }
     }
 
+    /** The stored URL does not parse; the message holds nothing of it. */
+    static final class UnreadableUrlException extends IOException {
+
+        UnreadableUrlException() {
+            super("The subscription URL is not a valid URI");
+        }
+    }
+
     /**
      * A failed fetch in the app's own words, when it is one of the usual
      * failures, or null to keep the technical reason. The reason used to be
@@ -592,6 +601,9 @@ public class SubscriptionService {
             }
             if (cause instanceof TunnelNotCarryingException) {
                 return new Declined("subscriptions.error.tunnel", List.of());
+            }
+            if (cause instanceof UnreadableUrlException) {
+                return new Declined("subscriptions.error.url", List.of());
             }
             if (cause instanceof UnresolvedAddressException
                     || cause instanceof UnknownHostException) {
@@ -858,7 +870,31 @@ public class SubscriptionService {
         if (SubscriptionLinks.encryptedForHapp(url)) {
             throw new IllegalArgumentException(I18n.get("subscriptions.link.happ.encrypted"));
         }
+        if (url != null && !isReadableUrl(url)) {
+            throw new IllegalArgumentException(I18n.get("subscriptions.url.invalid"));
+        }
         return SubscriptionLinks.subscriptionUrl(url).orElse(url);
+    }
+
+    /**
+     * Whether a refresh can read what the user gave as an address: the URL,
+     * or the one another client's link wraps, parses as a URI. One with a
+     * space or a quote in it does not; it used to be stored as it was, and
+     * every refresh failed on it.
+     *
+     * @param url the URL or link; null reads as nothing
+     * @return false for text no refresh can read
+     */
+    public static boolean isReadableUrl(String url) {
+        if (url == null) {
+            return false;
+        }
+        try {
+            new URI(SubscriptionLinks.subscriptionUrl(url).orElse(url));
+            return true;
+        } catch (URISyntaxException e) {
+            return false;
+        }
     }
 
     /**
@@ -1107,8 +1143,19 @@ public class SubscriptionService {
             log.warn("Subscription fetched over plaintext http (MITM/injection "
                     + "risk; prefer https): host={}", host);
         }
+        URI uri;
+        try {
+            uri = new URI(url);
+        } catch (URISyntaxException e) {
+            // Not with the JDK's reason, which quotes the URL whole: the
+            // redaction of a URL in text stops at a space or a quote, and the
+            // token after one went into lastError, onto the row, into MCP's
+            // answer and into the log. Such a URL is refused when added now,
+            // but a file from an earlier build can hold one.
+            throw new UnreadableUrlException();
+        }
         HttpRequest.Builder request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
+                .uri(uri)
                 .GET()
                 .timeout(Duration.ofSeconds(30))
                 .header("User-Agent", "Tunl/" + AppVersion.VERSION);
