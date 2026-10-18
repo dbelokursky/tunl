@@ -1524,7 +1524,7 @@
 }
 
 /* Why the core would refuse the value typed: the add-rule dialog, the bypass
-   list, and the DNS fields in Settings. */
+   list, the DNS fields in Settings, and a stored rule the list says is unused. */
 .routing-rule-problem {
     -fx-font-size: 11px;
     -fx-text-fill: -c-danger-fg;

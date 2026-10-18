@@ -118,6 +118,74 @@ public class RoutingViewTest extends ApplicationTest {
         }
     }
 
+    /**
+     * A stored rule the core cannot use is left out of the configuration, so
+     * that the core starts; the list showed it like any other rule, and
+     * nothing told the user that it did nothing.
+     */
+    @Test
+    void aStoredRuleTheCoreIsNotGivenSaysWhyInTheList() {
+        RoutingService routing = ServiceLocator.get(RoutingService.class);
+        RoutingRule unusable = new RoutingRule(RoutingRule.RuleType.GEOSITE, "youtub",
+                RoutingRule.RuleAction.PROXY);
+        RoutingRule usable = new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "fine.example",
+                RoutingRule.RuleAction.DIRECT);
+        java.util.List<RoutingRule> before = java.util.List.copyOf(routing.getConfig().getRules());
+        try {
+            // Stored as an earlier version stored it: addRule refuses it now.
+            // These two alone, whatever rules the tests before this one left.
+            interact(() -> {
+                routing.getConfig().setRules(java.util.List.of(unusable, usable));
+                routing.saveConfig(routing.getConfig());
+            });
+            WaitForAsyncUtils.waitForFxEvents();
+
+            assertThat(textsIn(cellShowing(unusable)))
+                    .anySatisfy(text -> assertThat(text).startsWith("Not used").contains("youtub"));
+            assertThat(textsIn(cellShowing(usable)))
+                    .noneSatisfy(text -> assertThat(text).startsWith("Not used"));
+        } finally {
+            interact(() -> {
+                routing.getConfig().setRules(before);
+                routing.saveConfig(routing.getConfig());
+            });
+        }
+    }
+
+    /**
+     * The row that shows {@code rule}, scrolled to first: the stage is shared
+     * between test classes, and one before this may leave the window smaller
+     * than the scene asks, with room in the list for a single row.
+     */
+    private javafx.scene.Node cellShowing(RoutingRule rule) {
+        ListView<RoutingRule> list = lookup("#rulesListView").query();
+        interact(() -> {
+            list.scrollTo(rule);
+            list.layout();
+        });
+        return lookup(".list-cell").queryAll().stream()
+                .map(node -> (javafx.scene.control.ListCell<?>) node)
+                .filter(cell -> cell.getItem() == rule)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no row shows " + rule.getValue()))
+                .getGraphic();
+    }
+
+    private static java.util.List<String> textsIn(javafx.scene.Node graphic) {
+        java.util.List<String> texts = new java.util.ArrayList<>();
+        java.util.ArrayDeque<javafx.scene.Node> nodes = new java.util.ArrayDeque<>();
+        nodes.push(graphic);
+        while (!nodes.isEmpty()) {
+            javafx.scene.Node node = nodes.pop();
+            if (node instanceof javafx.scene.control.Labeled labeled) {
+                texts.add(labeled.getText());
+            } else if (node instanceof javafx.scene.Parent parent) {
+                parent.getChildrenUnmodifiable().forEach(nodes::push);
+            }
+        }
+        return texts;
+    }
+
     @Test
     void redesignedControlsExist() {
         assertThat(lookup("#bypassCountryCombo").tryQuery()).isPresent();

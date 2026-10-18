@@ -631,7 +631,24 @@ public class RoutingViewController {
             deleteBtn.setOnAction(e -> deleteRule(rule));
 
             row.getChildren().addAll(typeLabel, valueLabel, spacer, actionBadge, deleteBtn);
-            setGraphic(row);
+            // A rule the core cannot use, stored before the add-rule check
+            // knew it, is left out of the configuration so that every other
+            // server and rule still connects; it was listed like any other,
+            // and the user had no way to know it did nothing. Say why.
+            Optional<String> problem = RoutingRuleCheck.problem(rule.getType(), rule.getValue());
+            if (problem.isEmpty()) {
+                setGraphic(row);
+                return;
+            }
+            Label unused = new Label(I18n.get("routing.rule.unused", problem.get()));
+            unused.getStyleClass().add("routing-rule-problem");
+            unused.setWrapText(true);
+            // As wide as the row, not as the sentence: asked for its whole
+            // length, the list widened every row and put Delete out of view.
+            unused.setPrefWidth(0);
+            unused.setMaxWidth(Double.MAX_VALUE);
+            unused.setMinHeight(Region.USE_PREF_SIZE);
+            setGraphic(new VBox(4, row, unused));
         }
     }
 }
