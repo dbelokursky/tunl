@@ -20,6 +20,14 @@ final class LinuxSecretToolSecretSealer implements SecretSealer {
     private static final String ATTRIBUTE_VALUE = "vless-client";
     private static final String TAG = SEAL_PREFIX + "secretservice:v1";
 
+    /**
+     * The most {@code secret-tool store} reads of a secret on stdin: libsecret's
+     * {@code read_password_stdin} fills a buffer of this size and stops, then
+     * stores what it has and exits 0, saying "password is too long" only on
+     * standard error. In libsecret's current source still.
+     */
+    static final int MAX_PAYLOAD = 8192;
+
     private final SecretSealers.Subprocess subprocess;
     private volatile Boolean available;
 
@@ -49,6 +57,16 @@ final class LinuxSecretToolSecretSealer implements SecretSealer {
         // regardless of encoding or trailing-newline handling.
         String payload = Base64.getEncoder()
                 .encodeToString(plaintext.getBytes(StandardCharsets.UTF_8));
+        if (payload.length() > MAX_PAYLOAD) {
+            // Kept in the file, as a value that cannot be sealed always is.
+            // Stored, it was cut with exit 0, the file kept only the tag, and
+            // the next start read back a subscription URL cut at 6 KiB: the
+            // rest of it was nowhere. Split over several entries, it would be
+            // a format no earlier build reads, and one entry lost loses it.
+            log.warn("A secret of {} characters is longer than secret-tool stores whole; "
+                    + "keeping it in the file", plaintext.length());
+            return null;
+        }
         return subprocess.run(
                         new String[] {
                             "secret-tool", "store", "--label=VLESS Client " + key,
