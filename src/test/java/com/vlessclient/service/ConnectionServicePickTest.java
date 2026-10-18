@@ -1084,6 +1084,62 @@ class ConnectionServicePickTest {
                 .isTrue();
     }
 
+    /** Frankfurt as a REALITY server, with the short ID and server name its panel handed out. */
+    private static ServerConfig realityFrankfurt(String name, String shortId, String serverName) {
+        ServerConfig frankfurt = server("srv-2", name);
+        // Where the server is stays as it was; only what the panel picks anew changes.
+        frankfurt.setAddress("frankfurt.example.com");
+        TlsConfig tls = new TlsConfig();
+        tls.setEnabled(true);
+        tls.setServerName(serverName);
+        tls.setReality(true);
+        tls.setRealityPublicKey("jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0");
+        tls.setRealityShortId(shortId);
+        frankfurt.setTls(tls);
+        frankfurt.setSubscriptionId("sub-1");
+        return frankfurt;
+    }
+
+    /**
+     * A server the core's check refused at the start, handed out again by a
+     * refresh with another name, as a remark that counts the traffic left
+     * changes, and another REALITY short ID and server name, which 3x-ui and
+     * Marzban pick anew at each hand-out. The refusal was kept for the
+     * server as it was whole, so after such a refresh select_server reported
+     * the pick made, and the pick stopped the working tunnel for a start the
+     * core refused again.
+     */
+    @Test
+    void aCheckRefusedServerARefreshRenamedAndReKeyedIsStillRefusedBeforeAnyStop()
+            throws Exception {
+        store.addServer(server("srv-1", "Tokyo"));
+        store.addServer(realityFrankfurt("Frankfurt", "ab", "a.example"));
+        store.setActiveServer("srv-1");
+        PickEngine engine = engine();
+        engine.refuseWith = ConnectionServicePickTest::refusingFrankfurt;
+        serviceOver(engine);
+        assertThat(service.connect().skipped()).extracting(ConnectionService.SkippedServer::id)
+                .containsExactly("srv-2");
+        store.applyServerBatch(List.of(realityFrankfurt("Frankfurt | 11 GB", "cd", "b.example")),
+                List.of(), ConfigStore.Removal.UNASKED);
+        DefaultAppControlService control = new DefaultAppControlService(store, null, null,
+                new RoutingService(), service, null, null, engine);
+
+        assertThatThrownBy(() -> control.selectServer("srv-2"))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining("unsupported flow: xtls-rprx-direct");
+        store.setActiveServer("srv-2");
+        assertThatThrownBy(service::switchToActiveServer)
+                .isInstanceOf(ConfigRejectedException.class)
+                .hasMessageContaining("Frankfurt | 11 GB");
+
+        assertThat(engine.calls).as("no stop for a start the core would refuse")
+                .doesNotContain("stop");
+        assertThat(engine.isRunning()).as("the working tunnel").isTrue();
+        assertThat(picked("srv-1")).as("the pick put back on the server the core runs")
+                .isTrue();
+    }
+
     /**
      * A server the check refused and that changed since, as a refresh that
      * fixed it changes it, is the core's to judge again: the pick restarts.

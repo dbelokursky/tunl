@@ -246,9 +246,8 @@ public class ConnectionService {
     /**
      * A server the core's check refused as a run started, as it was then.
      *
-     * @param content the server as the check refused it, but for whether it
-     *                was picked: one that changed since is the core's to judge
-     *                again
+     * @param content the server as the check judged it ({@link #contentOf}):
+     *                one that changed since is the core's to judge again
      * @param reason  what the core said about it
      */
     private record Refused(JsonNode content, String reason) {
@@ -762,10 +761,24 @@ public class ConnectionService {
 
     private static final JsonMapper SETTINGS_COPIER = JsonMapper.builder().build();
 
-    /** A server as a configuration is built from it, but for whether it is picked. */
+    /**
+     * A server as the core's check judges it: as stored, but for what the
+     * core is not given or takes from a list. Whether it is picked, its name
+     * and the subscription it came from never reach the core, and a REALITY
+     * server's short ID and server name are values its panel picks anew at
+     * each hand-out ({@link LiveSelector#runsAs}), whose form the core's
+     * check does not judge beyond what {@link CoreSettings#refusal} already
+     * does. Compared whole, a refresh that renamed the server or handed it
+     * out with another short ID dropped what the check had said of it, and
+     * a pick of it stopped the working tunnel for a start the core refused
+     * again.
+     */
     private static JsonNode contentOf(ServerConfig server) {
         ObjectNode content = SETTINGS_COPIER.valueToTree(server);
-        content.remove("active");
+        content.remove(List.of("active", "name", "subscription_id"));
+        if (content.path("tls") instanceof ObjectNode tls && tls.path("reality").asBoolean(false)) {
+            tls.remove(List.of("server_name", "reality_short_id"));
+        }
         return content;
     }
 
