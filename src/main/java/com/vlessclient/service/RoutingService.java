@@ -286,11 +286,13 @@ public class RoutingService {
                 RoutingRule read = objectMapper.treeToValue(rule, RoutingRule.class);
                 // A rule without a type or an action, from a hand edit or an
                 // older tool, was kept with nulls, and every connect threw a
-                // NullPointerException in the generator over it.
-                if (read.getType() == null || read.getAction() == null) {
+                // NullPointerException in the generator over it. A null entry
+                // reads as no rule at all, and asking it for its type threw out
+                // of this constructor: the app did not start.
+                if (read == null || read.getType() == null || read.getAction() == null) {
                     unreadable++;
                     log.warn("Skipping routing rule {}: it has no type or no action",
-                            read.getId());
+                            read == null ? null : read.getId());
                     continue;
                 }
                 kept.add(read);

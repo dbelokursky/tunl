@@ -90,6 +90,31 @@ class RoutingServiceTest {
     }
 
     /**
+     * A null among the rules, from a hand edit or another tool, read as no
+     * rule at all, and asking it for its type threw a NullPointerException out
+     * of the constructor: the app, autostart included, exited before a window
+     * appeared, every time, until routing.json was found and deleted by hand.
+     */
+    @Test
+    void aNullRuleIsSkippedAndReportedAndTheAppStarts() throws Exception {
+        java.nio.file.Files.writeString(tempDir.resolve("routing.json"), """
+                { "config_version": 1, "rules": [
+                    { "id": "r-1", "type": "domain_suffix", "value": "example.com",
+                      "action": "direct" },
+                    null ],
+                  "bypass_list": [] }""");
+        PersistenceState persistence = new PersistenceState();
+
+        RoutingConfig config = new RoutingService(tempDir, persistence).getConfig();
+
+        assertThat(config.getRules()).extracting(RoutingRule::getId).containsExactly("r-1");
+        assertThat(persistence.unreadableEntries()).containsEntry(RoutingService.ROUTING_FILE, 1);
+
+        java.nio.file.Files.writeString(tempDir.resolve("routing.json"), "{\"rules\": [null]}");
+        assertThat(new RoutingService(tempDir).getConfig().getRules()).isEmpty();
+    }
+
+    /**
      * Pre-port installs wrote routing.json mac-style on every OS. Moving to
      * PlatformPaths must carry that file over, or a Windows/Linux user silently
      * starts from empty routing rules.
