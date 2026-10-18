@@ -1011,6 +1011,43 @@ class SingBoxRealBinarySmokeTest {
         }
     }
 
+    /**
+     * The delay probe names a server by its tag in the clash API's path, and
+     * a tag with a space, srv-Germany 1 for a server a restored backup named
+     * so, went form-encoded, srv-Germany+1: the core answered 404, and the
+     * latency fell back to a TCP connect. A server that carries nothing is
+     * reported as failed, which the core says only of a tag it found.
+     */
+    @Test
+    void theDelayProbeFindsAServerWhoseIdHoldsASpace() throws Exception {
+        int closed = freePort();
+        ServerConfig server = serverFor(Protocol.VLESS);
+        server.setId("Germany 1");
+        server.setName("Germany 1");
+        server.setAddress("127.0.0.1");
+        server.setPort(closed);
+        AppSettings settings = new AppSettings();
+        settings.setProxyMode(ProxyMode.SYSTEM_PROXY);
+        settings.setSystemProxyAutoConfig(false);
+        settings.setClashApiSecret("probe-smoke-secret");
+        CoreRun run = startOnFreshPorts(settings, s -> generator.generate(server, s));
+        try (HttpClient http = HttpClient.newHttpClient()) {
+            ClashApiDelayProbe.Answer answer = new ClashApiDelayProbe(http).measure(
+                    settings.getClashApiPort(), "probe-smoke-secret",
+                    com.vlessclient.service.outbound.OutboundTags.server(server));
+
+            assertThat(answer).as("the core's answer for %s",
+                            com.vlessclient.service.outbound.OutboundTags.server(server))
+                    .isInstanceOf(ClashApiDelayProbe.Answer.Failed.class);
+        } catch (Throwable e) {
+            throw new AssertionError(outputTail(run.logFile()), e);
+        } finally {
+            stopCore(run.process());
+            Files.deleteIfExists(run.configFile());
+            Files.deleteIfExists(run.logFile());
+        }
+    }
+
     /** An IPv4 address of this machine's that is not the loopback, or null. */
     private static InetAddress ownAddress() throws IOException {
         for (var nic : java.util.Collections.list(java.net.NetworkInterface.getNetworkInterfaces())) {

@@ -70,6 +70,26 @@ class ClashApiDelayProbeTest {
                 .contains("timeout=");
     }
 
+    /**
+     * The tag was form-encoded, a space as "+", which a path keeps as a
+     * plus: the core answered 404 for /proxies/srv-Germany+1, so a server
+     * whose id holds a space, as a restored backup can bring one, never got
+     * a delay through the core, and was measured by a TCP connect that a
+     * server with expired credentials passes.
+     */
+    @Test
+    @DisplayName("a tag goes into the path as a path segment")
+    void aTagIsEncodedAsAPathSegment() {
+        probe().measure(port, "", "srv-Germany 1");
+        probe().measure(port, "", "srv-a+b/c");
+        probe().measure(port, "", "srv-Ä");
+
+        assertThat(paths).hasSize(3);
+        assertThat(paths.get(0)).startsWith("/proxies/srv-Germany%201/delay");
+        assertThat(paths.get(1)).startsWith("/proxies/srv-a%2Bb%2Fc/delay");
+        assertThat(paths.get(2)).startsWith("/proxies/srv-%C3%84/delay");
+    }
+
     @Test
     @DisplayName("a secret is sent as a bearer token, a blank one is not")
     void theSecretBecomesAnAuthorizationHeader() {
