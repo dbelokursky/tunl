@@ -1,6 +1,7 @@
 package com.vlessclient.platform;
 
 import com.vlessclient.testing.Await;
+import com.vlessclient.testing.FormatLocale;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
@@ -445,6 +446,39 @@ class LinuxTunLauncherTest {
 
         assertThat(wrapper).contains("'/opt/a b/sing-box'");
         assertThat(wrapper).contains("'/tmp/it'\\''s.json'");
+    }
+
+    /**
+     * The app's pid reached the fallback's watch through String.format's %d,
+     * which writes the digits of the default format locale. Under fa-IR,
+     * ar-SA, bn-BD and the like the watch read "kill -0 ۱۲۳۴۵", which no shell
+     * takes for a pid, and the loop ended on its first pass: bash stopped the
+     * root core as it started, so every TUN connect failed, and dash mostly
+     * lost that SIGTERM and left the core running with nothing watching it.
+     * A full JDK has those locales; the installers' runtime keeps en and ru.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"/bin/sh", "/bin/bash", "/bin/dash"})
+    @org.junit.jupiter.api.condition.EnabledOnOs({org.junit.jupiter.api.condition.OS.MAC,
+            org.junit.jupiter.api.condition.OS.LINUX})
+    void theFallbackKeepsItsWatchUnderALocaleWithDigitsOfItsOwn(String shell, @TempDir Path dir)
+            throws Exception {
+        Assumptions.assumeTrue(Files.isExecutable(Path.of(shell)), shell + " is not installed");
+        Path core = Files.writeString(dir.resolve("core.sh"), "#!/bin/sh\nexec sleep 60\n");
+        core.toFile().setExecutable(true, true);
+        Path stop = dir.resolve("stop");
+        String wrapper = FormatLocale.in("fa-IR",
+                () -> LinuxTunLauncher.wrapperCommand(core, dir.resolve("c.json"), stop));
+
+        Process sh = new ProcessBuilder(shell, "-c", wrapper).redirectErrorStream(true).start();
+        spawned.add(sh.toHandle());
+
+        assertThat(sh.waitFor(1500, TimeUnit.MILLISECONDS))
+                .as("the wrapper ended its core on its own, with no stop asked for")
+                .isFalse();
+        Files.createFile(stop);   // what SingBoxEngine.signalStop does
+        assertThat(sh.waitFor(5, TimeUnit.SECONDS)).as("the wrapper heeds the stop file").isTrue();
+        assertThat(wrapper).contains("kill -0 " + ProcessHandle.current().pid() + " ");
     }
 
     /** A core that failed reached the app as "exited with code 0". */

@@ -13,6 +13,7 @@ import java.nio.file.attribute.UserPrincipal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import org.slf4j.Logger;
@@ -438,7 +439,12 @@ public final class LinuxTunLauncher implements TunLauncher {
         // ($XDG_DATA_HOME or $HOME) split the trap command. dash refused the
         // whole trap, and a SIGTERM then killed the shell with the root core
         // still running.
-        return String.format(
+        // Locale.ROOT: %d wrote the pid in the digits of the default format
+        // locale, and under fa-IR, ar-SA, bn-BD and the like the watch read
+        // "kill -0 ۱۲۳۴۵", which no shell takes for a pid. The loop ended on
+        // its first pass, and the root core was stopped as it started or,
+        // under dash, left running with nothing watching it.
+        return String.format(Locale.ROOT,
                 "SBSTOP=%s; "
                         + StdinWatch.SIGNAL_TRAP + "rm -f \"$SBSTOP\"; exit 143' INT TERM; "
                         + StdinWatch.EXIT_TRAP

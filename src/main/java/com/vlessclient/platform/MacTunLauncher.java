@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -291,7 +292,11 @@ public final class MacTunLauncher implements TunLauncher {
         // every connect. bash then trapped the signals with an action cut
         // short before its exit, and dash refused the trap, so a SIGTERM
         // killed the shell with the root core still running.
-        return String.format(
+        // Locale.ROOT: %d wrote the pid in the digits of the default format
+        // locale, and under ar-SA, fa-IR and the like the watch read
+        // "kill -0 ١٢٣٤٥", which no shell takes for a pid: the core was
+        // stopped right after the password dialog, on every connect.
+        return String.format(Locale.ROOT,
                 "SBSTOP=%s; "
                         + StdinWatch.SIGNAL_TRAP + "rm -f \"$SBSTOP\"; exit 143' INT TERM; "
                         + StdinWatch.EXIT_TRAP
