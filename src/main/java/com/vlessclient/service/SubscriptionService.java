@@ -1248,7 +1248,11 @@ public class SubscriptionService {
         List<ServerConfig> servers = new ArrayList<>();
         List<String> unsupported = new ArrayList<>();
         int skipped = 0;
-        String[] lines = text.split("\\r?\\n");
+        // Every line break, as a backup's list is read: split at \n and \r\n
+        // only, a list ending its lines with a bare CR, NEL or a Unicode line
+        // separator was one line, whose first link's name took in the next
+        // links and their passwords.
+        String[] lines = text.split("\\R");
         for (String line : lines) {
             String trimmedLine = line.trim();
             if (trimmedLine.isEmpty()

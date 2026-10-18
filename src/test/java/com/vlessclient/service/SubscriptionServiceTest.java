@@ -72,6 +72,29 @@ class SubscriptionServiceTest {
     }
 
     /**
+     * Lines were split at \n and \r\n only. A list whose links end with a
+     * bare CR, as old Mac files do, or with NEL or a Unicode line separator
+     * read as one line: the first link's name swallowed the rest, the next
+     * links' passwords with it, a name shown and logged on every connect, and
+     * the other servers were missing.
+     */
+    @Test
+    void parseContent_readsEveryKindOfLineBreak() {
+        for (String separator : new String[] {"\r", "\u0085", " ", " ", "\r\n"}) {
+            String links = "trojan://firstPw@a.example.com:443#A" + separator
+                    + "trojan://secondPw@b.example.com:443#B";
+            String base64 = Base64.getEncoder().encodeToString(
+                    links.getBytes(StandardCharsets.UTF_8));
+            for (String body : new String[] {links, base64}) {
+                SubscriptionService.ParsedContent parsed = service.parseContent(body);
+
+                assertThat(parsed.servers()).as("%04x", (int) separator.charAt(0))
+                        .extracting(ServerConfig::getName).containsExactly("A", "B");
+            }
+        }
+    }
+
+    /**
      * A captive portal answers the hourly refresh with its login page, whose
      * lines quote addresses: {@code <html xmlns="http://…">},
      * {@code <link href="https://…">}. Each was read as a link in a protocol
