@@ -58,7 +58,7 @@ class SingBoxEngineConfigWriteFailureTest {
 
     private static Set<Path> sessionConfigs() throws IOException {
         Set<Path> found = new HashSet<>();
-        Path dir = SingBoxEngine.sessionConfigDir();
+        Path dir = SingBoxEngine.withoutCore().sessionConfigDir();
         if (Files.isDirectory(dir)) {
             try (DirectoryStream<Path> configs = Files.newDirectoryStream(dir,
                     SingBoxEngine.SESSION_CONFIG_PREFIX + "*.json")) {
