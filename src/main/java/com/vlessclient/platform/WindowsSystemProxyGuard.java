@@ -53,7 +53,7 @@ public final class WindowsSystemProxyGuard implements SystemProxyGuard {
     }
 
     /**
-     * True when the WinINET proxy is enabled and its server value contains
+     * True when the WinINET proxy is enabled and its server value names
      * {@code host:port} — i.e. it is the entry sing-box registered, not a
      * user- or corporate-configured proxy.
      */
@@ -66,7 +66,40 @@ public final class WindowsSystemProxyGuard implements SystemProxyGuard {
         }
         CommandRunner.Result server = runner.run(List.of(
                 "reg", "query", KEY, "/v", "ProxyServer"));
-        return server.exitCode() == 0
-                && server.output().contains(host + ":" + port);
+        return server.exitCode() == 0 && namesEndpoint(server.output(), host + ":" + port);
+    }
+
+    /**
+     * Whether {@code reg query}'s ProxyServer value names {@code endpoint}:
+     * one of its {@code ;}-separated entries is that endpoint once an
+     * optional {@code proto=} and {@code scheme://} are taken off. sing-box
+     * writes {@code http://host:port}; other tools write per-protocol lists.
+     *
+     * <p>The value was searched for {@code host:port} as text, so a proxy
+     * another tool had set on 127.0.0.1:10810 counted as ours on 1081, and
+     * the guard switched that working proxy off.</p>
+     */
+    private static boolean namesEndpoint(String regOutput, String endpoint) {
+        for (String line : regOutput.split("\\R")) {
+            int type = line.indexOf("REG_SZ");
+            if (type < 0 || !line.contains("ProxyServer")) {
+                continue;
+            }
+            for (String entry : line.substring(type + "REG_SZ".length()).strip().split(";")) {
+                String server = entry.strip();
+                server = server.substring(server.indexOf('=') + 1);
+                int scheme = server.indexOf("://");
+                if (scheme >= 0) {
+                    server = server.substring(scheme + 3);
+                }
+                if (server.endsWith("/")) {
+                    server = server.substring(0, server.length() - 1);
+                }
+                if (server.equalsIgnoreCase(endpoint)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }
