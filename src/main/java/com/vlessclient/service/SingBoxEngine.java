@@ -1436,9 +1436,10 @@ public class SingBoxEngine {
 
     /**
      * Writes a session configuration into {@code dir}, owner-only, after
-     * removing any an earlier run left behind. Only one engine runs at a time
-     * and a session's file goes when the session ends, so whatever is still
-     * there was orphaned by a run that did not end cleanly.
+     * removing any an earlier run left behind. One engine at a time writes in
+     * a run folder, since each data dir has its own and one copy of the app
+     * holds a data dir, and a session's file goes when the session ends, so
+     * whatever is still there was orphaned by a run that did not end cleanly.
      *
      * @param dir        the folder to write in, created private if needed
      * @param configJson the configuration

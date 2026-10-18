@@ -42,21 +42,21 @@ public final class LinuxPlatformPaths implements PlatformPaths {
     }
 
     /**
-     * {@code $XDG_RUNTIME_DIR/vless-client}: a tmpfs only its user can open,
-     * which root (the PolicyKit fallback) reads by its full path, no home
-     * backup includes, and logout empties. In the data dir, which Déjà Dup
-     * and most other backups take with the rest of the home folder, each
-     * backup made while connected took a plain-text copy of every server's
-     * credential along. Without a runtime dir that is this user's alone (none
-     * set, or another user's inherited through su), the data dir's run
-     * folder.
+     * This data dir's folder in {@code $XDG_RUNTIME_DIR/vless-client}
+     * ({@link RunFolders}): a tmpfs only its user can open, which root (the
+     * PolicyKit fallback) reads by its full path, no home backup includes,
+     * and logout empties. In the data dir, which Déjà Dup and most other
+     * backups take with the rest of the home folder, each backup made while
+     * connected took a plain-text copy of every server's credential along.
+     * Without a runtime dir that is this user's alone (none set, or another
+     * user's inherited through su), the data dir's run folder.
      */
     @Override
     public Path runDir() {
         if (xdgRuntimeDir != null && !xdgRuntimeDir.isBlank()) {
             Path runtime = Path.of(xdgRuntimeDir);
             if (runtime.isAbsolute() && SecureFiles.isPrivateDir(runtime)) {
-                return runtime.resolve("vless-client");
+                return RunFolders.forDataDir(runtime.resolve("vless-client"), dataDir());
             }
         }
         return PlatformPaths.super.runDir();

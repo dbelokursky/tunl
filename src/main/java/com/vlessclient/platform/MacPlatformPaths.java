@@ -31,19 +31,20 @@ public final class MacPlatformPaths implements PlatformPaths {
     }
 
     /**
-     * {@code VlessClient/run} in the per-user temporary folder, the JDK's
-     * {@code java.io.tmpdir} ({@code $TMPDIR} under /private/var/folders):
-     * only its user can open it, Time Machine leaves it out, and root (the
-     * password-prompt fallback) reads it by its full path. In the data dir,
-     * which Time Machine backs up every hour, each backup made while
-     * connected took a plain-text copy of every server's credential along.
-     * A temporary folder that is not this user's alone (a
-     * {@code java.io.tmpdir} pointed at /tmp) keeps the data dir's run folder.
+     * This data dir's folder in {@code VlessClient/run} in the per-user
+     * temporary folder ({@link RunFolders}), the JDK's {@code java.io.tmpdir}
+     * ({@code $TMPDIR} under /private/var/folders): only its user can open
+     * it, Time Machine leaves it out, and root (the password-prompt fallback)
+     * reads it by its full path. In the data dir, which Time Machine backs up
+     * every hour, each backup made while connected took a plain-text copy of
+     * every server's credential along. A temporary folder that is not this
+     * user's alone (a {@code java.io.tmpdir} pointed at /tmp) keeps the data
+     * dir's run folder.
      */
     @Override
     public Path runDir() {
         return SecureFiles.isPrivateDir(tempDir)
-                ? tempDir.resolve("VlessClient").resolve("run")
+                ? RunFolders.forDataDir(tempDir.resolve("VlessClient").resolve("run"), dataDir())
                 : PlatformPaths.super.runDir();
     }
 }

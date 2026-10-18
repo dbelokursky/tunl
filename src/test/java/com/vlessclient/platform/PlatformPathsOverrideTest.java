@@ -41,10 +41,9 @@ class PlatformPathsOverrideTest {
         // and would require the directories to exist.
         assertThat(paths.logsDir().startsWith(paths.dataDir())).isTrue();
         assertThat(paths.coreBinDir().startsWith(paths.dataDir())).isTrue();
-        // And so does the run folder. The per-OS one is shared by every copy
-        // of the user's, and each session start sweeps it: a test run there
-        // would delete the configuration the developer's own tunnel is still
-        // waiting to start on behind its elevation prompt.
+        // And so does the run folder: a test run writes no session files in
+        // the OS locations ($XDG_RUNTIME_DIR, %LOCALAPPDATA%, $TMPDIR) where
+        // the developer's own copy keeps its run folder.
         assertThat(paths.runDir().startsWith(paths.dataDir())).isTrue();
     }
 

@@ -8,6 +8,8 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -71,10 +73,33 @@ class PlatformPathsTest {
         WindowsPlatformPaths paths = new WindowsPlatformPaths(
                 profile.resolve("Roaming"), profile.resolve("Local"));
 
-        assertThat(paths.runDir())
+        assertThat(paths.runDir().getParent())
                 .isEqualTo(profile.resolve("Local").resolve("VlessClient").resolve("run"));
         assertThat(paths.runDir().startsWith(paths.dataDir())).as("out of the roaming data dir")
                 .isFalse();
+    }
+
+    /**
+     * Copies given an {@code APPDATA} of their own share the profile's
+     * {@code LOCALAPPDATA}, and the single-instance lock, in the data dir,
+     * lets them run side by side. Each session start sweeps its run folder,
+     * so in one shared folder each copy's connect deleted the configuration
+     * the other was to start its core on once UAC was answered.
+     */
+    @Test
+    void windows_givesEachDataDirItsOwnRunFolder() {
+        Path profile = Path.of("C:", "Users", "dima", "AppData");
+        Path local = profile.resolve("Local");
+        WindowsPlatformPaths first = new WindowsPlatformPaths(profile.resolve("Roaming"), local);
+        WindowsPlatformPaths second = new WindowsPlatformPaths(
+                Path.of("D:", "Portable", "Roaming"), local);
+
+        assertThat(first.dataDir()).isNotEqualTo(second.dataDir());
+        assertThat(first.runDir()).isNotEqualTo(second.runDir());
+        assertThat(List.of(first.runDir().getParent(), second.runDir().getParent()))
+                .containsOnly(local.resolve("VlessClient").resolve("run"));
+        assertThat(new WindowsPlatformPaths(profile.resolve("Roaming"), local).runDir())
+                .as("the same data dir finds its folder again").isEqualTo(first.runDir());
     }
 
     /**
@@ -89,7 +114,47 @@ class PlatformPathsTest {
         LinuxPlatformPaths paths = new LinuxPlatformPaths(tmp.resolve("home"), null,
                 runtime.toString());
 
-        assertThat(paths.runDir()).isEqualTo(runtime.resolve("vless-client"));
+        assertThat(paths.runDir().getParent()).isEqualTo(runtime.resolve("vless-client"));
+    }
+
+    /**
+     * The runtime dir is the user's, but the single-instance lock is the data
+     * dir's: copies with profiles of their own ({@code XDG_DATA_HOME}) run
+     * side by side. Each session start sweeps its run folder, so in one
+     * shared folder each copy's connect deleted the configuration the other
+     * was to start its core on once its PolicyKit prompt was answered.
+     */
+    @Test
+    void linux_givesEachDataDirItsOwnRunFolder(@TempDir Path tmp) throws IOException {
+        assumePosix();
+        Path runtime = directory(tmp.resolve("run user 1000"), "rwx------");
+        Path home = tmp.resolve("home");
+        List<Path> runDirs = new ArrayList<>();
+        for (String xdgDataHome : new String[] {null, tmp.resolve("profile a").toString(),
+                tmp.resolve("profile b").toString()}) {
+            LinuxPlatformPaths paths = new LinuxPlatformPaths(home, xdgDataHome,
+                    runtime.toString());
+            assertThat(paths.runDir().getParent()).isEqualTo(runtime.resolve("vless-client"));
+            assertThat(new LinuxPlatformPaths(home, xdgDataHome, runtime.toString()).runDir())
+                    .as("the same data dir finds its folder again").isEqualTo(paths.runDir());
+            runDirs.add(paths.runDir());
+        }
+
+        assertThat(runDirs).doesNotHaveDuplicates();
+    }
+
+    /**
+     * A run folder is named after its data dir the same way by every release:
+     * a configuration a crash left is swept only by a session start in that
+     * folder, and %LOCALAPPDATA% is never emptied.
+     */
+    @Test
+    void aRunFolderKeepsItsNameFromOneReleaseToTheNext(@TempDir Path tmp) throws IOException {
+        assumePosix();
+        Path runtime = directory(tmp.resolve("runtime"), "rwx------");
+
+        assertThat(new LinuxPlatformPaths(Path.of("/home/dima"), null, runtime.toString())
+                .runDir()).isEqualTo(runtime.resolve("vless-client").resolve("786b4e02a40ceeb2"));
     }
 
     /**
@@ -124,7 +189,7 @@ class PlatformPathsTest {
         assumePosix();
         Path perUser = directory(tmp.resolve("T"), "rwx------");
 
-        assertThat(new MacPlatformPaths(perUser).runDir())
+        assertThat(new MacPlatformPaths(perUser).runDir().getParent())
                 .isEqualTo(perUser.resolve("VlessClient").resolve("run"));
     }
 

@@ -68,6 +68,33 @@ class SingBoxEngineSessionConfigTest {
         }
     }
 
+    /**
+     * Two copies with data dirs of their own run side by side: the
+     * single-instance lock is the data dir's. A session start sweeps its run
+     * folder of what a run that did not end cleanly left, so in one folder
+     * the two shared, B's connect deleted the configuration A was to start
+     * its core on once its elevation prompt was answered: the password was
+     * typed, and A's TUN connect failed on a file that was gone.
+     */
+    @Test
+    void aCopyOnAnotherDataDirLeavesTheConfigurationThisOneIsStartingOn(@TempDir Path tmp)
+            throws Exception {
+        for (PlatformPaths[] copies : copiesSharingTheirOsLocation(tmp)) {
+            AtThePrompt bLaunch = new AtThePrompt(() -> { });
+            SingBoxEngine b = engineOn(copies[1], bLaunch, tmp);
+            // B connects while A's elevation prompt is up.
+            AtThePrompt aLaunch = new AtThePrompt(() -> start(b));
+
+            start(engineOn(copies[0], aLaunch, tmp));
+
+            assertThat(bLaunch.config).as("B's connect wrote its own").isNotNull();
+            assertThat(aLaunch.stillThere)
+                    .as("A's configuration %s, which its core has yet to read, after B's"
+                            + " connect wrote %s", aLaunch.config, bLaunch.config)
+                    .isTrue();
+        }
+    }
+
     @Test
     void aConfigAnEarlierRunLeftBehindIsRemovedAtTheNextStart(@TempDir Path tmp)
             throws Exception {

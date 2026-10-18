@@ -32,16 +32,18 @@ public final class WindowsPlatformPaths implements PlatformPaths {
     }
 
     /**
-     * {@code %LOCALAPPDATA%\VlessClient\run}: the local part of the profile,
-     * which neither roams nor follows AppData folder redirection to a file
-     * server. In {@code %APPDATA%} a plain-text copy of every server's
-     * credential went with the roaming profile, and onto the share for every
-     * session where AppData is redirected. The profile's ACL keeps it the
-     * user's, and the elevated core reads it by its full path.
+     * This data dir's folder in {@code %LOCALAPPDATA%\VlessClient\run}
+     * ({@link RunFolders}): the local part of the profile, which neither
+     * roams nor follows AppData folder redirection to a file server. In
+     * {@code %APPDATA%} a plain-text copy of every server's credential went
+     * with the roaming profile, and onto the share for every session where
+     * AppData is redirected. The profile's ACL keeps it the user's, and the
+     * elevated core reads it by its full path.
      */
     @Override
     public Path runDir() {
-        return localAppData.resolve("VlessClient").resolve("run");
+        return RunFolders.forDataDir(localAppData.resolve("VlessClient").resolve("run"),
+                dataDir());
     }
 
     private static Path resolveAppData() {

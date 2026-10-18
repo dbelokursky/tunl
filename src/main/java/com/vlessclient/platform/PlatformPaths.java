@@ -34,9 +34,13 @@ public interface PlatformPaths {
      * alone and readable by the elevated core, and each OS's paths also keep
      * them out of what backups copy and profiles roam.
      *
+     * <p>Each data dir has one of its own, wherever the OS puts it: a session
+     * start sweeps the folder, and what keeps a second engine out of it is
+     * the single-instance lock, which is the data dir's ({@link RunFolders}).</p>
+     *
      * <p>This default is the data dir's {@code run} folder, which a
-     * redirected data dir keeps: a test run then never sweeps the folder of
-     * the copy that holds the developer's tunnel.</p>
+     * redirected data dir keeps: a test run then writes nothing in the OS
+     * locations the developer's own copy uses.</p>
      *
      * @return the folder a session's files go in
      */
@@ -96,8 +100,8 @@ public interface PlatformPaths {
      * one for anything this record does not override — today that is nothing,
      * and the field is what keeps adding such a thing from meaning rewriting
      * the redirect. The run folder is not such a thing: it stays in the
-     * redirected data dir, since the per-OS one is shared by every copy of
-     * the user's and each session start sweeps it.</p>
+     * redirected data dir, so that a test run keeps out of the OS locations
+     * the developer's own copy has its run folder in.</p>
      */
     record OverriddenPlatformPaths(Path dataDir, PlatformPaths delegate) implements PlatformPaths {
     }
