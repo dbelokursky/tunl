@@ -347,6 +347,20 @@ public class SubscriptionService {
         // another one while the fetch waits, and what the old link answers
         // then is no longer the subscription's (see stillFetchedFrom).
         String fetchedUrl = urlOf(sub);
+        if (SecretSealer.isSealed(fetchedUrl)) {
+            // The keychain did not return the URL at this start (locked, its
+            // prompt dismissed, a DPAPI key lost, the data dir restored on
+            // another machine), and the subscription keeps its sealed tag,
+            // so the URL comes back at a start that has the keychain. Read as
+            // a URL, the tag failed as one holding a character a URL cannot
+            // have, and the advice to correct it led to a delete and a new
+            // add, which lost the servers, where a restart would have done.
+            log.warn("Not refreshing subscription '{}': the system keychain did not return "
+                    + "its URL at this start", sub.getName());
+            recordIfCurrent(sub, fetchedUrl,
+                    () -> sub.recordFailure("subscriptions.error.keychain", List.of()));
+            return;
+        }
 
         String content;
         ParsedContent parsed;
@@ -853,7 +867,10 @@ public class SubscriptionService {
      *
      * @param subscriptionId the subscription to change
      * @param name           the new display name
-     * @param url            the new URL; sealed on save like the original
+     * @param url            the new URL; sealed on save like the original. The
+     *                       sealed tag of one the keychain did not return at
+     *                       this start, left as it was, is kept as it is
+     * @throws IllegalArgumentException for a URL no refresh can read
      */
     public void updateSubscription(String subscriptionId, String name, String url) {
         Subscription sub = findById(subscriptionId);
@@ -861,7 +878,13 @@ public class SubscriptionService {
             log.warn("Subscription not found for update: {}", subscriptionId);
             return;
         }
-        String fetchable = fetchableUrl(url);
+        // A sealed tag left as it was is kept unchecked: the URL comes back
+        // at a start that has the keychain, and refused as a URL, the tag
+        // took the rename with it.
+        String stored = urlOf(sub);
+        boolean keptSealed = SecretSealer.isSealed(stored) && url != null
+                && url.strip().equals(stored);
+        String fetchable = keptSealed ? stored : fetchableUrl(url);
         FxExecutor.run(() -> {
             synchronized (this) {
                 sub.setName(name);
@@ -1720,9 +1743,11 @@ public class SubscriptionService {
                         urlSealCache.put(subscription.getId(), new SealedUrl(url, stored));
                     }
                 },
+                // Not "re-add it": a delete takes the subscription's servers.
                 () -> log.error(
-                        "Could not unseal the URL for subscription '{}' ({}); "
-                                + "re-add it or restore the secret backend entry",
+                        "Could not unseal the URL for subscription '{}' ({}); it stays sealed "
+                                + "until a start that has the keychain entry, or until the "
+                                + "URL is entered again in Edit",
                         subscription.getName(), subscription.getId()));
     }
 }

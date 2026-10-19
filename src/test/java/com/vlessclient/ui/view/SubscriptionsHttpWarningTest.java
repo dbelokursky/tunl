@@ -3,6 +3,7 @@ package com.vlessclient.ui.view;
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.app.ThemeCss;
+import com.vlessclient.model.Subscription;
 import com.vlessclient.service.SubscriptionService;
 import com.vlessclient.service.TestSubscriptionServices;
 import com.vlessclient.testing.Await;
@@ -64,6 +65,8 @@ public class SubscriptionsHttpWarningTest extends ApplicationTest {
 
     private static final String HTTP_URL = "http://provider.example/sub";
     private static final String HTTPS_URL = "https://provider.example/sub";
+    /** What subscriptions.json holds for a URL sealed in the macOS keychain. */
+    private static final String SEALED_URL = "@sealed:keychain:v1";
     private static final Duration PATIENCE = Duration.ofSeconds(10);
 
     @TempDir
@@ -202,6 +205,55 @@ public class SubscriptionsHttpWarningTest extends ApplicationTest {
         assertTheWindowFits(dialog);
     }
 
+    /**
+     * A subscription whose URL the keychain did not return at this start is
+     * listed with its sealed tag, which comes back as the URL at a start that
+     * has the keychain. Its edit dialog opened with the tag in the URL field,
+     * a line calling it no valid web address, and OK held: the subscription
+     * could not even be renamed without its URL pasted again. The tag left as
+     * it is now goes through, and the dialog says why it is there.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"en", "ru"})
+    void aUrlTheKeychainDidNotReturnIsKeptThroughARename(String language) {
+        mountTheView(language);
+        Subscription locked = new Subscription();
+        locked.setName("Provider");
+        locked.setUrl(SEALED_URL);
+        interact(() -> service.getSubscriptions().add(locked));
+        DialogPane dialog = open(rowButton(I18n.get("button.edit"))::fire);
+
+        assertThat(onFx(() -> dialog.lookupButton(ButtonType.OK).isDisabled()))
+                .as("whether OK can be pressed").isFalse();
+        assertThat(drawnProblem(dialog)).as("the problem shown").isNull();
+        assertThat(drawnNote(dialog)).isEqualTo(I18n.get("subscriptions.url.sealed"));
+        assertTheWindowFits(dialog);
+
+        typeUrl(dialog, "@sealed:dpapi:v1:AQAAANCMnd8BFdERjHoAwE");
+        assertThat(onFx(() -> dialog.lookupButton(ButtonType.OK).isDisabled()))
+                .as("whether OK can be pressed for a tag the subscription does not hold")
+                .isTrue();
+        assertThat(drawnNote(dialog)).isNull();
+        typeUrl(dialog, HTTPS_URL);
+        assertThat(drawnNote(dialog)).as("the note, for a URL entered again").isNull();
+        assertThat(drawnProblem(dialog)).isNull();
+        assertTheWindowFits(dialog);
+
+        typeUrl(dialog, SEALED_URL);
+        typeName(dialog, "Renamed");
+        interact(() -> {
+            // Off the name field first, as closeTheDialogsAndGoBackToEnglish
+            // does for the windows it closes: Monocle keeps a closed window
+            // focused, and the caret would blink on through the fork.
+            dialog.getScene().getRoot().requestFocus();
+            ((Button) dialog.lookupButton(ButtonType.OK)).fire();
+        });
+
+        Await.until("the rename saved", () -> onFx(() -> "Renamed".equals(locked.getName())),
+                PATIENCE);
+        assertThat(onFx(locked::getUrl)).as("the URL, kept as its tag").isEqualTo(SEALED_URL);
+    }
+
     /** The problem under the URL as the dialog draws it, or null when none is shown. */
     private String drawnProblem(DialogPane dialog) {
         return onFx(() -> {
@@ -210,6 +262,17 @@ public class SubscriptionsHttpWarningTest extends ApplicationTest {
             Node problem = dialog.lookup(".subscription-error");
             return problem != null && problem.isVisible()
                     ? ((Text) problem.lookup(".text")).getText() : null;
+        });
+    }
+
+    /** The note under the URL as the dialog draws it, or null when none is shown. */
+    private String drawnNote(DialogPane dialog) {
+        return onFx(() -> {
+            dialog.applyCss();
+            dialog.layout();
+            Node note = dialog.lookup(".form-note");
+            return note != null && note.isVisible()
+                    ? ((Text) note.lookup(".text")).getText() : null;
         });
     }
 
@@ -263,6 +326,18 @@ public class SubscriptionsHttpWarningTest extends ApplicationTest {
                 TextField field = (TextField) node;
                 if (!I18n.get("subscriptions.name.prompt").equals(field.getPromptText())) {
                     field.setText(url);
+                }
+            }
+        });
+    }
+
+    /** Puts {@code name} in the field prompting for a name. */
+    private void typeName(DialogPane dialog, String name) {
+        interact(() -> {
+            for (Node node : dialog.lookupAll(".text-field")) {
+                TextField field = (TextField) node;
+                if (I18n.get("subscriptions.name.prompt").equals(field.getPromptText())) {
+                    field.setText(name);
                 }
             }
         });

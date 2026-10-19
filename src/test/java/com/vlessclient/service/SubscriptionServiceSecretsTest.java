@@ -1,16 +1,22 @@
 package com.vlessclient.service;
 
+import com.vlessclient.app.I18n;
 import com.vlessclient.model.Subscription;
 import com.vlessclient.platform.InMemorySecretSealer;
 import com.vlessclient.platform.SecretSealer;
 import com.vlessclient.testing.Await;
+import java.io.IOException;
 import java.net.http.HttpClient;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -166,6 +172,64 @@ class SubscriptionServiceSecretsTest {
         assertThat(reloaded.getSubscriptions()).hasSize(1);
         assertThat(reloaded.getSubscriptions().get(0).getUrl())
                 .startsWith(SecretSealer.SEAL_PREFIX);
+    }
+
+    /**
+     * A URL the keychain did not return at this start (locked, its prompt
+     * dismissed, a DPAPI key lost, or the data dir restored on another
+     * machine) stays its sealed tag, and comes back at a start that has the
+     * keychain. Read as a URL, the tag failed each refresh as one holding a
+     * character a URL cannot have, telling the user to correct a URL that was
+     * fine, and an edit that only renamed the subscription was refused for
+     * the same reason: following the advice meant deleting the subscription,
+     * and its servers, to add it again.
+     */
+    @Test
+    void aUrlTheKeychainDidNotReturnIsSaidSoAndSurvivesARename() throws Exception {
+        InMemorySecretSealer sealer = new InMemorySecretSealer();
+        Files.createDirectories(tempDir.resolve("subs"));
+        SubscriptionService first = serviceWith(sealer);
+        first.getSubscriptions().add(subscription(TOKEN_URL));
+        first.saveSubscriptions();
+        String id = first.getSubscriptions().get(0).getId();
+        Map<String, String> keychainEntries = Map.copyOf(sealer.entries());
+        sealer.entries().clear();
+        AtomicInteger fetches = new AtomicInteger();
+        SubscriptionService locked = new SubscriptionService(
+                configStore, parser, tempDir.resolve("subs"), httpClient, sealer) {
+            @Override
+            String fetchContent(String url) throws IOException {
+                fetches.incrementAndGet();
+                throw new IOException("not fetched in this test");
+            }
+        };
+        String tag = locked.getSubscriptions().get(0).getUrl();
+        assertThat(tag).startsWith(SecretSealer.SEAL_PREFIX);
+
+        locked.refreshSubscription(id);
+
+        Subscription refreshed = locked.getSubscriptions().get(0);
+        assertThat(refreshed.getLastErrorKey()).isEqualTo("subscriptions.error.keychain");
+        assertThat(SubscriptionService.failureText(refreshed))
+                .isEqualTo(I18n.get("subscriptions.error.keychain"));
+        assertThat(fetches).as("fetches of a sealed tag").hasValue(0);
+
+        locked.updateSubscription(id, "Renamed", tag);
+
+        assertThat(locked.getSubscriptions().get(0).getName()).isEqualTo("Renamed");
+        assertThat(locked.getSubscriptions().get(0).getUrl()).isEqualTo(tag);
+        JsonNode saved = JsonMapper.builder().build().readTree(rawSubscriptionsJson())
+                .path("subscriptions").path(0);
+        assertThat(saved.path("name").asString()).isEqualTo("Renamed");
+        assertThat(saved.path("url").asString()).as("the tag its keychain entry is filed under")
+                .isEqualTo(tag);
+        assertThat(saved.path("lastErrorKey").asString())
+                .isEqualTo("subscriptions.error.keychain");
+
+        sealer.entries().putAll(keychainEntries);
+        assertThat(serviceWith(sealer).getSubscriptions().get(0).getUrl())
+                .as("the URL, at a start that has the keychain again")
+                .isEqualTo(TOKEN_URL);
     }
 
     @Test
