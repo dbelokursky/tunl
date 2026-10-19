@@ -24,8 +24,12 @@ public final class VlessOutboundBuilder extends OutboundBuilder {
         outbound.put("server_port", server.getPort());
         outbound.put("uuid", server.getUuid());
 
-        if (server.getFlow() != null && !server.getFlow().isEmpty()) {
-            outbound.put("flow", server.getFlow());
+        // Without the spaces a link or an edit can leave around it, as
+        // CoreSettings checks it: written with them, a server stored as Vision
+        // was refused by the core ("unsupported flow").
+        String flow = server.getFlow() == null ? "" : server.getFlow().strip();
+        if (!flow.isEmpty()) {
+            outbound.put("flow", flow);
         }
 
         addTlsIfEnabled(outbound, server);

@@ -1347,7 +1347,11 @@ public class SubscriptionService {
         List<ServerConfig> servers = new ArrayList<>();
         List<String> unsupported = new ArrayList<>();
         int skipped = 0;
-        String[] lines = text.split("\\r?\\n");
+        // Every line break, as a backup's list is read: split at \n and \r\n
+        // only, a list ending its lines with a bare CR, NEL or a Unicode line
+        // separator was one line, whose first link's name took in the next
+        // links and their passwords.
+        String[] lines = text.split("\\R");
         for (String line : lines) {
             String trimmedLine = line.trim();
             if (trimmedLine.isEmpty()
@@ -1385,7 +1389,11 @@ public class SubscriptionService {
                 skipped++;
                 // Scrubbed: the line is a share link and a parser message may
                 // quote it, and debug is what a user turns on for a bug report.
-                log.debug("Skipping unparseable line: {}", Redact.urlsIn(e.getMessage()));
+                // Only then: the scrubbing ran for every unreadable line of
+                // every refresh, at whatever level the log was.
+                if (log.isDebugEnabled()) {
+                    log.debug("Skipping unparseable line: {}", Redact.urlsIn(e.getMessage()));
+                }
             }
         }
         return new ParsedContent(servers, skipped, List.copyOf(unsupported));
@@ -1413,7 +1421,11 @@ public class SubscriptionService {
         // Stamped before the servers are saved: their membership is then on
         // disk with them even if the list saved after them never is.
         batch.upserts().forEach(server -> server.setSubscriptionId(sub.getId()));
-        configStore.applyServerBatch(batch.upserts(), batch.removals());
+        // The provider withdrew what it no longer lists, which nobody asked a
+        // running tunnel to follow: a pick made in place of a withdrawn one
+        // waits for the user's reconnect where its restart would prompt.
+        configStore.applyServerBatch(batch.upserts(), batch.removals(),
+                ConfigStore.Removal.UNASKED);
         sub.setServerIds(batch.serverIds());
     }
 

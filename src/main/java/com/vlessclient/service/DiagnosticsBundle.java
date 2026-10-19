@@ -102,8 +102,9 @@ public class DiagnosticsBundle {
      * it: the address, the SNI, the transport host, path and gRPC service, the
      * REALITY key and short id, a Shadowsocks plugin's options (the host and
      * path a v2ray-plugin server answers on), and for WireGuard the peer's key
-     * and reserved bytes and the interface address. Not credentials, but the
-     * bundle is what gets attached to a public issue, and {@link #appInfo}
+     * and reserved bytes, the interface address, and the local address an
+     * endpoint is bound to, this machine's own on a second network. Not
+     * credentials, but the bundle is what gets attached to a public issue, and {@link #appInfo}
      * keeps the address out for the same reason. Matched only inside {@code outbounds} and
      * {@code endpoints}, whatever the value's type (a WireGuard address is a
      * list): the same key names elsewhere are DNS resolver tags and rule
@@ -111,7 +112,8 @@ public class DiagnosticsBundle {
      */
     private static final Set<String> IDENTIFYING_FIELDS = Set.of(
             "server", "server_name", "host", "sni", "path", "service_name",
-            "address", "public_key", "short_id", "reserved", "plugin_opts");
+            "address", "public_key", "short_id", "reserved", "plugin_opts",
+            "inet4_bind_address", "inet6_bind_address");
 
     /**
      * A host name or an IPv4 address in free text: labels joined by dots, in

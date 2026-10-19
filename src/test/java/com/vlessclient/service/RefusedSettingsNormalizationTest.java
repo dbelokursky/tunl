@@ -103,6 +103,23 @@ class RefusedSettingsNormalizationTest {
         assertThat(interfaceAddress("10.0.0.2/24")).isEqualTo("10.0.0.2/24");
     }
 
+    /**
+     * wg-quick reads the addresses of an Address line separated by spaces as
+     * well as by commas, and the form's field took them either way: given
+     * with a space between them, the core was handed them as one prefix it
+     * could not read, and refused the whole configuration.
+     */
+    @Test
+    void aWireGuardServerGivenItsAddressesWithSpacesBetweenGetsEachOne() throws Exception {
+        ServerConfig server = wireguard("10.0.0.2/32 fd00::2/128");
+
+        JsonNode address = memberOf(server, "endpoints").get("address");
+
+        assertThat(address.size()).isEqualTo(2);
+        assertThat(address.get(0).asString()).isEqualTo("10.0.0.2/32");
+        assertThat(address.get(1).asString()).isEqualTo("fd00::2/128");
+    }
+
     @Test
     void shadowsocksCiphersAreSentByTheNamesTheCoreKnows() throws Exception {
         assertThat(method("chacha20-poly1305")).isEqualTo("chacha20-ietf-poly1305");
@@ -125,6 +142,10 @@ class RefusedSettingsNormalizationTest {
     }
 
     private String interfaceAddress(String address) throws Exception {
+        return memberOf(wireguard(address), "endpoints").get("address").get(0).asString();
+    }
+
+    private static ServerConfig wireguard(String address) {
         ServerConfig server = new ServerConfig();
         server.setId("wireguard");
         server.setName("wireguard");
@@ -134,7 +155,7 @@ class RefusedSettingsNormalizationTest {
         server.setUuid("wg-private-key-base64");
         server.setEncryption("wg-peer-public-key-base64");
         server.setFlow(address);
-        return memberOf(server, "endpoints").get("address").get(0).asString();
+        return server;
     }
 
     private String method(String method) throws Exception {

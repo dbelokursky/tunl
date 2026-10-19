@@ -36,13 +36,8 @@ public final class Redact {
     /** Stand-in for a value that was removed entirely. */
     public static final String REDACTED = "<redacted>";
 
-    /**
-     * A URL embedded in free text. Deliberately greedy up to whitespace or a
-     * quote: trailing punctuation swept into the match is redacted too, which
-     * is the safe direction to err in.
-     */
-    private static final Pattern URL_IN_TEXT =
-            Pattern.compile("[a-zA-Z][a-zA-Z0-9+.\\-]*://[^\\s\"'<>\\\\]+");
+    /** What separates a scheme from the rest of a URL. */
+    private static final String SCHEME_END = "://";
 
     /**
      * What we are willing to print as a host. Deliberately narrow, because
@@ -132,6 +127,17 @@ public final class Redact {
      * message, a stack-trace line, a JSON blob. Use this wherever the text
      * originates outside your control and might quote a URL back at you.
      *
+     * <p>A URL is a scheme, a letter and then letters, digits, {@code +},
+     * {@code .} or {@code -}, then {@code ://} and everything up to ASCII
+     * whitespace, a quote, {@code <}, {@code >} or a backslash. Deliberately
+     * greedy: trailing punctuation swept into the match is redacted too,
+     * which is the safe direction to err in. The text is read once, from each
+     * {@code ://} back to where its scheme starts. A regular expression found
+     * the same URLs, but it tried every letter of a run without a
+     * {@code ://} as the start of a scheme and read the rest of the run each
+     * time: the message for a link whose field held 32 KB of letters took
+     * seconds, on the FX thread when the Servers view imported it.</p>
+     *
      * @param text the text to scrub; may be null
      * @return the text with every embedded URL replaced by its redacted form
      */
@@ -139,18 +145,58 @@ public final class Redact {
         if (text == null || text.isEmpty()) {
             return text;
         }
-        Matcher matcher = URL_IN_TEXT.matcher(text);
-        if (!matcher.find()) {
+        StringBuilder out = null;
+        int last = 0;
+        int from = 0;
+        int separator;
+        while ((separator = text.indexOf(SCHEME_END, from)) >= 0) {
+            from = separator + 1;
+            int start = separator;
+            while (start > last && isSchemeChar(text.charAt(start - 1))) {
+                start--;
+            }
+            while (start < separator && !isAsciiLetter(text.charAt(start))) {
+                start++;
+            }
+            int end = separator + SCHEME_END.length();
+            if (start == separator || end == text.length() || endsUrl(text.charAt(end))) {
+                continue;
+            }
+            while (end < text.length() && !endsUrl(text.charAt(end))) {
+                end++;
+            }
+            if (out == null) {
+                out = new StringBuilder(text.length());
+            }
+            out.append(text, last, start).append(url(text.substring(start, end)));
+            last = end;
+            from = end;
+        }
+        if (out == null) {
             return text;
         }
-        StringBuilder out = new StringBuilder(text.length());
-        int last = 0;
-        do {
-            out.append(text, last, matcher.start()).append(url(matcher.group()));
-            last = matcher.end();
-        } while (matcher.find());
-        out.append(text, last, text.length());
-        return out.toString();
+        return out.append(text, last, text.length()).toString();
+    }
+
+    private static boolean isAsciiLetter(char c) {
+        return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z';
+    }
+
+    /** A character a scheme may hold after its first letter. */
+    private static boolean isSchemeChar(char c) {
+        return isAsciiLetter(c) || c >= '0' && c <= '9' || c == '+' || c == '.' || c == '-';
+    }
+
+    /**
+     * A character that ends a URL in free text: ASCII whitespace, a quote,
+     * {@code <}, {@code >} or a backslash. Other spaces do not, so a
+     * password holding one is redacted whole.
+     */
+    private static boolean endsUrl(char c) {
+        return switch (c) {
+            case ' ', '\t', '\n', '\u000B', '\f', '\r', '"', '\'', '<', '>', '\\' -> true;
+            default -> false;
+        };
     }
 
     /**

@@ -62,6 +62,12 @@ public final class TunnelRecoveryService implements AutoCloseable {
      * one stands until they connect, disconnect or cancel.
      */
     private String stoppedBecause;
+    /**
+     * The request under which the user called off a countdown with a core
+     * running ({@link #cancelCountdown()}), or -1: under it, a failed health
+     * check restarts nothing.
+     */
+    private long countdownCancelledFor = -1;
     private ConnectionState lastState = ConnectionState.DISCONNECTED;
     /** The last reachability verdict, to re-arm a retry a request cancelled. */
     private TunnelHealth lastHealth = TunnelHealth.UNMONITORED;
@@ -258,6 +264,79 @@ public final class TunnelRecoveryService implements AutoCloseable {
         return generation;
     }
 
+    /**
+     * Starts recovery over for a tunnel a pick moves to another server,
+     * under the user's request as it stands. The restart counted down to and
+     * the backoff were for the server the tunnel leaves; they go, as for a
+     * new request, and so does a restart already under way, once it gets to
+     * run. The request stays the user's: one a Disconnect withdrew, or a
+     * newer request replaced, is not asked for again.
+     *
+     * <p>A pick took a request of its own, which a Disconnect made before it
+     * could not withdraw. Taking none, the countdown of the server the
+     * tunnel left ran on: its restart hit the server just picked, a healthy
+     * one too, and a failing one waited out a backoff that had grown on
+     * another.</p>
+     *
+     * @param request the user's request the pick was made under
+     * @return the request recovery runs under now, or -1 when
+     *     {@code request} no longer stands
+     */
+    public synchronized long startOver(long request) {
+        if (!isWanted(request)) {
+            return -1;
+        }
+        stoppedBecause = null;
+        cancelPending();
+        attempts = 0;
+        connectedSinceRequest = false;
+        return ++generation;
+    }
+
+    /**
+     * Leaves the tunnel to the user's reconnect: a restart of a pick's ended
+     * at an elevation prompt the user dismissed. The pick stopped the working
+     * tunnel before the prompt came up, and the dismissal withdrew the request
+     * as a dismissed Connect does, so the VPN was off with no retry and
+     * nothing offered. The request stands, as for a dropped tunnel whose
+     * restart would prompt, and the reconnect is offered.
+     *
+     * @param request the request the restart ran under
+     * @return whether that request still stands, so the reconnect is offered
+     */
+    public synchronized boolean offerReconnect(long request) {
+        if (!isWanted(request)) {
+            return false;
+        }
+        cancelPending();
+        publish(null, true);
+        return true;
+    }
+
+    /**
+     * Calls off the countdown the recovery banner shows, as its Cancel
+     * button does. While the core still runs, the restart alone goes: the
+     * user's request stands, and failed health checks restart nothing more
+     * until the user's next request (a connect, a reconnect, a disconnect,
+     * or a pick that moves the tunnel). With no core running, a crashed one
+     * counting down or recovery stopped, it withdraws the request, as a
+     * disconnect does.
+     *
+     * <p>It withdrew the request in every case, which left a running core
+     * with a tunnel nobody wanted: a server picked afterwards in the list,
+     * the tray or by an agent was never applied, since a pick moves only a
+     * tunnel the user wants, and a crash of that core was not restarted.</p>
+     */
+    public synchronized void cancelCountdown() {
+        if (stoppedBecause != null || lastState != ConnectionState.CONNECTED) {
+            cancel();
+            return;
+        }
+        attempts = 0;
+        countdownCancelledFor = generation;
+        cancelPending();
+    }
+
     /** Cancels automatic recovery, including a restart that has not reached start() yet. */
     public synchronized void cancel() {
         wanted = false;
@@ -334,6 +413,13 @@ public final class TunnelRecoveryService implements AutoCloseable {
         AppSettings config = settings.get();
         if (!wanted || closed || running || pending != null || stoppedBecause != null
                 || !config.isHealthCheckAutoReconnect()) {
+            return;
+        }
+        if (why == Reason.UNREACHABLE && countdownCancelledFor == generation) {
+            // The user called the last such restart off and kept the tunnel;
+            // a crash of its core is still restarted.
+            log.info("Not restarting the tunnel: {}, but the user cancelled the restart",
+                    why.described());
             return;
         }
         if (why == Reason.UNREACHABLE && !power.isAwake()) {

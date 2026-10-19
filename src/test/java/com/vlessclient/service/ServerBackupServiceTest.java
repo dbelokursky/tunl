@@ -280,6 +280,33 @@ class ServerBackupServiceTest {
         assertThat(store.getServers()).extracting(ServerConfig::getName).containsExactly("ok");
     }
 
+    /**
+     * A transport whose type is null, as a backup edited by hand can give it,
+     * is plain TCP to the builders. Its path check threw on the null type, and
+     * the restore caught no such failure: the whole backup failed over it.
+     */
+    @Test
+    void aBackupEntryWhoseTransportHasNoTypeIsRestored() throws IOException {
+        Path file = tempDir.resolve("backup.json");
+        Files.writeString(file, """
+                {"config_version": 1, "servers": [
+                  {"name": "hand-written", "protocol": "vless", "address": "198.51.100.7",
+                   "port": 443, "uuid": "11111111-2222-3333-4444-555555555555",
+                   "transport": {"type": null},
+                   "tls": {"enabled": true, "server_name": "example.com"}},
+                  {"name": "second", "protocol": "trojan", "address": "198.51.100.8",
+                   "port": 443, "uuid": "trojan-password", "tls": {"enabled": true}}
+                ]}
+                """, StandardCharsets.UTF_8);
+
+        ServerBackupService.ImportResult result = backup.importFile(file);
+
+        assertThat(result.added()).isEqualTo(2);
+        assertThat(result.skipped()).isEmpty();
+        assertThat(store.getServers()).extracting(ServerConfig::getName)
+                .containsExactly("hand-written", "second");
+    }
+
     /** Without a protocol an entry made every connect fail with a NullPointerException. */
     @Test
     void aBackupEntryWithoutAProtocolIsSkipped() throws IOException {
