@@ -150,6 +150,12 @@ public class ConfigStore {
     private final AtomicBoolean serversUnsaved = new AtomicBoolean();
 
     /**
+     * Whether servers.json held a credential in plaintext as it was read: one
+     * saved while no keychain was there, or with secure storage off.
+     */
+    private boolean credentialsInPlaintext;
+
+    /**
      * Where a save asked for on the FX thread is written. The FX thread wrote
      * itself whenever no other write was under way, and sealing a credential
      * starts a keychain process: pasting, restoring or importing a list of
@@ -860,6 +866,35 @@ public class ConfigStore {
         saveServers();
     }
 
+    /**
+     * Writes servers.json again, its credentials sealed, when it held one in
+     * plaintext as it was read and secure storage is on with a keychain there
+     * to take it. A credential is sealed only when the file is written, so one
+     * saved while no keychain was there stayed in plaintext after a start that
+     * had one, which is what Settings tells a Linux user to arrange, until
+     * some other change wrote the list: for a server added by hand and never
+     * edited, for good. The start calls this once; off the FX thread, as the
+     * keychain's probe and each seal are processes.
+     */
+    public void sealCredentialsLeftInPlaintext() {
+        if (!credentialsInPlaintext || !getSettings().isStoreSecretsSecurely()
+                || !sealer.isAvailable()) {
+            return;
+        }
+        log.info("Sealing the credentials {} holds in plaintext", SERVERS_FILE);
+        saveServers();
+    }
+
+    /** Whether a server holds a credential that a save seals, in plaintext. */
+    private static boolean holdsPlaintextCredential(ServerConfig server) {
+        return isPlaintext(server.getUuid())
+                || server.getProtocol() == Protocol.HYSTERIA2 && isPlaintext(server.getFlow());
+    }
+
+    private static boolean isPlaintext(String credential) {
+        return credential != null && !credential.isBlank() && !SecretSealer.isSealed(credential);
+    }
+
     /** Writes the list until no change is left that a write has not taken in. */
     private void writePendingServers() {
         do {
@@ -1057,19 +1092,33 @@ public class ConfigStore {
             int unreadable = 0;
             for (JsonNode item : items) {
                 try {
-                    loaded.add(objectMapper.treeToValue(item, ServerConfig.class));
+                    ServerConfig server = objectMapper.treeToValue(item, ServerConfig.class);
+                    if (server == null) {
+                        // A null in the list, from a hand edit or a merge
+                        // tool, holds nothing to keep. Read as a server, it
+                        // threw in the unsealing below, and the app did not
+                        // start until the file was deleted by hand.
+                        log.warn("Skipping an empty (null) entry in {}", SERVERS_FILE);
+                        continue;
+                    }
+                    loaded.add(server);
                 } catch (JacksonException e) {
                     // Per entry, not per file: a protocol or transport a newer
                     // build wrote used to fail the whole list, quarantine
                     // servers.json and leave a downgraded install with nothing.
                     unreadable++;
-                    log.warn("Skipping a server entry this build cannot read: {}",
-                            e.getMessage());
+                    // By its field, not Jackson's message, which quotes the
+                    // value: a credential pasted into a field of another type.
+                    log.warn("Skipping a server entry this build cannot read ({})",
+                            StoredJson.where(e));
                     synchronized (this) {
                         unreadableServers.add(item);
                     }
                 }
             }
+            // Before the unsealing, which leaves every credential plaintext in memory.
+            credentialsInPlaintext = loaded.stream()
+                    .anyMatch(ConfigStore::holdsPlaintextCredential);
             Unsealing.each(loaded, this::unsealInPlace);
             servers.addAll(loaded);
             synchronized (this) {

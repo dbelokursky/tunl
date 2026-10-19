@@ -36,6 +36,49 @@ class LinuxSecretToolSecretSealerTest {
         assertThat(call.stdin()).doesNotContain("pässword");
     }
 
+    /**
+     * secret-tool reads a secret on stdin into 8 KiB and stops: it stores
+     * what it has and exits 0, saying "password is too long" only on the
+     * standard error the app discards. A subscription URL over 6 KiB was
+     * stored cut, the file kept only the tag, and the next start unsealed the
+     * cut URL: the rest of it, the account token with it, was gone for good.
+     */
+    @Test
+    void aValueSecretToolWouldCutIsKeptUnsealedAndOneThatFitsRoundTrips() {
+        SecretToolReadingStdinAsLibsecretDoes keyring = new SecretToolReadingStdinAsLibsecretDoes();
+        LinuxSecretToolSecretSealer sealing = new LinuxSecretToolSecretSealer(keyring);
+        // 6,144 bytes are 8,192 in base64, all secret-tool reads.
+        String fits = "https://sub.provider.example/s/" + "x".repeat(6144 - 31);
+        String tooLong = fits + "&token=ACCOUNT";
+
+        assertThat(sealing.seal("sub-1.url", tooLong))
+                .as("the seal of a URL secret-tool would cut").isNull();
+        assertThat(keyring.stored).as("nothing written to the keyring for it").isEmpty();
+
+        assertThat(sealing.seal("sub-2.url", fits)).isEqualTo(TAG);
+        assertThat(sealing.unseal("sub-2.url", TAG)).contains(fits);
+    }
+
+    /** A keyring behind {@code secret-tool}, whose stdin reader takes 8,192 bytes at most. */
+    private static final class SecretToolReadingStdinAsLibsecretDoes
+            implements SecretSealers.Subprocess {
+
+        final java.util.Map<String, String> stored = new java.util.HashMap<>();
+
+        @Override
+        public java.util.Optional<String> run(String[] command, String stdin) {
+            String key = command[command.length - 1];
+            return switch (command[1]) {
+                case "store" -> {
+                    stored.put(key, stdin.length() > 8192 ? stdin.substring(0, 8192) : stdin);
+                    yield java.util.Optional.of("");
+                }
+                case "lookup" -> java.util.Optional.ofNullable(stored.get(key));
+                default -> java.util.Optional.of("");
+            };
+        }
+    }
+
     @Test
     void sealReportsAFailedCommandAsNullSoTheCallerKeepsThePlaintext() {
         secretTool.fail();

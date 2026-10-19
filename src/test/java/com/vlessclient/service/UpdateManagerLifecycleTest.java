@@ -109,6 +109,60 @@ class UpdateManagerLifecycleTest {
         assertThat(manager.hasStagedUpdate()).isFalse();
     }
 
+    /**
+     * A user two releases behind, say on 1.25.0 with 1.26.0 staged, when
+     * 1.26.0 is withdrawn: the latest is 1.25.1 again, still newer than the
+     * build. The check took the update-available path, which never looked at
+     * what was staged; the download deferred to the newer installer already
+     * waiting, and the next start installed the build its maintainer had
+     * taken back. The build here reads as older than any release.
+     */
+    @Test
+    void anInstallerStagedForAWithdrawnReleaseIsDiscardedWhenTheLatestIsStillNewer(
+            @TempDir Path dir) throws Exception {
+        stage(dir, "9.9.9");
+        RecordingHttpClient client = new RecordingHttpClient();
+        UpdateManager manager = manager(dir, client);
+
+        assertThat(manager.processReleaseResponse(release("9.9.8")))
+                .isEqualTo(UpdateManager.CheckResult.UPDATE_AVAILABLE);
+
+        assertThat(new UpdateStaging(dir).pending()).as("the withdrawn installer").isEmpty();
+        assertThat(manager.hasStagedUpdate()).isFalse();
+        manager.autoDownloadIfAllowed();
+        assertThat(client.requests).as("the latest release is fetched in its place")
+                .anyMatch(uri -> uri.contains("/v9.9.8/"));
+        List<String> handedOff = new ArrayList<>();
+        UpdateApplier recording = new UpdateApplier() {
+            @Override
+            public Outcome apply(PendingUpdate update) {
+                handedOff.add(update.version());
+                return Outcome.FAILED;
+            }
+
+            @Override
+            public boolean selfUpdates() {
+                return true;
+            }
+        };
+        UpdateBootstrap.applyPendingUpdate(
+                new UpdateStaging(dir, (v, a, d, s) -> true), recording, "1.0.0");
+        assertThat(handedOff).as("what the next start hands to the installer").isEmpty();
+    }
+
+    /** A staged installer the latest release is not older than stays for the next start. */
+    @Test
+    void anInstallerStagedForTheLatestReleaseStaysWhileAnUpdateIsAvailable(
+            @TempDir Path dir) throws Exception {
+        stage(dir, "9.9.8");
+        UpdateManager manager = manager(dir, new RecordingHttpClient());
+
+        manager.processReleaseResponse(release("9.9.8"));
+
+        assertThat(new UpdateStaging(dir).pending()).map(PendingUpdate::version)
+                .contains("9.9.8");
+    }
+
     @Test
     void anOlderStagedInstallerGivesWayToANewerRelease(@TempDir Path dir) throws Exception {
         stage(dir, "9.9.8");

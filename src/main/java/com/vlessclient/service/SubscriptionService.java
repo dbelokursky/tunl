@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.ConnectException;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.net.http.HttpHeaders;
@@ -101,9 +102,20 @@ public class SubscriptionService {
      * The last URL sealed under each subscription id, and the tag it produced.
      * Every save used to seal every URL again, one secret-tool process each on
      * macOS, and a refresh saves the list. Loading fills it with the tags the
-     * file already holds. Guarded by this object's monitor.
+     * file already holds. Guarded by this object's monitor, which a save
+     * holds only to read and fill it: the keychain runs outside.
      */
     private final Map<String, SealedUrl> urlSealCache = new HashMap<>();
+
+    /**
+     * Keeps the writes of subscriptions.json in order: a save takes it before
+     * its snapshot and lets it go after its write. Taken before this object's
+     * monitor, and never on the FX thread, which saves nothing.
+     */
+    private final Object writeOrder = new Object();
+
+    /** Whether subscriptions.json held a URL in plaintext as it was read. */
+    private boolean urlsInPlaintext;
 
     /** A sealed URL and the plaintext that produced it. */
     private record SealedUrl(String plaintext, String tag) {
@@ -335,6 +347,20 @@ public class SubscriptionService {
         // another one while the fetch waits, and what the old link answers
         // then is no longer the subscription's (see stillFetchedFrom).
         String fetchedUrl = urlOf(sub);
+        if (SecretSealer.isSealed(fetchedUrl)) {
+            // The keychain did not return the URL at this start (locked, its
+            // prompt dismissed, a DPAPI key lost, the data dir restored on
+            // another machine), and the subscription keeps its sealed tag,
+            // so the URL comes back at a start that has the keychain. Read as
+            // a URL, the tag failed as one holding a character a URL cannot
+            // have, and the advice to correct it led to a delete and a new
+            // add, which lost the servers, where a restart would have done.
+            log.warn("Not refreshing subscription '{}': the system keychain did not return "
+                    + "its URL at this start", sub.getName());
+            recordIfCurrent(sub, fetchedUrl,
+                    () -> sub.recordFailure("subscriptions.error.keychain", List.of()));
+            return;
+        }
 
         String content;
         ParsedContent parsed;
@@ -574,6 +600,17 @@ public class SubscriptionService {
     }
 
     /**
+     * The stored URL does not parse, or the HTTP client takes no request to
+     * it; the message holds nothing of it.
+     */
+    static final class UnreadableUrlException extends IOException {
+
+        UnreadableUrlException() {
+            super("The subscription URL is not a valid URI");
+        }
+    }
+
+    /**
      * A failed fetch in the app's own words, when it is one of the usual
      * failures, or null to keep the technical reason. The reason used to be
      * the exception's message as it came, in English in every language, and
@@ -592,6 +629,9 @@ public class SubscriptionService {
             }
             if (cause instanceof TunnelNotCarryingException) {
                 return new Declined("subscriptions.error.tunnel", List.of());
+            }
+            if (cause instanceof UnreadableUrlException) {
+                return new Declined("subscriptions.error.url", List.of());
             }
             if (cause instanceof UnresolvedAddressException
                     || cause instanceof UnknownHostException) {
@@ -827,7 +867,10 @@ public class SubscriptionService {
      *
      * @param subscriptionId the subscription to change
      * @param name           the new display name
-     * @param url            the new URL; sealed on save like the original
+     * @param url            the new URL; sealed on save like the original. The
+     *                       sealed tag of one the keychain did not return at
+     *                       this start, left as it was, is kept as it is
+     * @throws IllegalArgumentException for a URL no refresh can read
      */
     public void updateSubscription(String subscriptionId, String name, String url) {
         Subscription sub = findById(subscriptionId);
@@ -835,7 +878,13 @@ public class SubscriptionService {
             log.warn("Subscription not found for update: {}", subscriptionId);
             return;
         }
-        String fetchable = fetchableUrl(url);
+        // A sealed tag left as it was is kept unchecked: the URL comes back
+        // at a start that has the keychain, and refused as a URL, the tag
+        // took the rename with it.
+        String stored = urlOf(sub);
+        boolean keptSealed = SecretSealer.isSealed(stored) && url != null
+                && url.strip().equals(stored);
+        String fetchable = keptSealed ? stored : fetchableUrl(url);
         FxExecutor.run(() -> {
             synchronized (this) {
                 sub.setName(name);
@@ -858,7 +907,53 @@ public class SubscriptionService {
         if (SubscriptionLinks.encryptedForHapp(url)) {
             throw new IllegalArgumentException(I18n.get("subscriptions.link.happ.encrypted"));
         }
+        if (url != null && !isReadableUrl(url)) {
+            throw new IllegalArgumentException(I18n.get("subscriptions.url.invalid"));
+        }
         return SubscriptionLinks.subscriptionUrl(url).orElse(url);
+    }
+
+    /**
+     * Whether a refresh can read what the user gave as an address: the URL,
+     * or the one another client's link wraps, parses as a URI, and the HTTP
+     * client takes that URI, which needs http or https and a host. One with a
+     * space or a quote in it does not parse; it used to be stored as it was,
+     * and every refresh failed on it. One with a single slash after the
+     * scheme, or a host with an underscore, parses but names no host, and the
+     * refresh failed with the client's "unsupported URI" and the whole URL,
+     * token and all.
+     *
+     * @param url the URL or link; null reads as nothing
+     * @return false for text no refresh can read
+     */
+    public static boolean isReadableUrl(String url) {
+        if (url == null) {
+            return false;
+        }
+        try {
+            requestTo(SubscriptionLinks.subscriptionUrl(url).orElse(url));
+            return true;
+        } catch (UnreadableUrlException e) {
+            return false;
+        }
+    }
+
+    /**
+     * A request to {@code url}, as far as the URL decides it: the URI and the
+     * HTTP client's check of it.
+     *
+     * @throws UnreadableUrlException when either refuses it, without their
+     *     reasons, which quote the URL whole
+     */
+    private static HttpRequest.Builder requestTo(String url) throws UnreadableUrlException {
+        if (url == null) {
+            throw new UnreadableUrlException();
+        }
+        try {
+            return HttpRequest.newBuilder(new URI(url));
+        } catch (URISyntaxException | IllegalArgumentException e) {
+            throw new UnreadableUrlException();
+        }
     }
 
     /**
@@ -1107,8 +1202,12 @@ public class SubscriptionService {
             log.warn("Subscription fetched over plaintext http (MITM/injection "
                     + "risk; prefer https): host={}", host);
         }
-        HttpRequest.Builder request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
+        // Not with the JDK's reason, which quotes the URL whole: the redaction
+        // of a URL in text stops at a space or a quote, and finds none without
+        // "://", and the token went into lastError, onto the row, into MCP's
+        // answer and into the log. Such a URL is refused when added now, but
+        // a file from an earlier build can hold one.
+        HttpRequest.Builder request = requestTo(url)
                 .GET()
                 .timeout(Duration.ofSeconds(30))
                 .header("User-Agent", "Tunl/" + AppVersion.VERSION);
@@ -1422,77 +1521,131 @@ public class SubscriptionService {
         saveSubscriptions();
     }
 
-    synchronized void saveSubscriptions() {
-        if (configStore.getPersistenceState().isHeld(SUBSCRIPTIONS_FILE)) {
+    /**
+     * Writes subscriptions.json again, its URLs sealed, when it held one in
+     * plaintext as it was read and secure storage is on with a keychain there
+     * to take it, as {@link ConfigStore#sealCredentialsLeftInPlaintext} does
+     * for the servers: a URL saved while no keychain was there kept its
+     * account token in the file after a start that had one, until the next
+     * refresh. Off the FX thread: the keychain's probe and each seal are
+     * processes.
+     */
+    public void sealUrlsLeftInPlaintext() {
+        if (!urlsInPlaintext || !configStore.getSettings().isStoreSecretsSecurely()
+                || !sealer.isAvailable()) {
+            return;
+        }
+        log.info("Sealing the URLs {} holds in plaintext", SUBSCRIPTIONS_FILE);
+        saveSubscriptions();
+    }
+
+    /**
+     * Writes subscriptions.json as the list is now, its URLs sealed when
+     * secure storage is on.
+     *
+     * <p>The whole save used to run inside this object's monitor, its
+     * keychain processes and its fsync included, and the FX thread takes that
+     * monitor for the list change of every add, edit and delete: one made
+     * while another save sealed a new URL froze the window until the keychain
+     * answered, which for a locked one is its unlock prompt, for up to two
+     * minutes. Now only the snapshot is taken, and the seal cache read and
+     * filled, under the monitor, as ConfigStore does for servers.json; the
+     * saves keep their order under a lock of their own, which the FX thread,
+     * saving nothing, never takes.</p>
+     */
+    void saveSubscriptions() {
+        PersistenceState persistence = configStore.getPersistenceState();
+        if (persistence.isHeld(SUBSCRIPTIONS_FILE)) {
             log.warn("Not saving {}: it could not be opened at startup", SUBSCRIPTIONS_FILE);
             return;
         }
         Path file = dataDir.resolve(SUBSCRIPTIONS_FILE);
-        try {
-            ObjectNode envelope = objectMapper.createObjectNode();
-            envelope.put("config_version", SUBSCRIPTIONS_CONFIG_VERSION);
-            ArrayNode list = objectMapper.valueToTree(serializableSubscriptions());
-            // An entry this build cannot read goes back as it came: it comes
-            // from a newer build, and its sealed URL names a keychain entry.
-            unreadableSubscriptions.forEach(entry -> list.add(entry.deepCopy()));
-            envelope.set("subscriptions", list);
-            if (envelopeExtras != null) {
-                envelope.setAll(envelopeExtras.deepCopy());
+        // Snapshot to write, under one lock: a later snapshot cannot land
+        // before an earlier one.
+        synchronized (writeOrder) {
+            try {
+                ArrayNode list;
+                List<JsonNode> keep;
+                ObjectNode extras;
+                synchronized (this) {
+                    list = objectMapper.valueToTree(new ArrayList<>(subscriptions));
+                    keep = List.copyOf(unreadableSubscriptions);
+                    extras = envelopeExtras;
+                }
+                if (configStore.getSettings().isStoreSecretsSecurely() && sealer.isAvailable()) {
+                    sealUrls(list);
+                }
+                // An entry this build cannot read goes back as it came: it comes
+                // from a newer build, and its sealed URL names a keychain entry.
+                keep.forEach(entry -> list.add(entry.deepCopy()));
+                ObjectNode envelope = objectMapper.createObjectNode();
+                envelope.put("config_version", SUBSCRIPTIONS_CONFIG_VERSION);
+                envelope.set("subscriptions", list);
+                if (extras != null) {
+                    envelope.setAll(extras.deepCopy());
+                }
+                SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(envelope));
+                persistence.saved(SUBSCRIPTIONS_FILE);
+                ConfigStore.dropLegacyBackupOnceMigrated(file, objectMapper, "subscriptions");
+            } catch (IOException | JacksonException e) {
+                // JacksonException is unchecked in Jackson 3: a serialization that
+                // failed escaped past the unsaved banner.
+                log.error("Failed to save subscriptions to {}", file, e);
+                persistence.failed(SUBSCRIPTIONS_FILE, this::saveSubscriptions);
             }
-            SecureFiles.writePrivately(file, objectMapper.writeValueAsBytes(envelope));
-            configStore.getPersistenceState().saved(SUBSCRIPTIONS_FILE);
-            ConfigStore.dropLegacyBackupOnceMigrated(file, objectMapper, "subscriptions");
-        } catch (IOException | JacksonException e) {
-            // JacksonException is unchecked in Jackson 3: a serialization that
-            // failed escaped past the unsaved banner.
-            log.error("Failed to save subscriptions to {}", file, e);
-            configStore.getPersistenceState().failed(SUBSCRIPTIONS_FILE, this::saveSubscriptions);
         }
     }
 
     /**
-     * The on-disk view of the subscription list. Subscription URLs usually
-     * embed the account token, so they get the same treatment as server
-     * credentials: plaintext in memory, sealed in the file when secure
-     * storage is enabled and a backend is available. A failed seal keeps the
-     * plaintext — a readable config always wins over a lost URL.
+     * Replaces the URLs in a snapshot of the list with their sealed tags.
+     * Subscription URLs usually embed the account token, so they get the same
+     * treatment as server credentials: plaintext in memory, sealed in the
+     * file. A failed seal keeps the plaintext — a readable config always wins
+     * over a lost URL.
      */
-    private List<Subscription> serializableSubscriptions() {
-        boolean sealing = configStore.getSettings().isStoreSecretsSecurely()
-                && sealer.isAvailable();
-        if (!sealing) {
-            return new ArrayList<>(subscriptions);
-        }
-        List<Subscription> out = new ArrayList<>(subscriptions.size());
-        for (Subscription live : subscriptions) {
-            String url = live.getUrl();
-            if (url == null || url.isBlank() || SecretSealer.isSealed(url)) {
-                out.add(live);
+    private void sealUrls(ArrayNode list) {
+        for (JsonNode node : list) {
+            if (!(node instanceof ObjectNode subscription)
+                    || !subscription.path("url").isString()) {
                 continue;
             }
-            SealedUrl cached = urlSealCache.get(live.getId());
-            String sealed = cached != null && cached.plaintext().equals(url)
-                    ? cached.tag()
-                    : sealer.seal(urlSecretKey(live.getId()), url);
+            String url = subscription.path("url").asString();
+            if (url.isBlank() || SecretSealer.isSealed(url)) {
+                continue;
+            }
+            String sealed = sealUrl(subscription.path("id").asString(""), url);
             if (sealed == null) {
                 log.warn("Could not seal URL for subscription '{}'; keeping plaintext",
-                        live.getName());
-                out.add(live);
+                        subscription.path("name").asString(""));
                 continue;
             }
-            urlSealCache.put(live.getId(), new SealedUrl(url, sealed));
-            try {
-                Subscription copy = objectMapper.readValue(
-                        objectMapper.writeValueAsString(live), Subscription.class);
-                copy.setUrl(sealed);
-                out.add(copy);
-            } catch (JacksonException e) {
-                log.warn("Could not copy subscription '{}' for sealing; keeping plaintext",
-                        live.getName(), e);
-                out.add(live);
+            subscription.put("url", sealed);
+        }
+    }
+
+    /**
+     * Seals one subscription's URL, or reuses the tag the cache holds for it;
+     * null when the seal failed. The keychain runs outside this object's
+     * monitor.
+     */
+    private String sealUrl(String subscriptionId, String url) {
+        synchronized (this) {
+            SealedUrl cached = urlSealCache.get(subscriptionId);
+            if (cached != null && cached.plaintext().equals(url)) {
+                return cached.tag();
             }
         }
-        return out;
+        String sealed = sealer.seal(urlSecretKey(subscriptionId), url);
+        if (sealed != null) {
+            synchronized (this) {
+                // Not for a subscription removed meanwhile, whose keychain
+                // entry is being deleted: the tag would name nothing.
+                if (findById(subscriptionId) != null) {
+                    urlSealCache.put(subscriptionId, new SealedUrl(url, sealed));
+                }
+            }
+        }
+        return sealed;
     }
 
     private static String urlSecretKey(String subscriptionId) {
@@ -1545,16 +1698,29 @@ public class SubscriptionService {
             int unreadable = 0;
             for (JsonNode item : items) {
                 try {
-                    loaded.add(objectMapper.treeToValue(item, Subscription.class));
+                    Subscription subscription = objectMapper.treeToValue(item, Subscription.class);
+                    if (subscription == null) {
+                        // A null holds nothing to keep; read as a subscription
+                        // it threw in the unsealing below, and the app did not
+                        // start, as servers.json's did.
+                        log.warn("Skipping an empty (null) entry in {}", SUBSCRIPTIONS_FILE);
+                        continue;
+                    }
+                    loaded.add(subscription);
                 } catch (JacksonException e) {
                     unreadable++;
-                    log.warn("Skipping a subscription entry this build cannot read: {}",
-                            e.getMessage());
+                    // By its field: Jackson's message quotes the value, and
+                    // this file's values include the account's URL.
+                    log.warn("Skipping a subscription entry this build cannot read ({})",
+                            StoredJson.where(e));
                     synchronized (this) {
                         unreadableSubscriptions.add(item);
                     }
                 }
             }
+            // Before the unsealing, which leaves every URL plaintext in memory.
+            urlsInPlaintext = loaded.stream().map(Subscription::getUrl).anyMatch(
+                    url -> url != null && !url.isBlank() && !SecretSealer.isSealed(url));
             Unsealing.each(loaded, this::unsealInPlace);
             subscriptions.addAll(loaded);
             synchronized (this) {
@@ -1589,9 +1755,11 @@ public class SubscriptionService {
                         urlSealCache.put(subscription.getId(), new SealedUrl(url, stored));
                     }
                 },
+                // Not "re-add it": a delete takes the subscription's servers.
                 () -> log.error(
-                        "Could not unseal the URL for subscription '{}' ({}); "
-                                + "re-add it or restore the secret backend entry",
+                        "Could not unseal the URL for subscription '{}' ({}); it stays sealed "
+                                + "until a start that has the keychain entry, or until the "
+                                + "URL is entered again in Edit",
                         subscription.getName(), subscription.getId()));
     }
 }

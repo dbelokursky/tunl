@@ -389,8 +389,17 @@ public class AppSettings extends KeepsUnknownFields {
         return proxyMode;
     }
 
+    /**
+     * Sets the proxy mode, the system proxy for none, as
+     * {@link ProxyMode#fromValue} reads a value it does not know. A
+     * {@code "proxy_mode": null} in settings.json, from a hand edit or a merge
+     * tool, never reaches that reading: it loaded as no mode, and every
+     * connect threw on it until the file was fixed by hand.
+     *
+     * @param proxyMode the mode; null reads as the system proxy
+     */
     public void setProxyMode(ProxyMode proxyMode) {
-        this.proxyMode = proxyMode;
+        this.proxyMode = proxyMode != null ? proxyMode : ProxyMode.SYSTEM_PROXY;
     }
 
     public ServerSelection getServerSelection() {

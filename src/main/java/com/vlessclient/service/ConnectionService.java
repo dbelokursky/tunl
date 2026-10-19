@@ -1251,16 +1251,32 @@ public class ConnectionService {
      * the servers the core refused, so it leaves them out too; picking one of
      * those does not match and restarts, where its refusal is reported by
      * name. The host is taken as the run found it.
+     *
+     * <p>Never with a server that names no protocol, which the generator
+     * throws on: a hand-edited servers.json can hold one, and since a start
+     * leaves it out, a run can be up while it is listed. A pick of it, or of
+     * any server the run left out while it was listed, threw here, and the
+     * Dashboard, whose switch failed with the core still up, asked for the
+     * same switch again at once, as long as the pick stood; the check for
+     * changes threw on the FX thread. A pick of it gets a configuration no
+     * core was started with, which matches none, so its refusal is said by
+     * name as well.</p>
      */
     private String generatedNow(List<ServerConfig> candidates, ServerConfig active,
                                 AppSettings settings, Set<String> leftOut, HostFacts host) {
-        List<ServerConfig> members = leftOut.contains(active.getId())
-                ? candidates
-                : candidates.stream()
-                        .filter(server -> !leftOut.contains(server.getId()))
-                        .toList();
+        if (active.getProtocol() == null) {
+            return NOT_GENERATED;
+        }
+        boolean activeLeftOut = leftOut.contains(active.getId());
+        List<ServerConfig> members = candidates.stream()
+                .filter(server -> server.getProtocol() != null)
+                .filter(server -> activeLeftOut || !leftOut.contains(server.getId()))
+                .toList();
         return configGenerator.generate(members, active, settings, safeRoutingConfig(), host);
     }
+
+    /** What {@link #generatedNow} gives in place of a configuration it cannot generate. */
+    private static final String NOT_GENERATED = "{}";
 
     /** The ports the user chose, which a run's own may have moved off. */
     private static List<Integer> chosenPorts(AppSettings settings) {
