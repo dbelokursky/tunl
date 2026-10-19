@@ -355,6 +355,27 @@ class DefaultAppControlServiceTest {
         assertThat(routing.getConfig().getRules()).isEmpty();
     }
 
+    /**
+     * The runetfreedom "ru-blocked" lists, which the generator fetches from
+     * runetfreedom: an agent asked to tunnel what is blocked in Russia was
+     * told there is no such list.
+     */
+    @Test
+    void addRoutingRule_takesTheRuBlockedLists() throws Exception {
+        RoutingService routing = com.vlessclient.service.TestRoutingServices.at(
+                tempDir.resolve("routing"));
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, null,
+                routing, null, null, new ShareLinkParser(),
+                new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        svc.addRoutingRule("geosite", "ru-blocked", "proxy");
+        svc.addRoutingRule("geoip", "ru-blocked", "proxy");
+
+        assertThat(routing.getConfig().getRules())
+                .extracting(rule -> rule.getType() + " " + rule.getValue())
+                .containsExactly("GEOSITE ru-blocked", "GEOIP ru-blocked");
+    }
+
     @Test
     void addServer_parsesShareLinkAndPersists() throws Exception {
         DefaultAppControlService svc = new DefaultAppControlService(store, null, null,

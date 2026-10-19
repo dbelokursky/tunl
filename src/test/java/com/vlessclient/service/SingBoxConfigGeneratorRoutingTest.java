@@ -621,6 +621,52 @@ class SingBoxConfigGeneratorRoutingTest {
     }
 
     /**
+     * Russia bypassed, except what is blocked there: custom rules for the
+     * runetfreedom "ru-blocked" lists, which the blocked-only mode downloads
+     * and the generator fetches from runetfreedom for any rule. The check
+     * took them for lists SagerNet does not publish, so a rule stored by 1.25
+     * was left out of every configuration and the blocked sites went direct.
+     */
+    @Test
+    void aCustomRuleForTheRuBlockedListsIsWrittenWithTheirOwnUrl() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setBypassCountries(List.of("ru"));
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.GEOSITE, "ru-blocked",
+                        RoutingRule.RuleAction.PROXY),
+                new RoutingRule(RoutingRule.RuleType.GEOIP, "RU-Blocked",
+                        RoutingRule.RuleAction.PROXY)));
+        String lists = "https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/"
+                + "release/sing-box/";
+
+        for (com.vlessclient.model.RouteMode routeMode : com.vlessclient.model.RouteMode.values()) {
+            routingConfig.setMode(routeMode);
+            for (com.vlessclient.model.ProxyMode mode : com.vlessclient.model.ProxyMode.values()) {
+                AppSettings settings = new AppSettings();
+                settings.setProxyMode(mode);
+                JsonNode route = parse(generator.generate(createVlessServer(), settings,
+                        routingConfig)).get("route");
+                String label = routeMode + ", " + mode;
+
+                assertThat(route.get("rules").toString()).as(label)
+                        .contains("{\"rule_set\":[\"geosite-ru-blocked\"],\"action\":\"route\","
+                                + "\"outbound\":\"proxy\"}")
+                        .contains("{\"rule_set\":[\"geoip-ru-blocked\"],\"action\":\"route\","
+                                + "\"outbound\":\"proxy\"}");
+                List<String> sets = new java.util.ArrayList<>();
+                route.get("rule_set").forEach(set -> sets.add(
+                        set.path("tag").asString() + " " + set.path("url").asString()));
+                assertThat(sets).as(label)
+                        .contains("geosite-ru-blocked " + lists
+                                        + "rule-set-geosite/geosite-ru-blocked.srs",
+                                "geoip-ru-blocked " + lists + "rule-set-geoip/geoip-ru-blocked.srs")
+                        .as("%s: each list once, with the mode's own", label)
+                        .filteredOn(set -> set.contains("ru-blocked")).hasSize(2);
+            }
+        }
+    }
+
+    /**
      * A rule without a type or an action threw a NullPointerException here,
      * so every connect failed. It is left out, and the rules around it stay.
      */

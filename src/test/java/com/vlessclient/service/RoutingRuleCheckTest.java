@@ -265,6 +265,25 @@ class RoutingRuleCheckTest {
         }
     }
 
+    /**
+     * "ru-blocked" names the runetfreedom list of what is blocked in Russia,
+     * which the blocked-only mode downloads and the generator fetches from
+     * there for a custom rule too: SagerNet has no such list, and the check
+     * refused the name, so "bypass Russia, but tunnel what is blocked there"
+     * could not be written, and a rule stored by 1.25 was left out.
+     */
+    @Test
+    void theRuBlockedListsAreTakenForBothKinds() {
+        for (RuleType type : List.of(RuleType.GEOSITE, RuleType.GEOIP)) {
+            for (String name : List.of("ru-blocked", "RU-Blocked", " ru-blocked ")) {
+                assertThat(RoutingRuleCheck.problem(type, name)).as("%s %s", type, name)
+                        .isEmpty();
+            }
+        }
+        // Only the two lists the generator fetches from runetfreedom.
+        assertThat(RoutingRuleCheck.problem(RuleType.GEOIP, "ru-blocked-all")).isPresent();
+    }
+
     @Test
     void aBlankValueIsRefusedForEveryType() {
         for (RuleType type : RuleType.values()) {

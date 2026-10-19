@@ -67,6 +67,19 @@ public class SingBoxConfigGenerator {
     private static final String BLOCKED_LISTS_URL = "https://raw.githubusercontent.com/"
             + "runetfreedom/russia-v2ray-rules-dat/release/sing-box/";
 
+    /**
+     * Whether a rule-set tag is one of the runetfreedom lists, which this
+     * generator fetches from there rather than from SagerNet: a custom
+     * Geosite or GeoIP rule naming "ru-blocked" gets the same list as the
+     * blocked-only mode.
+     *
+     * @param tag a rule-set tag, such as {@code geoip-ru-blocked}
+     * @return whether its list comes from runetfreedom
+     */
+    static boolean isBlockedInRussiaList(String tag) {
+        return BLOCKED_IN_RUSSIA_LISTS.contains(tag);
+    }
+
     /** Most servers the "Fastest" mode probes. */
     static final int MAX_AUTOMATIC_MEMBERS = 30;
 

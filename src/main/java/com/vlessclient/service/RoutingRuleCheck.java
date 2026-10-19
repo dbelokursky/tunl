@@ -225,6 +225,14 @@ public final class RoutingRuleCheck {
         if (!RULE_SET_NAME.matcher(name).matches()) {
             return Optional.of(I18n.get("routing.rule.problem.rule.set"));
         }
+        // "ru-blocked" names the runetfreedom list the blocked-only mode
+        // downloads, and the generator fetches it from there: such a rule was
+        // refused here, and one stored by 1.25 left out of the configuration,
+        // although the core loaded it.
+        String kind = type == RoutingRule.RuleType.GEOSITE ? "geosite-" : "geoip-";
+        if (SingBoxConfigGenerator.isBlockedInRussiaList(kind + name)) {
+            return Optional.empty();
+        }
         if (type == RoutingRule.RuleType.GEOSITE) {
             return GeositeLists.published(name)
                     ? Optional.empty()
