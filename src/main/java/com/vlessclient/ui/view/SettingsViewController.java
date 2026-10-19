@@ -18,6 +18,7 @@ import com.vlessclient.service.mcp.McpServerService;
 import com.vlessclient.ui.view.settings.TrafficHistorySettingsSection;
 import com.vlessclient.ui.view.settings.UpdatesSection;
 import java.io.IOException;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -28,7 +29,9 @@ import java.util.function.Consumer;
 import javafx.application.Platform;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
+import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
+import javafx.beans.value.WeakChangeListener;
 import javafx.fxml.FXML;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
@@ -145,6 +148,14 @@ public class SettingsViewController implements ViewShownAware {
     private McpServerService mcpServerService;
     private boolean updatingMcpControls;
     private boolean suppressLaunchAtLoginListener;
+
+    /**
+     * Rewords the MCP status line in a new language: it is worded when set,
+     * and after a switch kept the old language until the page was shown
+     * again. Held here, since the locale keeps it only weakly.
+     */
+    private final ChangeListener<Locale> mcpStatusInNewLanguage =
+            (obs, oldLocale, newLocale) -> refreshMcpStatus();
 
     /**
      * Every read and write of the autostart entry, one at a time and in the
@@ -730,6 +741,7 @@ public class SettingsViewController implements ViewShownAware {
             mcpCopyButton.setDisable(true);
             mcpRegenButton.setDisable(true);
         }
+        I18n.localeProperty().addListener(new WeakChangeListener<>(mcpStatusInNewLanguage));
         refreshMcpCommand();
     }
 
@@ -755,19 +767,37 @@ public class SettingsViewController implements ViewShownAware {
     }
 
     private void refreshMcpCommand() {
+        mcpCommandArea.setText(mcpServerService == null
+                ? "" : mcpServerService.claudeAddCommand());
+        refreshMcpStatus();
+    }
+
+    /** Words the server's state in the current language; reads no file. */
+    private void refreshMcpStatus() {
         if (mcpServerService == null) {
-            mcpCommandArea.setText("");
             mcpStatusLabel.setText("");
             return;
         }
-        mcpCommandArea.setText(mcpServerService.claudeAddCommand());
-        String startError = mcpServerService.getLastStartError();
-        if (startError != null) {
-            mcpStatusLabel.setText(I18n.get("settings.mcp.status.failed", startError));
+        McpServerService.StartFailure failure = mcpServerService.getLastStartFailure();
+        if (failure != null) {
+            mcpStatusLabel.setText(I18n.get("settings.mcp.status.failed",
+                    mcpFailureReason(failure)));
         } else {
             mcpStatusLabel.setText(I18n.get(mcpServerService.isRunning()
                     ? "settings.mcp.status.running" : "settings.mcp.status.stopped"));
         }
+    }
+
+    /** Why the server did not start, worded here so it follows the language. */
+    private static String mcpFailureReason(McpServerService.StartFailure failure) {
+        return switch (failure) {
+            // The port as text: MessageFormat writes a number the locale's
+            // way, 55555 as "55,555", or in Russian with a space.
+            case McpServerService.StartFailure.PortInUse portInUse -> I18n.get(
+                    "settings.mcp.status.port.in.use", String.valueOf(portInUse.port()));
+            // An exception's own message: no bundle has it, so it stays as it came.
+            case McpServerService.StartFailure.Other other -> other.message();
+        };
     }
 
     @FXML
