@@ -705,7 +705,7 @@ class SingBoxConfigGeneratorRoutingTest {
                         RoutingRule.RuleAction.PROXY),
                 new RoutingRule(RoutingRule.RuleType.DOMAIN_KEYWORD, "Ads",
                         RoutingRule.RuleAction.BLOCK),
-                new RoutingRule(RoutingRule.RuleType.DOMAIN_REGEX, "^\\D+\\.example$",
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_REGEX, "^\\D+\\.Example$",
                         RoutingRule.RuleAction.BLOCK)));
 
         JsonNode rules = parse(generator.generate(createVlessServer(), defaultSettings,
@@ -717,7 +717,49 @@ class SingBoxConfigGeneratorRoutingTest {
                 .contains("\".xn--e1afmkfd.xn--p1ai\"")
                 .contains("\"ads\"")
                 .as("a regex is left alone: lower case would turn \\D into \\d")
-                .contains("^\\\\D+\\\\.example$");
+                .contains("^\\\\D+\\\\.Example$");
+    }
+
+    /**
+     * A stored regex the core takes is written whatever its letters. The
+     * check that a letter the core never sees, a capital or a Cyrillic one,
+     * could never match was applied to stored rules too, so "\.(ru|рф)$" was
+     * left out of every configuration although its ".ru" alternative matched:
+     * after the upgrade, every .ru site went through the tunnel instead of
+     * direct. A regex that can never match does no harm written either.
+     */
+    @Test
+    void aStoredRegexTheCoreTakesIsWrittenWhateverItsLetters() throws Exception {
+        List<String> regexes = List.of("\\.(ru|рф)$", "^(www\\.)?(Example|example)\\.com$",
+                "^Mail\\.");
+        RoutingConfig routingConfig = new RoutingConfig();
+        List<RoutingRule> rules = new java.util.ArrayList<>();
+        regexes.forEach(regex -> rules.add(new RoutingRule(RoutingRule.RuleType.DOMAIN_REGEX,
+                regex, RoutingRule.RuleAction.DIRECT)));
+        rules.add(new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "control.example",
+                RoutingRule.RuleAction.DIRECT));
+        routingConfig.setRules(rules);
+
+        for (com.vlessclient.model.ProxyMode mode : com.vlessclient.model.ProxyMode.values()) {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(mode);
+            JsonNode root = parse(generator.generate(createVlessServer(), settings,
+                    routingConfig));
+            List<String> written = new java.util.ArrayList<>();
+            for (JsonNode rule : root.get("route").get("rules")) {
+                rule.path("domain_regex").forEach(regex -> written.add(regex.asString() + " "
+                        + rule.path("outbound").asString()));
+            }
+
+            assertThat(written).as(mode.name()).containsExactly(
+                    "\\.(ru|рф)$ direct", "^(www\\.)?(Example|example)\\.com$ direct",
+                    "^Mail\\. direct");
+            if (mode == com.vlessclient.model.ProxyMode.TUN) {
+                assertThat(root.get("dns").get("rules").toString()).as("the DNS mirror")
+                        .contains("{\"domain_regex\":[\"\\\\.(ru|рф)$\"],"
+                                + "\"server\":\"direct-dns\"}");
+            }
+        }
     }
 
     /**

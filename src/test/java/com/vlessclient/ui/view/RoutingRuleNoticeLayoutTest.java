@@ -43,12 +43,14 @@ public class RoutingRuleNoticeLayoutTest extends ApplicationTest {
         RoutingService routing = ServiceLocator.get(RoutingService.class);
         before = List.copyOf(routing.getConfig().getRules());
         // As an earlier version stored them: the add-rule check refuses the
-        // first two now. These alone, so that every row is laid out, whatever
-        // rules the tests before this one left.
+        // first two now, and has a hint for the third. These alone, so that
+        // every row is laid out, whatever rules the tests before this one left.
         routing.getConfig().setRules(List.of(
                 new RoutingRule(RoutingRule.RuleType.GEOSITE, "youtub",
                         RoutingRule.RuleAction.PROXY),
                 new RoutingRule(RoutingRule.RuleType.DOMAIN, "*.example.net",
+                        RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_REGEX, "\\.(ru|рф)$",
                         RoutingRule.RuleAction.DIRECT),
                 new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "fine.example",
                         RoutingRule.RuleAction.DIRECT)));
@@ -91,7 +93,7 @@ public class RoutingRuleNoticeLayoutTest extends ApplicationTest {
                             .formatted(rule.getValue(), row.getMaxX(), listBounds.getMaxX()));
                 }
             }
-            if (rows < 3) {
+            if (rows < 4) {
                 wrong.add("only " + rows + " rows were laid out");
             }
         });

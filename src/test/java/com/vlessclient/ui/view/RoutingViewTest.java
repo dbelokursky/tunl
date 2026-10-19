@@ -3,6 +3,7 @@ package com.vlessclient.ui.view;
 import com.vlessclient.app.I18n;
 import com.vlessclient.app.ServiceLocator;
 import com.vlessclient.model.RoutingRule;
+import com.vlessclient.service.RoutingRuleCheck;
 import com.vlessclient.service.RoutingService;
 import com.vlessclient.testing.UiTest;
 import java.util.concurrent.CompletableFuture;
@@ -121,7 +122,9 @@ public class RoutingViewTest extends ApplicationTest {
     /**
      * A stored rule the core cannot use is left out of the configuration, so
      * that the core starts; the list showed it like any other rule, and
-     * nothing told the user that it did nothing.
+     * nothing told the user that it did nothing. A rule the core is given,
+     * but with a letter it never sees, says so as a hint: it is not left out,
+     * and the rest of its alternatives work.
      */
     @Test
     void aStoredRuleTheCoreIsNotGivenSaysWhyInTheList() {
@@ -130,12 +133,15 @@ public class RoutingViewTest extends ApplicationTest {
                 RoutingRule.RuleAction.PROXY);
         RoutingRule usable = new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "fine.example",
                 RoutingRule.RuleAction.DIRECT);
+        RoutingRule hinted = new RoutingRule(RoutingRule.RuleType.DOMAIN_REGEX, "\\.(ru|рф)$",
+                RoutingRule.RuleAction.DIRECT);
         java.util.List<RoutingRule> before = java.util.List.copyOf(routing.getConfig().getRules());
         try {
-            // Stored as an earlier version stored it: addRule refuses it now.
-            // These two alone, whatever rules the tests before this one left.
+            // Stored as an earlier version stored them: addRule refuses the
+            // first now. These alone, whatever rules the tests before this
+            // one left.
             interact(() -> {
-                routing.getConfig().setRules(java.util.List.of(unusable, usable));
+                routing.getConfig().setRules(java.util.List.of(unusable, usable, hinted));
                 routing.saveConfig(routing.getConfig());
             });
             WaitForAsyncUtils.waitForFxEvents();
@@ -144,6 +150,10 @@ public class RoutingViewTest extends ApplicationTest {
                     .anySatisfy(text -> assertThat(text).startsWith("Not used").contains("youtub"));
             assertThat(textsIn(cellShowing(usable)))
                     .noneSatisfy(text -> assertThat(text).startsWith("Not used"));
+            assertThat(textsIn(cellShowing(hinted)))
+                    .noneSatisfy(text -> assertThat(text).startsWith("Not used"))
+                    .contains(RoutingRuleCheck.hint(hinted.getType(), hinted.getValue())
+                            .orElseThrow());
         } finally {
             interact(() -> {
                 routing.getConfig().setRules(before);

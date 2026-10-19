@@ -376,6 +376,28 @@ class DefaultAppControlServiceTest {
                 .containsExactly("GEOSITE ru-blocked", "GEOIP ru-blocked");
     }
 
+    /**
+     * An agent's regex that matches through one alternative is added, as in
+     * the dialog; one no name can match is refused with the letter that does
+     * nothing. Both were refused.
+     */
+    @Test
+    void addRoutingRule_takesARegexThatMatchesThroughAnAlternative() throws Exception {
+        RoutingService routing = com.vlessclient.service.TestRoutingServices.at(
+                tempDir.resolve("routing"));
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, null,
+                routing, null, null, new ShareLinkParser(),
+                new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        svc.addRoutingRule("domain_regex", "^m\\.(VK|vk)\\.com$", "direct");
+        assertThatThrownBy(() -> svc.addRoutingRule("domain_regex", "^Mail\\.", "direct"))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining(" M ");
+
+        assertThat(routing.getConfig().getRules()).extracting(rule -> rule.getValue())
+                .containsExactly("^m\\.(VK|vk)\\.com$");
+    }
+
     @Test
     void addServer_parsesShareLinkAndPersists() throws Exception {
         DefaultAppControlService svc = new DefaultAppControlService(store, null, null,

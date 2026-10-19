@@ -1484,6 +1484,12 @@ public class SingBoxConfigGenerator {
      * every server from connecting until it was found and deleted; the
      * Routing screen and MCP no longer store one, and one stored before is
      * left out of the configuration, with a warning in the log.
+     *
+     * <p>Only the core's own refusals count: a rule the core takes stays,
+     * whatever the add-rule check says of it now. A regex with a capital or a
+     * Cyrillic letter in one alternative, "\.(ru|рф)$", still matches through
+     * the others, and was left out while the rest of its alternatives
+     * worked.</p>
      */
     private static boolean unusable(RoutingRule rule) {
         if (rule.getType() == null || rule.getAction() == null) {

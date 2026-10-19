@@ -169,15 +169,16 @@ public class RoutingService {
 
     /**
      * Adds a rule and persists the change, unless the core would refuse its
-     * value: sing-box refuses a whole configuration over one such rule, so it
-     * stopped every server from connecting until it was found and deleted.
+     * value, which sing-box refuses a whole configuration over, so it stopped
+     * every server from connecting until it was found and deleted; or unless
+     * no name could match it: see {@link RoutingRuleCheck#refusal}.
      *
      * @param rule the rule to add
      * @throws IllegalArgumentException with the reason, worded in the language
-     *     of the UI, when the core would refuse the rule's value
+     *     of the UI, when the rule's value is refused
      */
     public synchronized void addRule(RoutingRule rule) {
-        RoutingRuleCheck.problem(rule.getType(), rule.getValue()).ifPresent(reason -> {
+        RoutingRuleCheck.refusal(rule.getType(), rule.getValue()).ifPresent(reason -> {
             throw new IllegalArgumentException(reason);
         });
         // A new list, not the live one changed: a config being generated

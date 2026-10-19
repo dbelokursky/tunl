@@ -1530,6 +1530,14 @@
     -fx-text-fill: -c-danger-fg;
 }
 
+/* What may keep a rule the core takes from doing what it says: under the
+   value in the add-rule dialog, which still adds it, and under a stored rule.
+   -c-warn-text, as the subscription dialog's http warning, for its contrast. */
+.routing-rule-hint {
+    -fx-font-size: 11px;
+    -fx-text-fill: -c-warn-text;
+}
+
 /* Country flags: a hairline keeps light bands from bleeding into the row. */
 .flag-border {
     -fx-stroke: -c-border-strong;

@@ -466,6 +466,44 @@ class SingBoxRealBinarySmokeTest {
         }
     }
 
+    /**
+     * A regex with a letter the core never sees in one alternative, or in a
+     * part that may be left out, still matches through the rest: the add-rule
+     * check takes it, and a stored one stays in the configuration. It was
+     * refused, and left out, as one that could never match. The pinned core
+     * is asked, as it compares names; and one the check refuses matches none.
+     */
+    @Test
+    void aRegexTheCheckTakesDespiteALetterMatchesThroughItsOtherWays() throws Exception {
+        var regex = com.vlessclient.model.RoutingRule.RuleType.DOMAIN_REGEX;
+        java.util.Map<String, String> matches = new java.util.LinkedHashMap<>();
+        matches.put("\\.(ru|рф)$", "www.example.ru");
+        matches.put("^m\\.(VK|vk)\\.com$", "m.vk.com");
+        matches.put("^(www\\.)?(Example|example)\\.com$", "example.com");
+        matches.put("(\\.рф|\\.xn--p1ai)$", "xn--80aswg.xn--p1ai");
+        matches.put("(?:Mail)?\\.example\\.org$", "www.example.org");
+        matches.put("A(?i)b|C", "c.example");
+        matches.put("^Mail\\.", "MAIL.example.com");
+
+        for (var entry : matches.entrySet()) {
+            Path ruleSet = Files.createTempFile("smoke-rule-set-", ".json");
+            try {
+                Files.writeString(ruleSet, "{\"version\":3,\"rules\":[{\"domain_regex\":["
+                        + tools.jackson.databind.json.JsonMapper.builder().build()
+                                .writeValueAsString(entry.getKey()) + "]}]}");
+                ProcessResult result = run(binary, "rule-set", "match", "-f", "source",
+                        ruleSet.toString(), entry.getValue());
+                boolean taken = RoutingRuleCheck.refusal(regex, entry.getKey()).isEmpty();
+                assertThat(result.output().contains("match rules.[0]"))
+                        .as("%s on %s, which the check %s: %s", entry.getKey(), entry.getValue(),
+                                taken ? "takes" : "refuses", result.output().strip())
+                        .isEqualTo(taken);
+            } finally {
+                Files.deleteIfExists(ruleSet);
+            }
+        }
+    }
+
     private static ServerConfig withPlugin(String name, String plugin, String options) {
         return with(shadowsocksServer(name, "aes-256-gcm"), server -> {
             server.setPlugin(plugin);

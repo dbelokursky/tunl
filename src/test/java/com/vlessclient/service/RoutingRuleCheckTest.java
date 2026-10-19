@@ -34,7 +34,10 @@ class RoutingRuleCheckTest {
             // POSIX classes Go has.
             "x(?i){2}", "^{2}", "\\b{2}", "\\Qab\\E{2}", "(?:){2}", "(|a)", "a{2}(?i){3}",
             "^(www\\.)?example\\.com$", "[[:alnum:]]+", "[[:^alpha:]]", "[[:word:]-]",
-            "[]a]", "[^]a]");
+            "[]a]", "[^]a]",
+            // Letters the core never sees in a name: it takes the expression,
+            // and a stored rule with one stays in the configuration.
+            "^Mail\\.", "\\.рф$", "\\.(ru|рф)$", "^m\\.(VK|vk)\\.com$");
 
     static final List<String> REGEXES_THE_CORE_REFUSES = List.of(
             "(", "[a", "a{2,1}", "*a", "(?=a)", "(?!a)", "(?<=a)b", "(?<!a)b", "(?>a)",
@@ -90,27 +93,81 @@ class RoutingRuleCheckTest {
      * The core matches a regex against the name in lower case and in
      * punycode, the way SNI, DNS and a browser's CONNECT carry it: "^Mail\."
      * or "\.рф$" passed here, the core took it, and the rule matched nothing.
+     * A new one is refused. The core itself takes it, so it is no problem: a
+     * stored one stays in the configuration, where it does no harm, and its
+     * row says why it does nothing.
      */
     @Test
     void aRegexTheCoreCanNeverMatchIsRefused() {
         for (String regex : List.of("^Mail\\.", "Gosuslugi\\.ru$", "(?-i)Mail", "\\QMail\\E",
-                "(?s:Mail)", "(?P<Sub>Mail)\\.ru")) {
-            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                "(?s:Mail)", "(?P<Sub>Mail)\\.ru", "(?i:mail)\\.Ru$", "(?:Mail|Post)\\.ru",
+                "\\QMail\\E?", "M{1,2}ail", "(?i)a(?-i)B", "(?:(?i)a|b)C")) {
+            assertThat(RoutingRuleCheck.refusal(RuleType.DOMAIN_REGEX, regex)).as(regex)
                     .hasValueSatisfying(reason -> assertThat(reason).contains("(?i)"));
-        }
-        assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_REGEX, "^mail\\.Example"))
-                .hasValueSatisfying(reason -> assertThat(reason).contains(" E "));
-        for (String regex : List.of("\\.рф$", "яндекс", "^\\Qпочта\\E\\.")) {
             assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .isEmpty();
+            assertThat(RoutingRuleCheck.hint(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .isEqualTo(RoutingRuleCheck.refusal(RuleType.DOMAIN_REGEX, regex));
+        }
+        assertThat(RoutingRuleCheck.refusal(RuleType.DOMAIN_REGEX, "^mail\\.Example"))
+                .hasValueSatisfying(reason -> assertThat(reason).contains(" E "));
+        for (String regex : List.of("\\.рф$", "яндекс", "^\\Qпочта\\E\\.", "(?i)\\.РФ$")) {
+            assertThat(RoutingRuleCheck.refusal(RuleType.DOMAIN_REGEX, regex)).as(regex)
                     .hasValueSatisfying(reason -> assertThat(reason).contains("punycode"));
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .isEmpty();
         }
         // Upper case where it is not a letter of the name, and (?i).
         for (String regex : List.of("(?i)^Mail\\.", "(?i:Mail)\\.ru$", "(?im)^Mail",
                 "[A-Za-z]+\\.ru$", "[[:upper:]a-z]+", "^\\D+\\.example$", "\\p{Lu}", "\\PL",
                 "\\x4A", "\\x{4A}", "(?P<Sub>mail)\\.ru", "(?<Sub>mail)", "(?U)a+",
-                "\\.xn--p1ai$", "[а-яa-z]+\\.ru$", "\\x{0440}\\x{0444}")) {
+                "\\.xn--p1ai$", "[а-яa-z]+\\.ru$", "\\x{0440}\\x{0444}", "\\101",
+                // The Kelvin sign, which (?i) folds to k in Go as in Java.
+                "(?i)K\\.example$")) {
+            assertThat(RoutingRuleCheck.refusal(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .isEmpty();
+            assertThat(RoutingRuleCheck.hint(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .isEmpty();
+        }
+    }
+
+    /**
+     * A letter the core never sees in one alternative, or in a part that may
+     * be left out, leaves the rest to match: "\.(ru|рф)$" matches every .ru
+     * name and "^m\.(VK|vk)\.com$" m.vk.com, as the pinned core says. They
+     * were refused as rules that could never match, and one stored by 1.25
+     * was left out of the configuration; now the dialog takes them and says
+     * which letter does nothing. The expression is read as Go reads it: (?i)
+     * holds to the end of its group, alternatives after it included, and a
+     * repeat after flags takes the atom before them.
+     */
+    @Test
+    void aRegexWithALetterTheCoreNeverSeesOnSomeOfItsWaysIsTakenWithAHint() {
+        java.util.Map<String, String> letters = new java.util.LinkedHashMap<>();
+        letters.put("^m\\.(VK|vk)\\.com$", "V");
+        letters.put("(\\.рф|\\.xn--p1ai)$", "р");
+        letters.put("^(?:xn--80asehdb|телеграм)\\.xn--p1ai$", "т");
+        letters.put("^(mail|Mail)\\.example\\.com$", "M");
+        letters.put("\\.(ru|рф)$", "р");
+        letters.put("\\.(ru|su|рф)$", "р");
+        letters.put("^(www\\.)?(Example|example)\\.com$", "E");
+        letters.put("(?:Mail)?\\.ru$", "M");
+        letters.put("M*ail", "M");
+        letters.put("M{0,2}ail", "M");
+        letters.put("A(?i)b|C", "A");
+        // Go repeats the X, none times; Java the flags, and wants the X.
+        letters.put("X(?i){0}y", "X");
+        letters.put("(?:Mail){0}\\.ru", "M");
+        letters.put("\\QMa\\E|mail", "M");
+        for (var entry : letters.entrySet()) {
+            String regex = entry.getKey();
             assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_REGEX, regex)).as(regex)
                     .isEmpty();
+            assertThat(RoutingRuleCheck.refusal(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .isEmpty();
+            assertThat(RoutingRuleCheck.hint(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .hasValueSatisfying(hint -> assertThat(hint)
+                            .contains(" " + entry.getValue() + " "));
         }
     }
 

@@ -269,6 +269,28 @@ class RoutingServiceTest {
                 .as("the file").isEmpty();
     }
 
+    /**
+     * A regex no name can match, as the core compares names, is refused; one
+     * that matches through another alternative is added. Both were refused,
+     * so "\.(ru|рф)$", which matches every .ru name, could not be added.
+     */
+    @Test
+    void addRule_refusesARegexNoNameCanMatchAndAddsOneThatMatchesThroughAnother() {
+        RoutingRule never = new RoutingRule(RoutingRule.RuleType.DOMAIN_REGEX, "^Mail\\.",
+                RoutingRule.RuleAction.PROXY);
+        RoutingRule partly = new RoutingRule(RoutingRule.RuleType.DOMAIN_REGEX, "\\.(ru|рф)$",
+                RoutingRule.RuleAction.DIRECT);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> routingService.addRule(never))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(RoutingRuleCheck.refusal(never.getType(), never.getValue())
+                        .orElseThrow());
+        routingService.addRule(partly);
+
+        assertThat(new RoutingService(tempDir).getConfig().getRules()).as("the file")
+                .extracting(RoutingRule::getValue).containsExactly("\\.(ru|рф)$");
+    }
+
     @Test
     void addRule_appendsToExistingRules() {
         RoutingRule rule1 = new RoutingRule(RoutingRule.RuleType.DOMAIN, "example.com",

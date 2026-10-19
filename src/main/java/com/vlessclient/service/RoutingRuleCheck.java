@@ -82,10 +82,6 @@ public final class RoutingRuleCheck {
     /** The inline flags Go has, as in (?i) or (?s-m:, with a flag after any "-". */
     private static final Pattern RE2_FLAGS = Pattern.compile("[imsU]*(?:-[imsU]+)?");
 
-    /** Flags that make an expression, or a part of it, take either case: (?i), (?im-s:. */
-    private static final Pattern CASE_INSENSITIVE =
-            Pattern.compile("\\(\\?[msU]*i[imsU]*(?:-[imsU]+)?[:)]");
-
     /**
      * What {@link #re2Unsupported} names for a "[" inside a class that opens
      * no POSIX class; no other construct it names is a lone "[".
@@ -96,8 +92,10 @@ public final class RoutingRuleCheck {
     }
 
     /**
-     * Why the core would refuse this value for a rule of this type, worded in
-     * the language of the UI, or empty when it accepts it.
+     * Why the core would refuse this value for a rule of this type, or could
+     * not read the rule from it, worded in the language of the UI; empty when
+     * it accepts it. A stored rule with a problem is left out of the
+     * configuration, so that the core still starts.
      *
      * @param type  the rule's type
      * @param value the rule's value, as it will be stored
@@ -123,6 +121,44 @@ public final class RoutingRuleCheck {
                     : Optional.of(I18n.get("routing.rule.problem.cidr"));
             case GEOSITE, GEOIP -> listProblem(type, ruleSetName(value));
         };
+    }
+
+    /**
+     * Why a new rule with this value is not added: its {@link #problem}, or a
+     * regular expression no name can match as the core compares names. The
+     * core takes the latter, and a stored one stays in the configuration,
+     * where it does no harm; only the Routing dialog, RoutingService and MCP
+     * refuse it.
+     *
+     * @param type  the rule's type
+     * @param value the rule's value, as it will be stored
+     * @return the reason, in the language of the UI, or empty
+     */
+    public static Optional<String> refusal(RoutingRule.RuleType type, String value) {
+        Optional<String> problem = problem(type, value);
+        if (problem.isPresent() || type != RoutingRule.RuleType.DOMAIN_REGEX) {
+            return problem;
+        }
+        Letters letters = new Letters(value);
+        return letters.neverMatches() ? letters.first() : Optional.empty();
+    }
+
+    /**
+     * What may keep a rule the core takes from doing what it says, worded in
+     * the language of the UI: a letter of a regular expression the core never
+     * sees. Shown under the value in the Routing dialog, which still adds the
+     * rule, and under a stored rule in the list; empty for a value with a
+     * {@link #problem}, which says more.
+     *
+     * @param type  the rule's type
+     * @param value the rule's value, as it is stored
+     * @return the hint, or empty
+     */
+    public static Optional<String> hint(RoutingRule.RuleType type, String value) {
+        if (type != RoutingRule.RuleType.DOMAIN_REGEX || problem(type, value).isPresent()) {
+            return Optional.empty();
+        }
+        return new Letters(value).first();
     }
 
     /**
@@ -304,7 +340,7 @@ public final class RoutingRuleCheck {
         }
         String construct = re2Unsupported(regex);
         if (construct == null) {
-            return letterProblem(regex);
+            return Optional.empty();
         }
         return Optional.of(NESTED_CLASS.equals(construct)
                 ? I18n.get("routing.rule.problem.regex.nested")
@@ -312,76 +348,242 @@ public final class RoutingRuleCheck {
     }
 
     /**
-     * A letter the expression asks for that the core never sees: it matches
-     * the name in lower case and in punycode, as SNI, DNS and a browser's
-     * CONNECT carry it, so "^Mail\." or "\.рф$" passed here, the core took it,
-     * and the rule matched nothing. What a class, an escape, a group's name or
-     * its flags hold is not a letter of the name, and (?i) lets upper case
-     * through.
+     * The letters a regular expression asks for that the core never sees: it
+     * matches the name in lower case and in punycode, as SNI, DNS and a
+     * browser's CONNECT carry it, so "^Mail\." or "\.рф$" passed the check,
+     * the core took it, and the rule matched nothing. What a class, an
+     * escape, a group's name or its flags hold is not a letter of the name,
+     * and (?i) lets upper case through from where it stands to the end of its
+     * group, alternatives after it included.
+     *
+     * <p>The expression is read as Go's parser reads it, which
+     * {@link #problem} has found Java's to agree with, for whether every way
+     * through it reads such a letter. An alternative without one, or a part
+     * that may be left out, still matches: "\.(ru|рф)$" matches every .ru
+     * name and "^m\.(VK|vk)\.com$" m.vk.com. Such a rule was refused and,
+     * stored by 1.25, left out of the configuration, as one that could never
+     * match.</p>
      */
-    private static Optional<String> letterProblem(String regex) {
-        boolean anyCase = CASE_INSENSITIVE.matcher(regex).find();
-        int length = regex.length();
-        int i = 0;
-        while (i < length) {
-            int c = regex.codePointAt(i);
-            if (c == '\\' && i + 1 < length) {
-                char next = regex.charAt(i + 1);
-                if (next == 'Q') {
-                    // Literal text up to \E, or to the end.
-                    int end = regex.indexOf("\\E", i + 2);
-                    Optional<String> problem = literalProblem(
-                            regex.substring(i + 2, end < 0 ? length : end), anyCase);
-                    if (problem.isPresent()) {
-                        return problem;
-                    }
-                    i = end < 0 ? length : end + 2;
-                } else if ("pPx".indexOf(next) >= 0 && i + 2 < length
-                        && regex.charAt(i + 2) == '{') {
-                    int close = regex.indexOf('}', i + 3);
-                    i = close < 0 ? length : close + 1;
-                } else {
-                    // \xHH and \pL carry their letters after the escape's own.
-                    int letters = next == 'x' ? 2 : next == 'p' || next == 'P' ? 1 : 0;
-                    i += 1 + Character.charCount(regex.codePointAt(i + 1)) + letters;
+    private static final class Letters {
+
+        private final String regex;
+        private int at;
+        /** Whether (?i) is in effect where the reading stands. */
+        private boolean anyCase;
+        /** The first letter the core never sees, or -1. */
+        private int first = -1;
+        private final boolean never;
+
+        Letters(String regex) {
+            this.regex = regex;
+            this.never = alternatives();
+        }
+
+        /** Whether no name as the core compares it can match: each way through reads one. */
+        boolean neverMatches() {
+            return never;
+        }
+
+        /** The first letter the core never sees, in a sentence of the UI's language. */
+        Optional<String> first() {
+            if (first < 0) {
+                return Optional.empty();
+            }
+            String letter = Character.toString(first);
+            return Optional.of(first > 0x7f
+                    ? I18n.get("routing.rule.problem.regex.ascii", letter)
+                    : I18n.get("routing.rule.problem.regex.case", letter));
+        }
+
+        /**
+         * Reads alternatives up to the end, or to the ")" that closes their
+         * group: whether each of them reads such a letter.
+         */
+        private boolean alternatives() {
+            boolean every = true;
+            // The alternative so far without its last atom, and that atom,
+            // which a repeat after it may make optional.
+            boolean before = false;
+            boolean last = false;
+            while (at < regex.length() && regex.charAt(at) != ')') {
+                if (regex.charAt(at) == '|') {
+                    every &= before || last;
+                    before = false;
+                    last = false;
+                    at++;
+                    continue;
                 }
-                continue;
+                int min = repeat();
+                if (min >= 0) {
+                    last &= min > 0;
+                    continue;
+                }
+                if (regex.startsWith("\\Q", at)) {
+                    // Literal text up to \E, or to the end: each character an
+                    // atom of its own, so a repeat after it takes the last.
+                    int end = regex.indexOf("\\E", at + 2);
+                    int stop = end < 0 ? regex.length() : end;
+                    for (int i = at + 2; i < stop; i += Character.charCount(regex.codePointAt(i))) {
+                        before |= last;
+                        last = unseen(regex.codePointAt(i));
+                    }
+                    at = end < 0 ? regex.length() : end + 2;
+                    continue;
+                }
+                if (flagsAlone()) {
+                    // (?i) and the like are no atom: as in Go, a repeat after
+                    // them takes the atom before.
+                    continue;
+                }
+                before |= last;
+                last = atom();
+            }
+            return every && (before || last);
+        }
+
+        /**
+         * The least count of the repeat that starts here, read past it with a
+         * lazy "?" after it; -1, and nothing read, where none starts.
+         */
+        private int repeat() {
+            char c = regex.charAt(at);
+            int min;
+            if (c == '*' || c == '?') {
+                min = 0;
+                at++;
+            } else if (c == '+') {
+                min = 1;
+                at++;
+            } else {
+                Matcher count = c == '{' ? REPEAT.matcher(regex).region(at, regex.length()) : null;
+                if (count == null || !count.lookingAt()) {
+                    return -1;
+                }
+                min = repeatCount(count.group(1));
+                at = count.end();
+            }
+            if (at < regex.length() && regex.charAt(at) == '?') {
+                at++;
+            }
+            return min;
+        }
+
+        /** Reads past flags that stand alone, as in (?i) or (?-i), and applies them. */
+        private boolean flagsAlone() {
+            if (!regex.startsWith("(?", at)) {
+                return false;
+            }
+            int end = at + 2;
+            while (end < regex.length() && "imsU-".indexOf(regex.charAt(end)) >= 0) {
+                end++;
+            }
+            if (end >= regex.length() || regex.charAt(end) != ')') {
+                return false;
+            }
+            applyFlags(regex.substring(at + 2, end));
+            at = end + 1;
+            return true;
+        }
+
+        /** The flags before a "-" turn on, the ones after it off; only i matters here. */
+        private void applyFlags(String flags) {
+            int minus = flags.indexOf('-');
+            if (flags.substring(0, minus < 0 ? flags.length() : minus).indexOf('i') >= 0) {
+                anyCase = true;
+            }
+            if (minus >= 0 && flags.indexOf('i', minus) >= 0) {
+                anyCase = false;
+            }
+        }
+
+        /** Reads one atom: whether it is a letter the core never sees, or a group reading one. */
+        private boolean atom() {
+            char c = regex.charAt(at);
+            if (c == '(') {
+                return group();
             }
             if (c == '[') {
-                i = classEnd(regex, i);
-                continue;
+                at = classEnd(regex, at);
+                return false;
             }
-            if (regex.startsWith("(?", i)) {
-                // Flags or a group's name, up to what ends them.
-                int end = i + 2;
-                while (end < length && ":)>".indexOf(regex.charAt(end)) < 0) {
+            if (c == '\\') {
+                at = escapeEnd(at);
+                return false;
+            }
+            int letter = regex.codePointAt(at);
+            at += Character.charCount(letter);
+            return unseen(letter);
+        }
+
+        /** Reads a group, its opening and closing included; flags set in it end with it. */
+        private boolean group() {
+            final boolean outside = anyCase;
+            at++;
+            if (at < regex.length() && regex.charAt(at) == '?') {
+                // (?:, (?i:, (?P<name> or (?<name>: what opens the content.
+                int end = at + 1;
+                while (end < regex.length() && ":>".indexOf(regex.charAt(end)) < 0) {
                     end++;
                 }
-                i = end + 1;
-                continue;
+                if (end < regex.length() && regex.charAt(end) == ':') {
+                    applyFlags(regex.substring(at + 1, end));
+                }
+                at = end + 1;
             }
-            Optional<String> problem = literalProblem(Character.toString(c), anyCase);
-            if (problem.isPresent()) {
-                return problem;
+            boolean reads = alternatives();
+            if (at < regex.length()) {
+                at++;
             }
-            i += Character.charCount(c);
+            anyCase = outside;
+            return reads;
         }
-        return Optional.empty();
-    }
 
-    /** Why a literal in an expression can never match a name as the core compares it. */
-    private static Optional<String> literalProblem(String literal, boolean anyCase) {
-        for (int c : literal.codePoints().toArray()) {
-            if (c > 0x7f) {
-                return Optional.of(I18n.get("routing.rule.problem.regex.ascii",
-                        Character.toString(c)));
+        /** The index past an escape: a class, an assertion or a character, none a letter here. */
+        private int escapeEnd(int backslash) {
+            int i = backslash + 1;
+            if (i >= regex.length()) {
+                return regex.length();
             }
-            if (!anyCase && c >= 'A' && c <= 'Z') {
-                return Optional.of(I18n.get("routing.rule.problem.regex.case",
-                        Character.toString(c)));
+            char c = regex.charAt(i);
+            if ("xpP".indexOf(c) >= 0 && i + 1 < regex.length() && regex.charAt(i + 1) == '{') {
+                int close = regex.indexOf('}', i + 2);
+                return close < 0 ? regex.length() : close + 1;
             }
+            if (c == 'x' || c == 'p' || c == 'P') {
+                // \x41 carries two digits, \pL one letter.
+                return Math.min(regex.length(), i + (c == 'x' ? 3 : 2));
+            }
+            if (c >= '0' && c <= '7') {
+                // Octal, as Go reads it: up to three digits.
+                int end = i + 1;
+                while (end < Math.min(regex.length(), i + 3)
+                        && regex.charAt(end) >= '0' && regex.charAt(end) <= '7') {
+                    end++;
+                }
+                return end;
+            }
+            return i + Character.charCount(regex.codePointAt(i));
         }
-        return Optional.empty();
+
+        /**
+         * Whether a literal is one the core never sees in a name: a capital
+         * where (?i) is not in effect, or anything outside ASCII, unless (?i)
+         * folds it to an ASCII letter, as it folds the Kelvin sign to k.
+         */
+        private boolean unseen(int c) {
+            boolean unseen = c > 0x7f
+                    ? !anyCase || !isAsciiLetter(Character.toLowerCase(c))
+                            && !isAsciiLetter(Character.toUpperCase(c))
+                    : !anyCase && c >= 'A' && c <= 'Z';
+            if (unseen && first < 0) {
+                first = c;
+            }
+            return unseen;
+        }
+
+        private static boolean isAsciiLetter(int c) {
+            return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z';
+        }
     }
 
     /**
