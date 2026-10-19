@@ -21,6 +21,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -146,14 +148,24 @@ class SubscriptionServiceRedactionTest {
      * at a space: the token after one went into lastError beside the sealed
      * URL, onto the row, into MCP's answer and into the log. Such a URL was
      * stored by every build before this one, so a file can still hold one.
+     *
+     * <p>So can one that parses but names no host the HTTP client takes: one
+     * slash after the scheme, none, or a host with an underscore. The client
+     * refused it as "unsupported URI" and the URL whole, and without "://"
+     * the redaction found no URL in that text at all.</p>
      */
-    @Test
-    @DisplayName("a stored URL that is not a URI fails its refresh without quoting the token")
-    void refreshSubscription_aUrlThatIsNotAUriKeepsItsTokenOut() throws IOException {
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "https://sub.example.com/api/sub/ %s",
+        "https:/sub.example.com/api/sub/%s",
+        "https:sub.example.com/api/sub/%s",
+        "https://my_sub.example.com/api/sub/%s"})
+    @DisplayName("a stored URL no refresh can read fails its refresh without quoting the token")
+    void refreshSubscription_aUrlThatIsNotAUriKeepsItsTokenOut(String stored) throws IOException {
         Files.writeString(tempDir.resolve("subscriptions.json"), """
                 {"config_version":1,"subscriptions":[
-                  {"id":"a","name":"Provider","url":"https://sub.example.com/api/sub/ %s"}]}
-                """.formatted(TOKEN), java.nio.charset.StandardCharsets.UTF_8);
+                  {"id":"a","name":"Provider","url":"%s"}]}
+                """.formatted(stored.formatted(TOKEN)), java.nio.charset.StandardCharsets.UTF_8);
         SubscriptionService service = new SubscriptionService(
                 new ConfigStore(tempDir), new ShareLinkParser(), tempDir,
                 HttpClient.newHttpClient());
@@ -199,7 +211,14 @@ class SubscriptionServiceRedactionTest {
 
         for (String url : java.util.List.of(spaced, "https://sub.example.com/api/sub/\"" + TOKEN,
                 "sing-box://import-remote-profile?url=https%3A%2F%2Fsub.example.com%2Fsub%2F%20"
-                        + TOKEN)) {
+                        + TOKEN,
+                // Parsed as URIs, refused by the HTTP client: no host it takes,
+                // no scheme, or one it does not speak.
+                "https:/sub.example.com/api/sub/" + TOKEN,
+                "https:sub.example.com/api/sub/" + TOKEN,
+                "https://my_sub.example.com/api/sub/" + TOKEN,
+                "sub.example.com/api/sub/" + TOKEN,
+                "ftp://sub.example.com/api/sub/" + TOKEN)) {
             assertThatThrownBy(() -> service.addSubscription("Provider", url))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessage(com.vlessclient.app.I18n.get("subscriptions.url.invalid"));

@@ -585,7 +585,10 @@ public class SubscriptionService {
         }
     }
 
-    /** The stored URL does not parse; the message holds nothing of it. */
+    /**
+     * The stored URL does not parse, or the HTTP client takes no request to
+     * it; the message holds nothing of it.
+     */
     static final class UnreadableUrlException extends IOException {
 
         UnreadableUrlException() {
@@ -889,9 +892,13 @@ public class SubscriptionService {
 
     /**
      * Whether a refresh can read what the user gave as an address: the URL,
-     * or the one another client's link wraps, parses as a URI. One with a
-     * space or a quote in it does not; it used to be stored as it was, and
-     * every refresh failed on it.
+     * or the one another client's link wraps, parses as a URI, and the HTTP
+     * client takes that URI, which needs http or https and a host. One with a
+     * space or a quote in it does not parse; it used to be stored as it was,
+     * and every refresh failed on it. One with a single slash after the
+     * scheme, or a host with an underscore, parses but names no host, and the
+     * refresh failed with the client's "unsupported URI" and the whole URL,
+     * token and all.
      *
      * @param url the URL or link; null reads as nothing
      * @return false for text no refresh can read
@@ -901,10 +908,28 @@ public class SubscriptionService {
             return false;
         }
         try {
-            new URI(SubscriptionLinks.subscriptionUrl(url).orElse(url));
+            requestTo(SubscriptionLinks.subscriptionUrl(url).orElse(url));
             return true;
-        } catch (URISyntaxException e) {
+        } catch (UnreadableUrlException e) {
             return false;
+        }
+    }
+
+    /**
+     * A request to {@code url}, as far as the URL decides it: the URI and the
+     * HTTP client's check of it.
+     *
+     * @throws UnreadableUrlException when either refuses it, without their
+     *     reasons, which quote the URL whole
+     */
+    private static HttpRequest.Builder requestTo(String url) throws UnreadableUrlException {
+        if (url == null) {
+            throw new UnreadableUrlException();
+        }
+        try {
+            return HttpRequest.newBuilder(new URI(url));
+        } catch (URISyntaxException | IllegalArgumentException e) {
+            throw new UnreadableUrlException();
         }
     }
 
@@ -1154,19 +1179,12 @@ public class SubscriptionService {
             log.warn("Subscription fetched over plaintext http (MITM/injection "
                     + "risk; prefer https): host={}", host);
         }
-        URI uri;
-        try {
-            uri = new URI(url);
-        } catch (URISyntaxException e) {
-            // Not with the JDK's reason, which quotes the URL whole: the
-            // redaction of a URL in text stops at a space or a quote, and the
-            // token after one went into lastError, onto the row, into MCP's
-            // answer and into the log. Such a URL is refused when added now,
-            // but a file from an earlier build can hold one.
-            throw new UnreadableUrlException();
-        }
-        HttpRequest.Builder request = HttpRequest.newBuilder()
-                .uri(uri)
+        // Not with the JDK's reason, which quotes the URL whole: the redaction
+        // of a URL in text stops at a space or a quote, and finds none without
+        // "://", and the token went into lastError, onto the row, into MCP's
+        // answer and into the log. Such a URL is refused when added now, but
+        // a file from an earlier build can hold one.
+        HttpRequest.Builder request = requestTo(url)
                 .GET()
                 .timeout(Duration.ofSeconds(30))
                 .header("User-Agent", "Tunl/" + AppVersion.VERSION);

@@ -175,6 +175,13 @@ public class SubscriptionsHttpWarningTest extends ApplicationTest {
         assertThat(drawnProblem(dialog)).isEqualTo(I18n.get("subscriptions.url.invalid"));
         assertTheWindowFits(dialog);
 
+        // A URI, but none the HTTP client takes: it names no host.
+        typeUrl(dialog, "https:/provider.example/sub/token");
+
+        assertThat(onFx(() -> dialog.lookupButton(ButtonType.OK).isDisabled()))
+                .as("whether OK can be pressed for a URL with one slash").isTrue();
+        assertThat(drawnProblem(dialog)).isEqualTo(I18n.get("subscriptions.url.invalid"));
+
         typeUrl(dialog, "https://provider.example/sub/%20token");
 
         assertThat(onFx(() -> dialog.lookupButton(ButtonType.OK).isDisabled())).isFalse();
