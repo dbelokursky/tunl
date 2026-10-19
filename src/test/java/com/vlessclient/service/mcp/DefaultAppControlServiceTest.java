@@ -398,6 +398,31 @@ class DefaultAppControlServiceTest {
                 .containsExactly("^m\\.(VK|vk)\\.com$");
     }
 
+    /**
+     * A Geosite list this version does not know may be newer, and the dialog
+     * adds it after saying so; but one that does not exist stops the core for
+     * every server, and an agent's guess at a name is the likelier miss. The
+     * agent is told so, and where the user can add it.
+     */
+    @Test
+    void addRoutingRule_refusesAGeositeListThisVersionDoesNotKnow() throws Exception {
+        RoutingService routing = com.vlessclient.service.TestRoutingServices.at(
+                tempDir.resolve("routing"));
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, null,
+                routing, null, null, new ShareLinkParser(),
+                new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        assertThatThrownBy(() -> svc.addRoutingRule("geosite", "A-List-Newer-Than-This-Build",
+                "proxy"))
+                .isInstanceOf(McpToolException.class)
+                .hasMessage(com.vlessclient.app.I18n.get("routing.rule.agent.geosite",
+                        "a-list-newer-than-this-build"));
+        svc.addRoutingRule("geosite", "youtube", "proxy");
+
+        assertThat(routing.getConfig().getRules()).extracting(rule -> rule.getValue())
+                .containsExactly("youtube");
+    }
+
     @Test
     void addServer_parsesShareLinkAndPersists() throws Exception {
         DefaultAppControlService svc = new DefaultAppControlService(store, null, null,

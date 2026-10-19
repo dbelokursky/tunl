@@ -122,38 +122,44 @@ public class RoutingViewTest extends ApplicationTest {
     /**
      * A stored rule the core cannot use is left out of the configuration, so
      * that the core starts; the list showed it like any other rule, and
-     * nothing told the user that it did nothing. A rule the core is given,
-     * but with a letter it never sees, says so as a hint: it is not left out,
-     * and the rest of its alternatives work.
+     * nothing told the user that it did nothing. A rule the core is given
+     * but may not do what it says, a regex with a letter the core never sees
+     * or a Geosite list this version does not know, says so as a hint: it is
+     * not left out. The list was said to be "Not used", and was.
      */
     @Test
     void aStoredRuleTheCoreIsNotGivenSaysWhyInTheList() {
         RoutingService routing = ServiceLocator.get(RoutingService.class);
-        RoutingRule unusable = new RoutingRule(RoutingRule.RuleType.GEOSITE, "youtub",
+        RoutingRule unusable = new RoutingRule(RoutingRule.RuleType.GEOIP, "rus",
                 RoutingRule.RuleAction.PROXY);
         RoutingRule usable = new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "fine.example",
                 RoutingRule.RuleAction.DIRECT);
         RoutingRule hinted = new RoutingRule(RoutingRule.RuleType.DOMAIN_REGEX, "\\.(ru|рф)$",
                 RoutingRule.RuleAction.DIRECT);
+        RoutingRule unknownList = new RoutingRule(RoutingRule.RuleType.GEOSITE, "youtub",
+                RoutingRule.RuleAction.PROXY);
         java.util.List<RoutingRule> before = java.util.List.copyOf(routing.getConfig().getRules());
         try {
             // Stored as an earlier version stored them: addRule refuses the
             // first now. These alone, whatever rules the tests before this
             // one left.
             interact(() -> {
-                routing.getConfig().setRules(java.util.List.of(unusable, usable, hinted));
+                routing.getConfig().setRules(java.util.List.of(unusable, usable, hinted,
+                        unknownList));
                 routing.saveConfig(routing.getConfig());
             });
             WaitForAsyncUtils.waitForFxEvents();
 
             assertThat(textsIn(cellShowing(unusable)))
-                    .anySatisfy(text -> assertThat(text).startsWith("Not used").contains("youtub"));
+                    .anySatisfy(text -> assertThat(text).startsWith("Not used").contains("rus"));
             assertThat(textsIn(cellShowing(usable)))
                     .noneSatisfy(text -> assertThat(text).startsWith("Not used"));
-            assertThat(textsIn(cellShowing(hinted)))
-                    .noneSatisfy(text -> assertThat(text).startsWith("Not used"))
-                    .contains(RoutingRuleCheck.hint(hinted.getType(), hinted.getValue())
-                            .orElseThrow());
+            for (RoutingRule rule : java.util.List.of(hinted, unknownList)) {
+                assertThat(textsIn(cellShowing(rule))).as(rule.getValue())
+                        .noneSatisfy(text -> assertThat(text).startsWith("Not used"))
+                        .contains(RoutingRuleCheck.hint(rule.getType(), rule.getValue())
+                                .orElseThrow());
+            }
         } finally {
             interact(() -> {
                 routing.getConfig().setRules(before);

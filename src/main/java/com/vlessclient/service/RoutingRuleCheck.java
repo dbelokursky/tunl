@@ -146,19 +146,53 @@ public final class RoutingRuleCheck {
     /**
      * What may keep a rule the core takes from doing what it says, worded in
      * the language of the UI: a letter of a regular expression the core never
-     * sees. Shown under the value in the Routing dialog, which still adds the
-     * rule, and under a stored rule in the list; empty for a value with a
-     * {@link #problem}, which says more.
+     * sees, or a Geosite list this version does not know. Shown under the
+     * value in the Routing dialog, which still adds the rule, and under a
+     * stored rule in the list; empty for a value with a {@link #problem},
+     * which says more.
      *
      * @param type  the rule's type
      * @param value the rule's value, as it is stored
      * @return the hint, or empty
      */
     public static Optional<String> hint(RoutingRule.RuleType type, String value) {
-        if (type != RoutingRule.RuleType.DOMAIN_REGEX || problem(type, value).isPresent()) {
+        if (type == null || problem(type, value).isPresent()) {
             return Optional.empty();
         }
-        return new Letters(value).first();
+        if (type == RoutingRule.RuleType.GEOSITE) {
+            return isKnownList(type, value)
+                    ? Optional.empty()
+                    : Optional.of(I18n.get("routing.rule.hint.geosite", ruleSetName(value)));
+        }
+        return type == RoutingRule.RuleType.DOMAIN_REGEX
+                ? new Letters(value).first()
+                : Optional.empty();
+    }
+
+    /**
+     * Whether this version knows the list a Geosite rule names: one in
+     * {@code geosite-lists.txt}, the lists sing-geosite published when it was
+     * built, or one the generator fetches from runetfreedom. True for every
+     * other type: GeoIP names are checked exactly, as a {@link #problem}.
+     *
+     * <p>A name it does not know is no proof that there is no such list:
+     * sing-geosite adds lists every week, and a release is used for months.
+     * Such a rule was refused, and one stored by 1.25 left out of the
+     * configuration, under a false "there is no geosite list". A list that
+     * really does not exist still stops the core from starting, which then
+     * names the list; the dialog says so before the user adds it.</p>
+     *
+     * @param type  the rule's type
+     * @param value the rule's value
+     * @return whether the list is known, or the rule names none
+     */
+    public static boolean isKnownList(RoutingRule.RuleType type, String value) {
+        if (type != RoutingRule.RuleType.GEOSITE) {
+            return true;
+        }
+        String name = ruleSetName(value);
+        return GeositeLists.published(name)
+                || SingBoxConfigGenerator.isBlockedInRussiaList("geosite-" + name);
     }
 
     /**
@@ -253,9 +287,12 @@ public final class RoutingRuleCheck {
     /**
      * Why there is no list of this name to download. The core fetches a rule's
      * list when it starts and does not start without it, and a name the
-     * repository does not publish, such as the typo "youtub", was a 404: every
+     * repository does not publish, such as "rus" for GeoIP, was a 404: every
      * server failed to connect, with a message that read like a blocked
-     * network, until the rule was found and deleted.
+     * network, until the rule was found and deleted. sing-geoip publishes one
+     * list per country, which RoutingConfig knows exactly; a Geosite name is
+     * only asked of the lists known when this version was built, as a
+     * {@link #hint}, since sing-geosite publishes new ones all the time.
      */
     private static Optional<String> listProblem(RoutingRule.RuleType type, String name) {
         if (!RULE_SET_NAME.matcher(name).matches()) {
@@ -265,22 +302,16 @@ public final class RoutingRuleCheck {
         // downloads, and the generator fetches it from there: such a rule was
         // refused here, and one stored by 1.25 left out of the configuration,
         // although the core loaded it.
-        String kind = type == RoutingRule.RuleType.GEOSITE ? "geosite-" : "geoip-";
-        if (SingBoxConfigGenerator.isBlockedInRussiaList(kind + name)) {
+        if (type == RoutingRule.RuleType.GEOSITE
+                || SingBoxConfigGenerator.isBlockedInRussiaList("geoip-" + name)) {
             return Optional.empty();
         }
-        if (type == RoutingRule.RuleType.GEOSITE) {
-            return GeositeLists.published(name)
-                    ? Optional.empty()
-                    : Optional.of(I18n.get("routing.rule.problem.geosite", name));
-        }
-        // sing-geoip has one list for each country with addresses of its own.
         return RoutingConfig.isBypassCountry(name)
                 ? Optional.empty()
                 : Optional.of(I18n.get("routing.rule.problem.geoip", name));
     }
 
-    /** The lists sing-geosite publishes, as {@code geosite-lists.txt} has them. */
+    /** The lists sing-geosite published when this version was built: {@code geosite-lists.txt}. */
     private static final class GeositeLists {
 
         private static final Set<String> NAMES = read();
@@ -289,8 +320,8 @@ public final class RoutingRuleCheck {
         }
 
         static boolean published(String name) {
-            // Without the file every name passes, as before it existed: it
-            // must not leave out each Geosite rule the user has.
+            // Without the file every name is known, as before it existed: it
+            // must not warn of every Geosite rule, nor refuse each to agents.
             return NAMES.isEmpty() || NAMES.contains(name);
         }
 

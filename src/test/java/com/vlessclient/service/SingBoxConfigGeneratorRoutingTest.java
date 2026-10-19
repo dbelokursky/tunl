@@ -596,28 +596,41 @@ class SingBoxConfigGeneratorRoutingTest {
     }
 
     /**
-     * A Geosite or GeoIP rule naming a list the repositories do not publish
-     * passed sing-box check, and then the core did not start, whichever server
-     * was picked: its first download of the list was a 404. Such a rule,
-     * stored before the dialog checked the name, is left out.
+     * A GeoIP rule naming a list sing-geoip does not publish passed sing-box
+     * check, and then the core did not start, whichever server was picked:
+     * its first download of the list was a 404. Such a rule, stored before
+     * the dialog checked the name, is left out. A Geosite rule is written
+     * whatever its name: the index of lists this version knows ages, and a
+     * stored rule for a list published since, such as vatsim, was left out
+     * under a false "there is no geosite list", as was one for a list removed
+     * upstream that the core still loaded from its cache.
      */
     @Test
-    void aStoredRuleForAListNobodyPublishesIsLeftOut() throws Exception {
+    void aStoredGeoipRuleWithoutAListIsLeftOutAndAGeositeOneIsWritten() throws Exception {
         RoutingConfig routingConfig = new RoutingConfig();
         routingConfig.setRules(List.of(
-                new RoutingRule(RoutingRule.RuleType.GEOSITE, "youtub",
-                        RoutingRule.RuleAction.PROXY),
+                new RoutingRule(RoutingRule.RuleType.GEOSITE, "a-list-newer-than-this-build",
+                        RoutingRule.RuleAction.DIRECT),
                 new RoutingRule(RoutingRule.RuleType.GEOIP, "rus",
                         RoutingRule.RuleAction.DIRECT),
                 new RoutingRule(RoutingRule.RuleType.GEOSITE, "youtube",
                         RoutingRule.RuleAction.PROXY)));
 
-        String json = generator.generate(createVlessServer(), defaultSettings, routingConfig);
+        for (com.vlessclient.model.ProxyMode mode : com.vlessclient.model.ProxyMode.values()) {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(mode);
+            JsonNode route = parse(generator.generate(createVlessServer(), settings,
+                    routingConfig)).get("route");
 
-        assertThat(json).doesNotContain("geosite-youtub\"").doesNotContain("geosite-youtub.srs")
-                .doesNotContain("geoip-rus");
-        assertThat(parse(json).get("route").get("rule_set").toString())
-                .contains("geosite-youtube.srs");
+            assertThat(route.toString()).as(mode.name()).doesNotContain("geoip-rus");
+            assertThat(route.get("rules").toString()).as(mode.name())
+                    .contains("{\"rule_set\":[\"geosite-a-list-newer-than-this-build\"],"
+                            + "\"action\":\"route\",\"outbound\":\"direct\"}");
+            assertThat(route.get("rule_set").toString()).as(mode.name())
+                    .contains("\"https://raw.githubusercontent.com/SagerNet/sing-geosite/"
+                            + "rule-set/geosite-a-list-newer-than-this-build.srs\"")
+                    .contains("geosite-youtube.srs");
+        }
     }
 
     /**

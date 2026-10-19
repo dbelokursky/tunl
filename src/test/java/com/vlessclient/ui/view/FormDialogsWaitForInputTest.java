@@ -222,6 +222,38 @@ public class FormDialogsWaitForInputTest extends ApplicationTest {
     }
 
     /**
+     * A Geosite list this version does not know may be newer than its index:
+     * the form says what happens if there is no such list, and OK adds the
+     * rule. It refused the name as one nobody publishes, so a list published
+     * after the build could not be added at all.
+     */
+    @Test
+    void theRuleFormWarnsOfAListThisVersionDoesNotKnowAndAddsTheRule() {
+        RoutingService routing = TestRoutingServices.at(freshDir("routing"));
+        ServiceLocator.register(RoutingService.class, routing);
+        mount("RoutingView");
+        DialogPane form = open(button("#addRuleButton")::fire);
+        setRuleType(form, RoutingRule.RuleType.GEOSITE);
+
+        setRuleValue(form, "a-list-newer-than-this-build");
+        assertThat(okDisabled(form)).as("OK with a list this version does not know").isFalse();
+        assertThat(problemShown(form)).as("a refusal").isNull();
+        assertThat(hintShown(form)).as("the hint under the value")
+                .isEqualTo(RoutingRuleCheck.hint(RoutingRule.RuleType.GEOSITE,
+                        "a-list-newer-than-this-build").orElseThrow());
+        setRuleValue(form, "youtube");
+        assertThat(hintShown(form)).as("the hint for a list the index has").isNull();
+        setRuleValue(form, "a-list-newer-than-this-build");
+        pressOk(form);
+
+        Await.until("the rule to be added",
+                () -> routing.getConfig().getRules().stream()
+                        .map(RoutingRule::getValue)
+                        .anyMatch("a-list-newer-than-this-build"::equals),
+                PATIENCE);
+    }
+
+    /**
      * OK was enabled by a check on the value without Unicode spaces around it,
      * but the rule was stored with them (trim() leaves an em space), so the
      * store refused it on the FX thread and the rule was lost without a word.

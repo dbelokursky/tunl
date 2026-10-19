@@ -43,8 +43,9 @@ public class RoutingRuleNoticeLayoutTest extends ApplicationTest {
         RoutingService routing = ServiceLocator.get(RoutingService.class);
         before = List.copyOf(routing.getConfig().getRules());
         // As an earlier version stored them: the add-rule check refuses the
-        // first two now, and has a hint for the third. These alone, so that
-        // every row is laid out, whatever rules the tests before this one left.
+        // second now, and has a hint for the first and the third. These
+        // alone, so that every row is laid out, whatever rules the tests
+        // before this one left.
         routing.getConfig().setRules(List.of(
                 new RoutingRule(RoutingRule.RuleType.GEOSITE, "youtub",
                         RoutingRule.RuleAction.PROXY),

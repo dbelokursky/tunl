@@ -1,15 +1,14 @@
-# The lists SagerNet/sing-geosite publishes on its rule-set branch, one name a
-# line: a Geosite rule downloads https://raw.githubusercontent.com/SagerNet/
-# sing-geosite/rule-set/geosite-<name>.srs. Any other name was a 404 there, and
-# the core does not start without its rule-sets, so a Geosite rule naming one
-# stopped every server from connecting. RoutingRuleCheck refuses those names.
+# The lists SagerNet/sing-geosite published on its rule-set branch when this
+# version was built, one name a line: a Geosite rule downloads
+# https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/
+# geosite-<name>.srs, and the core does not start without its rule-sets, so a
+# rule naming a list that does not exist stops every server from connecting.
+# The Routing dialog warns of any other name before it adds the rule, and MCP
+# refuses it to agents. A stored rule is kept whatever its name: a list newer
+# than this file is not missing.
 #
 # From the rule-set branch at 95793ceb929b8340764019327ed053148880e725
-# (2026-10-18). To bring it up to date, run in an empty directory:
-#   git clone -q --depth 1 --filter=blob:none --no-checkout --branch rule-set \
-#       https://github.com/SagerNet/sing-geosite sing-geosite
-#   git -C sing-geosite ls-tree --name-only HEAD \
-#       | sed -n 's/^geosite-\(.*\)\.srs$/\1/p'
+# (2026-10-18). To bring it up to date: scripts/update-geosite-lists.sh
 0x0
 115
 1337x

@@ -298,20 +298,30 @@ class RoutingRuleCheckTest {
     /**
      * A list the repositories do not publish was a 404 when the core fetched
      * it at start, and the core does not start without its rule-sets: a typo
-     * such as "youtub" stopped every server from connecting, with a message
-     * that read like a blocked network. sing-geosite has no list "ru" (it is
-     * "category-ru"), and sing-geoip one per country with addresses of its own.
+     * such as "youtub" stopped every server from connecting. sing-geoip
+     * publishes one list per country with addresses of its own, which is
+     * checked exactly. A Geosite name the bundled index lacks is no proof
+     * there is no such list: sing-geosite adds lists every week, and a
+     * release is used for months. It was refused, and a stored rule for it
+     * left out, under a false "there is no geosite list"; now it has a hint,
+     * the dialog adds it, and the generator writes it.
      */
     @Test
-    void aListNameIsOneTheRepositoryPublishes() {
-        for (String name : List.of("youtub", "ru", "category-ruu", "google@ru")) {
-            assertThat(RoutingRuleCheck.problem(RuleType.GEOSITE, name)).as(name)
-                    .hasValueSatisfying(reason -> assertThat(reason).contains(name));
-        }
-        // The country bypass's own lists among them.
-        for (String name : List.of("youtube", "YouTube", "cn", "netflix", "google@cn",
-                "category-ads-all", "category-ru", "category-ir")) {
+    void aGeositeListThisVersionDoesNotKnowHasAHintAndAGeoipCodeWithoutAListAProblem() {
+        // sing-geosite has no list "ru": it is "category-ru".
+        for (String name : List.of("youtub", "ru", "category-ruu", "google@ru",
+                "a-list-newer-than-this-build")) {
             assertThat(RoutingRuleCheck.problem(RuleType.GEOSITE, name)).as(name).isEmpty();
+            assertThat(RoutingRuleCheck.refusal(RuleType.GEOSITE, name)).as(name).isEmpty();
+            assertThat(RoutingRuleCheck.isKnownList(RuleType.GEOSITE, name)).as(name).isFalse();
+            assertThat(RoutingRuleCheck.hint(RuleType.GEOSITE, name)).as(name)
+                    .hasValueSatisfying(hint -> assertThat(hint).contains(" " + name + " "));
+        }
+        // The country bypass's own lists among them, and runetfreedom's.
+        for (String name : List.of("youtube", "YouTube", "cn", "netflix", "google@cn",
+                "category-ads-all", "category-ru", "category-ir", "ru-blocked")) {
+            assertThat(RoutingRuleCheck.isKnownList(RuleType.GEOSITE, name)).as(name).isTrue();
+            assertThat(RoutingRuleCheck.hint(RuleType.GEOSITE, name)).as(name).isEmpty();
         }
         for (String name : List.of("rus", "private", "bv", "category-ru", "zz")) {
             assertThat(RoutingRuleCheck.problem(RuleType.GEOIP, name)).as(name)
@@ -319,7 +329,11 @@ class RoutingRuleCheckTest {
         }
         for (String name : List.of("ru", "RU", "cn", "us", "ir")) {
             assertThat(RoutingRuleCheck.problem(RuleType.GEOIP, name)).as(name).isEmpty();
+            assertThat(RoutingRuleCheck.hint(RuleType.GEOIP, name)).as(name).isEmpty();
         }
+        // A name no URL can carry is still a problem, and says so alone.
+        assertThat(RoutingRuleCheck.problem(RuleType.GEOSITE, "google ads")).isPresent();
+        assertThat(RoutingRuleCheck.hint(RuleType.GEOSITE, "google ads")).isEmpty();
     }
 
     /**

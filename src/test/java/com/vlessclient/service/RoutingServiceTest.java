@@ -291,6 +291,20 @@ class RoutingServiceTest {
                 .extracting(RoutingRule::getValue).containsExactly("\\.(ru|рф)$");
     }
 
+    /**
+     * The Routing dialog adds a Geosite list this version does not know once
+     * it has said so: the list may be newer than the index. It was refused
+     * here, so the dialog could not add it whatever it said.
+     */
+    @Test
+    void addRule_addsAGeositeListThisVersionDoesNotKnow() {
+        routingService.addRule(new RoutingRule(RoutingRule.RuleType.GEOSITE,
+                "a-list-newer-than-this-build", RoutingRule.RuleAction.PROXY));
+
+        assertThat(new RoutingService(tempDir).getConfig().getRules()).as("the file")
+                .extracting(RoutingRule::getValue).containsExactly("a-list-newer-than-this-build");
+    }
+
     @Test
     void addRule_appendsToExistingRules() {
         RoutingRule rule1 = new RoutingRule(RoutingRule.RuleType.DOMAIN, "example.com",
