@@ -67,6 +67,14 @@ public class DashboardPendingChangesTest extends ApplicationTest {
     private static volatile boolean runsCurrentSettings = true;
     /** How long the stub takes to answer, as a long server list makes it. */
     private static volatile long comparisonMillis;
+    /**
+     * While set, a comparison off the FX thread waits for it before it
+     * answers: a comparison under way for as long as the test needs one,
+     * however slow the runner. One on the FX thread does not wait, so that
+     * the defect theComparisonIsMadeOffTheFxThread looks for fails a test
+     * rather than hanging it.
+     */
+    private static volatile CountDownLatch held;
     /** The comparisons made, and how many of them ran on the FX thread. */
     private static final AtomicInteger COMPARISONS = new AtomicInteger();
     private static final AtomicInteger COMPARISONS_ON_FX = new AtomicInteger();
@@ -100,6 +108,10 @@ public class DashboardPendingChangesTest extends ApplicationTest {
                         }
                         try {
                             Thread.sleep(comparisonMillis);
+                            CountDownLatch hold = held;
+                            if (hold != null && !Platform.isFxApplicationThread()) {
+                                hold.await(PATIENCE.toMillis(), TimeUnit.MILLISECONDS);
+                            }
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                         } finally {
@@ -126,6 +138,7 @@ public class DashboardPendingChangesTest extends ApplicationTest {
     @AfterEach
     void disconnect() {
         comparisonMillis = 0;
+        held = null;
         interact(() -> ENGINE.state.set(ConnectionState.DISCONNECTED));
     }
 
@@ -199,18 +212,28 @@ public class DashboardPendingChangesTest extends ApplicationTest {
      * Repaints come in bursts: a state change, a health verdict, the group
      * monitor. Those asked for while a comparison runs are answered by one
      * more, made once it ends, rather than by one each.
+     *
+     * <p>The first repaint's comparison is held until all ten are in. One
+     * that slept a fixed 600 ms outlasted the ten round trips to the FX
+     * thread by only 5 to 70 ms on a developer's machine: on a slower runner
+     * a repaint came after its answer had landed and asked for a third.</p>
      */
     @Test
     void repaintsDuringAComparisonAreAnsweredByOneMore() {
         runsCurrentSettings = false;
-        comparisonMillis = 600;
         interact(() -> ENGINE.state.set(ConnectionState.CONNECTED));
         awaitBanner(true, "connected on settings changed since");
         awaitComparisonsAnswered();
         COMPARISONS.set(0);
 
-        for (int i = 0; i < 10; i++) {
-            interact(controller::onViewShown);
+        CountDownLatch release = new CountDownLatch(1);
+        held = release;
+        try {
+            for (int i = 0; i < 10; i++) {
+                interact(controller::onViewShown);
+            }
+        } finally {
+            release.countDown();
         }
         Await.until("the one more comparison", () -> COMPARISONS.get() >= 2, PATIENCE);
         awaitComparisonsAnswered();
@@ -218,16 +241,24 @@ public class DashboardPendingChangesTest extends ApplicationTest {
         assertThat(COMPARISONS).as("comparisons for ten repaints").hasValue(2);
     }
 
-    /** An answer the tunnel's going down overtook is not shown. */
+    /**
+     * An answer the tunnel's going down overtook is not shown. Held until
+     * the disconnect is in, so that it is overtaken on any runner.
+     */
     @Test
-    void aComparisonOvertakenByADisconnectIsNotShown() throws InterruptedException {
+    void aComparisonOvertakenByADisconnectIsNotShown() {
         runsCurrentSettings = false;
-        comparisonMillis = 600;
         COMPARISONS.set(0);
 
-        interact(() -> ENGINE.state.set(ConnectionState.CONNECTED));
-        Await.until("a comparison to start", () -> COMPARISONS.get() > 0, PATIENCE);
-        interact(() -> ENGINE.state.set(ConnectionState.DISCONNECTED));
+        CountDownLatch release = new CountDownLatch(1);
+        held = release;
+        try {
+            interact(() -> ENGINE.state.set(ConnectionState.CONNECTED));
+            Await.until("a comparison to start", () -> COMPARISONS.get() > 0, PATIENCE);
+            interact(() -> ENGINE.state.set(ConnectionState.DISCONNECTED));
+        } finally {
+            release.countDown();
+        }
         awaitComparisonsAnswered();
 
         assertThat(bannerShown()).as("disconnected before the answer came").isFalse();
