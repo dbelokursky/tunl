@@ -59,6 +59,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       the edge, and the log list's own scroll bar with it.</li>
  *   <li>At 125% the Servers header ellipsized its Backup and Import menus to
  *       "..." and "И...", which could no longer be told apart.</li>
+ *   <li>The MCP server's status shared a line with its port: at 125% it read
+ *       "○ stop...", and at 150% "○ ..." whether the server ran or not.</li>
  * </ul>
  *
  * <p>Each page is mounted in MainView, sidebar and all, at each size, text
@@ -75,6 +77,9 @@ public class LargerTextFitTest extends ApplicationTest {
 
     /** Windows' usual text size and its larger steps, up to the largest it offers here. */
     private static final double[] TEXT_SIZES = {1.0, 1.25, 1.5, 2.0};
+
+    /** The largest of {@link #TEXT_SIZES}. */
+    private static final double LARGEST_TEXT_SIZE = TEXT_SIZES[TEXT_SIZES.length - 1];
 
     /**
      * Windows display scalings whose device pixel no double holds: 0.8,
@@ -112,13 +117,51 @@ public class LargerTextFitTest extends ApplicationTest {
      * The device ID's label and its Reset button whole at every size, as
      * d181492 made them at 125%; the MCP command's two buttons up to 150%,
      * where they go one under the other. At 200% in the smaller windows each
-     * of those two is wider than the whole card, and is cut where it is.
+     * of those two is wider than the whole card, and is cut where it is. The
+     * MCP server's status whole at every size: it goes under the port, and
+     * wraps.
      */
     @Test
     void settingsFitsTheWindowAtEveryTextSize() {
         assertFits("Settings", MainViewController::showSettings, Map.of(
                 "#deviceIdLabel", 2.0, "#deviceIdResetButton", 2.0,
-                "#mcpCopyButton", 1.5, "#mcpRegenButton", 1.5));
+                "#mcpCopyButton", 1.5, "#mcpRegenButton", 1.5,
+                "#mcpStatusLabel", LARGEST_TEXT_SIZE));
+    }
+
+    /**
+     * The MCP server's status in the port's row, which cut it: at 125%
+     * "○ stopped" read "○ stop...", at 150% "○ ..." whether the server ran or
+     * not, and the reason a start failed was cut even at the usual size. The
+     * check above reads it stopped, as the tests' service is; these are the
+     * other two.
+     */
+    @Test
+    void theMcpStatusIsDrawnWholeAtTheUsualAndTheLargestTextSize() {
+        List<String> wrong = new ArrayList<>();
+        for (int[] window : WINDOWS) {
+            for (double size : new double[] {1.0, LARGEST_TEXT_SIZE}) {
+                for (Locale language : LANGUAGES) {
+                    interact(() -> I18n.setLocale(language));
+                    Scene scene = mainView(window, size, MainViewController::showSettings);
+                    for (String status : List.of(I18n.get("settings.mcp.status.running"),
+                            I18n.get("settings.mcp.status.failed",
+                                    "port 55555 is already in use"))) {
+                        interact(() -> ((Labeled) scene.lookup("#mcpStatusLabel"))
+                                .setText(status));
+                        SettledLayout.settle(scene);
+                        String where = "Settings %dx%d at %.0f%% %s".formatted(window[0],
+                                window[1], size * 100, language);
+                        interact(() -> measure(where, scene, List.of("#mcpStatusLabel"), wrong));
+                    }
+                }
+            }
+        }
+
+        assertThat(wrong)
+                .withFailMessage("ContentScrollPane has no horizontal scroll bar, so these are "
+                        + "cut off or unreadable:%n  %s", String.join("\n  ", wrong))
+                .isEmpty();
     }
 
     @Test
@@ -144,18 +187,23 @@ public class LargerTextFitTest extends ApplicationTest {
      * default window in Russian and in the smallest in English. The HBox drew
      * its title, its menus and its button cut there ("Серве...", "Бэ...",
      * "Back..."); the header goes on to a second line now, and the checks
-     * above read its menus whole.</p>
+     * above read its menus whole. The MCP server's status is held beside its
+     * port the same way: where the HBox it shared with them cut it, it goes
+     * under them now.</p>
      */
     @Test
     void atTheUsualTextSizeTheRowsStayOnOneLine() {
         List<String> wrapped = new ArrayList<>();
         boolean headerHadRoom = false;
+        boolean mcpStatusHadRoom = false;
         for (int[] window : WINDOWS) {
             for (Locale language : LANGUAGES) {
                 interact(() -> I18n.setLocale(language));
                 String where = "%dx%d %s".formatted(window[0], window[1], language);
-                oneLine(where, mainView(window, 1.0, MainViewController::showSettings),
-                        "#deviceIdLabel", "#deviceIdResetButton", wrapped);
+                Scene settings = mainView(window, 1.0, MainViewController::showSettings);
+                oneLine(where, settings, "#deviceIdLabel", "#deviceIdResetButton", wrapped);
+                mcpStatusHadRoom |= oneLineWhereItFits(where, settings, "#mcpPortLabel",
+                        "#mcpStatusLabel", wrapped);
                 oneLine(where, mainView(window, 1.0, MainViewController::showLogs),
                         "#logLevelFilter", "#clearButton", wrapped);
                 Scene servers = mainView(window, 1.0, MainViewController::showServers);
@@ -167,6 +215,10 @@ public class LargerTextFitTest extends ApplicationTest {
 
         assertThat(headerHadRoom)
                 .as("the Servers header had room for one line in no window, so the check"
+                        + " proved nothing")
+                .isTrue();
+        assertThat(mcpStatusHadRoom)
+                .as("the MCP status had room beside its port in no window, so the check"
                         + " proved nothing")
                 .isTrue();
         assertThat(wrapped)
@@ -312,8 +364,12 @@ public class LargerTextFitTest extends ApplicationTest {
             Node node = scene.lookup(id);
             String full = node instanceof Labeled labeled ? labeled.getText() : null;
             String drawn = drawnText(node);
-            if (full == null || !full.equals(drawn)) {
+            // An empty text is drawn whole anywhere, and proves nothing.
+            if (full == null || full.isEmpty() || !full.equals(drawn)) {
                 wrong.add("%s: %s \"%s\" is drawn \"%s\"".formatted(where, id, full, drawn));
+            } else if (inScene(node).getMaxX() > edge + 0.5) {
+                wrong.add("%s: %s reaches x=%.1f, past the viewport's edge at %.1f".formatted(
+                        where, id, inScene(node).getMaxX(), edge));
             }
         }
     }

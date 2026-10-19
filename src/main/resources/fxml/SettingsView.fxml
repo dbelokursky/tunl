@@ -210,15 +210,23 @@
 
         <CheckBox fx:id="mcpEnabledCheck" text="Enable MCP server" styleClass="form-checkbox"/>
 
-        <HBox spacing="12" alignment="CENTER_LEFT">
-            <!-- 210 and 110: the label gutter and the numeric-field width
-                 every other label+field row in this view uses. At 120/120
-                 this row's field started 90px left of all of them. -->
-            <Label fx:id="mcpPortLabel" text="Port" styleClass="form-label, settings-gutter"/>
-            <TextField fx:id="mcpPortField" styleClass="form-field" prefWidth="110"
-                       promptText="55555"/>
-            <Label fx:id="mcpStatusLabel" text="" styleClass="stats-value, settings-status"/>
-        </HBox>
+        <!-- The status goes under the port where the two do not fit beside
+             each other, and wraps where a line of its own is too short for
+             it. Squeezed in beside the field, at 125% text size it read
+             "○ sto…", at 150% "○ …" whether the server ran or not, and the
+             reason a start failed was cut even at the usual size. -->
+        <WrappingRow hgap="12" vgap="6">
+            <HBox spacing="12" alignment="CENTER_LEFT">
+                <!-- 210 and 110: the label gutter and the numeric-field width
+                     every other label+field row in this view uses. At 120/120
+                     this row's field started 90px left of all of them. -->
+                <Label fx:id="mcpPortLabel" text="Port" styleClass="form-label, settings-gutter"/>
+                <TextField fx:id="mcpPortField" styleClass="form-field" prefWidth="110"
+                           promptText="55555"/>
+            </HBox>
+            <Label fx:id="mcpStatusLabel" text="" styleClass="stats-value, settings-status"
+                   wrapText="true"/>
+        </WrappingRow>
 
         <CheckBox fx:id="mcpAllowMutationsCheck"
                   text="Allow configuration changes (connect, edit servers, routing)"
