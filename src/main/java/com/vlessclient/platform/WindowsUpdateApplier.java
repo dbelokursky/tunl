@@ -2,6 +2,7 @@ package com.vlessclient.platform;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -80,8 +81,12 @@ final class WindowsUpdateApplier implements UpdateApplier {
      */
     static String relayScript(long pid, Path installer, Path launcher) {
         // $pid is a PowerShell automatic variable (this shell's own id), hence
-        // the deliberately different name.
-        return """
+        // the deliberately different name. Locale.ROOT: .formatted wrote the
+        // pid in the digits of the default format locale, and PowerShell read
+        // "$waitFor = ۴۲۴۲" as a command named ۴۲۴۲. $waitFor stayed empty,
+        // the wait and the still-running check both failed on it, and msiexec
+        // started on the app it was replacing before that had exited.
+        return String.format(Locale.ROOT, """
                 # Applies a Tunl update once the app being replaced has exited.
                 # Written by WindowsUpdateApplier; regenerated on every update.
                 $ErrorActionPreference = 'Continue'
@@ -113,7 +118,7 @@ final class WindowsUpdateApplier implements UpdateApplier {
 
                 Write-Output "installed, relaunching"
                 Start-Process $exe
-                """.formatted(pid,
+                """, pid,
                 WindowsTunLauncher.psLiteral(installer.toString()),
                 WindowsTunLauncher.psLiteral(launcher.toString()));
     }
