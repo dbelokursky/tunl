@@ -143,17 +143,25 @@ public class DashboardServerPickTest extends ApplicationTest {
         }
     }
 
-    /** Holds the next off-FX generation until released: where a switch reads the list. */
+    /**
+     * Holds the next generation a switch makes until released: where a switch
+     * reads the list. A switch's alone: the card compares the running core
+     * with the settings off the FX thread as well, and where that comparison
+     * came first it was held instead. The switch then ran unheld, and a test
+     * meant for a Disconnect meeting a switch under way passed without one.
+     */
     static final class PausingGenerator extends SingBoxConfigGenerator {
         final AtomicBoolean armed = new AtomicBoolean();
         final CountDownLatch paused = new CountDownLatch(1);
         final CountDownLatch release = new CountDownLatch(1);
+        /** Whether this thread runs a switch: the test's service says so. */
+        final ThreadLocal<Boolean> inSwitch = ThreadLocal.withInitial(() -> false);
 
         @Override
         public String generate(List<ServerConfig> candidates, ServerConfig active,
                                AppSettings settings, RoutingConfig routingConfig,
                                HostFacts host) {
-            if (!Platform.isFxApplicationThread() && armed.compareAndSet(true, false)) {
+            if (inSwitch.get() && armed.compareAndSet(true, false)) {
                 paused.countDown();
                 try {
                     release.await(10, TimeUnit.SECONDS);
@@ -190,7 +198,12 @@ public class DashboardServerPickTest extends ApplicationTest {
             @Override
             public ConnectAttempt switchToActiveServer() throws IOException {
                 switches.incrementAndGet();
-                return super.switchToActiveServer();
+                generator.inSwitch.set(true);
+                try {
+                    return super.switchToActiveServer();
+                } finally {
+                    generator.inSwitch.remove();
+                }
             }
         };
         ServiceLocator.register(ConnectionService.class, service);
