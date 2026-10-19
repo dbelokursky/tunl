@@ -801,6 +801,37 @@ class SingBoxConfigGeneratorRoutingTest {
     }
 
     /**
+     * A joiner pasted along with a name, where no browser keeps one, was put
+     * into punycode with it: a stored rule or bypass entry for rutracker.org
+     * with a non-joiner before its dot named xn--rutracker-y69d.org, which
+     * no client sends, and matched nothing, in the route and the DNS mirror.
+     * 1.25.1 dropped the joiner, and the rule worked.
+     */
+    @Test
+    void aStrayJoinerInAStoredNameIsNotPartOfIt() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "rutracker‌.org",
+                        RoutingRule.RuleAction.PROXY),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN, "example.com‍",
+                        RoutingRule.RuleAction.DIRECT)));
+        routingConfig.setBypassList(List.of("*.rutracker‌.net"));
+
+        for (com.vlessclient.model.ProxyMode mode : com.vlessclient.model.ProxyMode.values()) {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(mode);
+            String route = parse(generator.generate(createVlessServer(), settings,
+                    routingConfig)).get("route").get("rules").toString();
+
+            assertThat(route).as(mode.name())
+                    .contains("{\"domain_suffix\":[\"rutracker.org\"],\"action\":\"route\"")
+                    .contains("{\"domain\":[\"example.com\"],\"action\":\"route\"")
+                    .contains("\"domain_suffix\":[\"rutracker.net\"]")
+                    .doesNotContain("xn--");
+        }
+    }
+
+    /**
      * A star or a final dot reached the core as typed, and the core compares
      * text: "*.example.org" matched nothing while the bypass list on the same
      * page read it as every name under example.org. A Direct rule left those

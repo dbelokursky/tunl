@@ -6,6 +6,7 @@ import java.text.Normalizer;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -49,6 +50,31 @@ public final class BypassPatternParser {
 
     private static final int ZERO_WIDTH_NON_JOINER = 0x200C;
     private static final int ZERO_WIDTH_JOINER = 0x200D;
+
+    /** The scripts whose letters join one another, as Unicode's ArabicShaping.txt lists them. */
+    private static final Set<Character.UnicodeScript> JOINING_SCRIPTS = Set.of(
+            Character.UnicodeScript.ARABIC, Character.UnicodeScript.SYRIAC,
+            Character.UnicodeScript.NKO, Character.UnicodeScript.MONGOLIAN,
+            Character.UnicodeScript.MANDAIC, Character.UnicodeScript.MANICHAEAN,
+            Character.UnicodeScript.PSALTER_PAHLAVI, Character.UnicodeScript.SOGDIAN,
+            Character.UnicodeScript.OLD_UYGHUR, Character.UnicodeScript.CHORASMIAN,
+            Character.UnicodeScript.ADLAM, Character.UnicodeScript.HANIFI_ROHINGYA,
+            Character.UnicodeScript.PHAGS_PA);
+
+    /**
+     * The letters of the Arabic block that do not join the letter after them,
+     * joining type R, U or C in ArabicShaping.txt: alef, dal, reh, waw and
+     * their kin, hamza and tatweel. Persian typists put a non-joiner after
+     * them, where it does nothing, and CONTEXTJ refuses it there. Ranges,
+     * first and last.
+     */
+    private static final int[] ARABIC_NOT_JOINING_FORWARD = {
+        0x0621, 0x0625, 0x0627, 0x0627, 0x0629, 0x0629, 0x062F, 0x0632, 0x0640, 0x0640,
+        0x0648, 0x0648, 0x0671, 0x0677, 0x0688, 0x0699, 0x06C0, 0x06C0, 0x06C3, 0x06CB,
+        0x06CD, 0x06CD, 0x06CF, 0x06CF, 0x06D2, 0x06D3, 0x06D5, 0x06D5, 0x06EE, 0x06EF};
+
+    /** The letters of the Arabic block that do not join the one before them: hamzas, tatweel. */
+    private static final Set<Integer> ARABIC_NOT_JOINING_BACKWARD = Set.of(0x0621, 0x0640, 0x0674);
 
     private BypassPatternParser() {
     }
@@ -171,7 +197,8 @@ public final class BypassPatternParser {
      * of right-to-left writing carries (U+200E and U+200F, U+202A to U+202E,
      * U+2066 to U+2069) and the like: no name has one, and IDN refuses a label
      * that does, so the line kept it and matched nothing, or, in a glob, made
-     * a regex the core refuses. The joiners some scripts spell names with stay.
+     * a regex the core refuses. The joiners some scripts spell names with
+     * stay; the ones no browser keeps go when the name is put into punycode.
      */
     private static String withoutFormatCharacters(String raw) {
         StringBuilder line = new StringBuilder(raw.length());
@@ -231,7 +258,8 @@ public final class BypassPatternParser {
      * xn--strae-oqa.de. A label holding one of the four is put in punycode
      * as it is; the rest of what IDN maps, both read alike.</p>
      */
-    private static String ascii(String name) {
+    private static String ascii(String typed) {
+        String name = withoutStrayJoiners(typed);
         if (name.codePoints().noneMatch(BypassPatternParser::isDeviation)) {
             return idnaAscii(name);
         }
@@ -265,6 +293,98 @@ public final class BypassPatternParser {
     private static boolean isDeviation(int c) {
         return c == 0x00df || c == 0x03c2 || c == ZERO_WIDTH_NON_JOINER
                 || c == ZERO_WIDTH_JOINER;
+    }
+
+    /**
+     * The name without the joiners no browser keeps. A host may hold a
+     * zero-width joiner or non-joiner only where RFC 5892's CONTEXTJ rules
+     * allow it, which UTS #46 CheckJoiners and so the WHATWG URL standard
+     * apply: right after a virama, or, the non-joiner, between letters that
+     * join. Elsewhere browsers refuse the host. Such a joiner comes along
+     * with a name copied out of a messenger, or out of a post hiding it from
+     * filters, and was put into punycode with it: rutracker.org with a
+     * non-joiner before its dot became xn--rutracker-y69d.org, a name no
+     * client sends, so the rule matched nothing, and nothing said why.
+     * Dropped, as IDNA 2003 did.
+     *
+     * <p>Which letters join is read from their script, Arabic, Syriac, N'Ko,
+     * Mongolian and the like, since Java has no joining types; in the Arabic
+     * block, which Persian, Arabic and Urdu are written in, the letters that
+     * join on one side only are known as well. Elsewhere, a non-joiner beside
+     * a letter that does not join it is kept although CONTEXTJ refuses it; no
+     * registry takes such a name either.</p>
+     */
+    private static String withoutStrayJoiners(String name) {
+        if (name.indexOf(ZERO_WIDTH_NON_JOINER) < 0 && name.indexOf(ZERO_WIDTH_JOINER) < 0) {
+            return name;
+        }
+        int[] points = name.codePoints().toArray();
+        StringBuilder kept = new StringBuilder(name.length());
+        for (int i = 0; i < points.length; i++) {
+            boolean joiner = points[i] == ZERO_WIDTH_NON_JOINER || points[i] == ZERO_WIDTH_JOINER;
+            if (!joiner || joinerAllowed(points, i)) {
+                kept.appendCodePoint(points[i]);
+            }
+        }
+        return kept.toString();
+    }
+
+    /** RFC 5892 appendix A.1 and A.2 for the joiner at {@code at}, as described above. */
+    private static boolean joinerAllowed(int[] points, int at) {
+        if (at > 0 && isVirama(points[at - 1])) {
+            return true;
+        }
+        if (points[at] == ZERO_WIDTH_JOINER) {
+            return false;
+        }
+        // A joining letter on either side, with marks between it and the
+        // non-joiner skipped: they are transparent to joining.
+        int before = at - 1;
+        while (before >= 0 && isTransparent(points[before])) {
+            before--;
+        }
+        int after = at + 1;
+        while (after < points.length && isTransparent(points[after])) {
+            after++;
+        }
+        return before >= 0 && after < points.length
+                && isJoiningLetter(points[before]) && !isArabicNotJoiningForward(points[before])
+                && isJoiningLetter(points[after])
+                && !ARABIC_NOT_JOINING_BACKWARD.contains(points[after]);
+    }
+
+    private static boolean isArabicNotJoiningForward(int c) {
+        for (int i = 0; i < ARABIC_NOT_JOINING_FORWARD.length; i += 2) {
+            if (c >= ARABIC_NOT_JOINING_FORWARD[i] && c <= ARABIC_NOT_JOINING_FORWARD[i + 1]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether a character is a virama, canonical combining class 9, which
+     * Java does not expose: canonical ordering moves a mark of a higher class
+     * after one of a lower, so a virama goes after U+3099 (class 8) and
+     * before U+05B0 (class 10), and no other class does both.
+     */
+    private static boolean isVirama(int c) {
+        String mark = Character.toString(c);
+        String eight = Character.toString(0x3099);
+        String ten = Character.toString(0x05b0);
+        return Normalizer.normalize("a" + mark + eight, Normalizer.Form.NFD)
+                .equals("a" + eight + mark)
+                && Normalizer.normalize("a" + ten + mark, Normalizer.Form.NFD)
+                .equals("a" + mark + ten);
+    }
+
+    private static boolean isTransparent(int c) {
+        int type = Character.getType(c);
+        return type == Character.NON_SPACING_MARK || type == Character.ENCLOSING_MARK;
+    }
+
+    private static boolean isJoiningLetter(int c) {
+        return Character.isLetter(c) && JOINING_SCRIPTS.contains(Character.UnicodeScript.of(c));
     }
 
     /**

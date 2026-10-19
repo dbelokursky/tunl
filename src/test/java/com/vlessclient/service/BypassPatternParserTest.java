@@ -206,9 +206,57 @@ class BypassPatternParserTest {
         assertThat(BypassPatternParser.parse("*.maße.de")).isEqualTo(
                 new BypassPatternParser.Parsed(
                         BypassPatternParser.Kind.DOMAIN_SUFFIX, "xn--mae-6ka.de"));
-        // No longer abc.com, a name of its own: the joiner stays, and no
-        // browser sends the name, which UTS #46 refuses.
-        assertThat(BypassPatternParser.coreName("ab‍c.com")).isNotEqualTo("abc.com");
+    }
+
+    /**
+     * A joiner where no browser keeps one, beside a Latin or Cyrillic letter,
+     * at a label's edge, or a joining one between Arabic letters, comes along
+     * with a name copied out of a messenger. It was put into punycode with
+     * the name: rutracker.org with a non-joiner before its dot became
+     * xn--rutracker-y69d.org, which no client sends, so the entry or rule
+     * matched nothing. It is dropped, as IDNA 2003 and 1.25.1 dropped it. A
+     * joiner a script spells with, after a virama or between joining letters,
+     * stays. Every expected name is what Node's WHATWG URL sends.
+     */
+    @Test
+    void aJoinerNoBrowserKeepsIsDroppedAndOneAScriptSpellsWithStays() {
+        java.util.Map<String, String> sent = new java.util.LinkedHashMap<>();
+        sent.put("rutracker‌.org", "rutracker.org");
+        sent.put("example.com‍", "example.com");
+        sent.put("‌example.com", "example.com");
+        sent.put("ab‍c.com", "abc.com");
+        sent.put("пример‌.рф",
+                "xn--e1afmkfd.xn--p1ai");
+        sent.put("ب‍ب.example", "xn--ngba.example");
+        // After a virama, in Devanagari, Malayalam and, outside the BMP, Brahmi.
+        sent.put("क्‍ष.example", "xn--11b2ezcw70k.example");
+        sent.put("क्‌ष.example", "xn--11b2ezcs70k.example");
+        sent.put("ന്‍.example", "xn--uwc8ep99d.example");
+        sent.put("𑀓𑁆‍𑀓.example",
+                "xn--1ug2565gba6r.example");
+        // A non-joiner between Persian letters, a mark between included.
+        sent.put("می‌خواهم.example",
+                "xn--mgbn2ecje63gr19l.example");
+        sent.put("بَ‌ب.example", "xn--ngba7iz95i.example");
+        sent.put("کتاب‌ها.example",
+                "xn--mgbacg1m8wy53l.example");
+        // One after a letter that joins nothing after it, as waw or alef, or
+        // before one that joins nothing before it, as hamza: it does nothing,
+        // and the name is the one without it.
+        sent.put("رو‌زنامه.example",
+                "xn--mgbtd1fdic.example");
+        sent.put("ا‌ب.example", "xn--mgbc.example");
+        sent.put("ب‌ء.example", "xn--ggbn.example");
+        sent.forEach((typed, browser) ->
+                assertThat(BypassPatternParser.coreName(typed)).as(typed).isEqualTo(browser));
+
+        assertThat(BypassPatternParser.parse("*.rutracker‌.net")).isEqualTo(
+                new BypassPatternParser.Parsed(
+                        BypassPatternParser.Kind.DOMAIN_SUFFIX, "rutracker.net"));
+        assertThat(BypassPatternParser.parse("rutracker‌.org").value())
+                .isEqualTo("rutracker.org");
+        assertThat(BypassPatternParser.parse("mail.*.rutracker‌.org").value())
+                .isEqualTo("^mail\\..*\\.rutracker\\.org$");
     }
 
     /**
