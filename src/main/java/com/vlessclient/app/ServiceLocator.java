@@ -81,6 +81,21 @@ public class ServiceLocator {
      */
     static void initialize(StartupMode mode) {
         Objects.requireNonNull(mode, "mode");
+        // The test graph seals nothing: a headless UI test that adds a server
+        // used to write through the developer's login Keychain (CLAUDE.md:
+        // a test never touches the OS keychain).
+        initialize(mode, mode == StartupMode.TEST
+                ? SecretSealers.disabled() : SecretSealers.forCurrentPlatform());
+    }
+
+    /**
+     * {@link #initialize(StartupMode)} with the keychain the graph seals
+     * through: a test's own in memory, for what a start does when a keychain
+     * is there, which the test graph's disabled one never shows.
+     */
+    static void initialize(StartupMode mode, SecretSealer sealer) {
+        Objects.requireNonNull(mode, "mode");
+        Objects.requireNonNull(sealer, "sealer");
         SingBoxInstaller installer = new SingBoxInstaller();
         register(SingBoxInstaller.class, installer);
 
@@ -102,11 +117,6 @@ public class ServiceLocator {
         register(SingBoxEngine.class,
                 new SingBoxEngine(existing.orElse(null), CoreRecord.inDataDir()));
 
-        // The test graph seals nothing: a headless UI test that adds a server
-        // used to write through the developer's login Keychain (CLAUDE.md:
-        // a test never touches the OS keychain).
-        SecretSealer sealer = mode == StartupMode.TEST
-                ? SecretSealers.disabled() : SecretSealers.forCurrentPlatform();
         // Registered too, for Settings to say when the box is not in effect.
         register(SecretSealer.class, sealer);
         ConfigStore configStore = new ConfigStore(PlatformPaths.current().dataDir(), sealer);
