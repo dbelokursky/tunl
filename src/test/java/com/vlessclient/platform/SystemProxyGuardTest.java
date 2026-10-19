@@ -76,6 +76,47 @@ class SystemProxyGuardTest {
             assertThat(reg.calls).noneMatch(cmd -> cmd.contains("add"));
         }
 
+        /**
+         * The value was searched for "127.0.0.1:1081" as text, which a proxy
+         * another tool set on 127.0.0.1:10810 also holds; for a user on port
+         * 1080, so does v2rayN's usual 127.0.0.1:10808. The guard runs after
+         * every core exit and at startup, and switched that tool's working
+         * proxy off.
+         */
+        @Test
+        void leavesAProxyOnANeighbouringPortAlone() {
+            for (String[] neighbour : new String[][] {{"127.0.0.1:10810", "1081"},
+                    {"127.0.0.1:10808", "1080"}, {"http://127.0.0.1:10819", "1081"},
+                    {"http=127.0.0.1:10810;https=127.0.0.1:10810", "1081"}}) {
+                FakeRunner reg = registry(ENABLED_ON,
+                        "    ProxyServer    REG_SZ    " + neighbour[0]);
+
+                new WindowsSystemProxyGuard(reg)
+                        .clearIfPointsAt("127.0.0.1", Integer.parseInt(neighbour[1]));
+
+                assertThat(reg.calls).as("a proxy on %s, ours on port %s",
+                        neighbour[0], neighbour[1]).noneMatch(cmd -> cmd.contains("add"));
+            }
+        }
+
+        /**
+         * What sing-box itself writes, http:// and all, and the per-protocol
+         * lists other tools write, still count as ours.
+         */
+        @Test
+        void disablesEachFormThatNamesOurInbound() {
+            for (String ours : new String[] {"http://127.0.0.1:1081", "127.0.0.1:1081",
+                    "http=127.0.0.1:1081;https=127.0.0.1:1081",
+                    "http=127.0.0.1:1081;https=127.0.0.1:1081;socks=127.0.0.1:1081",
+                    "HTTP://127.0.0.1:1081/"}) {
+                FakeRunner reg = registry(ENABLED_ON, "    ProxyServer    REG_SZ    " + ours);
+
+                new WindowsSystemProxyGuard(reg).clearIfPointsAt("127.0.0.1", 1081);
+
+                assertThat(reg.calls.getLast()).as(ours).containsSequence("reg", "add");
+            }
+        }
+
         @Test
         void doesNothingWhenProxyAlreadyDisabled() {
             FakeRunner reg = registry("    ProxyEnable    REG_DWORD    0x0", SERVER_OURS);

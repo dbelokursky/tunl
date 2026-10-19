@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -273,12 +274,12 @@ public final class MacTunLauncher implements TunLauncher {
     }
 
     /**
-     * Runs {@code start} in the background and tears it down when the core
-     * exits, the stop file appears, or the app's pid is gone, checking every
-     * 0.3 s. Only for a wrapper that runs as root with no stdin from the app;
-     * see {@link StdinWatch} for the others. The trap is set before
-     * the core starts, so no signal can land between the two and leave the
-     * core orphaned.
+     * Runs {@code start}, a simple command, in the background and tears it
+     * down when the core exits, the stop file appears, or the app's pid is
+     * gone, checking every 0.3 s. Only for a wrapper that runs as root with no
+     * stdin from the app; see {@link StdinWatch} for the others. The trap is
+     * set before the core starts, so no signal can land between the two and
+     * leave the core orphaned.
      */
     private static String watched(String start, Path stopSignalFile) {
         long parentPid = ProcessHandle.current().pid();
@@ -291,18 +292,29 @@ public final class MacTunLauncher implements TunLauncher {
         // every connect. bash then trapped the signals with an action cut
         // short before its exit, and dash refused the trap, so a SIGTERM
         // killed the shell with the root core still running.
-        return String.format(
+        // Locale.ROOT: %d wrote the pid in the digits of the default format
+        // locale, and under ar-SA, fa-IR and the like the watch read
+        // "kill -0 ١٢٣٤٥", which no shell takes for a pid: the core was
+        // stopped right after the password dialog, on every connect.
+        // The core starts in a subshell that sets TERM back to its default
+        // and looks at the stop file and the app once more, for a stop that
+        // came while the password dialog was up: its SIGTERM reached the
+        // background child before the exec, and a dash child, which still
+        // had the wrapper's TERM trap, lost it there and left the root core
+        // running with nothing watching it. See LinuxTunLauncher's wrapper.
+        return String.format(Locale.ROOT,
                 "SBSTOP=%s; "
                         + StdinWatch.SIGNAL_TRAP + "rm -f \"$SBSTOP\"; exit 143' INT TERM; "
                         + StdinWatch.EXIT_TRAP
-                        + "%s & SBPID=$!; "
+                        + "( trap - EXIT TERM; [ -f \"$SBSTOP\" ] && exit 0; "
+                        + "kill -0 %d 2>/dev/null || exit 0; exec %s ) & SBPID=$!; "
                         + "while kill -0 $SBPID 2>/dev/null "
                         + "&& kill -0 %d 2>/dev/null "
                         + "&& [ ! -f \"$SBSTOP\" ]; do sleep 0.3; done; "
                         + "kill $SBPID 2>/dev/null; "
                         + "wait $SBPID 2>/dev/null; RC=$?; "
                         + "rm -f \"$SBSTOP\"; exit $RC",
-                stopPath, start, parentPid);
+                stopPath, parentPid, start, parentPid);
     }
 
     /**

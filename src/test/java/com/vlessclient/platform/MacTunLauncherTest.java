@@ -1,6 +1,7 @@
 package com.vlessclient.platform;
 
 import com.vlessclient.testing.Await;
+import com.vlessclient.testing.FormatLocale;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -178,6 +179,64 @@ class MacTunLauncherTest {
         assertThat(Files.readString(output, StandardCharsets.UTF_8))
                 .as("what the shell said about its trap").doesNotContain("trap");
         assertThat(sh.exitValue()).as("the trap's own exit").isEqualTo(143);
+    }
+
+    /**
+     * The osascript fallback's watch got the app's pid through String.format's
+     * %d as well: under a format locale that writes digits of its own (ar-SA,
+     * fa-IR, bn-BD, ...) the root wrapper read "kill -0 ١٢٣٤٥" and its loop
+     * ended on the first pass. Under bash, macOS's /bin/sh, the core it had
+     * just started, right after the password dialog, was stopped at once;
+     * under dash it mostly ran on with no watch, deaf to the stop file.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"/bin/sh", "/bin/bash", "/bin/dash"})
+    void theOsascriptWrapperKeepsItsWatchUnderALocaleWithDigitsOfItsOwn(String shell,
+            @TempDir Path dir) throws Exception {
+        assumeTrue(Files.isExecutable(Path.of(shell)), shell + " is not installed");
+        Path core = Files.writeString(dir.resolve("core.sh"), "#!/bin/sh\nexec sleep 60\n");
+        core.toFile().setExecutable(true, true);
+        Path stop = dir.resolve("stop");
+        String wrapper = FormatLocale.in("ar-SA",
+                () -> MacTunLauncher.osascriptWrapperCommand(core, dir.resolve("c.json"), stop));
+
+        Process sh = new ProcessBuilder(shell, "-c", wrapper).redirectErrorStream(true).start();
+        spawned.add(sh.toHandle());
+
+        assertThat(sh.waitFor(1500, TimeUnit.MILLISECONDS))
+                .as("the wrapper ended its core on its own, with no stop asked for")
+                .isFalse();
+        Files.createFile(stop);   // what SingBoxEngine.signalStop does
+        assertThat(sh.waitFor(5, TimeUnit.SECONDS)).as("the wrapper heeds the stop file").isTrue();
+        assertThat(wrapper).contains("kill -0 " + ProcessHandle.current().pid() + " ");
+    }
+
+    /**
+     * A stop that came before the root wrapper started, while the password
+     * dialog was up: the loop ended on its first pass and its SIGTERM reached
+     * the core's background child before the exec. A dash child still had
+     * the wrapper's TERM trap, which lost the signal at the exec, and the root
+     * core ran on with nothing watching it. macOS's /bin/sh can be dash.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"/bin/sh", "/bin/bash", "/bin/dash"})
+    void aStopThatCameBeforeTheOsascriptWrapperStartedLeavesNoCore(String shell,
+            @TempDir Path dir) throws Exception {
+        assumeTrue(Files.isExecutable(Path.of(shell)), shell + " is not installed");
+        Path started = dir.resolve("started");
+        Path core = Files.writeString(dir.resolve("core.sh"),
+                "#!/bin/sh\n: > '" + started + "'\nexec sleep 60\n");
+        core.toFile().setExecutable(true, true);
+        for (int run = 0; run < 10; run++) {
+            Path stop = Files.createFile(dir.resolve("stop-" + run));
+            Process sh = new ProcessBuilder(shell, "-c", MacTunLauncher.osascriptWrapperCommand(
+                    core, dir.resolve("c.json"), stop)).redirectErrorStream(true).start();
+            spawned.add(sh.toHandle());
+
+            assertThat(sh.waitFor(3, TimeUnit.SECONDS))
+                    .as("run %d: the wrapper ends on a stop that came first", run).isTrue();
+        }
+        assertThat(started).as("a core whose stop came first").doesNotExist();
     }
 
     @Test

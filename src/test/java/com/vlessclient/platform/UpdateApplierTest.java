@@ -1,5 +1,6 @@
 package com.vlessclient.platform;
 
+import com.vlessclient.testing.FormatLocale;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -173,6 +174,24 @@ class UpdateApplierTest {
 
         assertThat(script).contains("-ArgumentList ('/i \"{0}\" /qb /norestart' -f $msi)");
         assertThat(script).doesNotContain("'/i', $msi");
+    }
+
+    /**
+     * String.formatted wrote the pid in the default format locale's digits,
+     * and a Windows "Persian (Iran)", "Arabic (Saudi Arabia)" or "Bangla"
+     * regional format makes that "$waitFor = ۴۲۴۲". PowerShell read it as a
+     * command named ۴۲۴۲, $waitFor stayed empty, the wait and the
+     * still-running check both failed on it, and msiexec started on the app
+     * it replaces before that app had exited.
+     */
+    @Test
+    void windowsRelayWritesThePidInDigitsPowerShellReads() {
+        String script = FormatLocale.in("fa-IR",
+                () -> WindowsUpdateApplier.relayScript(4242,
+                        Path.of("C:\\Users\\Dev User\\AppData\\Local\\Tunl\\update\\tunl.msi"),
+                        Path.of("C:\\Users\\Dev User\\AppData\\Local\\Tunl\\Tunl.exe")));
+
+        assertThat(script).contains("$waitFor = 4242\n");
     }
 
     // -- Linux: deliberately does nothing --
