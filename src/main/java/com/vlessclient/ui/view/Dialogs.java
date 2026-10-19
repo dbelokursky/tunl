@@ -53,6 +53,9 @@ public final class Dialogs {
     private static void dressFrame(Scene scene) {
         ServiceLocator.find(ThemeManager.class).ifPresent(themes ->
                 scene.getPreferences().setColorScheme(themes.currentColorScheme()));
+        // The owner lends its stylesheets, not its root's classes: a rule
+        // keyed on the OS's class reached no dialog.
+        OsStyleClass.applyTo(scene.getRoot());
     }
 
     /**

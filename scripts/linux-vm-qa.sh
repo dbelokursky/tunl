@@ -55,9 +55,11 @@ rm -rf "$WORK" "$DATA"
 mkdir -p "$OUT"
 
 echo "=== provision ==="
+# unzip: without it ./mvnw fetches Maven as a .tar.gz and checks that against
+# the .zip digest in maven-wrapper.properties, so the build fails at once.
 sudo apt-get update -q >/dev/null
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
-  wget apt-transport-https gpg git maven xvfb xauth imagemagick x11-apps x11-utils \
+  wget unzip apt-transport-https gpg git maven xvfb xauth imagemagick x11-apps x11-utils \
   trayer dbus-x11 gsettings-desktop-schemas libglib2.0-bin procps psmisc \
   libgtk-3-0t64 libglib2.0-0t64 libxtst6 libxi6 libxrender1 libxrandr2 \
   libfreetype6 fontconfig libasound2t64 libgl1 libpango-1.0-0 libcairo2 \

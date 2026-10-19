@@ -934,6 +934,46 @@ class DefaultAppControlServiceTest {
     }
 
     /**
+     * Over DNS-over-TLS and DNS-over-QUIC a private resolver keeps the account
+     * in the host itself, as a label under the provider's domain, and
+     * Cloudflare's gateway does over DNS-over-HTTPS too. Only the path was
+     * cut, so get_settings gave every agent the account, changes off or on.
+     */
+    @Test
+    void getSettings_keepsTheAccountInAResolversHostFromAgents() {
+        for (String address : List.of("tls://ab12cd.dns.nextdns.io",
+                "quic://ab12cd.d.adguard-dns.com", "tls://ab12cd.d.adguard-dns.com:853",
+                "https://ab12cd.cloudflare-gateway.com/dns-query", "h3://dns.nextdns.io/ab12cd",
+                "ab12cd.dns.nextdns.io", "1.1.1.1, tls://ab12cd.dns.nextdns.io")) {
+            store.getSettings().setProxyDns(address);
+            store.getSettings().setDirectDns(address);
+
+            SettingsInfo info = service.getSettings();
+
+            assertThat(List.of(info.proxyDns(), info.directDns())).as("for %s", address)
+                    .allSatisfy(shown -> assertThat(shown).doesNotContain("ab12cd"));
+        }
+        store.getSettings().setProxyDns("tls://ab12cd.dns.nextdns.io:853");
+        store.getSettings().setDirectDns("ab12cd.dns.nextdns.io");
+        SettingsInfo info = service.getSettings();
+        assertThat(info.proxyDns()).as("the scheme, the provider and the port stay")
+                .startsWith("tls://").contains("nextdns.io:853");
+        assertThat(info.directDns()).as("a bare name, read as plain DNS").endsWith(".nextdns.io");
+    }
+
+    /** A resolver's own name holds no account and stays: an agent can still say which it is. */
+    @Test
+    void getSettings_showsAPublicResolversName() {
+        store.getSettings().setProxyDns("https://dns.google/dns-query");
+        store.getSettings().setDirectDns("tls://9.9.9.9");
+
+        SettingsInfo info = service.getSettings();
+
+        assertThat(info.proxyDns()).startsWith("https://dns.google");
+        assertThat(info.directDns()).startsWith("tls://9.9.9.9");
+    }
+
+    /**
      * A private DNS-over-HTTPS resolver keeps the account in its path, which
      * the diagnostics bundle redacts; get_settings, which every agent can call
      * with changes off, returned it whole.
@@ -945,8 +985,9 @@ class DefaultAppControlServiceTest {
 
         SettingsInfo info = service.getSettings();
 
-        assertThat(info.proxyDns()).startsWith("https://dns.nextdns.io").doesNotContain("ab12cd");
-        assertThat(info.directDns()).startsWith("https://d.adguard-dns.com")
+        assertThat(info.proxyDns()).startsWith("https://").contains("nextdns.io")
+                .doesNotContain("ab12cd");
+        assertThat(info.directDns()).startsWith("https://").contains("adguard-dns.com")
                 .doesNotContain("SECRET-TOKEN");
     }
 

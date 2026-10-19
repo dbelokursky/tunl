@@ -3,7 +3,9 @@ package com.vlessclient.service;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import tools.jackson.core.JacksonException;
+import tools.jackson.core.TokenStreamLocation;
 import tools.jackson.core.exc.StreamReadException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -80,7 +82,11 @@ final class StoredJson {
             } catch (IOException e) {
                 last = e;
             } catch (JacksonException e) {
-                return new Damaged(e);
+                // Where it broke, not Jackson's message, which quotes the
+                // token it could not read: in a servers.json whose credential
+                // lost its quotes, that token is the credential, and the
+                // stores log the cause.
+                return new Damaged(new StreamReadException("not valid JSON (" + where(e) + ")"));
             }
             if (attempt < ATTEMPTS && !pause()) {
                 break;
@@ -110,6 +116,43 @@ final class StoredJson {
             Thread.currentThread().interrupt();
             return false;
         }
+    }
+
+    /**
+     * Where a parse or a mapping failed, for the log: the exception's kind,
+     * and the line and column or the field of what could not be read, but
+     * never its message. Jackson's message quotes the token or the value it
+     * could not read, and in a file edited by hand that is a credential which
+     * lost its quotes, or one pasted into a field of another type.
+     *
+     * @param failure what Jackson threw
+     * @return a description holding nothing of the content
+     */
+    static String where(JacksonException failure) {
+        StringBuilder where = new StringBuilder(failure.getClass().getSimpleName());
+        TokenStreamLocation location = failure.getLocation();
+        if (location != null && location.getLineNr() > 0) {
+            where.append(" at line ").append(location.getLineNr())
+                    .append(", column ").append(location.getColumnNr());
+        }
+        String field = field(failure);
+        if (field != null) {
+            where.append(" in field ").append(field);
+        }
+        return where.toString();
+    }
+
+    /**
+     * The field a mapping failed in, as the entry's class names it, or null
+     * when the entry itself is of the wrong kind. Only the first of the path:
+     * further in, a map's keys come from the file.
+     *
+     * @param failure what Jackson threw
+     * @return the entry's field, or null
+     */
+    static String field(JacksonException failure) {
+        List<JacksonException.Reference> path = failure.getPath();
+        return path.isEmpty() ? null : path.getFirst().getPropertyName();
     }
 
     /**

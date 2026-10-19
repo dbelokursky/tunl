@@ -132,16 +132,54 @@ public final class LinuxAutostart implements Autostart {
     /** Test seam: same as {@link #execLine()} with an explicit process command. */
     static String execLine(Optional<String> processCommand) {
         if (processCommand.isPresent() && !isJavaExecutable(processCommand.get())) {
-            return quoteExecArg(processCommand.get());
+            return execLine(List.of(processCommand.get()));
         }
+        return execLine(JvmLaunchCommand.current());
+    }
+
+    /**
+     * Test seam: the Exec value that runs {@code command}.
+     *
+     * <p>A program whose path holds a %, a quote, a backslash or a control
+     * character runs through {@code env}. GLib, and systemd's autostart
+     * generator, look the program up before they expand {@code %%}, so a
+     * path written the spec's way was not found and the entry did nothing.
+     * systemd-managed GNOME and Plasma sessions start autostart entries as
+     * the units that generator makes of them, and systemd refuses a unit
+     * whose program path holds a quote, a backslash or a control character
+     * ("Executable name contains special characters"): a launcher under
+     * {@code say "hi"}, {@code it's} or a name with a tab did not start at
+     * login there, while GLib ran the same entry. As {@code env}'s argument
+     * the path is read like any other.</p>
+     *
+     * <p>Under that generator a $, a ` or a backslash anywhere in the line
+     * still cannot work: it writes $ and ` into the unit as \$ and \`, which
+     * its own unit parser keeps as a backslash and the character, and it
+     * unescapes every argument once more, which a backslash does not
+     * survive. No Exec value that GLib also reads gets past that.</p>
+     */
+    static String execLine(List<String> command) {
         StringBuilder exec = new StringBuilder();
-        for (String arg : JvmLaunchCommand.current()) {
+        if (command.getFirst().chars().anyMatch(LinuxAutostart::keepsTheProgramFromRunning)) {
+            exec.append("env");
+        }
+        for (String arg : command) {
             if (!exec.isEmpty()) {
                 exec.append(' ');
             }
-            exec.append(quoteExecArg(arg));
+            exec.append(execArg(arg));
         }
         return exec.toString();
+    }
+
+    /**
+     * A character that a program path cannot hold where GLib or systemd
+     * reads it as the program, rather than as an argument: a % they look up
+     * before expanding it, and what systemd's check of a program's name
+     * refuses (a quote, a backslash, a control character).
+     */
+    private static boolean keepsTheProgramFromRunning(int c) {
+        return c == '%' || c == '"' || c == '\'' || c == '\\' || Character.isISOControl(c);
     }
 
     private static boolean isJavaExecutable(String command) {
@@ -151,18 +189,32 @@ public final class LinuxAutostart implements Autostart {
     }
 
     /**
-     * Desktop-entry Exec quoting: arguments with reserved characters go in
-     * double quotes with the inner specials backslash-escaped.
+     * One argument of an Exec value, written for the three passes the Desktop
+     * Entry spec reads it in, the last pass first: a % is doubled, as any
+     * other % starts a field code; an argument with a reserved character goes
+     * in double quotes, with {@code " ` $ \} backslash-escaped; and the value
+     * as a whole escapes a backslash, newline, tab or carriage return the way
+     * every string in a key file does.
+     *
+     * <p>The line was written for the quoting pass alone. GLib reads the
+     * string escapes first and refuses {@code \$}, {@code \`} and {@code \"},
+     * so for a path holding $, ` or " GNOME found no Exec at all, and Tunl did
+     * not start at login while the box in Settings stayed ticked. A % was
+     * read as a field code: "100%done" became "100one".</p>
      */
-    private static String quoteExecArg(String arg) {
-        if (!arg.isEmpty() && arg.chars().noneMatch(c ->
+    private static String execArg(String arg) {
+        String text = arg.replace("%", "%%");
+        if (text.isEmpty() || text.chars().anyMatch(c ->
                 Character.isWhitespace(c) || "\"'\\><~|&;$*?#()`".indexOf(c) >= 0)) {
-            return arg;
+            text = '"' + text.replace("\\", "\\\\")
+                    .replace("\"", "\\\"")
+                    .replace("`", "\\`")
+                    .replace("$", "\\$") + '"';
         }
-        return '"' + arg.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("`", "\\`")
-                .replace("$", "\\$") + '"';
+        return text.replace("\\", "\\\\")
+                .replace("\n", "\\n")
+                .replace("\t", "\\t")
+                .replace("\r", "\\r");
     }
 
     /**

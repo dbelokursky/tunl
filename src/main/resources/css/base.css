@@ -628,9 +628,9 @@
 }
 
 /* Menlo on a Mac, the face the monospace rules were written for: JavaFX draws
-   monospace in Courier New there. MainViewController puts .os-mac on the
-   window's root on a Mac. Every rule set in monospace has its line here
-   (StylesheetDeclarationsTest). */
+   monospace in Courier New there. OsStyleClass puts .os-mac on the root of
+   every scene the app builds on a Mac, the dialogs' included. Every rule set
+   in monospace has its line here (StylesheetDeclarationsTest). */
 .os-mac .code-area,
 .os-mac .log-list-view .list-cell,
 .os-mac .singbox-missing-banner .banner-command {

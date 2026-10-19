@@ -106,6 +106,109 @@ class TunnelRecoveryServiceTest {
         assertThat(scheduler.jobs).hasSize(1);
     }
 
+    /**
+     * The health card's "reconnecting in 10 s [Cancel]" for failed checks,
+     * cancelled while the core runs on. The Cancel withdrew the user's
+     * request, so the core ran on for a tunnel nobody wanted: a pick in the
+     * list, the tray or by an agent was never applied to it, and a crash of
+     * it was never restarted. Only the restart goes now, and failed checks
+     * restart nothing more until the user asks for something.
+     */
+    @Test
+    void theCountdownsCancelUnderARunningCoreCallsOffTheRestartAndKeepsTheRequest() {
+        recovery.onConnectionState(ConnectionState.CONNECTED);
+        recovery.onHealth(TunnelHealth.BROKEN);
+        assertThat(scheduler.jobs).hasSize(1);
+
+        recovery.cancelCountdown();
+
+        assertThat(scheduler.jobs.getFirst().isCancelled()).as("the restart counted down to")
+                .isTrue();
+        assertThat(recovery.isTunnelWanted()).as("the user's request").isTrue();
+        recovery.onHealth(TunnelHealth.HEALTHY);
+        recovery.onHealth(TunnelHealth.BROKEN);
+        assertThat(scheduler.jobs).as("restarts for a failed check after the Cancel").hasSize(1);
+
+        recovery.onConnectionState(ConnectionState.ERROR);
+        assertThat(scheduler.jobs).as("a crash of the core, restarted").hasSize(2);
+        scheduler.jobs.get(1).run();
+        assertThat(starts).hasValue(1);
+    }
+
+    /** What the countdown's Cancel held off ends with the user's next request. */
+    @Test
+    void theNextRequestEndsWhatTheCountdownsCancelHeldOff() {
+        recovery.onConnectionState(ConnectionState.CONNECTED);
+        recovery.onHealth(TunnelHealth.BROKEN);
+        recovery.cancelCountdown();
+
+        recovery.connectionRequested();
+        recovery.onConnectionState(ConnectionState.CONNECTED);
+        recovery.onHealth(TunnelHealth.BROKEN);
+
+        assertThat(scheduler.jobs).hasSize(2);
+        assertThat(scheduler.jobs.get(1).seconds).as("the backoff's first step").isEqualTo(10);
+    }
+
+    /**
+     * With no core running, a crashed one counting down to its restart, the
+     * Cancel is the user giving up the tunnel, and withdraws the request as a
+     * Disconnect does.
+     */
+    @Test
+    void theCountdownsCancelOfACrashedCoresRestartWithdrawsTheRequest() {
+        recovery.onConnectionState(ConnectionState.CONNECTED);
+        recovery.onConnectionState(ConnectionState.ERROR);
+        assertThat(scheduler.jobs).hasSize(1);
+
+        recovery.cancelCountdown();
+
+        assertThat(scheduler.jobs.getFirst().isCancelled()).isTrue();
+        assertThat(recovery.isTunnelWanted()).isFalse();
+        recovery.onConnectionState(ConnectionState.ERROR);
+        assertThat(scheduler.jobs).hasSize(1);
+    }
+
+    /**
+     * A pick that moves the tunnel to another server starts recovery over
+     * under the user's request: the restart the old server's checks asked
+     * for, and its backoff, were that server's, and one already under way
+     * restarts nothing once it gets to run.
+     */
+    @Test
+    void aPickThatMovesTheTunnelStartsRecoveryOver() {
+        long request = recovery.currentRequest();
+        recovery.onConnectionState(ConnectionState.CONNECTED);
+        recovery.onHealth(TunnelHealth.BROKEN);
+        scheduler.jobs.getFirst().run();
+        assertThat(scheduler.jobs).extracting(job -> job.seconds).containsExactly(10L, 20L);
+
+        long moved = recovery.startOver(request);
+
+        assertThat(moved).as("the request recovery runs under").isPositive()
+                .isNotEqualTo(request);
+        assertThat(recovery.isWanted(moved)).isTrue();
+        assertThat(scheduler.jobs.get(1).isCancelled()).as("the old server's restart").isTrue();
+        scheduler.jobs.get(1).raw.run();
+        assertThat(starts).as("restarts, one for the old server").hasValue(1);
+        recovery.keptUp(moved);
+        assertThat(scheduler.jobs.get(2).seconds).as("the backoff's first step").isEqualTo(10);
+    }
+
+    /** A request the user withdrew is not asked for again by a pick. */
+    @Test
+    void aPickStartsNothingOverForAWithdrawnRequest() {
+        long request = recovery.currentRequest();
+        recovery.cancel();
+
+        assertThat(recovery.startOver(request)).isEqualTo(-1);
+        assertThat(recovery.isTunnelWanted()).isFalse();
+        long superseded = recovery.connectionRequested();
+        recovery.connectionRequested();
+        assertThat(recovery.startOver(superseded)).as("a request a newer one replaced")
+                .isEqualTo(-1);
+    }
+
     @Test
     void staleTimerCannotCancelANewerUserRequest() {
         recovery.onConnectionState(ConnectionState.ERROR);

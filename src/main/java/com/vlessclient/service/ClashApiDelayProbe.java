@@ -108,8 +108,11 @@ public class ClashApiDelayProbe implements AutoCloseable {
             return new Answer.NoAnswer();
         }
         try {
+            // A path segment, a space as %20: URLEncoder writes a form, whose
+            // "+" for a space a path keeps as a plus, and the core answered a
+            // tag with a space, a server whose id has one, with 404.
             String url = "http://127.0.0.1:" + port + "/proxies/"
-                    + URLEncoder.encode(tag, StandardCharsets.UTF_8)
+                    + URLEncoder.encode(tag, StandardCharsets.UTF_8).replace("+", "%20")
                     + "/delay?timeout=" + PROBE_TIMEOUT_MS
                     + "&url=" + URLEncoder.encode(PROBE_URL, StandardCharsets.UTF_8);
 

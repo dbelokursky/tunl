@@ -242,8 +242,15 @@ class SingBoxRealBinarySmokeTest {
                         + "&serviceName=grpc-svc&host=example.com#vless-grpc",
                 "vless://" + TEST_UUID + "@example.com:443?type=http&" + tls
                         + "&host=example.com&path=%2Fh2#vless-h2",
+                "vless://" + TEST_UUID + "@example.com:443?type=http&" + tls
+                        + "&host=a.example.com%2Cb.example.com&path=%2Fh2#vless-h2-hosts",
                 "vless://" + TEST_UUID + "@example.com:443?type=httpupgrade&" + tls
                         + "&host=example.com&path=%2Fup#vless-httpupgrade",
+                // Xray's early data in the path, which the core is sent apart.
+                "vless://" + TEST_UUID + "@cdn.example.com:443?type=ws&" + tls
+                        + "&host=example.com&path=%2Fws%3Fed%3D2048#vless-ws-early-data",
+                "vless://" + TEST_UUID + "@example.com:443?type=httpupgrade&" + tls
+                        + "&host=example.com&path=%2Fup%3Fed%3D2048#vless-httpupgrade-early-data",
                 "vless://" + TEST_UUID + "@example.com:443?type=quic&" + tls
                         + "&quicSecurity=none&key=&headerType=none#vless-quic",
                 "trojan://smoke-password@example.com:443?type=ws&" + tls
@@ -297,7 +304,15 @@ class SingBoxRealBinarySmokeTest {
                 with(shadowsocksServer("simple-obfs", "aes-256-gcm"), server -> {
                     server.setPlugin("simple-obfs");
                     server.setPluginOpts("obfs=http;obfs-host=www.bing.com");
-                }));
+                }),
+                // The legacy cipher the core's documentation names and its check refuses.
+                with(serverFor(Protocol.VMESS), server -> {
+                    server.setId("vmess-aes-128-ctr");
+                    server.setName("vmess-aes-128-ctr");
+                    server.setEncryption("aes-128-ctr");
+                }),
+                with(realityServer("flow-with-a-space", "chrome", realityKey),
+                        server -> server.setFlow("xtls-rprx-vision ")));
 
         for (ProxyMode mode : ProxyMode.values()) {
             AppSettings settings = new AppSettings();
@@ -417,7 +432,62 @@ class SingBoxRealBinarySmokeTest {
                 with(hysteria2Server("hysteria2-obfs-unknown"), server -> {
                     server.setEncryption("foo");
                     server.setFlow("obfs-password");
-                }));
+                }),
+                with(quicServer("vless-quic-reality", true), server -> withReality(server, realityKey)),
+                with(quicServer("trojan-quic-reality", true), server -> {
+                    server.setProtocol(Protocol.TROJAN);
+                    withReality(server, realityKey);
+                }),
+                with(hysteria2Server("hysteria2-reality"), server -> withReality(server, realityKey)),
+                with(shadowsocksServer("ss2022-chacha-one-key", "2022-blake3-chacha20-poly1305"),
+                        server -> server.setUuid(key32)),
+                with(shadowsocksServer("ss2022-chacha-server-key", "2022-blake3-chacha20-poly1305"),
+                        server -> server.setUuid(key32 + ":" + key32)),
+                withPlugin("v2ray-plugin-mux-true", "v2ray-plugin", "mux=true;host=example.com"),
+                withPlugin("v2ray-plugin-mux-1", "v2ray-plugin", "mux=1;host=example.com"),
+                withPlugin("v2ray-plugin-mux-flag", "v2ray-plugin", "mux;host=example.com"),
+                withPlugin("v2ray-plugin-mux-first", "v2ray-plugin", "mux=1;mux=true"),
+                withPlugin("v2ray-plugin-mux-quic", "v2ray-plugin",
+                        "mode=quic;tls;mux=true;host=example.com"),
+                // The plugin options as the core's own parser reads them.
+                withPlugin("v2ray-plugin-path-percent", "v2ray-plugin",
+                        "path=/ws%;host=cdn.example.com"),
+                withPlugin("v2ray-plugin-path-escaped", "v2ray-plugin",
+                        "path=/ws%25;host=cdn.example.com"),
+                withPlugin("v2ray-plugin-path-quic", "v2ray-plugin",
+                        "mode=quic;tls;path=/ws%;host=example.com"),
+                withPlugin("obfs-empty-key", "obfs-local", "obfs=http;;obfs-host=www.bing.com"),
+                withPlugin("v2ray-plugin-empty-key", "v2ray-plugin",
+                        "mode=websocket;;host=cdn.example.com"),
+                withPlugin("obfs-leading-semicolon", "obfs-local", ";obfs=http"),
+                withPlugin("v2ray-plugin-final-escape", "v2ray-plugin", "host=example.com\\"),
+                withPlugin("v2ray-plugin-mux-escaped", "v2ray-plugin", "mux=\\1;host=example.com"),
+                withPlugin("obfs-escaped-mode", "obfs-local", "obfs=ht\\tp;obfs-host=www.bing.com"),
+                withPlugin("obfs-trailing-semicolon", "obfs-local",
+                        "obfs=http;obfs-host=www.bing.com;"),
+                pathServer("ws-path-percent", com.vlessclient.model.TransportType.WEBSOCKET, "/ws%"),
+                pathServer("h2-path-percent", com.vlessclient.model.TransportType.HTTP2, "/h2%zz"),
+                pathServer("httpupgrade-path-percent",
+                        com.vlessclient.model.TransportType.HTTPUPGRADE, "/up%2"),
+                pathServer("ws-path-escaped", com.vlessclient.model.TransportType.WEBSOCKET,
+                        "/ws%20x"),
+                pathServer("ws-path-early-data-percent",
+                        com.vlessclient.model.TransportType.WEBSOCKET, "/ws?ed=50%"),
+                // A servers.json written by hand can give a transport no type.
+                with(pathServer("transport-type-null",
+                        com.vlessclient.model.TransportType.WEBSOCKET, "/ws%"),
+                        server -> server.getTransport().setType(null)),
+                // The local address as a .conf or the form gives it.
+                wireguardServer("wg-address-prefix-too-long", "10.0.0.2/33"),
+                wireguardServer("wg-address-not-an-ip", "not-an-ip"),
+                wireguardServer("wg-address-semicolon", "10.0.0.2/32;fd00::2/128"),
+                wireguardServer("wg-address-leading-zero", "010.0.0.2/32"),
+                wireguardServer("wg-address-five-digit-group", "02001:db8::2/128"),
+                wireguardServer("wg-address-zone", "fe80::1%eth0/64"),
+                wireguardServer("wg-address-spaces", "10.0.0.2/32 fd00::2/128"),
+                wireguardServer("wg-address-commas", "10.0.0.2/32, fd00::2/128"),
+                wireguardServer("wg-address-mapped", "::ffff:10.0.0.9/128"),
+                wireguardServer("wg-address-embedded-v4", "64:ff9b::10.0.0.9/128"));
 
         for (ServerConfig server : servers) {
             boolean coreAccepts = checkPasses(generator.generate(server, new AppSettings()));
@@ -527,6 +597,26 @@ class SingBoxRealBinarySmokeTest {
                                      java.util.function.Consumer<ServerConfig> change) {
         change.accept(server);
         return server;
+    }
+
+    private static void withReality(ServerConfig server, String publicKey) {
+        server.getTls().setReality(true);
+        server.getTls().setRealityPublicKey(publicKey);
+        server.getTls().setRealityShortId("0123abcd");
+    }
+
+    private static ServerConfig pathServer(String name, com.vlessclient.model.TransportType type,
+                                           String path) {
+        return TestServers.server()
+                .id(name)
+                .name(name)
+                .protocol(Protocol.VLESS)
+                .address("203.0.113.14")
+                .port(443)
+                .uuid(TEST_UUID)
+                .tls("example.com")
+                .transport(type, path, "example.com")
+                .build();
     }
 
     private boolean checkPasses(String config) throws Exception {
@@ -910,6 +1000,205 @@ class SingBoxRealBinarySmokeTest {
             Files.deleteIfExists(serverConfig);
             Files.deleteIfExists(serverLog);
         }
+    }
+
+    /** A key pair for each side of the loopback WireGuard tunnel below. */
+    private static final String WG_CLIENT_PRIVATE_KEY =
+            "yAsvzGasgRVNEgeLKWg180ByMB7LlKAPpNON6mlz33g=";
+    private static final String WG_CLIENT_PUBLIC_KEY =
+            "RefnSxKudmcstcHyW1v5YskBdYq5Jb3llPigp7YjSTc=";
+    private static final String WG_SERVER_PRIVATE_KEY =
+            "uOMl/GnzItlyQsRrlhqhRj1G6Tt1W3NzHAYTlowV32I=";
+    private static final String WG_SERVER_PUBLIC_KEY =
+            "Jlis5v0ROUPH5A57OPn/oLF4Y+qntinc92Zfh/BOkhQ=";
+
+    /**
+     * A WireGuard peer on this machine, a local relay or obfuscator as
+     * udp2raw and wg-obfuscator setups have it. The route's
+     * auto_detect_interface bound the endpoint's socket to the default
+     * interface, a handshake sent from there to 127.0.0.1 never arrived, and
+     * the server carried nothing. Run on every system the core ships for:
+     * each binds a socket to an interface its own way. The target is on this
+     * machine's own address, not the loopback, which a WireGuard stack drops
+     * as martian.
+     */
+    @Test
+    void aWireguardPeerOnThisMachineCarriesTraffic() throws Exception {
+        carriesTrafficThroughAWireguardPeerAt("127.0.0.1", generator, "a peer on 127.0.0.1");
+    }
+
+    /**
+     * A peer the system reaches through another interface than the default
+     * route's, a second network card or a Docker or virtual machine bridge,
+     * is bound to that interface: by the name Java gives it on Linux and
+     * macOS, by the local address on Windows, where Java names interfaces its
+     * own way. A test machine has no second network to reach a peer over, so
+     * the peer here is this machine's own address, and the route to it is
+     * given as through the interface that holds it. What it asserts on each
+     * system is that the core starts with the binding as it is written there,
+     * finds the interface by that name, and carries traffic.
+     */
+    @Test
+    void aWireguardEndpointBoundToItsPeersInterfaceCarriesTraffic() throws Exception {
+        InetAddress own = ownAddress();
+        org.junit.jupiter.api.Assumptions.assumeTrue(own != null,
+                "this machine has no IPv4 address but the loopback");
+        String name = java.net.NetworkInterface.getByInetAddress(own).getName();
+        SingBoxConfigGenerator bound = SingBoxConfigGenerator.withRoutes(destination ->
+                java.util.Optional.of(new com.vlessclient.platform.InterfaceRoute.Route(name, own)));
+        ServerConfig peer = TestServers.server().id("wg-bound").name("wg-bound")
+                .protocol(Protocol.WIREGUARD).address(own.getHostAddress()).port(51820)
+                .uuid(WG_CLIENT_PRIVATE_KEY).encryption(WG_SERVER_PUBLIC_KEY)
+                .flow("10.13.0.2/32").build();
+        String endpoint = tools.jackson.databind.json.JsonMapper.builder().build()
+                .readTree(bound.generate(peer, new AppSettings())).path("endpoints").get(0)
+                .toString();
+        assertThat(endpoint).as("the endpoint, bound as written on this system")
+                .contains(com.vlessclient.platform.Platform.current().isWindows()
+                        ? "\"inet4_bind_address\":\"" + own.getHostAddress() + "\""
+                        : "\"bind_interface\":\"" + name + "\"");
+
+        carriesTrafficThroughAWireguardPeerAt(own.getHostAddress(), bound,
+                "a peer bound to " + name);
+    }
+
+    /**
+     * Runs a WireGuard server on this machine and checks, through a client
+     * core generated by {@code configs} for a peer at {@code peerAddress},
+     * that a site on this machine's own address answers.
+     */
+    private void carriesTrafficThroughAWireguardPeerAt(String peerAddress,
+                                                       SingBoxConfigGenerator configs,
+                                                       String what) throws Exception {
+        InetAddress own = ownAddress();
+        org.junit.jupiter.api.Assumptions.assumeTrue(own != null,
+                "this machine has no IPv4 address but the loopback");
+        HttpServer target = HttpServer.create(new InetSocketAddress(own, 0), 0);
+        target.createContext("/generate_204", exchange -> {
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        target.start();
+        int wgPort;
+        try (java.net.DatagramSocket udp = new java.net.DatagramSocket(0)) {
+            wgPort = udp.getLocalPort();
+        }
+        int serverControlPort = freePort();
+        Path serverConfig = Files.createTempFile("smoke-wg-server-", ".json");
+        Path serverLog = Files.createTempFile("smoke-wg-server-", ".log");
+        Files.writeString(serverConfig, """
+                {"log": {"level": "warn"},
+                 "endpoints": [{"type": "wireguard", "tag": "wg-in", "address": ["10.13.0.1/24"],
+                                "private_key": "%s", "listen_port": %d,
+                                "peers": [{"public_key": "%s", "allowed_ips": ["10.13.0.2/32"]}]}],
+                 "outbounds": [{"type": "direct", "tag": "direct"}],
+                 "route": {"final": "direct"},
+                 "experimental": {"clash_api": {"external_controller": "127.0.0.1:%d"}}}
+                """.formatted(WG_SERVER_PRIVATE_KEY, wgPort, WG_CLIENT_PUBLIC_KEY,
+                serverControlPort));
+        Process server = new ProcessBuilder(binary.toString(), "run", "-c", serverConfig.toString())
+                .redirectErrorStream(true)
+                .redirectOutput(serverLog.toFile())
+                .start();
+        ServerConfig peer = TestServers.server()
+                .id("wg-loopback")
+                .name("wg-loopback")
+                .protocol(Protocol.WIREGUARD)
+                .address(peerAddress)
+                .port(wgPort)
+                .uuid(WG_CLIENT_PRIVATE_KEY)
+                .encryption(WG_SERVER_PUBLIC_KEY)
+                .flow("10.13.0.2/32")
+                .build();
+        AppSettings settings = new AppSettings();
+        settings.setProxyMode(ProxyMode.SYSTEM_PROXY);
+        settings.setSystemProxyAutoConfig(false);
+        ServiceReachabilityChecker checker = new ServiceReachabilityChecker();
+        CoreRun run = null;
+        try {
+            awaitPort(serverControlPort, server, serverLog);
+            // With routing, as every connect has it: the route is where
+            // auto_detect_interface is set.
+            run = startOnFreshPorts(settings, s -> {
+                s.listenOn(s.getSocksPort(), s.getHttpPort(), s.getClashApiPort(), unusedPort());
+                return configs.generate(List.of(peer), peer, s, new RoutingConfig());
+            });
+            String url = "http://" + own.getHostAddress() + ":" + target.getAddress().getPort()
+                    + "/generate_204";
+
+            assertThat(checker.checkAll(List.of(new HealthCheckTarget("Site", url)),
+                            settings.listenProbePort()).get(60, TimeUnit.SECONDS))
+                    .as("through the tunnel to " + what)
+                    .extracting(ServiceReachabilityChecker.ProbeResult::detail)
+                    .containsExactly("HTTP 204");
+        } catch (Throwable e) {
+            throw new AssertionError(outputTail(serverLog)
+                    + (run == null ? "" : outputTail(run.logFile())), e);
+        } finally {
+            checker.shutdown();
+            if (run != null) {
+                stopCore(run.process());
+                Files.deleteIfExists(run.configFile());
+                Files.deleteIfExists(run.logFile());
+            }
+            stopCore(server);
+            target.stop(0);
+            Files.deleteIfExists(serverConfig);
+            Files.deleteIfExists(serverLog);
+        }
+    }
+
+    /**
+     * The delay probe names a server by its tag in the clash API's path, and
+     * a tag with a space, srv-Germany 1 for a server a restored backup named
+     * so, went form-encoded, srv-Germany+1: the core answered 404, and the
+     * latency fell back to a TCP connect. A server that carries nothing is
+     * reported as failed, which the core says only of a tag it found.
+     */
+    @Test
+    void theDelayProbeFindsAServerWhoseIdHoldsASpace() throws Exception {
+        int closed = freePort();
+        ServerConfig server = serverFor(Protocol.VLESS);
+        server.setId("Germany 1");
+        server.setName("Germany 1");
+        server.setAddress("127.0.0.1");
+        server.setPort(closed);
+        AppSettings settings = new AppSettings();
+        settings.setProxyMode(ProxyMode.SYSTEM_PROXY);
+        settings.setSystemProxyAutoConfig(false);
+        settings.setClashApiSecret("probe-smoke-secret");
+        CoreRun run = startOnFreshPorts(settings, s -> generator.generate(server, s));
+        try (HttpClient http = HttpClient.newHttpClient()) {
+            ClashApiDelayProbe.Answer answer = new ClashApiDelayProbe(http).measure(
+                    settings.getClashApiPort(), "probe-smoke-secret",
+                    com.vlessclient.service.outbound.OutboundTags.server(server));
+
+            assertThat(answer).as("the core's answer for %s",
+                            com.vlessclient.service.outbound.OutboundTags.server(server))
+                    .isInstanceOf(ClashApiDelayProbe.Answer.Failed.class);
+        } catch (Throwable e) {
+            throw new AssertionError(outputTail(run.logFile()), e);
+        } finally {
+            stopCore(run.process());
+            Files.deleteIfExists(run.configFile());
+            Files.deleteIfExists(run.logFile());
+        }
+    }
+
+    /** An IPv4 address of this machine's that is not the loopback, or null. */
+    private static InetAddress ownAddress() throws IOException {
+        for (var nic : java.util.Collections.list(java.net.NetworkInterface.getNetworkInterfaces())) {
+            if (!nic.isUp() || nic.isLoopback()) {
+                continue;
+            }
+            for (InetAddress address : java.util.Collections.list(nic.getInetAddresses())) {
+                if (address instanceof java.net.Inet4Address && !address.isLoopbackAddress()
+                        && !address.isLinkLocalAddress()) {
+                    return address;
+                }
+            }
+        }
+        return null;
     }
 
     /**

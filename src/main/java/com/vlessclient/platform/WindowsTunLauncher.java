@@ -28,19 +28,23 @@ import org.slf4j.LoggerFactory;
  *       disappears — so a crashed app never leaks a privileged core.</li>
  * </ol>
  *
- * <p><b>Nothing on disk is ever elevated.</b> Both commands travel as
+ * <p><b>No script is read from disk.</b> Both commands travel as
  * {@code -EncodedCommand} blobs — base64 of UTF-16LE, the encoding PowerShell
  * requires — rather than as {@code .ps1} files passed to {@code -File}. Writing
- * them to {@code java.io.tmpdir} and elevating them by path was a local
- * privilege escalation: that directory is writable by the very user we are
- * elevating away from, {@code RunAs} reads the file at elevation time, and the
- * UAC prompt holds that window open for as long as the user takes to click
- * Yes. Any code already running as the user could swap the wrapper — or the
- * outer script that builds the elevation request — and ride a prompt the user
- * fully expects into administrator. The script bodies are compile-time
- * constants in the jar and the per-connect values are bound by
- * {@link #wrapperCommand} and {@link #outerCommand}, so there is no file to
- * swap and no window to win.</p>
+ * them to {@code java.io.tmpdir} and elevating them by path let the scripts be
+ * swapped while the UAC prompt waited for a click. The script bodies are
+ * compile-time constants in the jar and the per-connect values are bound by
+ * {@link #wrapperCommand} and {@link #outerCommand}.</p>
+ *
+ * <p><b>What the elevated side still runs.</b> The core in
+ * {@code %APPDATA%\VlessClient\bin}, on the session config the app wrote:
+ * files the user can write, as the per-user install's jar, runtime and
+ * {@code Tunl.cfg} under {@code %LOCALAPPDATA%\Tunl} are too. Code already
+ * running as the user can therefore make this prompt run what it likes,
+ * through the core or through the app that builds the request. The prompt is
+ * the user's consent to TUN mode, not a boundary against such code, and
+ * Microsoft does not count UAC as a security boundary either. Closing that
+ * takes a per-machine install with a privileged service.</p>
  */
 public final class WindowsTunLauncher implements TunLauncher {
 
@@ -65,8 +69,9 @@ public final class WindowsTunLauncher implements TunLauncher {
         String token = Long.toString(System.nanoTime());
         Path stopSignalFile = StopSignals.newStopSignalFile();
 
-        Path logOut = tempDir.resolve("vless-tun-" + token + ".out.log");
-        Path logErr = tempDir.resolve("vless-tun-" + token + ".err.log");
+        Path logDir = logDirectory(tempDir, stopSignalFile);
+        Path logOut = logDir.resolve("vless-tun-" + token + ".out.log");
+        Path logErr = logDir.resolve("vless-tun-" + token + ".err.log");
 
         // The elevated command is encoded here, in the trusted process, and
         // travels to RunAs as an argument: no intermediate file exists for
@@ -83,6 +88,30 @@ public final class WindowsTunLauncher implements TunLauncher {
         log.info("Started sing-box TUN launch via UAC elevation (prompt expected)");
         // UAC asks on every launch: there is no one-time grant to fall back on.
         return new Launched(process, stopSignalFile, true);
+    }
+
+    /**
+     * Where the core's two log files go: the system temp dir, unless its path
+     * holds [ or ], the only wildcard characters a Windows path can.
+     *
+     * <p>The elevated wrapper hands both paths to Start-Process, which reads
+     * them as wildcard patterns. Under a TEMP set by hand to "R:\Temp [ram]"
+     * they matched nothing, Start-Process threw, no core started, and every
+     * TUN connect failed after the UAC prompt. Escaping them does not help:
+     * given both redirects, Start-Process resolves each path once to see that
+     * they differ and again to open it, and the second pass reads the path
+     * the first one returned. The stop file's folder is in the profile, and a
+     * Windows user name cannot hold a bracket.</p>
+     *
+     * @param tempDir        {@code java.io.tmpdir}
+     * @param stopSignalFile this session's stop file
+     * @return the folder to put the logs in
+     * @throws IOException if the stop file's path names no folder
+     */
+    static Path logDirectory(Path tempDir, Path stopSignalFile) throws IOException {
+        String temp = tempDir.toString();
+        return temp.indexOf('[') >= 0 || temp.indexOf(']') >= 0
+                ? SecureFiles.parentDirectory(stopSignalFile) : tempDir;
     }
 
     /**

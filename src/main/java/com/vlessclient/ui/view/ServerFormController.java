@@ -509,6 +509,15 @@ public class ServerFormController {
         // text field of its own.
         encryptionCombo.setEditable(false);
         flowCombo.setEditable(false);
+        // Their editors are emptied too. A combo made editable again shows the
+        // text its editor held when it stopped being editable, not its value:
+        // JavaFX takes that text for one put there before the combo had a
+        // skin. So WireGuard's local address showed as Hysteria2's obfuscation
+        // password over an empty value, and the commit Save makes stored it as
+        // the password; Hysteria2's password became WireGuard's address the
+        // same way. With the editor empty, the skin shows the value.
+        encryptionCombo.getEditor().clear();
+        flowCombo.getEditor().clear();
         markField(encryptionCombo.getEditor(), false);
         markField(flowCombo.getEditor(), false);
 

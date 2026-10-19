@@ -492,6 +492,11 @@ public class UpdateManager {
                     root.path("assets"), installerExtension(), currentArchToken());
             String installerUrl = asset.url();
 
+            // On every answer, not only when this build is current: a user
+            // two releases behind still has an update when the newer one is
+            // withdrawn, and its staged installer was installed at the next
+            // start.
+            discardStagedNewerThan(version);
             if (isNewerVersion(version, AppVersion.VERSION)) {
                 log.info("Update available: {} -> {}", AppVersion.VERSION, version);
                 candidateAbandoned = version.equals(staging.abandonedVersion());
@@ -524,8 +529,7 @@ public class UpdateManager {
      * or demoted to a prerelease, stayed the download candidate for the rest
      * of a run that can last weeks. It was fetched every six hours and on
      * every connect, offered in the banner, and, once staged, installed at the
-     * next restart: the build its maintainer had taken back. An installer
-     * already staged for a version newer than the latest release goes too.</p>
+     * next restart: the build its maintainer had taken back.</p>
      *
      * @param latestReleased the version GitHub now reports as latest
      */
@@ -541,6 +545,16 @@ public class UpdateManager {
                 latestVersion.set("");
             });
         }
+    }
+
+    /**
+     * Discards an installer staged for a version newer than the latest
+     * release. The latest release never names a prerelease, so such an
+     * installer is one GitHub no longer offers: withdrawn, or demoted.
+     *
+     * @param latestReleased the version GitHub now reports as latest
+     */
+    private void discardStagedNewerThan(String latestReleased) {
         Optional<PendingUpdate> waiting = staging.pending();
         if (waiting.isPresent() && isNewerVersion(waiting.get().version(), latestReleased)) {
             log.info("Staged update {} is newer than the latest release {}; discarding it",

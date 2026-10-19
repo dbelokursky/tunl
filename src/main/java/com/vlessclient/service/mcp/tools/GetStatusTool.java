@@ -27,10 +27,16 @@ public class GetStatusTool implements McpTool {
 
     @Override
     public String description() {
+        // The server the core runs could differ from the active one with no
+        // way to tell: one a refresh withdrew read as no server at all.
         return "Get the current VPN connection status: state, active server, "
                 + "proxy mode and local proxy ports. 'proxyMode' is the configured mode; "
                 + "'runningProxyMode' is the one the running core was started with, "
-                + "and differs until a reconnect applies a changed mode.";
+                + "and differs until a reconnect applies a changed mode. 'currentServerId' "
+                + "is the server the tunnel routes through, which can differ from "
+                + "'activeServerId': with server_selection auto_best, and when a refresh "
+                + "withdrew the server the tunnel runs on (select_server of the active "
+                + "server, or a reconnect, moves it).";
     }
 
     @Override

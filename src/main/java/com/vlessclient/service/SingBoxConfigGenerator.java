@@ -115,6 +115,7 @@ public class SingBoxConfigGenerator {
     private final Hysteria2OutboundBuilder hysteria2Builder;
     private final WireguardEndpointBuilder wireguardBuilder;
     private final LatencyRanking ranking;
+    private final com.vlessclient.platform.InterfaceRoute interfaceRoute;
 
     public SingBoxConfigGenerator() {
         this(LatencyRanking.NONE);
@@ -128,23 +129,34 @@ public class SingBoxConfigGenerator {
      */
     public SingBoxConfigGenerator(LatencyRanking ranking) {
         this(com.vlessclient.platform.SystemProxySupport.current(), Ipv6Uplink.current(),
-                ranking);
+                ranking, com.vlessclient.platform.InterfaceRoute.current());
     }
 
     /** Test seam: inject the host's system-proxy capability check. */
     SingBoxConfigGenerator(com.vlessclient.platform.SystemProxySupport systemProxySupport) {
-        this(systemProxySupport, Ipv6Uplink.current(), LatencyRanking.NONE);
+        this(systemProxySupport, Ipv6Uplink.current(), LatencyRanking.NONE,
+                com.vlessclient.platform.InterfaceRoute.current());
     }
 
     /** Test seam: inject the host's network as well, which the TUN device's IPv6 depends on. */
     SingBoxConfigGenerator(com.vlessclient.platform.SystemProxySupport systemProxySupport,
                            Ipv6Uplink ipv6Uplink) {
-        this(systemProxySupport, ipv6Uplink, LatencyRanking.NONE);
+        this(systemProxySupport, ipv6Uplink, LatencyRanking.NONE,
+                com.vlessclient.platform.InterfaceRoute.current());
+    }
+
+    /** Test seam: inject the host's routes, which a WireGuard endpoint's binding depends on. */
+    static SingBoxConfigGenerator withRoutes(
+            com.vlessclient.platform.InterfaceRoute interfaceRoute) {
+        return new SingBoxConfigGenerator(com.vlessclient.platform.SystemProxySupport.current(),
+                Ipv6Uplink.current(), LatencyRanking.NONE, interfaceRoute);
     }
 
     private SingBoxConfigGenerator(com.vlessclient.platform.SystemProxySupport systemProxySupport,
-                                   Ipv6Uplink ipv6Uplink, LatencyRanking ranking) {
+                                   Ipv6Uplink ipv6Uplink, LatencyRanking ranking,
+                                   com.vlessclient.platform.InterfaceRoute interfaceRoute) {
         this.ranking = ranking;
+        this.interfaceRoute = interfaceRoute;
         this.mapper = JsonMapper.builder()
                 .enable(SerializationFeature.INDENT_OUTPUT)
                 .build();
@@ -236,7 +248,8 @@ public class SingBoxConfigGenerator {
         ArrayNode endpoints = mapper.createArrayNode();
         for (ServerConfig member : members) {
             if (member.getProtocol() == Protocol.WIREGUARD) {
-                endpoints.add(wireguardBuilder.build(member, OutboundTags.server(member)));
+                endpoints.add(wireguardBuilder.build(member, OutboundTags.server(member),
+                        host::routeOffDefault));
             }
         }
         if (!endpoints.isEmpty()) {
@@ -867,7 +880,7 @@ public class SingBoxConfigGenerator {
      * @return facts not yet asked
      */
     public HostFacts hostFacts() {
-        return new HostFacts(ipv6Uplink, systemProxySupport, ranking);
+        return new HostFacts(ipv6Uplink, systemProxySupport, ranking, interfaceRoute);
     }
 
     /**

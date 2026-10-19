@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <?import com.vlessclient.ui.view.FittedTextArea?>
+<?import com.vlessclient.ui.view.WrappingRow?>
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.CheckBox?>
@@ -188,14 +189,26 @@
         <!-- The ID gives way when the row is short of room, at a narrow
              window or a larger text size: the label and the button keep
              their own widths. All three used to shrink together, so at 125%
-             in Russian the label and "Сбросить…" were cut as well. -->
-        <HBox spacing="10" alignment="CENTER_LEFT">
+             in Russian the label and "Сбросить…" were cut as well. Where the
+             label and the button do not fit on one line, the ID and the
+             button go on to the next: pinned in one HBox, at 150% the row
+             made the page wider than the window and hid every combo's
+             arrow. The label wraps only where the row is narrower than the
+             gutter, at 200%. The button goes under the ID only where a line
+             is too short for the two, and is cut only where it is too short
+             for the button alone: pinned to its width, at 225% in the
+             smallest window in Russian it made the page wider than the
+             window again. -->
+        <WrappingRow hgap="10" vgap="6">
             <Label fx:id="deviceIdLabel" text="Device ID for subscriptions"
-                   styleClass="form-label, settings-gutter" minWidth="-Infinity"/>
-            <Label fx:id="deviceIdValue" text="" styleClass="stats-value"/>
-            <Button fx:id="deviceIdResetButton" text="Reset…" styleClass="secondary-button"
-                    minWidth="-Infinity" onAction="#onResetDeviceId"/>
-        </HBox>
+                   styleClass="form-label, settings-gutter" wrapText="true"/>
+            <WrappingRow hgap="10" vgap="6" HBox.hgrow="ALWAYS">
+                <Label fx:id="deviceIdValue" text="" styleClass="stats-value" minWidth="0"
+                       HBox.hgrow="ALWAYS"/>
+                <Button fx:id="deviceIdResetButton" text="Reset…" styleClass="secondary-button"
+                        onAction="#onResetDeviceId"/>
+            </WrappingRow>
+        </WrappingRow>
         <Label fx:id="deviceIdHint" styleClass="hint-label" wrapText="true" maxWidth="520"
                text="Sent to subscription providers."/>
     </VBox>
@@ -209,15 +222,23 @@
 
         <CheckBox fx:id="mcpEnabledCheck" text="Enable MCP server" styleClass="form-checkbox"/>
 
-        <HBox spacing="12" alignment="CENTER_LEFT">
-            <!-- 210 and 110: the label gutter and the numeric-field width
-                 every other label+field row in this view uses. At 120/120
-                 this row's field started 90px left of all of them. -->
-            <Label fx:id="mcpPortLabel" text="Port" styleClass="form-label, settings-gutter"/>
-            <TextField fx:id="mcpPortField" styleClass="form-field" prefWidth="110"
-                       promptText="55555"/>
-            <Label fx:id="mcpStatusLabel" text="" styleClass="stats-value, settings-status"/>
-        </HBox>
+        <!-- The status goes under the port where the two do not fit beside
+             each other, and wraps where a line of its own is too short for
+             it. Squeezed in beside the field, at 125% text size it read
+             "○ sto…", at 150% "○ …" whether the server ran or not, and the
+             reason a start failed was cut even at the usual size. -->
+        <WrappingRow hgap="12" vgap="6">
+            <HBox spacing="12" alignment="CENTER_LEFT">
+                <!-- 210 and 110: the label gutter and the numeric-field width
+                     every other label+field row in this view uses. At 120/120
+                     this row's field started 90px left of all of them. -->
+                <Label fx:id="mcpPortLabel" text="Port" styleClass="form-label, settings-gutter"/>
+                <TextField fx:id="mcpPortField" styleClass="form-field" prefWidth="110"
+                           promptText="55555"/>
+            </HBox>
+            <Label fx:id="mcpStatusLabel" text="" styleClass="stats-value, settings-status"
+                   wrapText="true"/>
+        </WrappingRow>
 
         <CheckBox fx:id="mcpAllowMutationsCheck"
                   text="Allow configuration changes (connect, edit servers, routing)"
@@ -232,12 +253,14 @@
         <FittedTextArea fx:id="mcpCommandArea" editable="false" wrapText="true"
                         styleClass="form-field"/>
 
-        <HBox spacing="12" alignment="CENTER_LEFT">
+        <!-- One under the other where the two do not fit beside each other,
+             at 150% text size, rather than both cut short. -->
+        <WrappingRow hgap="12" vgap="8">
             <Button fx:id="mcpCopyButton" text="Copy command" styleClass="secondary-button"
                     onAction="#onCopyMcpCommand"/>
             <Button fx:id="mcpRegenButton" text="Regenerate token" styleClass="secondary-button"
                     onAction="#onRegenerateMcpToken"/>
-        </HBox>
+        </WrappingRow>
     </VBox>
 
     <!-- Traffic history: the record behind the dashboard's history panel,
@@ -264,10 +287,12 @@
                maxWidth="Infinity"/>
 
         <!-- Alone and right-aligned, like the update row in About: the
-             action sits under the facts it acts on. -->
+             action sits under the facts it acts on. Free to shrink, so only
+             a row narrower than its label cuts it: pinned to that width, at
+             200% in Russian it reached past the page. -->
         <HBox alignment="CENTER_RIGHT" spacing="10">
             <Button fx:id="clearTrafficHistoryButton" text="Clear history…"
-                    styleClass="secondary-button" minWidth="-Infinity"/>
+                    styleClass="secondary-button"/>
         </HBox>
     </VBox>
 

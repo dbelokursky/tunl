@@ -75,6 +75,34 @@ public class ConfigStore {
     private final PersistenceState persistence = new PersistenceState();
 
     /**
+     * The picked server is the store's own choice, made as a removal nobody
+     * asked the tunnel to follow took the one picked (a refresh that withdrew
+     * it, an agent's delete), not one the user made. A pick of the user's
+     * clears it, and so does the user's own delete of the picked server.
+     * Changed on the FX thread with the list.
+     */
+    private volatile boolean pickedByTheStore;
+
+    /**
+     * Whose a removal of servers is, which says whose the pick is that the
+     * store makes when the removal takes the picked server
+     * ({@link #isPickedByTheStore()}).
+     */
+    public enum Removal {
+        /**
+         * One nobody asked the running tunnel to follow: a subscription
+         * refresh that withdrew servers, or an agent's delete_server.
+         */
+        UNASKED,
+        /**
+         * The user's own delete, in the server list or with a subscription:
+         * the user asked the tunnel to leave the server, and it follows the
+         * pick made in its place as it follows one of the user's.
+         */
+        BY_THE_USER
+    }
+
+    /**
      * The last value sealed under each secret key, and the tag it produced.
      *
      * <p>Credentials are plaintext in memory, so {@code SecretSealer.isSealed}
@@ -121,6 +149,12 @@ public class ConfigStore {
 
     /** A change to the server list that no write has taken in yet. */
     private final AtomicBoolean serversUnsaved = new AtomicBoolean();
+
+    /**
+     * Whether servers.json held a credential in plaintext as it was read: one
+     * saved while no keychain was there, or with secure storage off.
+     */
+    private boolean credentialsInPlaintext;
 
     /**
      * Where a save asked for on the FX thread is written. The FX thread wrote
@@ -278,11 +312,41 @@ public class ConfigStore {
                     any = true;
                 }
             }
+            if (any) {
+                pickedByTheStore = false;
+            } else if (pickedByTheStore) {
+                // The store's own pick, picked again: the user's now. Nothing
+                // in the list changed, so nothing heard of it, and a tunnel
+                // that leaves the store's pick to the user's reconnect stayed
+                // on the server it ran, while select_server, a click on the
+                // ticked server in the tray or a click on its row answered as
+                // if it had moved. Its listeners hear of it now; nothing is
+                // saved, as nothing saved has changed.
+                int at = indexOfServer(serverId);
+                if (at >= 0 && servers.get(at).isActive()) {
+                    pickedByTheStore = false;
+                    servers.set(at, servers.get(at));
+                }
+            }
             return any;
         });
         if (changed) {
             saveServers();
         }
+    }
+
+    /**
+     * Whether the picked server is the store's own choice: a removal nobody
+     * asked the tunnel to follow took the one picked, a subscription refresh
+     * that withdrew it or an agent's delete, and the store picked another,
+     * which nobody asked a running tunnel to move to. A pick the user makes
+     * ends it, as does the user's own delete of the picked server. Read on
+     * the FX thread, with the list.
+     *
+     * @return true while the pick is the store's
+     */
+    public boolean isPickedByTheStore() {
+        return pickedByTheStore;
     }
 
     /**
@@ -311,14 +375,33 @@ public class ConfigStore {
      * Removes the server with the given id and persists the change. Logs a
      * warning if no matching server is found. Removing the picked server
      * picks another, as a batch does, so a non-empty list always has one.
+     * The removal is the user's own ({@link Removal#BY_THE_USER}): a running
+     * tunnel follows the pick made in place of the removed one.
      *
      * @param serverId the id of the server to remove
      */
     public void removeServer(String serverId) {
+        removeServer(serverId, Removal.BY_THE_USER);
+    }
+
+    /**
+     * {@link #removeServer(String)}, saying whose the removal is. One nobody
+     * asked the tunnel to follow, an agent's delete, leaves the pick made in
+     * place of a removed pick the store's own, which a running tunnel leaves
+     * to the user's reconnect where its restart would prompt. Every removal
+     * counted as that, so under a TUN core whose every launch prompts the
+     * user's own delete of the server the tunnel ran on left the traffic on
+     * it, while the list, the tray and get_status named the pick made in its
+     * place.
+     *
+     * @param serverId the id of the server to remove
+     * @param removal  whose the removal is
+     */
+    public void removeServer(String serverId, Removal removal) {
         boolean removed = mutateList(() -> {
             boolean gone = servers.removeIf(s -> s.getId().equals(serverId));
             if (gone) {
-                ServerConfig pick = keepOnePicked(servers, List.of(), List.of());
+                ServerConfig pick = keepOnePicked(servers, List.of(), List.of(), removal);
                 if (pick != null) {
                     servers.set(servers.indexOf(pick), pick);
                 }
@@ -356,8 +439,9 @@ public class ConfigStore {
      * appended and inherits {@link #addServer}'s rule that the first server to
      * exist when nothing is active becomes active, and removals are applied
      * after upserts. A batch that removes the picked server picks another, so
-     * a non-empty list always has one. An upsert that holds nothing the
-     * stored server does not leaves the stored one in place.</p>
+     * a non-empty list always has one; the removals are the user's own
+     * ({@link Removal#BY_THE_USER}). An upsert that holds nothing the stored
+     * server does not leaves the stored one in place.</p>
      *
      * <p>The list's listeners hear the whole batch as one change, and nothing
      * when it changed nothing. Each replacement and each removal used to be a
@@ -371,6 +455,20 @@ public class ConfigStore {
      * @param removalIds ids to remove; unknown ids are ignored
      */
     public void applyServerBatch(List<ServerConfig> upserts, List<String> removalIds) {
+        applyServerBatch(upserts, removalIds, Removal.BY_THE_USER);
+    }
+
+    /**
+     * {@link #applyServerBatch(List, List)}, saying whose the removals are:
+     * a subscription refresh's withdrawal leaves the pick made in place of a
+     * removed pick the store's own (see {@link #removeServer(String, Removal)}).
+     *
+     * @param upserts    servers to add or replace, matched by id
+     * @param removalIds ids to remove; unknown ids are ignored
+     * @param removal    whose the removals are
+     */
+    public void applyServerBatch(List<ServerConfig> upserts, List<String> removalIds,
+                                 Removal removal) {
         Map<String, ServerConfig> alike = storedAlike(upserts);
         Set<String> removed = mutateList(() -> {
             // Where each id sits, read once. Each upsert and each removal used
@@ -427,7 +525,7 @@ public class ConfigStore {
                 });
                 gone.forEach(this::evictSealCache);
             }
-            ServerConfig repicked = keepOnePicked(next, added, applied);
+            ServerConfig repicked = keepOnePicked(next, added, applied, removal);
             putInPlace(next, repicked);
             return gone;
         });
@@ -460,12 +558,14 @@ public class ConfigStore {
      * @param list    the servers as the change leaves them
      * @param added   the servers the change added
      * @param upserts the servers it added or updated, as {@code list} holds them
+     * @param removal whose the removal is, which makes the pick the store's
+     *                own or the user's
      * @return the server picked now, flagged but not yet set again in the
      *     observable list, so its listeners have still to hear of it; null
      *     when the list has one picked or is empty
      */
     private ServerConfig keepOnePicked(List<ServerConfig> list, List<ServerConfig> added,
-                                       List<ServerConfig> upserts) {
+                                       List<ServerConfig> upserts, Removal removal) {
         if (list.isEmpty() || list.stream().anyMatch(ServerConfig::isActive)) {
             return null;
         }
@@ -473,6 +573,7 @@ public class ConfigStore {
                 .or(() -> upserts.stream().filter(list::contains).findFirst())
                 .orElse(list.getFirst());
         pick.setActive(true);
+        pickedByTheStore = removal == Removal.UNASKED;
         log.info("The picked server was withdrawn; picked '{}' instead", pick.getName());
         return pick;
     }
@@ -766,6 +867,35 @@ public class ConfigStore {
         saveServers();
     }
 
+    /**
+     * Writes servers.json again, its credentials sealed, when it held one in
+     * plaintext as it was read and secure storage is on with a keychain there
+     * to take it. A credential is sealed only when the file is written, so one
+     * saved while no keychain was there stayed in plaintext after a start that
+     * had one, which is what Settings tells a Linux user to arrange, until
+     * some other change wrote the list: for a server added by hand and never
+     * edited, for good. The start calls this once; off the FX thread, as the
+     * keychain's probe and each seal are processes.
+     */
+    public void sealCredentialsLeftInPlaintext() {
+        if (!credentialsInPlaintext || !getSettings().isStoreSecretsSecurely()
+                || !sealer.isAvailable()) {
+            return;
+        }
+        log.info("Sealing the credentials {} holds in plaintext", SERVERS_FILE);
+        saveServers();
+    }
+
+    /** Whether a server holds a credential that a save seals, in plaintext. */
+    private static boolean holdsPlaintextCredential(ServerConfig server) {
+        return isPlaintext(server.getUuid())
+                || server.getProtocol() == Protocol.HYSTERIA2 && isPlaintext(server.getFlow());
+    }
+
+    private static boolean isPlaintext(String credential) {
+        return credential != null && !credential.isBlank() && !SecretSealer.isSealed(credential);
+    }
+
     /** Writes the list until no change is left that a write has not taken in. */
     private void writePendingServers() {
         do {
@@ -963,19 +1093,33 @@ public class ConfigStore {
             int unreadable = 0;
             for (JsonNode item : items) {
                 try {
-                    loaded.add(objectMapper.treeToValue(item, ServerConfig.class));
+                    ServerConfig server = objectMapper.treeToValue(item, ServerConfig.class);
+                    if (server == null) {
+                        // A null in the list, from a hand edit or a merge
+                        // tool, holds nothing to keep. Read as a server, it
+                        // threw in the unsealing below, and the app did not
+                        // start until the file was deleted by hand.
+                        log.warn("Skipping an empty (null) entry in {}", SERVERS_FILE);
+                        continue;
+                    }
+                    loaded.add(server);
                 } catch (JacksonException e) {
                     // Per entry, not per file: a protocol or transport a newer
                     // build wrote used to fail the whole list, quarantine
                     // servers.json and leave a downgraded install with nothing.
                     unreadable++;
-                    log.warn("Skipping a server entry this build cannot read: {}",
-                            e.getMessage());
+                    // By its field, not Jackson's message, which quotes the
+                    // value: a credential pasted into a field of another type.
+                    log.warn("Skipping a server entry this build cannot read ({})",
+                            StoredJson.where(e));
                     synchronized (this) {
                         unreadableServers.add(item);
                     }
                 }
             }
+            // Before the unsealing, which leaves every credential plaintext in memory.
+            credentialsInPlaintext = loaded.stream()
+                    .anyMatch(ConfigStore::holdsPlaintextCredential);
             Unsealing.each(loaded, this::unsealInPlace);
             servers.addAll(loaded);
             synchronized (this) {

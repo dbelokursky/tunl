@@ -13,8 +13,10 @@ import java.nio.file.attribute.UserPrincipal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.core.JacksonException;
@@ -85,6 +87,8 @@ public final class LinuxTunLauncher implements TunLauncher {
     private final List<Path> toolDirs;
     /** Where else getcap and setcap are looked for; see {@link #findTool}. */
     private final List<Path> searchDirs;
+    /** The cores {@link #warnOfSharedCapability} has warned of in this run. */
+    private final Set<Path> sharedCapabilitiesTold = ConcurrentHashMap.newKeySet();
 
     public LinuxTunLauncher() {
         this(CommandRunner.system(PROMPT_TIMEOUT), "pkexec");
@@ -125,12 +129,19 @@ public final class LinuxTunLauncher implements TunLauncher {
         // the chmod fails there, and setcap as root then made CAP_NET_ADMIN
         // available to every account on the machine, with no prompt. A grant
         // whose result getcap cannot show would be a prompt for nothing.
-        if (restrictToOwner(binary) && tool("getcap").isPresent()
+        boolean ownersAlone = restrictToOwner(binary);
+        if (ownersAlone && tool("getcap").isPresent()
                 && !hasNetAdminCapability(binary)) {
             grantNetAdminCapability(binary);
         }
 
+        // A core this user cannot restrict may carry the capability all the
+        // same. It is used as it is and left in place; see
+        // warnOfSharedCapability for why, and for what the log says.
         boolean direct = hasNetAdminCapability(binary);
+        if (direct && !ownersAlone) {
+            warnOfSharedCapability(binary);
+        }
         // An interrupt is the start being called off (at quit the recovery
         // scheduler and the MCP server interrupt their threads). It used to
         // fail getcap and the grant, which read as "no capability", and the
@@ -175,7 +186,7 @@ public final class LinuxTunLauncher implements TunLauncher {
         } catch (UnsupportedOperationException e) {
             return true;
         } catch (IOException e) {
-            log.warn("Could not restrict {} to its owner, so it gets no capability: {}",
+            log.warn("Could not restrict {} to its owner, so Tunl grants it no capability: {}",
                     binary, e.getMessage());
             return false;
         }
@@ -211,6 +222,33 @@ public final class LinuxTunLauncher implements TunLauncher {
         } catch (IOException e) {
             log.debug("getcap unavailable: {}", e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Says, once a run for each core, that a core this user cannot make
+     * owner-only carries cap_net_admin, which every account that can run it
+     * holds through it, and how to remove it.
+     *
+     * <p>Up to 1.24 Tunl granted it to such a core all the same. The launch
+     * starts the core through that grant, as it did then, but the log said
+     * the core "gets no capability", and nothing said that every account
+     * could use the one it had. The grant is not Tunl's to take off: an
+     * administrator's own {@code setcap cap_net_admin+ep} reads back exactly
+     * like it, and other accounts or services may rely on it. Nor would
+     * starting the core as root instead keep the capability from anyone; it
+     * would only cost a PolicyKit prompt at every connect, restart and
+     * auto-connect, and TUN itself where no PolicyKit agent runs.</p>
+     */
+    private void warnOfSharedCapability(Path binary) {
+        Path core = binary.toAbsolutePath();
+        if (sharedCapabilitiesTold.add(core)) {
+            log.warn("{} carries cap_net_admin and this user cannot make it owner-only, so"
+                    + " every account that can run it holds that capability. Tunl starts the"
+                    + " core through it and leaves it in place: it may be a grant like the one"
+                    + " Tunl up to 1.24 made on such a core, or an administrator's own. If"
+                    + " nothing else needs it, remove it with: sudo setcap -r {} (every TUN"
+                    + " connect then asks for elevation)", core, shellQuote(core.toString()));
         }
     }
 
@@ -414,7 +452,12 @@ public final class LinuxTunLauncher implements TunLauncher {
      * Mirrors the macOS osascript wrapper.
      */
     static String wrapperCommand(Path binary, Path configFile, Path stopSignalFile) {
-        long parentPid = ProcessHandle.current().pid();
+        return wrapperCommand(binary, configFile, stopSignalFile, ProcessHandle.current().pid());
+    }
+
+    /** Test seam: {@link #wrapperCommand(Path, Path, Path)} watching {@code parentPid}. */
+    static String wrapperCommand(Path binary, Path configFile, Path stopSignalFile,
+                                 long parentPid) {
         String singBoxCmd = shellQuote(binary.toAbsolutePath().toString());
         String configPath = shellQuote(configFile.toAbsolutePath().toString());
         String stopPath = shellQuote(stopSignalFile.toAbsolutePath().toString());
@@ -438,18 +481,38 @@ public final class LinuxTunLauncher implements TunLauncher {
         // ($XDG_DATA_HOME or $HOME) split the trap command. dash refused the
         // whole trap, and a SIGTERM then killed the shell with the root core
         // still running.
-        return String.format(
+        // Locale.ROOT: %d wrote the pid in the digits of the default format
+        // locale, and under fa-IR, ar-SA, bn-BD and the like the watch read
+        // "kill -0 ۱۲۳۴۵", which no shell takes for a pid. The loop ended on
+        // its first pass, and the root core was stopped as it started or,
+        // under dash, left running with nothing watching it.
+        // The core starts in a subshell that first sets TERM back to its
+        // default, then looks at the stop file and the app once more and ends
+        // there if either says stop. A stop that came before the wrapper
+        // started (Disconnect or Quit while the PolicyKit dialog was up, the
+        // dialog answered within the engine's grace) ended the loop on its
+        // first pass, and its SIGTERM reached the background child before the
+        // exec. A dash child still had the wrapper's TERM trap then, which
+        // took the signal and lost it at the exec: the root core ran on, and
+        // the wrapper waited on it deaf to the stop file and the app. A
+        // SIGTERM lost that way was sent after the stop it answers, so the
+        // subshell, looking after its reset, sees that stop; one sent later
+        // finds TERM at its default, or the core. The ids go before exec,
+        // which hands them to the core.
+        return String.format(Locale.ROOT,
                 "SBSTOP=%s; "
                         + StdinWatch.SIGNAL_TRAP + "rm -f \"$SBSTOP\"; exit 143' INT TERM; "
                         + StdinWatch.EXIT_TRAP
-                        + "%s%s run -c %s & SBPID=$!; "
+                        + "( trap - EXIT TERM; [ -f \"$SBSTOP\" ] && exit 0; "
+                        + "kill -0 %d 2>/dev/null || exit 0; "
+                        + "%sexec %s run -c %s ) & SBPID=$!; "
                         + "while kill -0 $SBPID 2>/dev/null "
                         + "&& kill -0 %d 2>/dev/null "
                         + "&& [ ! -f \"$SBSTOP\" ]; do sleep 0.3; done; "
                         + "kill $SBPID 2>/dev/null; "
                         + "wait $SBPID 2>/dev/null; RC=$?; "
                         + "rm -f \"$SBSTOP\"; exit $RC",
-                stopPath, appUserIds(), singBoxCmd, configPath, parentPid);
+                stopPath, parentPid, appUserIds(), singBoxCmd, configPath, parentPid);
     }
 
     /**

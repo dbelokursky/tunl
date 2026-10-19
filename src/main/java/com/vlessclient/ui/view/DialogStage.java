@@ -43,9 +43,12 @@ final class DialogStage extends Stage {
     /**
      * Puts {@code scene} in the stage, dressed in the stylesheets the app wears
      * now and a title bar to match: a snapshot, as ThemeManager hands every
-     * scene it does not own.
+     * scene it does not own. Its root wears the OS's class as the main
+     * window's does, which on a Mac is what sets the installer's command in
+     * Menlo rather than Courier New.
      */
     void setThemedScene(Scene scene) {
+        OsStyleClass.applyTo(scene.getRoot());
         Optional<ThemeManager> themes = ServiceLocator.find(ThemeManager.class);
         if (themes.isPresent()) {
             scene.getStylesheets().addAll(themes.get().currentStylesheets());

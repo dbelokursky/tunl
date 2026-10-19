@@ -113,7 +113,12 @@ jobs:
           # closed (or merged and then reverted) was proposed again every day,
           # and the push to the branch the closed pull request had left
           # behind was rejected, failing the run until upstream moved on.
-          pr_states="$(gh pr list --head "$branch" --state all --json state --jq '.[].state')"
+          # Only this repository's own branch counts: --head matches the
+          # branch name alone, forks included, and the name is predictable.
+          # A fork's pull request from a branch of that name, opened and
+          # closed by anyone, stopped every scheduled run for that version.
+          pr_states="$(gh pr list --head "$branch" --state all --json state,isCrossRepository \
+            --jq '.[] | select(.isCrossRepository | not) | .state')"
           if [ "$release" = "$have_release" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "pinned at $have_release, nothing to do"

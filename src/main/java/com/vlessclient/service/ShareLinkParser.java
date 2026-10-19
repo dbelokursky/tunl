@@ -142,6 +142,29 @@ public class ShareLinkParser {
     private static final int MAX_FEATURE_LENGTH = 40;
 
     /**
+     * An @ and then what reads as a server, host:port, as it stands in the
+     * text after an authority when a credential holding an @ and a #, ? or /
+     * was not percent-encoded.
+     */
+    private static final Pattern SERVER_AFTER_AT = Pattern.compile(
+            "@(?:\\[[0-9A-Fa-f:.]+]|[A-Za-z0-9-]*\\.[A-Za-z0-9.-]*|localhost):[0-9]");
+
+    /**
+     * An authority's host and port as a share link writes them: an IPv6
+     * literal, its zone included, a name with a dot or localhost, each with a
+     * port or without one, since VLESS, Trojan and Hysteria2 default to 443;
+     * or any other name with its port. Hysteria2's port list included.
+     */
+    private static final Pattern SERVER_AUTHORITY = Pattern.compile(
+            "(?:\\[[0-9A-Fa-f:.]+(?:%[^\\[\\]]*)?]|[^:\\[\\].]*\\.[^:\\[\\]]*|localhost)"
+                    + "(?::[0-9,-]*)?|[^:\\[\\]]+:[0-9][0-9,-]*",
+            Pattern.CASE_INSENSITIVE);
+
+    /** A credential that is a UUID, as VLESS ids and many passwords are: it holds no @. */
+    private static final Pattern UUID_CREDENTIAL = Pattern.compile(
+            "[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}");
+
+    /**
      * A display name safe to store, render and log.
      *
      * <p>The name comes straight out of the link's fragment, URL-decoded, and
@@ -197,6 +220,47 @@ public class ShareLinkParser {
         }
         bytes.writeBytes(text.toString().getBytes(StandardCharsets.UTF_8));
         return bytes.toString(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Refuses a link whose credential holds an @ and then a #, ? or /,
+     * written without percent-encoding. The link is cut at the first of
+     * those, so its authority ended at the credential's own @: a part of the
+     * credential was read as the host, and the rest, the real host with it,
+     * as the name, the query or the path. The address went into the list,
+     * the resolver and MCP's answers, and the name into the log on every
+     * connect. Told apart from a name that holds an address by the authority
+     * it leaves, which is no server: a name with no dot and no port. The
+     * refusal repeats nothing of the link.
+     *
+     * <p>Only that shape is refused, and never after a credential that is a
+     * UUID. Refused for a missing port or a missing dot alone, links that had
+     * always imported were turned away: the default-port form, tr.example.com
+     * without :443, which the Hysteria2 scheme documents; a name on the local
+     * network with its port; an IPv6 literal with a zone; and VLESS links,
+     * whose UUID holds no @ at all. In a subscription each counted as an
+     * unreadable line, so every refresh was partial and removed no server the
+     * provider withdrew. A part of a password that reads as a server, with a
+     * dot or a port, is read as written, as any parser of URIs reads it.</p>
+     *
+     * @param link the link after its {@code scheme://}
+     */
+    private static void refuseUnescapedCredential(String link) {
+        int end = link.length();
+        for (char stop : new char[] {'/', '?', '#'}) {
+            int at = link.indexOf(stop);
+            if (at >= 0 && at < end) {
+                end = at;
+            }
+        }
+        String authority = link.substring(0, end);
+        int at = authority.lastIndexOf('@');
+        if (at < 0 || UUID_CREDENTIAL.matcher(authority.substring(0, at)).matches()
+                || !SERVER_AFTER_AT.matcher(link).region(end, link.length()).find()
+                || SERVER_AUTHORITY.matcher(authority.substring(at + 1)).matches()) {
+            return;
+        }
+        throw new IllegalArgumentException(I18n.get("import.credential.unescaped"));
     }
 
     /**
@@ -321,6 +385,7 @@ public class ShareLinkParser {
         if (!uri.toLowerCase().startsWith("vless://")) {
             throw new IllegalArgumentException("URI must start with vless://");
         }
+        refuseUnescapedCredential(uri.substring("vless://".length()));
 
         // Extract fragment (server name) before parsing
         String fragment = null;
@@ -373,10 +438,11 @@ public class ShareLinkParser {
             config.setEncryption(encryption);
         }
 
-        // Flow
+        // Flow, without the spaces a link can carry around it (%20, +), which
+        // went into the outbound and made the core refuse Vision.
         String flow = params.get("flow");
         if (flow != null && !flow.isBlank()) {
-            config.setFlow(flow);
+            config.setFlow(flow.strip());
         }
 
         // Transport
@@ -497,6 +563,7 @@ public class ShareLinkParser {
         if (!uri.toLowerCase().startsWith("trojan://")) {
             throw new IllegalArgumentException("URI must start with trojan://");
         }
+        refuseUnescapedCredential(uri.substring("trojan://".length()));
 
         String fragment = null;
         int fragmentIndex = uri.indexOf('#');
@@ -750,6 +817,7 @@ public class ShareLinkParser {
         }
 
         int schemeEnd = uri.indexOf("://");
+        refuseUnescapedCredential(uri.substring(schemeEnd + 3));
         String fragment = null;
         int fragmentIndex = uri.indexOf('#');
         if (fragmentIndex >= 0) {

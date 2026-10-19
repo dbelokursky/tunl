@@ -195,9 +195,18 @@ public final class DefaultAppControlService implements AppControlService {
                     ? healthState.get() : TunnelHealth.UNMONITORED;
             String tag = state == ConnectionState.CONNECTED && groupMonitor != null
                     ? groupMonitor.currentMemberTagProperty().get() : null;
+            // A server the core runs that has left the list, as one a refresh
+            // withdrew while the tunnel stays on it until a reconnect, is named
+            // as the core was started with it: looked up in the list alone, it
+            // read as no server at all, beside the active one the next start
+            // takes.
             ServerConfig routed = tag == null ? null : configStore.getServers().stream()
                     .filter(server -> tag.equals(OutboundTags.server(server)))
-                    .findFirst().orElse(null);
+                    .findFirst()
+                    .or(() -> connectionService == null ? Optional.empty()
+                            : connectionService.appliedServer().filter(
+                                    server -> tag.equals(OutboundTags.server(server))))
+                    .orElse(null);
             // The settings' mode is what the next start uses; a mode changed
             // there does not change the running core's, and get_status said
             // the new one as if it were running.
@@ -317,12 +326,35 @@ public final class DefaultAppControlService implements AppControlService {
      * A resolver's address as an agent sees it. A private DNS-over-HTTPS
      * resolver keeps the account in its path ({@code https://dns.nextdns.io/ab12cd}),
      * which the diagnostics bundle redacts; get_settings, which works with
-     * changes off, returned it whole. A bare address or {@code system} names
-     * no account and is shown as it is.
+     * changes off, returned it whole. Over DNS-over-TLS and DNS-over-QUIC the
+     * account is a label of the host ({@code tls://ab12cd.dns.nextdns.io}),
+     * and get_settings still gave it: a host name keeps only its last two
+     * labels, the provider's domain. An IP address or {@code system} names no
+     * account and is shown as it is.
      */
     private static String dnsForAgents(String address) {
-        return address == null || (address.indexOf('/') < 0 && address.indexOf('@') < 0)
+        String shown = address == null || (address.indexOf('/') < 0 && address.indexOf('@') < 0)
                 ? address : Redact.url(address);
+        return shown == null ? null : HOST_NAME.matcher(shown).replaceAll(
+                host -> java.util.regex.Matcher.quoteReplacement(providerDomain(host.group())));
+    }
+
+    /**
+     * A host name of three labels or more, in any script, where an account
+     * label can sit under the provider's domain. Read off the whole value, so
+     * a list typed before the field was checked is covered too.
+     */
+    private static final java.util.regex.Pattern HOST_NAME = java.util.regex.Pattern.compile(
+            "(?<![\\w.-])(?:[\\w-]{1,63}\\.){2,}[\\w-]{1,63}(?![\\w-])",
+            java.util.regex.Pattern.UNICODE_CHARACTER_CLASS);
+
+    /** {@code host} cut to its last two labels, or as it is when it is an IPv4 address. */
+    private static String providerDomain(String host) {
+        if (host.chars().allMatch(c -> c == '.' || (c >= '0' && c <= '9'))) {
+            return host;
+        }
+        int last = host.lastIndexOf('.');
+        return Redact.REDACTED + host.substring(host.lastIndexOf('.', last - 1));
     }
 
     @Override
@@ -347,6 +379,39 @@ public final class DefaultAppControlService implements AppControlService {
                     modeGiven ? effectiveMode : null, running.get());
         }
 
+        // A start under way with no core yet is answered as a running tunnel
+        // is. One at a setup prompt or in the core's check read as none: the
+        // pick and the mode were saved, the connect then waited for that
+        // start and was refused as "already running", and the new tunnel was
+        // moved to the agent's server as it came up. It is compared with the
+        // start, whose mode a recovery restart or a pick's restart takes from
+        // the core it replaces: compared with the saved mode, a connect with
+        // none, or with the saved one, passed, its own request called that
+        // restart off after its stop, and it started in the saved mode, a TUN
+        // tunnel turned into a system proxy or the other way round.
+        Optional<ProxyMode> starting = connectionService == null ? Optional.empty()
+                : connectionService.startingMode();
+        if (starting.isPresent()) {
+            if ((modeGiven && effectiveMode != starting.get())
+                    || (serverGiven && !isPicked(serverId))) {
+                throw new McpToolException("A tunnel is starting, and nothing was changed. Call "
+                        + "get_status until it is up: select_server then switches it to another "
+                        + "server, and another mode needs disconnect, then connect with that "
+                        + "mode.");
+            }
+            // Asking for nothing that start does not bring: it is waited
+            // for, not called off by a request of this call's own.
+            Optional<ProxyMode> up = connectionService.awaitStartUnderWay()
+                    ? runningMode() : Optional.empty();
+            if (up.isEmpty()) {
+                throw new McpToolException("The tunnel that was starting did not come up, and "
+                        + "nothing was changed. Call get_status for why, then connect again.");
+            }
+            return alreadyConnected(serverGiven ? serverId : null,
+                    modeGiven ? effectiveMode : null, up.get());
+        }
+        boolean savesMode = modeGiven && effectiveMode != settings.getProxyMode();
+
         // Gate the proxy mode before doing any work: TUN triggers a macOS
         // admin password prompt and captures all traffic, so it needs an
         // explicit confirm.
@@ -360,11 +425,12 @@ public final class DefaultAppControlService implements AppControlService {
         // file no save may write until a restart, kept the tunnel down while
         // the Dashboard connected at once. The window's banner names what is
         // unsaved, and retry_saving reports it to an agent.
+        final boolean picks = serverGiven && !isPicked(serverId);
         if (serverGiven) {
             activate(serverId);
         }
 
-        if (modeGiven && effectiveMode != settings.getProxyMode()) {
+        if (savesMode) {
             // On the FX thread, as set_proxy_mode does: this runs on an HTTP
             // worker, and the dashboard reads the same instance from FX.
             FxExecutor.run(() -> {
@@ -384,12 +450,17 @@ public final class DefaultAppControlService implements AppControlService {
             throw new McpToolException("Failed to start sing-box: " + e.getMessage(), e);
         }
         if (attempt.outcome() == ConnectionService.Outcome.ALREADY_RUNNING
-                && !serverGiven && !modeGiven && runningMode().isPresent()) {
-            // Another request started a core since the check above: the
-            // tunnel the agent asked for is up, as it would have been found.
-            // Only while one does run: a refusal with none running, as for a
-            // core still closing from a stop, was reported as a connect.
-            return getStatus();
+                && !picks && !savesMode) {
+            // Another request started a core since the check above, a start
+            // already under way among them, and this one changed nothing: it
+            // is answered as the running tunnel would have been. Only while
+            // one does run: a refusal with none running, as for a core still
+            // closing from a stop, was reported as a connect.
+            Optional<ProxyMode> startedMeanwhile = runningMode();
+            if (startedMeanwhile.isPresent()) {
+                return alreadyConnected(serverGiven ? serverId : null,
+                        modeGiven ? effectiveMode : null, startedMeanwhile.get());
+            }
         }
         if (!attempt.started()) {
             // Anything but a start is an error for a tool call — including a
@@ -407,6 +478,13 @@ public final class DefaultAppControlService implements AppControlService {
             throw new McpToolException(reason);
         }
         return getStatus();
+    }
+
+    /** Whether the server with this id is the picked one; refused for an id that names none. */
+    private boolean isPicked(String serverId) throws McpToolException {
+        return configStore.getServerById(serverId)
+                .orElseThrow(() -> new McpToolException("No server with id: " + serverId))
+                .isActive();
     }
 
     /**
@@ -452,6 +530,17 @@ public final class DefaultAppControlService implements AppControlService {
 
     @Override
     public ServerSummary selectServer(String serverId) throws McpToolException {
+        // A server the running core refuses is said before anything changes:
+        // the pick was reported made, and the switch it set off stopped the
+        // tunnel and then failed, which only the window heard of.
+        ServerConfig wanted = configStore.getServerById(serverId)
+                .orElseThrow(() -> new McpToolException("No server with id: " + serverId));
+        Optional<String> refused = connectionService == null ? Optional.empty()
+                : connectionService.pickRefusal(wanted);
+        if (refused.isPresent()) {
+            throw new McpToolException(refused.get() + " Nothing was changed: the running "
+                    + "tunnel stays on the server it runs.");
+        }
         ServerConfig s = activate(serverId);
         ensureSaved(ConfigStore.SERVERS_FILE);
         return new ServerSummary(s.getId(), s.getName(),
@@ -645,7 +734,10 @@ public final class DefaultAppControlService implements AppControlService {
         }
         ServerConfig existing = configStore.getServerById(id)
                 .orElseThrow(() -> new McpToolException("No server with id: " + id));
-        configStore.removeServer(id);
+        // Asks nothing of a running tunnel: a pick made in place of the
+        // deleted one waits for the user's reconnect where its restart would
+        // raise an elevation prompt.
+        configStore.removeServer(id, ConfigStore.Removal.UNASKED);
         ensureSaved(ConfigStore.SERVERS_FILE);
         return "Deleted server '" + existing.getName() + "'.";
     }
@@ -776,6 +868,12 @@ public final class DefaultAppControlService implements AppControlService {
     }
 
     private ProxyMode parseMode(String mode) throws McpToolException {
+        // An absent mode, or one that is no string, comes here as null: the
+        // agent was answered with a NullPointerException's text, and
+        // tunl.log got its stack trace, as for a failure of the app's own.
+        if (mode == null || mode.isBlank()) {
+            throw new McpToolException("'mode' is required: 'system_proxy' or 'tun'.");
+        }
         return switch (mode.toLowerCase(Locale.ROOT)) {
             case "tun" -> ProxyMode.TUN;
             case "system", "system_proxy" -> ProxyMode.SYSTEM_PROXY;
