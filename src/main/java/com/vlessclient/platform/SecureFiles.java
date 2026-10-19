@@ -3,7 +3,9 @@ package com.vlessclient.platform;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.FileSystemException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -32,6 +34,13 @@ public final class SecureFiles {
 
     private static final boolean POSIX = FileSystems.getDefault()
             .supportedFileAttributeViews().contains("posix");
+
+    /**
+     * The pauses before each further try at a replace Windows refused: 630 ms
+     * in all, long past a scan of a config file, and short enough for a save
+     * the window waits on.
+     */
+    private static final long[] REPLACE_RETRY_MILLIS = {10, 20, 40, 80, 160, 320};
 
     private SecureFiles() {
     }
@@ -89,14 +98,76 @@ public final class SecureFiles {
                 }
                 channel.force(true);
             }
-            try {
-                Files.move(tmp, absoluteTarget, StandardCopyOption.REPLACE_EXISTING,
-                        StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(tmp, absoluteTarget, StandardCopyOption.REPLACE_EXISTING);
-            }
+            replace(tmp, absoluteTarget, SecureFiles::move, !POSIX);
         } finally {
             Files.deleteIfExists(tmp);
+        }
+    }
+
+    /** Puts one file in another's place; the seam a test refuses a move through. */
+    @FunctionalInterface
+    interface Mover {
+        void move(Path source, Path target) throws IOException;
+    }
+
+    /**
+     * Moves {@code source} into {@code target}'s place, and on Windows tries
+     * again for a moment when the move is refused while {@code target} may
+     * just be held open.
+     *
+     * <p>Windows does not replace a file another program has open: a virus
+     * scanner or a sync client reading the file just written, or anything
+     * else reading it, and says "access denied", or that the file is in use,
+     * until it lets go a moment later. The first such refusal failed the
+     * save: credentials stayed sealed after the keychain box was unticked,
+     * and Settings asked to retry a save that a second try would have made.
+     * A refusal that lasts, a directory where the file belongs or a read-only
+     * file, still fails at once.</p>
+     */
+    static void replace(Path source, Path target, Mover mover, boolean windows)
+            throws IOException {
+        for (int attempt = 0; ; attempt++) {
+            try {
+                mover.move(source, target);
+                return;
+            } catch (IOException e) {
+                if (!windows || attempt == REPLACE_RETRY_MILLIS.length
+                        || !mayBeHeldOpen(e, target)) {
+                    throw e;
+                }
+                log.debug("Replacing {} was refused ({}); trying again", target, e.toString());
+                pause(REPLACE_RETRY_MILLIS[attempt], e);
+            }
+        }
+    }
+
+    /**
+     * Whether a refused move may be another program holding the file open:
+     * Windows reports that as access denied, or, for a file in use, as a
+     * plain {@link FileSystemException}.
+     */
+    private static boolean mayBeHeldOpen(IOException e, Path target) {
+        boolean heldOpenError = e instanceof AccessDeniedException
+                || e.getClass() == FileSystemException.class;
+        return heldOpenError && !Files.isDirectory(target)
+                && (Files.notExists(target) || Files.isWritable(target));
+    }
+
+    private static void pause(long millis, IOException refusal) throws IOException {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw refusal;
+        }
+    }
+
+    private static void move(Path source, Path target) throws IOException {
+        try {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
         }
     }
 
