@@ -12,7 +12,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
@@ -172,7 +174,24 @@ class LinuxAutostartTest {
 
     /** Launcher paths that take each of the spec's passes to write. */
     private static final List<String> LAUNCHERS = List.of("plain", "My Apps", "cost$5",
-            "tick`tock", "say \"hi\"", "back\\slash", "100%done", "tab\there");
+            "tick`tock", "say \"hi\"", "it's", "back\\slash", "100%done", "tab\there");
+
+    /**
+     * Those of them whose launcher goes in as env's argument: GLib and systemd
+     * look a program up before they expand %%, and systemd refuses a program
+     * path with a quote, a backslash or a control character.
+     */
+    private static final List<String> THROUGH_ENV =
+            List.of("say \"hi\"", "it's", "back\\slash", "100%done", "tab\there");
+
+    /**
+     * Those that systemd's autostart generator can start too. A $, a ` or a
+     * backslash cannot work there: the generator writes \$ and \` into the
+     * unit, which its own parser keeps as written, and it unescapes every
+     * argument once more, which a backslash does not survive.
+     */
+    private static final List<String> SYSTEMD_LAUNCHERS =
+            List.of("plain", "My Apps", "say \"hi\"", "it's", "100%done", "tab\there");
 
     /**
      * The Desktop Entry spec reads Exec in three passes: the string escapes
@@ -190,8 +209,8 @@ class LinuxAutostartTest {
             String launcher = "/opt/" + name + "/bin/tunl";
             String exec = LinuxAutostart.execLine(Optional.of(launcher));
 
-            assertThat(readExec(exec)).as("Exec=%s", exec)
-                    .isEqualTo(name.contains("%") ? List.of("env", launcher) : List.of(launcher));
+            assertThat(readExec(exec)).as("Exec=%s", exec).isEqualTo(
+                    THROUGH_ENV.contains(name) ? List.of("env", launcher) : List.of(launcher));
         }
     }
 
@@ -249,6 +268,78 @@ class LinuxAutostartTest {
 
             assertThat(readLines(ran)).as(LAUNCHERS.get(i)).containsExactly(launcher.toString());
         }
+    }
+
+    /**
+     * systemd-managed GNOME and Plasma sessions start autostart entries
+     * through systemd's xdg-autostart generator, which makes a unit of each.
+     * systemd refused the units made of entries whose launcher path held a
+     * quote or a tab ("Executable name contains special characters ... Unit
+     * configuration has fatal error"), so Tunl did not start at login there
+     * while GLib ran the same entries. Each entry here goes through the real
+     * generator, and systemd-analyze loads the unit it makes as the user's
+     * session would.
+     */
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void systemdLoadsTheUnitItsGeneratorMakesOfEachEntry(@TempDir Path dir) throws Exception {
+        Path generator =
+                Path.of("/usr/lib/systemd/user-generators/systemd-xdg-autostart-generator");
+        Path analyze = Path.of("/usr/bin/systemd-analyze");
+        assumeTrue(Files.isExecutable(generator) && Files.isExecutable(analyze),
+                "systemd's autostart generator is not installed");
+        Map<String, String> refused = new LinkedHashMap<>();
+        for (int i = 0; i < SYSTEMD_LAUNCHERS.size(); i++) {
+            String name = SYSTEMD_LAUNCHERS.get(i);
+            Path session = Files.createDirectories(dir.resolve("session-" + i));
+            Path launcher = Files.createDirectories(session.resolve(name).resolve("bin"))
+                    .resolve("tunl");
+            Files.writeString(launcher, "#!/bin/sh\nexit 0\n");
+            assertThat(launcher.toFile().setExecutable(true, true)).isTrue();
+            Path autostart = Files.createDirectories(session.resolve("config/autostart"));
+            Files.writeString(autostart.resolve(ENTRY), LinuxAutostart.buildDesktopEntry(
+                    LinuxAutostart.execLine(Optional.of(launcher.toString()))));
+            List<String> dirs = new ArrayList<>();
+            for (String output : List.of("normal", "early", "late")) {
+                dirs.add(Files.createDirectories(session.resolve(output)).toString());
+            }
+
+            ProcessBuilder generate = new ProcessBuilder(generator.toString(), dirs.get(0),
+                    dirs.get(1), dirs.get(2));
+            generate.environment().put("XDG_CONFIG_HOME", session.resolve("config").toString());
+            generate.environment().put("XDG_CONFIG_DIRS",
+                    Files.createDirectories(session.resolve("no-system-entries")).toString());
+            Ran generated = run(generate);
+            List<Path> units;
+            try (var files = Files.list(Path.of(dirs.get(2)))) {
+                units = files.filter(f -> f.toString().endsWith(".service")).toList();
+            }
+            assertThat(units).as("the unit made of %s: %s", name, generated.said()).hasSize(1);
+
+            Ran verify = run(new ProcessBuilder(analyze.toString(), "verify", "--man=no",
+                    units.getFirst().toString()));
+            if (i == 0) {
+                // A plain path is the control: where systemd-analyze cannot
+                // load even that, this machine says nothing about the entry.
+                assumeTrue(verify.exit() == 0, "systemd-analyze cannot verify here: "
+                        + verify.said());
+            }
+            if (verify.exit() != 0 || verify.said().contains("fatal error")) {
+                refused.put(name, verify.said());
+            }
+        }
+        assertThat(refused).as("the launchers whose unit systemd refused, and why").isEmpty();
+    }
+
+    /** How a command ended, and what it printed. */
+    private record Ran(int exit, String said) {
+    }
+
+    private static Ran run(ProcessBuilder command) throws IOException, InterruptedException {
+        Process process = command.redirectErrorStream(true).start();
+        String said = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertThat(process.waitFor(30, TimeUnit.SECONDS)).isTrue();
+        return new Ran(process.exitValue(), said);
     }
 
     private static List<String> readLines(Path file) {
