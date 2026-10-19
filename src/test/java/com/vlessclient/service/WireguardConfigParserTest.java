@@ -63,6 +63,20 @@ class WireguardConfigParserTest {
     }
 
     /**
+     * wg-quick splits an Address line on spaces as well as on commas, and
+     * a config written that way was stored as one address the core could not
+     * read: it refused every connect that included the server.
+     */
+    @Test
+    void readsTheAddressesOfALineSeparatedBySpaces() {
+        ServerConfig server = parser.parse(TYPICAL.replace(
+                "Address = 10.66.66.2/32, fd42:42::2/128",
+                "Address = 10.66.66.2/32 fd42:42:42::2/128"));
+
+        assertThat(server.getFlow()).isEqualTo("10.66.66.2/32, fd42:42:42::2/128");
+    }
+
+    /**
      * The core refuses an interface that has one address twice, whatever its
      * prefix or spelling ("duplicate address"), and every endpoint of a group
      * goes into one config, so one such server stopped every connect. Read

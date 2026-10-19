@@ -121,6 +121,27 @@ class ShareLinkUnrunnableFeatureTest {
     }
 
     /**
+     * SIP002 links whose plugin options the core cannot take: an option
+     * without a name, which its parser of the options refuses, and a
+     * v2ray-plugin path with a % that starts no escape. They were stored, and
+     * every configuration holding one failed the core's check.
+     */
+    @Test
+    void aShadowsocksLinkWhosePluginOptionsTheCoreRefusesIsRefused() {
+        Map<String, String> links = new LinkedHashMap<>();
+        links.put("ss://" + userInfo() + "@ss.example.com:8388/?plugin=v2ray-plugin%3Bpath%3D%2Fws"
+                + "%25%3Bhost%3Dcdn.example.com#P", "v2ray-plugin path");
+        links.put("ss://" + userInfo() + "@ss.example.com:8388/?plugin=obfs-local%3B%3Bobfs%3Dhttp"
+                + "%3Bobfs-host%3Dwww.bing.com#P", "obfs-local options");
+        links.put("ss://" + userInfo() + "@ss.example.com:8388/?plugin=v2ray-plugin%3Bmode%3D"
+                + "websocket%3B%3Bhost%3Dcdn.example.com#P", "v2ray-plugin options");
+        links.forEach((link, feature) -> assertThatThrownBy(() -> parser.parseForImport(link))
+                .as(link)
+                .isInstanceOfSatisfying(ShareLinkParser.UnsupportedFeatureException.class,
+                        e -> assertThat(e.feature()).isEqualTo(feature)));
+    }
+
+    /**
      * What a one-click Hysteria2 install hands out for its self-signed
      * certificate: verification off, and the certificate's SHA-256 pinned in
      * its place, which is what makes insecure=1 safe in the official client.
@@ -187,6 +208,28 @@ class ShareLinkUnrunnableFeatureTest {
         } finally {
             com.vlessclient.app.I18n.setLocale(before);
         }
+    }
+
+    /**
+     * A VMess link whose JSON escapes half an emoji in a field the core is
+     * given, as a panel that cuts a string between the halves writes it. It
+     * was stored, and the configuration of every connect, which holds every
+     * server, could no longer be written. A name is never given to the core.
+     */
+    @Test
+    void aVmessLinkHoldingHalfAnEmojiIsRefused() {
+        for (String field : new String[] {"\"path\":\"/\\ud83c\"", "\"host\":\"\\ud83c.example\"",
+            "\"sni\":\"\\udc00\""}) {
+            String link = vmess("{\"add\":\"vm.example\",\"port\":\"443\",\"id\":\"" + UUID
+                    + "\",\"net\":\"ws\",\"tls\":\"tls\"," + field + "}");
+
+            assertThatThrownBy(() -> parser.parseForImport(link)).as(field)
+                    .isInstanceOfSatisfying(ShareLinkParser.UnsupportedFeatureException.class,
+                            e -> assertThat(e.feature()).isEqualTo("broken character"));
+        }
+        String named = vmess("{\"add\":\"vm.example\",\"port\":\"443\",\"id\":\"" + UUID
+                + "\",\"net\":\"ws\",\"tls\":\"tls\",\"ps\":\"Name \\ud83c\"}");
+        assertThat(parser.parseForImport(named).getAddress()).isEqualTo("vm.example");
     }
 
     private static String userInfo() {

@@ -41,6 +41,10 @@ class PlatformPathsOverrideTest {
         // and would require the directories to exist.
         assertThat(paths.logsDir().startsWith(paths.dataDir())).isTrue();
         assertThat(paths.coreBinDir().startsWith(paths.dataDir())).isTrue();
+        // And so does the run folder: a test run writes no session files in
+        // the OS locations ($XDG_RUNTIME_DIR, %LOCALAPPDATA%, $TMPDIR) where
+        // the developer's own copy keeps its run folder.
+        assertThat(paths.runDir().startsWith(paths.dataDir())).isTrue();
     }
 
     /**
@@ -87,5 +91,17 @@ class PlatformPathsOverrideTest {
         assertThat(overridden.dataDir()).isEqualTo(Path.of("/tmp/whatever"));
         assertThat(overridden.logsDir()).isEqualTo(Path.of("/tmp/whatever", "logs"));
         assertThat(overridden.coreBinDir()).isEqualTo(Path.of("/tmp/whatever", "bin"));
+        assertThat(overridden.runDir()).isEqualTo(Path.of("/tmp/whatever", "run"));
+    }
+
+    @Test
+    void theRunFolderFollowsTheOverrideRatherThanTheSystemLocation(
+            @org.junit.jupiter.api.io.TempDir Path tmp) {
+        // A delegate whose own run folder is the system one (a private
+        // temporary folder): the override still keeps it in the data dir.
+        PlatformPaths overridden = new PlatformPaths.OverriddenPlatformPaths(
+                tmp.resolve("data"), new MacPlatformPaths(tmp));
+
+        assertThat(overridden.runDir()).isEqualTo(tmp.resolve("data").resolve("run"));
     }
 }

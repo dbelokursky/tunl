@@ -9,8 +9,11 @@ import com.vlessclient.model.TransportConfig;
 import com.vlessclient.model.TransportType;
 import com.vlessclient.platform.SecretSealer;
 import java.net.InetAddress;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -102,12 +105,36 @@ public final class CoreSettings {
     /** The modes of v2ray-plugin the core runs; quic only with tls. */
     private static final Set<String> V2RAY_PLUGIN_MODES = Set.of("websocket", "quic");
 
-    /** The VMess ciphers the core takes, the legacy aes-128-ctr included. */
+    /**
+     * The VMess ciphers the core takes. Its documentation names aes-128-ctr
+     * as the legacy one, which its check refuses ("unsupported security
+     * type"): listed here, a link with that scy was sent as it was and never
+     * connected, where any other cipher the core does not know goes as auto.
+     */
     private static final Set<String> VMESS_CIPHERS = Set.of(
-            "auto", "none", "zero", "aes-128-gcm", "chacha20-poly1305", "aes-128-ctr");
+            "auto", "none", "zero", "aes-128-gcm", "chacha20-poly1305");
+
+    /** The Shadowsocks 2022 cipher that takes one key, the server's, and no user key. */
+    private static final String SS2022_CHACHA = "2022-blake3-chacha20-poly1305";
+
+    /** A number as Go's strconv.Atoi reads it, the way the core reads v2ray-plugin's mux. */
+    private static final Pattern GO_INT = Pattern.compile("[+-]?[0-9]+");
+
+    /** The transports whose path the core reads as escaped, the way a URL holds it. */
+    private static final Set<TransportType> ESCAPED_PATHS = Set.of(
+            TransportType.WEBSOCKET, TransportType.HTTP2, TransportType.HTTPUPGRADE);
 
     /** The VMess ciphers that leave the payload as it is. */
     private static final Set<String> VMESS_CLEAR = Set.of("none", "zero");
+
+    /** The parameter of a WebSocket path that Xray's links ask for early data with. */
+    private static final String EARLY_DATA_PARAMETER = "ed";
+
+    /** The header Xray's servers read WebSocket early data from. */
+    public static final String EARLY_DATA_HEADER = "Sec-WebSocket-Protocol";
+
+    /** The most digits an early data size can have and still be an int. */
+    private static final int MAX_EARLY_DATA_DIGITS = 9;
 
     private CoreSettings() {
     }
@@ -362,26 +389,102 @@ public final class CoreSettings {
     }
 
     /**
-     * The interface addresses of a WireGuard server, listed comma-separated,
-     * each address once, in the first spelling given. The core refuses an
-     * interface that has one address twice, under any prefix length or
-     * spelling ("duplicate address"), and the endpoint of every member of a
-     * group goes into one configuration: a {@code .conf} that repeated its
-     * Address line, or a form that listed an address twice, stopped every
-     * connect of the group.
+     * The interface addresses of a WireGuard server, listed separated by
+     * commas or spaces, as wg-quick reads them, each address once, in the
+     * first spelling given. The core refuses an interface that has one
+     * address twice, under any prefix length or spelling ("duplicate
+     * address"), and the endpoint of every member of a group goes into one
+     * configuration: a {@code .conf} that repeated its Address line, or a
+     * form that listed an address twice, stopped every connect of the group.
+     * Two addresses with a space between them were read as one, which the
+     * core could not read and refused the configuration over.
      *
-     * @param addresses the addresses as stored, comma-separated
+     * @param addresses the addresses as stored, separated by commas or spaces
      * @return the distinct addresses, stripped, as written
      */
     public static List<String> interfaceAddresses(String addresses) {
         Map<String, String> distinct = new LinkedHashMap<>();
-        for (String part : addresses.split(",")) {
+        for (String part : addresses.split("[,\\s]+")) {
             String address = part.strip();
             if (!address.isEmpty()) {
                 distinct.putIfAbsent(addressKey(address), address);
             }
         }
         return List.copyOf(distinct.values());
+    }
+
+    /**
+     * The path of a transport as the core is to send it: for WebSocket and
+     * HTTPUpgrade, without the {@code ed} parameter Xray's links ask for early
+     * data with, {@code /ws?ed=2048}. Xray's client takes the parameter out
+     * and its server compares the path without it, while the core sent the
+     * path as stored, with the {@code ?} escaped, {@code GET /ws%3Fed=2048},
+     * which such a server answers with 404. The stored path keeps the
+     * parameter, so a copied link still asks the clients that read it for
+     * early data. The other parameters of the path stay in it.
+     *
+     * @param transport the server's transport
+     * @return the path to send, or null when there is none
+     */
+    public static String transportPath(TransportConfig transport) {
+        if (transport.getType() != TransportType.WEBSOCKET
+                && transport.getType() != TransportType.HTTPUPGRADE) {
+            return transport.getPath();
+        }
+        return earlyDataIn(transport.getPath()).path();
+    }
+
+    /**
+     * How many bytes of early data a WebSocket server takes, as its path asks
+     * with {@code ed=}: the core sends them in {@link #EARLY_DATA_HEADER}, as
+     * Xray does. The core's HTTPUpgrade has no early data, and a size that is
+     * no number asks for none, as in Xray.
+     *
+     * @param transport the server's transport
+     * @return the size, or 0 when the server is sent none
+     */
+    public static int webSocketEarlyData(TransportConfig transport) {
+        if (transport.getType() != TransportType.WEBSOCKET) {
+            return 0;
+        }
+        return earlyDataIn(transport.getPath()).size();
+    }
+
+    /** A path without its early data parameter, and the size that parameter asked for. */
+    private record EarlyData(String path, int size) {
+    }
+
+    /**
+     * Takes Xray's early data parameter out of a path, as Xray does: every
+     * {@code ed} goes once the first one has a value, and a value that is no
+     * number is a size of 0.
+     */
+    private static EarlyData earlyDataIn(String path) {
+        int query = path == null ? -1 : path.indexOf('?');
+        if (query < 0) {
+            return new EarlyData(path, 0);
+        }
+        StringJoiner kept = new StringJoiner("&");
+        String size = null;
+        for (String parameter : path.substring(query + 1).split("&")) {
+            int equals = parameter.indexOf('=');
+            String name = equals < 0 ? parameter : parameter.substring(0, equals);
+            if (!EARLY_DATA_PARAMETER.equals(name)) {
+                if (!parameter.isEmpty()) {
+                    kept.add(parameter);
+                }
+            } else if (size == null) {
+                size = equals < 0 ? "" : parameter.substring(equals + 1);
+            }
+        }
+        if (size == null || size.isEmpty()) {
+            return new EarlyData(path, 0);
+        }
+        String rest = kept.toString();
+        String stripped = path.substring(0, query) + (rest.isEmpty() ? "" : "?" + rest);
+        boolean number = size.length() <= MAX_EARLY_DATA_DIGITS
+                && size.chars().allMatch(c -> c >= '0' && c <= '9');
+        return new EarlyData(stripped, number ? Integer.parseInt(size) : 0);
     }
 
     /**
@@ -405,11 +508,13 @@ public final class CoreSettings {
      * Why the core would refuse this server however its settings are spelled:
      * a port outside 1 to 65535 (the check lets 0 through, but nothing dials
      * it), a VLESS flow other than Vision, an unknown uTLS fingerprint, a
-     * REALITY key or short ID the core cannot decode, the QUIC transport
-     * without TLS, an unknown Shadowsocks cipher, a Shadowsocks 2022 key of
-     * the wrong length, a SIP003 plugin or plugin mode the core does not
-     * have, or a WireGuard key it cannot decode or a WireGuard server with no
-     * local address. A setting the spelling methods correct is not a refusal.
+     * REALITY key or short ID the core cannot decode, REALITY over QUIC, the
+     * QUIC transport without TLS, a transport path with a {@code %} that
+     * starts no escape, an unknown Shadowsocks cipher, a Shadowsocks 2022 key
+     * of the wrong length or a server key for its ChaCha20 cipher, a SIP003
+     * plugin, plugin mode or v2ray-plugin mux the core does not have, or a
+     * WireGuard key it cannot decode or a WireGuard server with no local
+     * address. A setting the spelling methods correct is not a refusal.
      *
      * @param server the server to check
      * @return the refusal, or empty when the core accepts the server
@@ -419,6 +524,12 @@ public final class CoreSettings {
             // Kept as its sealed tag so the entry recovers once the keychain
             // does; handed to the core, the tag failed in words about neither.
             return refused("unreadable credential", "refusal.credential.unreadable");
+        }
+        if (holdsLoneSurrogate(server)) {
+            // Half an emoji, from a link whose JSON escaped one: the
+            // configuration, which holds every server, could not be written
+            // as UTF-8, and every connect failed with an error naming none.
+            return refused("broken character", "refusal.broken.character");
         }
         int port = server.getPort();
         if (port < 1 || port > 65535) {
@@ -436,12 +547,28 @@ public final class CoreSettings {
             if (refusal.isPresent()) {
                 return refusal;
             }
+            if (tls.isReality() && fingerprintToSend(server) == null) {
+                // "uTLS is required by reality client": the hello REALITY
+                // needs goes out through uTLS, which QUIC cannot carry.
+                return refused("REALITY over QUIC", "refusal.reality.quic");
+            }
         }
         if (!tlsEnabled && TRANSPORT_PROTOCOLS.contains(server.getProtocol())
                 && server.getTransport() != null
                 && server.getTransport().getType() == TransportType.QUIC) {
             // "create client transport: quic: TLS required"
             return refused("QUIC without TLS", "refusal.quic.tls");
+        }
+        // A null type, which a servers.json or a backup written by hand can
+        // hold, is plain TCP to the builders, and Set.of throws on a null
+        // lookup: every connect, and every restore holding one, failed on it.
+        if (TRANSPORT_PROTOCOLS.contains(server.getProtocol()) && server.getTransport() != null
+                && server.getTransport().getType() != null
+                && ESCAPED_PATHS.contains(server.getTransport().getType())
+                && !isEscapedPath(transportPath(server.getTransport()))) {
+            // "create client transport: ws: parse path: invalid URL escape "%"".
+            // Not quoted: a path can hold an account's token.
+            return refused("transport path", "refusal.transport.path");
         }
         if (server.getProtocol() == Protocol.SHADOWSOCKS) {
             return shadowsocksRefusal(server);
@@ -457,13 +584,16 @@ public final class CoreSettings {
 
     /**
      * Why the core would not start a WireGuard server: a private or peer key
-     * that is not 32 bytes in padded standard base64, or no local address.
+     * that is not 32 bytes in padded standard base64, no local address, or
+     * one the core cannot read.
      *
      * <p>None of them was refused. A key the core cannot decode fails its
      * check, but a missing peer key or one of the wrong length passes it, and
      * the core then stops at start printing the interface's settings, the
      * private key among them, which the app log kept. A server with no local
-     * address starts and carries nothing.</p>
+     * address starts and carries nothing, and one the core cannot read as an
+     * address with a prefix length, such as 10.0.0.2/33, made it refuse the
+     * whole configuration.</p>
      */
     private static Optional<Refusal> wireguardRefusal(ServerConfig server) {
         if (!isWireguardKey(server.getUuid())) {
@@ -474,10 +604,155 @@ public final class CoreSettings {
             // "failed to get peer by public key: hex string does not fit the slice"
             return refused("WireGuard peer key", "refusal.wireguard.peer.key");
         }
-        if (server.getFlow() == null || server.getFlow().isBlank()) {
+        List<String> addresses = server.getFlow() == null
+                ? List.of() : interfaceAddresses(server.getFlow());
+        if (addresses.isEmpty()) {
             return refused("WireGuard local address", "refusal.wireguard.address");
         }
+        for (String address : addresses) {
+            if (!isInterfacePrefix(interfaceAddress(address))) {
+                // "endpoints[0].address: ... netip.ParsePrefix("10.0.0.2/33"):
+                // prefix length out of range"
+                return refused("WireGuard local address", "refusal.wireguard.address.invalid",
+                        shown(address));
+            }
+        }
         return Optional.empty();
+    }
+
+    /** The most of a stored value a refusal repeats. */
+    private static final int MAX_SHOWN_LENGTH = 40;
+
+    /** A stored value as a refusal repeats it: control characters as spaces, and capped. */
+    private static String shown(String value) {
+        String cleaned = value.replaceAll("\\p{Cntrl}", " ");
+        return cleaned.length() > MAX_SHOWN_LENGTH
+                ? cleaned.substring(0, MAX_SHOWN_LENGTH) + "…" : cleaned;
+    }
+
+    /**
+     * Whether {@code prefix} is an address with a prefix length that the core
+     * reads, as Go's netip.ParsePrefix does: an IPv4 address in four decimal
+     * fields without leading zeros, or an IPv6 address without a zone, then
+     * a length without leading zeros no longer than the address. Java's own
+     * parsers take forms Go refuses, such as 010.0.0.2 or a group of five
+     * digits.
+     */
+    private static boolean isInterfacePrefix(String prefix) {
+        int slash = prefix.lastIndexOf('/');
+        if (slash < 0) {
+            return false;
+        }
+        String address = prefix.substring(0, slash);
+        int maxBits = -1;
+        // As netip.ParseAddr tells the families apart: by the first of these.
+        for (int i = 0; i < address.length() && maxBits < 0; i++) {
+            switch (address.charAt(i)) {
+                case '.' -> maxBits = isIpv4(address) ? 32 : 0;
+                case ':' -> maxBits = isIpv6(address) ? 128 : 0;
+                case '%' -> maxBits = 0;
+                default -> {
+                    // Part of the first field.
+                }
+            }
+        }
+        String bits = prefix.substring(slash + 1);
+        if (maxBits <= 0 || bits.isEmpty() || bits.length() > 3
+                || bits.length() > 1 && bits.charAt(0) == '0'
+                || !bits.chars().allMatch(c -> c >= '0' && c <= '9')) {
+            return false;
+        }
+        return Integer.parseInt(bits) <= maxBits;
+    }
+
+    /** An IPv4 address as netip reads one: four fields of up to 255, no leading zeros. */
+    private static boolean isIpv4(String address) {
+        int dots = 0;
+        int digits = 0;
+        int value = 0;
+        for (int i = 0; i < address.length(); i++) {
+            char c = address.charAt(i);
+            if (c >= '0' && c <= '9') {
+                if (digits == 1 && value == 0) {
+                    return false;
+                }
+                value = value * 10 + c - '0';
+                digits++;
+                if (value > 255) {
+                    return false;
+                }
+            } else if (c == '.' && digits > 0 && dots < 3 && i < address.length() - 1) {
+                dots++;
+                digits = 0;
+                value = 0;
+            } else {
+                return false;
+            }
+        }
+        return dots == 3 && digits > 0;
+    }
+
+    /**
+     * An IPv6 address as netip reads one, with no zone, which a prefix
+     * cannot have: groups of one to four hex digits, at most one {@code ::}
+     * standing for at least one group, and an IPv4 address in place of the
+     * last two.
+     */
+    private static boolean isIpv6(String address) {
+        if (address.indexOf('%') >= 0) {
+            return false;
+        }
+        int groups = 0;
+        int ellipsis = -1;
+        int at = 0;
+        if (address.startsWith("::")) {
+            ellipsis = 0;
+            at = 2;
+            if (at == address.length()) {
+                return true;
+            }
+        }
+        while (groups < 8) {
+            int end = at;
+            while (end < address.length() && HexFormat.isHexDigit(address.charAt(end))) {
+                end++;
+            }
+            if (end == at || end - at > 4) {
+                return false;
+            }
+            if (end < address.length() && address.charAt(end) == '.') {
+                if (ellipsis < 0 && groups != 6 || groups > 6
+                        || !isIpv4(address.substring(at))) {
+                    return false;
+                }
+                groups += 2;
+                at = address.length();
+                break;
+            }
+            groups++;
+            at = end;
+            if (at == address.length()) {
+                break;
+            }
+            if (address.charAt(at) != ':' || at + 1 == address.length()) {
+                return false;
+            }
+            at++;
+            if (address.charAt(at) == ':') {
+                if (ellipsis >= 0) {
+                    return false;
+                }
+                ellipsis = groups;
+                at++;
+                if (at == address.length()) {
+                    break;
+                }
+            }
+        }
+        if (at != address.length()) {
+            return false;
+        }
+        return groups < 8 ? ellipsis >= 0 : ellipsis < 0;
     }
 
     /**
@@ -511,6 +786,52 @@ public final class CoreSettings {
             return refused("obfs " + obfs, "refusal.hysteria2.obfs", obfs);
         }
         return Optional.empty();
+    }
+
+    /**
+     * Whether a value the core is given for {@code server} holds half of a
+     * surrogate pair, which no UTF-8 text can: its id, which tags it, its
+     * address, credentials and plugin, and its TLS and transport settings.
+     * The name is not given to the core.
+     */
+    private static boolean holdsLoneSurrogate(ServerConfig server) {
+        List<String> values = new ArrayList<>();
+        Collections.addAll(values, server.getId(), server.getAddress(), server.getUuid(),
+                server.getEncryption(), server.getFlow(), server.getPlugin(),
+                server.getPluginOpts(), server.getServerPorts());
+        TlsConfig tls = server.getTls();
+        if (tls != null) {
+            Collections.addAll(values, tls.getServerName(), tls.getAlpn(),
+                    tls.getFingerprint(), tls.getRealityPublicKey(), tls.getRealityShortId());
+        }
+        TransportConfig transport = server.getTransport();
+        if (transport != null) {
+            Collections.addAll(values, transport.getPath(), transport.getHost(),
+                    transport.getServiceName());
+            if (transport.getHeaders() != null) {
+                transport.getHeaders().forEach((name, value) -> {
+                    values.add(name);
+                    values.add(value);
+                });
+            }
+        }
+        return values.stream().anyMatch(CoreSettings::hasLoneSurrogate);
+    }
+
+    private static boolean hasLoneSurrogate(String value) {
+        if (value == null) {
+            return false;
+        }
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (Character.isHighSurrogate(c) && i + 1 < value.length()
+                    && Character.isLowSurrogate(value.charAt(i + 1))) {
+                i++;
+            } else if (Character.isSurrogate(c)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -554,71 +875,162 @@ public final class CoreSettings {
             int bytes = "2022-blake3-aes-128-gcm".equals(method) ? 16 : 32;
             String password = server.getUuid() == null ? "" : server.getUuid();
             // A multi-user server is given the server key and the user key, colon-separated.
-            for (String key : password.split(":", -1)) {
+            String[] keys = password.split(":", -1);
+            for (String key : keys) {
                 if (decodedLength(key) != bytes) {
                     return refused("Shadowsocks 2022 key", "refusal.ss2022.key",
                             method, String.valueOf(bytes));
                 }
+            }
+            if (SS2022_CHACHA.equals(method) && keys.length > 1) {
+                // "Shadowsocks 2022 EIH support only available in AES ciphers"
+                return refused("Shadowsocks 2022 ChaCha20 with a server key",
+                        "refusal.ss2022.chacha.keys", method);
             }
         }
         return pluginRefusal(server.getPlugin(), server.getPluginOpts());
     }
 
     /**
+     * Whether a transport path is one the core can send: every {@code %} in
+     * it starts an escape of two hex digits, as the core unescapes it.
+     */
+    private static boolean isEscapedPath(String path) {
+        if (path == null) {
+            return true;
+        }
+        for (int i = path.indexOf('%'); i >= 0; i = path.indexOf('%', i + 1)) {
+            if (i + 2 >= path.length() || !HexFormat.isHexDigit(path.charAt(i + 1))
+                    || !HexFormat.isHexDigit(path.charAt(i + 2))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
      * Why the core would refuse a SIP003 plugin: one it does not have ("plugin
-     * not found"), or a mode it does not run. It has obfs-local, in http and
-     * tls mode ("unknown obfs mode"), and v2ray-plugin, in websocket mode and
-     * in quic mode with tls ("unknown mode", "TLS required"). Names and modes
-     * match exactly, as in the core.
+     * not found"), options it cannot read ("parse plugin_opts"), or a mode it
+     * does not run. It has obfs-local, in http and tls mode ("unknown obfs
+     * mode"), and v2ray-plugin, in websocket mode and in quic mode with tls
+     * ("unknown mode", "TLS required"), whose mux in websocket mode has to be
+     * a number ("parse mux value") and whose path there is read as escaped,
+     * as the WebSocket transport's is ("parse path"). Names and modes match
+     * exactly, as in the core.
      */
     private static Optional<Refusal> pluginRefusal(String plugin, String options) {
         String name = shadowsocksPlugin(plugin);
         if (name == null || name.isEmpty()) {
             return Optional.empty();
         }
-        Map<String, String> settings = pluginOptions(options);
-        switch (name) {
-            case "obfs-local" -> {
-                String mode = settings.getOrDefault("obfs", "http");
-                if (!OBFS_MODES.contains(mode)) {
-                    return refused("obfs-local mode " + mode, "refusal.plugin.mode", name, mode);
-                }
-                return Optional.empty();
-            }
-            case "v2ray-plugin" -> {
-                String mode = settings.getOrDefault("mode", "websocket");
-                if ("quic".equals(mode) && !settings.containsKey("tls")) {
-                    return refused("v2ray-plugin QUIC without TLS", "refusal.plugin.quic.tls");
-                }
-                if (!V2RAY_PLUGIN_MODES.contains(mode)) {
-                    return refused("v2ray-plugin mode " + mode, "refusal.plugin.mode", name, mode);
-                }
-                return Optional.empty();
-            }
-            default -> {
-                return refused("plugin " + name, "refusal.plugin", name);
-            }
+        if (!"obfs-local".equals(name) && !"v2ray-plugin".equals(name)) {
+            return refused("plugin " + name, "refusal.plugin", name);
         }
+        Map<String, String> settings = pluginOptions(options);
+        if (settings == null) {
+            // "parse plugin_opts: empty key in """, or "nothing following
+            // final escape". Not quoted: the options can hold a path's token.
+            return refused(name + " options", "refusal.plugin.options", name);
+        }
+        if ("obfs-local".equals(name)) {
+            String mode = settings.getOrDefault("obfs", "http");
+            if (!OBFS_MODES.contains(mode)) {
+                return refused("obfs-local mode " + mode, "refusal.plugin.mode", name, mode);
+            }
+            return Optional.empty();
+        }
+        String mode = settings.getOrDefault("mode", "websocket");
+        if ("quic".equals(mode) && !settings.containsKey("tls")) {
+            return refused("v2ray-plugin QUIC without TLS", "refusal.plugin.quic.tls");
+        }
+        if (!V2RAY_PLUGIN_MODES.contains(mode)) {
+            return refused("v2ray-plugin mode " + mode, "refusal.plugin.mode", name, mode);
+        }
+        String mux = settings.get("mux");
+        if ("websocket".equals(mode) && mux != null && !isGoInt(mux)) {
+            // "parse mux value: strconv.Atoi: parsing "true": invalid syntax"
+            return refused("v2ray-plugin mux", "refusal.plugin.mux");
+        }
+        if ("websocket".equals(mode) && !isEscapedPath(settings.get("path"))) {
+            // "parse path: invalid URL escape "%"". Not quoted, as above.
+            return refused("v2ray-plugin path", "refusal.plugin.path");
+        }
+        return Optional.empty();
     }
 
     /**
-     * SIP003 plugin options, {@code key=value;flag}, as the core splits them;
-     * a flag such as {@code tls} maps to an empty value. Nothing is trimmed,
-     * since the core trims nothing either.
+     * SIP003 plugin options, {@code key=value;flag}, as the core's
+     * ParsePluginOptions reads them: a backslash makes the character after it
+     * plain, so a key or a value can hold {@code \;} or {@code \=}; a flag
+     * such as {@code tls} maps to {@code 1}; and a key given twice keeps its
+     * first value. Nothing is trimmed, and options that are blank are not
+     * given to the core at all. Split at every {@code ;} without its escapes,
+     * options the core refuses were taken, and mux=\1 was refused, which the
+     * core reads as 1.
+     *
+     * @return the options, or null when the core cannot read them: an option
+     *     without a key, from {@code ;;} or a {@code ;} at the start, or a
+     *     backslash with nothing after it
      */
     private static Map<String, String> pluginOptions(String options) {
         Map<String, String> settings = new HashMap<>();
-        if (options == null || options.isEmpty()) {
+        if (options == null || options.isBlank()) {
             return settings;
         }
-        for (String option : options.split(";")) {
-            int equals = option.indexOf('=');
-            String key = equals < 0 ? option : option.substring(0, equals);
-            if (!key.isEmpty()) {
-                settings.put(key, equals < 0 ? "" : option.substring(equals + 1));
+        int at = 0;
+        while (at < options.length()) {
+            StringBuilder key = new StringBuilder();
+            at = readUnescaped(options, at, "=;", key);
+            if (at < 0 || key.isEmpty()) {
+                return null;
             }
+            String value = "1";
+            if (at < options.length() && options.charAt(at) == '=') {
+                StringBuilder read = new StringBuilder();
+                at = readUnescaped(options, at + 1, ";", read);
+                if (at < 0) {
+                    return null;
+                }
+                value = read.toString();
+            }
+            settings.putIfAbsent(key.toString(), value);
+            at++;
         }
         return settings;
+    }
+
+    /**
+     * Reads {@code text} from {@code start} up to the first of {@code stops}
+     * that no backslash escapes, into {@code into} without the escapes.
+     *
+     * @return where it stopped, or -1 when a backslash ends the text
+     */
+    private static int readUnescaped(String text, int start, String stops, StringBuilder into) {
+        int at = start;
+        while (at < text.length() && stops.indexOf(text.charAt(at)) < 0) {
+            if (text.charAt(at) == '\\') {
+                at++;
+                if (at == text.length()) {
+                    return -1;
+                }
+            }
+            into.append(text.charAt(at));
+            at++;
+        }
+        return at;
+    }
+
+    /** Whether {@code value} is a number Go's strconv.Atoi reads: a sign, digits, an int64. */
+    private static boolean isGoInt(String value) {
+        if (!GO_INT.matcher(value).matches()) {
+            return false;
+        }
+        try {
+            Long.parseLong(value);
+            return true;
+        } catch (NumberFormatException outOfRange) {
+            return false;
+        }
     }
 
     /** How many bytes a base64 value in either alphabet decodes to, or -1 when it does not. */

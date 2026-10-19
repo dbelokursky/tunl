@@ -35,13 +35,14 @@ class SubscriptionPickDuringRefreshTest {
         }
 
         @Override
-        public void applyServerBatch(List<ServerConfig> upserts, List<String> removalIds) {
+        public void applyServerBatch(List<ServerConfig> upserts, List<String> removalIds,
+                                     Removal removal) {
             String pick = pickBeforeTheBatch;
             pickBeforeTheBatch = null;
             if (pick != null) {
                 setActiveServer(pick);
             }
-            super.applyServerBatch(upserts, removalIds);
+            super.applyServerBatch(upserts, removalIds, removal);
         }
     }
 

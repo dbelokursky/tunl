@@ -1,9 +1,12 @@
 package com.vlessclient.service;
 
+import com.vlessclient.platform.InterfaceRoute;
 import com.vlessclient.platform.Ipv6Uplink;
 import com.vlessclient.platform.SystemProxySupport;
+import java.net.InetAddress;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalLong;
 
 /**
@@ -29,6 +32,7 @@ public final class HostFacts {
     private final Ipv6Uplink ipv6Uplink;
     private final SystemProxySupport systemProxySupport;
     private final SingBoxConfigGenerator.LatencyRanking ranking;
+    private final InterfaceRoute interfaceRoute;
 
     /** Null until asked. Guarded by this. */
     private Boolean ipv6;
@@ -36,6 +40,8 @@ public final class HostFacts {
     private Boolean systemProxy;
     /** Each server's latency as first asked. Guarded by this. */
     private final Map<String, OptionalLong> latencies = new HashMap<>();
+    /** Each peer's route off the default interface, as first asked. Guarded by this. */
+    private final Map<InetAddress, Optional<InterfaceRoute.Route>> routes = new HashMap<>();
 
     HostFacts(Ipv6Uplink ipv6Uplink, SystemProxySupport systemProxySupport) {
         this(ipv6Uplink, systemProxySupport, SingBoxConfigGenerator.LatencyRanking.NONE);
@@ -43,9 +49,15 @@ public final class HostFacts {
 
     HostFacts(Ipv6Uplink ipv6Uplink, SystemProxySupport systemProxySupport,
               SingBoxConfigGenerator.LatencyRanking ranking) {
+        this(ipv6Uplink, systemProxySupport, ranking, InterfaceRoute.DEFAULT_ONLY);
+    }
+
+    HostFacts(Ipv6Uplink ipv6Uplink, SystemProxySupport systemProxySupport,
+              SingBoxConfigGenerator.LatencyRanking ranking, InterfaceRoute interfaceRoute) {
         this.ipv6Uplink = ipv6Uplink;
         this.systemProxySupport = systemProxySupport;
         this.ranking = ranking;
+        this.interfaceRoute = interfaceRoute;
     }
 
     /**
@@ -82,5 +94,18 @@ public final class HostFacts {
             systemProxy = systemProxySupport.canAutoConfigure();
         }
         return systemProxy;
+    }
+
+    /**
+     * The route to a WireGuard peer when the system takes it through another
+     * interface than the default route's, as it was when this run first
+     * asked: a network gaining or losing an interface mid-session is no
+     * change of the settings.
+     *
+     * @param peer the peer's address
+     * @return what {@link InterfaceRoute#offDefault} answered the first time
+     */
+    public synchronized Optional<InterfaceRoute.Route> routeOffDefault(InetAddress peer) {
+        return routes.computeIfAbsent(peer, interfaceRoute::offDefault);
     }
 }
