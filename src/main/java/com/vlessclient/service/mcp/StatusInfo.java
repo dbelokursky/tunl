@@ -17,7 +17,8 @@ package com.vlessclient.service.mcp;
  * @param error          last error message, or empty string when none
  * @param health         reachability verdict, independent of the core state
  * @param tunnelStatus   combined status shared with the dashboard and tray
- * @param currentServerId core-reported routed server id, null when unknown or disconnected
+ * @param currentServerId core-reported routed server id, null when unknown or disconnected;
+ *                       also a server no longer listed that the core still runs
  * @param currentServer  core-reported routed server name, null when unknown or disconnected
  * @param runningProxyMode the mode the running core was started with, which
  *                       {@code proxyMode} may no longer name until a reconnect;

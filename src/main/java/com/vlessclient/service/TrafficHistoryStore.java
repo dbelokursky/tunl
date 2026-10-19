@@ -17,6 +17,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.concurrent.ExecutionException;
@@ -524,10 +525,22 @@ public class TrafficHistoryStore {
                     + "reading best-effort", history.getVersion(), TrafficHistory.CURRENT_VERSION);
         }
         // Future incompatible versions dispatch their migrations here.
+        boolean skipped = false;
         for (TrafficHistory.Day day : history.getDays()) {
+            // A null day, or a null row in one, holds nothing: read on, the
+            // day stopped the app from starting, and a row threw in every
+            // total and in the sample that next landed on its day.
+            if (day == null) {
+                skipped = true;
+                continue;
+            }
+            skipped |= day.getServers().removeIf(Objects::isNull);
             if (day.getDate() != null && !day.getDate().isBlank()) {
                 byDate.put(day.getDate(), day);
             }
+        }
+        if (skipped) {
+            log.warn("Skipping empty (null) entries in {}", HISTORY_FILE);
         }
     }
 }

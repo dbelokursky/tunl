@@ -246,6 +246,46 @@ class CoreSettingsTest {
                         .isEqualTo(I18n.get("refusal.wireguard.address")));
     }
 
+    /**
+     * The core reads each interface address as Go's netip.ParsePrefix does
+     * and refused the whole configuration over one it could not
+     * ("endpoints[0].address: ... netip.ParsePrefix"), while only that the
+     * server had an address was checked: a .conf with Address = 10.0.0.2/33,
+     * or the form's field with a semicolon between two addresses, was stored
+     * and failed every connect it was part of. Java's own parsers take forms
+     * Go refuses, a leading zero and a five-digit group among them.
+     */
+    @Test
+    void aWireGuardAddressTheCoreCannotReadIsRefused() {
+        for (String flow : List.of("10.0.0.2/33", "not-an-ip", "10.0.0.2/32;fd00::2/128",
+                "010.0.0.2/32", "02001:db8::2/128", "fe80::1%eth0/64", "10.0.0.2/032",
+                "::ffff:010.0.0.1/128", "10.0.0.2/", "10.0.0.256", "fd00::2/129",
+                "10.0.0.2/32, nope", "1:2:3:4:5:6:7:8::/128", "::1.2.3.4.5/128")) {
+            assertThat(CoreSettings.refusal(wireguard(server -> server.setFlow(flow)))).as(flow)
+                    .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                            .isEqualTo("WireGuard local address"));
+        }
+        assertThat(CoreSettings.refusal(wireguard(server -> server.setFlow("10.0.0.2/33"))))
+                .hasValueSatisfying(refusal -> assertThat(refusal.reason())
+                        .isEqualTo(I18n.get("refusal.wireguard.address.invalid", "10.0.0.2/33")));
+        for (String flow : List.of("10.0.0.2", "fd00::2", "10.0.0.2/32, fd00::2/128",
+                "10.0.0.2/32 fd00::2/128", "10.0.0.2/24", "::ffff:10.0.0.1/128",
+                "2606:4700:110:8a36:df92:102a:9602:fa18/128", "FD42:42:0::2/128", "::/0",
+                "1::/64", "1:2:3:4:5:6:1.2.3.4/128")) {
+            assertThat(CoreSettings.refusal(wireguard(server -> server.setFlow(flow)))).as(flow)
+                    .isEmpty();
+        }
+    }
+
+    /** wg-quick reads the addresses of an Address line split on spaces as well as on commas. */
+    @Test
+    void interfaceAddressesSeparatedBySpacesAreReadOneByOne() {
+        assertThat(CoreSettings.interfaceAddresses("10.0.0.2/32 fd00::2/128"))
+                .containsExactly("10.0.0.2/32", "fd00::2/128");
+        assertThat(CoreSettings.interfaceAddresses(" 10.0.0.2/32 ,\tfd00::2/128 , "))
+                .containsExactly("10.0.0.2/32", "fd00::2/128");
+    }
+
     static ServerConfig wireguard(Consumer<ServerConfig> change) {
         ServerConfig server = TestServers.server()
                 .id("wireguard")
@@ -329,7 +369,9 @@ class CoreSettingsTest {
                     quic(Protocol.VLESS, false),
                     withPlugin("kcptun", "mode=fast"),
                     withPlugin("obfs-local", "obfs=xyz"),
-                    withPlugin("v2ray-plugin", "mode=quic"));
+                    withPlugin("v2ray-plugin", "mode=quic"),
+                    withPlugin("obfs-local", "obfs=http;;"),
+                    withPlugin("v2ray-plugin", "path=/ws%"));
             for (ServerConfig server : refused) {
                 assertThat(CoreSettings.refusal(server)).hasValueSatisfying(refusal -> {
                     assertThat(refusal.reason()).as(refusal.feature())
@@ -403,6 +445,227 @@ class CoreSettingsTest {
         for (ServerConfig server : accepted) {
             assertThat(CoreSettings.refusal(server)).as(server.getPluginOpts()).isEmpty();
         }
+    }
+
+    /**
+     * "uTLS is required by reality client": the core sends REALITY's hello
+     * through uTLS, which cannot run inside QUIC, Hysteria2's or the QUIC
+     * transport's. A link with type=quic and security=reality was stored and
+     * then failed every connect it was part of.
+     */
+    @Test
+    void realityWhereTheCoreCannotSendItsHelloIsRefused() {
+        for (Protocol protocol : List.of(Protocol.VLESS, Protocol.VMESS, Protocol.TROJAN)) {
+            ServerConfig server = quic(protocol, true);
+            server.getTls().setReality(true);
+            server.getTls().setRealityPublicKey(REALITY_KEY);
+            server.getTls().setRealityShortId("ab");
+
+            assertThat(CoreSettings.refusal(server)).as(protocol.name())
+                    .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                            .isEqualTo("REALITY over QUIC"));
+        }
+        ServerConfig hysteria2 = TestServers.server().id("hy2").name("hy2")
+                .protocol(Protocol.HYSTERIA2).address("203.0.113.5").port(443).uuid("pw")
+                .reality("www.microsoft.com", REALITY_KEY, "ab").build();
+        assertThat(CoreSettings.refusal(hysteria2))
+                .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                        .isEqualTo("REALITY over QUIC"));
+        assertThat(CoreSettings.refusal(reality(server -> server.getTransport()
+                .setType(com.vlessclient.model.TransportType.GRPC)))).isEmpty();
+    }
+
+    /**
+     * "Shadowsocks 2022 EIH support only available in AES ciphers": a server
+     * key and a user key are taken by the AES ciphers of Shadowsocks 2022
+     * only.
+     */
+    @Test
+    void aShadowsocks2022ChachaServerGivenAServerKeyAndAUserKeyIsRefused() {
+        String chacha = "2022-blake3-chacha20-poly1305";
+
+        assertThat(CoreSettings.refusal(shadowsocks(chacha, KEY_32_BYTES + ":" + KEY_32_BYTES)))
+                .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                        .isEqualTo("Shadowsocks 2022 ChaCha20 with a server key"));
+        assertThat(CoreSettings.refusal(shadowsocks(chacha, KEY_32_BYTES))).isEmpty();
+    }
+
+    /**
+     * "parse mux value: strconv.Atoi: parsing "true": invalid syntax": the
+     * core reads v2ray-plugin's mux as a number in websocket mode, the first
+     * one given, and a bare mux flag as 1. A link that said mux=true was
+     * stored and refused at every connect.
+     */
+    @Test
+    void aV2rayPluginMuxThatIsNoNumberIsRefused() {
+        for (String options : List.of("mux=true;host=v.example", "mux=;host=v.example",
+                "mux=1.0", "mux= 1", "mux=99999999999999999999", "mux=true;mux=1",
+                "mode=websocket;mux=on")) {
+            assertThat(CoreSettings.refusal(withPlugin("v2ray-plugin", options))).as(options)
+                    .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                            .isEqualTo("v2ray-plugin mux"));
+        }
+        for (String options : List.of("mux=1;host=v.example", "mux=0", "mux=-1", "mux=+1",
+                "mux=01", "mux;host=v.example", "mux=1;mux=true", "mode=quic;tls;mux=true",
+                "mux=9223372036854775807")) {
+            assertThat(CoreSettings.refusal(withPlugin("v2ray-plugin", options))).as(options)
+                    .isEmpty();
+        }
+    }
+
+    /**
+     * SIP003 options as the core reads them (ParsePluginOptions): a backslash
+     * makes the character after it plain, and an option without a name, from
+     * ;; or a ; at the start, or a backslash with nothing after it, stops the
+     * whole configuration ("parse plugin_opts: empty key", "nothing following
+     * final escape"). Such options were stored and failed every connect, and
+     * read without their escapes, mux=\1 was refused though the core reads 1.
+     */
+    @Test
+    void pluginOptionsAreReadAsTheCoreReadsThem() {
+        String[][] refused = {
+            {"obfs-local", "obfs=http;;obfs-host=www.bing.com"},
+            {"v2ray-plugin", "mode=websocket;;host=cdn.example.com"},
+            {"obfs-local", ";obfs=http"},
+            {"obfs-local", "=http"},
+            {"obfs-local", ";"},
+            {"obfs-local", "obfs=http;obfs-host=www.bing.com;;"},
+            {"v2ray-plugin", "host=example.com\\"},
+            {"v2ray-plugin", "mux=1\\"}};
+        for (String[] plugin : refused) {
+            assertThat(CoreSettings.refusal(withPlugin(plugin[0], plugin[1]))).as(plugin[1])
+                    .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                            .isEqualTo(plugin[0] + " options"));
+        }
+        String[][] accepted = {
+            {"v2ray-plugin", "mux=\\1;host=example.com"},
+            {"obfs-local", "obfs=ht\\tp;obfs-host=www.bing.com"},
+            {"obfs-local", "obfs=http;obfs-host=www.bing.com;"},
+            {"obfs-local", "obfs\\=x=http"},
+            {"obfs-local", "obfs=http;obfs-host=a\\;b"},
+            {"v2ray-plugin", "mode=web\\socket"},
+            {"obfs-local", " "}};
+        for (String[] plugin : accepted) {
+            assertThat(CoreSettings.refusal(withPlugin(plugin[0], plugin[1]))).as(plugin[1])
+                    .isEmpty();
+        }
+        assertThat(CoreSettings.refusal(withPlugin("v2ray-plugin", "mux=\\t")))
+                .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                        .isEqualTo("v2ray-plugin mux"));
+    }
+
+    /**
+     * "parse path: invalid URL escape "%"": in websocket mode v2ray-plugin
+     * sends its path the way the WebSocket transport does, read as escaped.
+     * Its quic mode sends no path.
+     */
+    @Test
+    void aV2rayPluginPathWithAPercentThatStartsNoEscapeIsRefused() {
+        for (String options : List.of("path=/ws%;host=cdn.example.com", "path=/a%4",
+                "mode=websocket;path=/a\\;b%", "path=/bad%;path=/ok")) {
+            assertThat(CoreSettings.refusal(withPlugin("v2ray-plugin", options))).as(options)
+                    .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                            .isEqualTo("v2ray-plugin path"));
+        }
+        for (String options : List.of("path=/ws%25;host=cdn.example.com", "path=/a\\%41",
+                "mode=quic;tls;path=/ws%", "path=/ok;path=/bad%", "path=/ws?ed=2048")) {
+            assertThat(CoreSettings.refusal(withPlugin("v2ray-plugin", options))).as(options)
+                    .isEmpty();
+        }
+    }
+
+    /**
+     * "parse path: invalid URL escape "%"": the core reads a WebSocket,
+     * HTTP/2 or HTTPUpgrade path as escaped, and a {@code %} that starts no
+     * escape is one it cannot send. Early data a WebSocket path asks for is
+     * not sent in the path, so a {@code %} there does not count.
+     */
+    @Test
+    void aTransportPathWithAPercentThatStartsNoEscapeIsRefused() {
+        for (com.vlessclient.model.TransportType type : List.of(
+                com.vlessclient.model.TransportType.WEBSOCKET,
+                com.vlessclient.model.TransportType.HTTP2,
+                com.vlessclient.model.TransportType.HTTPUPGRADE)) {
+            for (String path : List.of("/ws%", "/ws%2", "/ws%zz", "/a%2/b")) {
+                assertThat(CoreSettings.refusal(withPath(type, path))).as(type + " " + path)
+                        .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                                .isEqualTo("transport path"));
+            }
+            for (String path : List.of("/ws", "/ws%20x", "/%E2%82%AC", "/ws?a=b")) {
+                assertThat(CoreSettings.refusal(withPath(type, path))).as(type + " " + path)
+                        .isEmpty();
+            }
+        }
+        assertThat(CoreSettings.refusal(withPath(com.vlessclient.model.TransportType.WEBSOCKET,
+                "/ws?ed=50%"))).isEmpty();
+        ServerConfig grpc = withPath(com.vlessclient.model.TransportType.GRPC, null);
+        grpc.getTransport().setServiceName("svc%");
+        assertThat(CoreSettings.refusal(grpc)).isEmpty();
+    }
+
+    /**
+     * A transport with the type null, which a servers.json or a backup written
+     * by hand can hold, is built as plain TCP. Looking its path up threw on the
+     * null type, and as every server is checked at every connect, no connect
+     * worked.
+     */
+    @Test
+    void aTransportWithNoTypeIsPlainTcp() {
+        for (Protocol protocol : List.of(Protocol.VLESS, Protocol.VMESS, Protocol.TROJAN)) {
+            ServerConfig server = withPath(com.vlessclient.model.TransportType.WEBSOCKET, "/ws%");
+            server.setProtocol(protocol);
+            server.getTransport().setType(null);
+
+            assertThat(CoreSettings.refusal(server)).as(protocol.name()).isEmpty();
+        }
+    }
+
+    /**
+     * Half of a surrogate pair, from a link whose JSON escaped half an emoji
+     * ("path":"/\ud83c"): a configuration holding it cannot be written as
+     * UTF-8, and every configuration holds every server, so every connect
+     * failed, whichever server was picked, with an error naming none.
+     */
+    @Test
+    void aServerHoldingHalfAnEmojiIsRefused() {
+        String half = "\ud83c";
+        List<Consumer<ServerConfig>> breaks = List.of(
+                server -> server.getTransport().setPath("/" + half),
+                server -> server.getTransport().setHost("cdn" + half + ".example"),
+                server -> server.getTransport().getHeaders().put("X-Note", half),
+                server -> server.getTls().setServerName(half + "a.example"),
+                server -> server.getTls().setAlpn("h2," + "\udc00"),
+                server -> server.setUuid(half),
+                server -> server.setAddress("h" + half + ".example"),
+                server -> server.setId("id" + half));
+        for (Consumer<ServerConfig> change : breaks) {
+            ServerConfig server = withPath(com.vlessclient.model.TransportType.WEBSOCKET, "/ws");
+            change.accept(server);
+
+            assertThat(CoreSettings.refusal(server))
+                    .hasValueSatisfying(refusal -> assertThat(refusal.feature())
+                            .isEqualTo("broken character"));
+        }
+        ServerConfig plugin = withPlugin("v2ray-plugin", "host=v" + half + ".example");
+        assertThat(CoreSettings.refusal(plugin)).isPresent();
+
+        ServerConfig named = withPath(com.vlessclient.model.TransportType.WEBSOCKET, "/🎉");
+        named.setName("Name " + half);
+        assertThat(CoreSettings.refusal(named)).as("a whole emoji, and a name that reaches "
+                + "no configuration").isEmpty();
+    }
+
+    static ServerConfig withPath(com.vlessclient.model.TransportType type, String path) {
+        return TestServers.server()
+                .id("path")
+                .name("path")
+                .protocol(Protocol.VLESS)
+                .address("203.0.113.6")
+                .port(443)
+                .uuid("b1c2d3e4-f5a6-7890-abcd-ef1234567890")
+                .tls("a.example")
+                .transport(type, path, "cdn.example")
+                .build();
     }
 
     static ServerConfig reality(Consumer<ServerConfig> change) {
@@ -482,6 +745,17 @@ class CoreSettingsTest {
     void aVmessCipherTheCoreDoesNotKnowIsAskedForAsAuto() {
         assertThat(CoreSettings.vmessSecurity(vmess("aes-256-cfb", true))).isEqualTo("auto");
         assertThat(CoreSettings.vmessSecurity(vmess(null, true))).isEqualTo("auto");
+    }
+
+    /**
+     * The core's documentation names aes-128-ctr as VMess's legacy cipher,
+     * and its check refuses it: "vmess: unsupported security type". A link
+     * with scy=aes-128-ctr was sent as it was and never connected.
+     */
+    @Test
+    void theLegacyCipherTheCoreRefusesIsAskedForAsAuto() {
+        assertThat(CoreSettings.vmessSecurity(vmess("aes-128-ctr", true))).isEqualTo("auto");
+        assertThat(CoreSettings.vmessSecurity(vmess("aes-128-ctr", false))).isEqualTo("auto");
     }
 
     private static ServerConfig vmess(String cipher, boolean tls) {

@@ -114,12 +114,13 @@ public class WireguardConfigParser {
 
         String address = iface.get("address");
         if (address != null && !address.isBlank()) {
-            // Every address, comma-separated as the file lists them. Only the
-            // first was kept, but the endpoint routes IPv4 and IPv6 alike
-            // through the peer, so the other family went into a tunnel with no
-            // address for it: a dual-stack config lost IPv6, or with IPv6
-            // listed first, nearly everything. Each address once, since the
-            // core refuses an interface that has one twice.
+            // Every address, separated by commas or spaces as wg-quick reads
+            // them; with a space, two were stored as one the core could not
+            // read. Only the first was kept, but the endpoint routes IPv4 and
+            // IPv6 alike through the peer, so the other family went into a
+            // tunnel with no address for it: a dual-stack config lost IPv6, or
+            // with IPv6 listed first, nearly everything. Each address once,
+            // since the core refuses an interface that has one twice.
             server.setFlow(String.join(", ", CoreSettings.interfaceAddresses(address)));
         }
         server.setName(defaultName(server));

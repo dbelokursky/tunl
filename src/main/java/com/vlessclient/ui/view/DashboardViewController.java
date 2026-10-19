@@ -179,6 +179,19 @@ public class DashboardViewController implements ViewShownAware {
      * is compared again once it is done, with the server it switched to.
      */
     private boolean applyingServer;
+    /**
+     * A pick the running core refused that stayed the pick, as the server the
+     * core runs had left the list: each later change of the list asked for
+     * it, and put up its refusal, again. Asked for again once another server
+     * is picked.
+     */
+    private String refusedPick;
+    /**
+     * The server the switch under way was asked for, while
+     * {@link #applyingServer} holds: a refusal is remembered for that server
+     * alone, and a pick made while the switch ran is still compared again.
+     */
+    private String switchingTo;
     /** The run's engine, which has no core until one is installed. */
     private SingBoxEngine singBoxEngine;
     private ProxyGroupMonitor groupMonitor;
@@ -1065,10 +1078,17 @@ public class DashboardViewController implements ViewShownAware {
     }
 
     private void runConnect(ConnectionService service, boolean restart, boolean switchServer) {
+        ConnectionService.Outcome outcome = null;
+        String deferredPick = null;
+        boolean pickRefused = false;
         try {
             ConnectionService.ConnectAttempt attempt =
                     switchServer ? service.switchToActiveServer()
                             : restart ? service.reconnect(null) : service.connect(null);
+            outcome = attempt.outcome();
+            if (outcome == ConnectionService.Outcome.DEFERRED && attempt.server() != null) {
+                deferredPick = attempt.server().getId();
+            }
             switch (attempt.outcome()) {
                 case NO_ACTIVE_SERVER -> Platform.runLater(() -> {
                     log.warn("No active server selected");
@@ -1081,6 +1101,12 @@ public class DashboardViewController implements ViewShownAware {
                                 I18n.get("dashboard.error.singbox.body")));
                 case ALREADY_RUNNING -> log.warn("sing-box already running");
                 case CANCELLED -> log.debug("Connect superseded by a newer user request");
+                case NOT_RUNNING ->
+                        log.debug("No core runs to switch; the next start takes the pick");
+                // The core runs on, and the banner offers the reconnect that
+                // takes the store's pick.
+                case DEFERRED -> Platform.runLater(
+                        () -> refreshPendingChanges(currentConnectionState()));
                 // STARTED: the engine's state listener drives the UI from here.
                 // SWITCHED changes no state, so nothing else tells the health
                 // checks that the traffic leaves through another server.
@@ -1092,8 +1118,20 @@ public class DashboardViewController implements ViewShownAware {
                 });
             }
         } catch (IOException e) {
-            log.error("Failed to start sing-box", e);
+            // A pick the core refuses is refused before anything stops, and
+            // the tunnel runs on: the card does not say a start failed.
+            boolean keptRunning = switchServer && service.isRunning();
+            pickRefused = keptRunning;
+            log.error(keptRunning ? "Could not switch servers" : "Failed to start sing-box", e);
             Platform.runLater(() -> {
+                if (keptRunning) {
+                    rememberRefusedPick();
+                    ServerConfig running = runningServer();
+                    showError(I18n.get("dashboard.error.pick.title"),
+                            I18n.get("dashboard.error.pick.body", e.getMessage(),
+                                    running != null ? running.getName() : ""));
+                    return;
+                }
                 statusLabel.setText(I18n.get("error.connection.failed", e.getMessage()));
                 showError(I18n.get("dashboard.error.start.title"), e.getMessage());
             });
@@ -1109,14 +1147,44 @@ public class DashboardViewController implements ViewShownAware {
             Platform.runLater(() ->
                     statusLabel.setText(I18n.get("error.connection.failed", detail)));
         } finally {
+            // Compared again only once the core moved, or a pick was refused
+            // with the core running on, for a pick made while it did. After a
+            // switch a Disconnect called off, the stop it waited for still
+            // read Connected here, and the second look started another
+            // switch, which asked for the tunnel again and started it after
+            // the stop; after one that moved nothing it only asked for the
+            // same again, and again. After one that left the store's own
+            // pick to the user's reconnect it is compared again too, but for
+            // that pick: a pick the user made while it ran was lost, and the
+            // tunnel stayed on the withdrawn server while the list and the
+            // tray named the new pick.
+            boolean compareAgain = outcome == ConnectionService.Outcome.SWITCHED
+                    || outcome == ConnectionService.Outcome.STARTED || pickRefused
+                    || outcome == ConnectionService.Outcome.DEFERRED;
+            String leftToTheUser = deferredPick;
             Platform.runLater(() -> {
                 refreshConnectButtonAvailability();
                 if (switchServer) {
                     applyingServer = false;
-                    reconnectIfActiveServerChanged();
+                    if (compareAgain) {
+                        reconnectIfActiveServerChanged(leftToTheUser);
+                    }
                 }
             });
         }
+    }
+
+    /**
+     * Remembers a pick the running core refused that is still the pick: the
+     * service puts a refused pick back on the server the core runs, unless
+     * that one has left the list. Only the server the switch was asked for:
+     * another one picked while it ran is compared again, not taken for it.
+     */
+    private void rememberRefusedPick() {
+        ServerConfig pick = findActiveServer();
+        String applied = appliedServerId();
+        refusedPick = pick != null && pick.getId().equals(switchingTo)
+                && !pick.getId().equals(applied) ? pick.getId() : null;
     }
 
     private void disconnect() {
@@ -1166,11 +1234,32 @@ public class DashboardViewController implements ViewShownAware {
      * connecting, picking the first server again read as no change.</p>
      */
     private void reconnectIfActiveServerChanged() {
+        reconnectIfActiveServerChanged(null);
+    }
+
+    /**
+     * {@link #reconnectIfActiveServerChanged()}, leaving one pick alone.
+     *
+     * @param deferredPick the store's own pick that the switch just done left
+     *                     to the user's reconnect, or null: while it is still
+     *                     the store's, another switch for it would only be
+     *                     left to the user again, and again
+     */
+    private void reconnectIfActiveServerChanged(String deferredPick) {
         if (applyingServer
                 || singBoxEngine.connectionStateProperty().get() != ConnectionState.CONNECTED) {
             return;
         }
         ServerConfig nowActive = findActiveServer();
+        if (nowActive != null && nowActive.getId().equals(refusedPick)) {
+            return;
+        }
+        refusedPick = null;
+        if (nowActive != null && nowActive.getId().equals(deferredPick)
+                && ServiceLocator.find(ConfigStore.class)
+                        .map(ConfigStore::isPickedByTheStore).orElse(false)) {
+            return;
+        }
         String applied = appliedServerId();
         if (nowActive == null || applied == null || nowActive.getId().equals(applied)) {
             return;
@@ -1187,6 +1276,7 @@ public class DashboardViewController implements ViewShownAware {
         // would start a second switch, or, if it went back to that server,
         // none at all.
         applyingServer = true;
+        switchingTo = nowActive.getId();
         holdConnect();
         Thread.startVirtualThread(() -> runConnect(service, true, true));
     }

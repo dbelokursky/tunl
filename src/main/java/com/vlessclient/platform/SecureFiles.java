@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.nio.file.attribute.UserPrincipal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -114,6 +115,38 @@ public final class SecureFiles {
             Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"));
         } catch (IOException e) {
             log.debug("Could not restrict permissions on {}: {}", file, e.getMessage());
+        }
+    }
+
+    /**
+     * Whether {@code dir} is a directory of this user's that nobody else can
+     * enter, owner-only {@code rwx}: what a system folder must be before a
+     * session's files go into it, since anyone who could write in it could
+     * swap the configuration a root core is about to read. False off POSIX
+     * and whenever it cannot be told.
+     */
+    static boolean isPrivateDir(Path dir) {
+        return isPrivateDir(dir, System.getProperty("user.name"));
+    }
+
+    /**
+     * {@link #isPrivateDir(Path)} for the user named {@code userName}; a seam
+     * for tests, which cannot hand a folder to another user without root.
+     */
+    static boolean isPrivateDir(Path dir, String userName) {
+        if (!POSIX) {
+            return false;
+        }
+        try {
+            UserPrincipal user = dir.getFileSystem().getUserPrincipalLookupService()
+                    .lookupPrincipalByName(userName);
+            return Files.isDirectory(dir)
+                    && Files.getOwner(dir).equals(user)
+                    && Files.getPosixFilePermissions(dir)
+                            .equals(PosixFilePermissions.fromString("rwx------"));
+        } catch (IOException | RuntimeException e) {
+            log.debug("Could not tell whether {} is private: {}", dir, e.toString());
+            return false;
         }
     }
 }

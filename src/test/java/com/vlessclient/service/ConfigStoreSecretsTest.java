@@ -133,6 +133,70 @@ class ConfigStoreSecretsTest {
         assertThat(store.getServers().get(0).getUuid()).isEqualTo("legacy-plain");
     }
 
+    /**
+     * A credential is sealed only when the file is written. One saved while
+     * no keychain was there stayed in plaintext after a start that had one,
+     * which is what Settings tells a Linux user to arrange, until some other
+     * change wrote the list: for a server added by hand and never edited,
+     * for good.
+     */
+    @Test
+    void credentialsLeftInPlaintextAreSealedAtAStartWithAKeychain() throws Exception {
+        InMemorySecretSealer offSealer = new InMemorySecretSealer();
+        offSealer.setAvailable(false);
+        ConfigStore before = new ConfigStore(tempDir, offSealer);
+        before.addServer(server("vless", "11111111-2222-3333-4444-555555555555"));
+        before.addServer(TestServers.server().name("hy2").protocol(Protocol.HYSTERIA2)
+                .address("192.0.2.2").port(443).uuid("hy2-password").flow("obfs-password")
+                .build());
+        assertThat(rawServersJson()).contains("11111111-2222-3333-4444-555555555555");
+
+        InMemorySecretSealer keychain = new InMemorySecretSealer();
+        ConfigStore store = new ConfigStore(tempDir, keychain);
+        store.sealCredentialsLeftInPlaintext();
+
+        assertThat(rawServersJson()).doesNotContain("11111111-2222-3333-4444-555555555555")
+                .doesNotContain("hy2-password").doesNotContain("obfs-password");
+        assertThat(keychain.entries()).containsValues("11111111-2222-3333-4444-555555555555",
+                "hy2-password", "obfs-password");
+        assertThat(new ConfigStore(tempDir, keychain).getServers())
+                .extracting(ServerConfig::getUuid)
+                .containsExactly("11111111-2222-3333-4444-555555555555", "hy2-password");
+    }
+
+    /** No write and no keychain process at a start that has nothing to seal. */
+    @Test
+    void aStartWithNothingLeftInPlaintextWritesNothing() throws Exception {
+        InMemorySecretSealer keychain = new InMemorySecretSealer();
+        new ConfigStore(tempDir, keychain).addServer(server("s1", "sealed-already"));
+        String sealed = rawServersJson();
+        keychain.resetSealCalls();
+
+        new ConfigStore(tempDir, keychain).sealCredentialsLeftInPlaintext();
+
+        assertThat(keychain.sealCalls()).isZero();
+        assertThat(rawServersJson()).isEqualTo(sealed);
+    }
+
+    /** Plaintext stays where the user asked for it, or where no keychain is there to take it. */
+    @Test
+    void plaintextStaysWithSecureStorageOffOrNoKeychain() throws Exception {
+        InMemorySecretSealer offSealer = new InMemorySecretSealer();
+        offSealer.setAvailable(false);
+        new ConfigStore(tempDir, offSealer).addServer(server("s1", "plain-uuid"));
+
+        new ConfigStore(tempDir, offSealer).sealCredentialsLeftInPlaintext();
+        assertThat(rawServersJson()).contains("plain-uuid");
+
+        InMemorySecretSealer keychain = new InMemorySecretSealer();
+        ConfigStore optedOut = new ConfigStore(tempDir, keychain);
+        optedOut.getSettings().setStoreSecretsSecurely(false);
+        optedOut.saveSettings(optedOut.getSettings());
+        new ConfigStore(tempDir, keychain).sealCredentialsLeftInPlaintext();
+        assertThat(rawServersJson()).contains("plain-uuid");
+        assertThat(keychain.sealCalls()).isZero();
+    }
+
     @Test
     void unavailableBackendKeepsWritingPlaintext() throws Exception {
         InMemorySecretSealer sealer = new InMemorySecretSealer();

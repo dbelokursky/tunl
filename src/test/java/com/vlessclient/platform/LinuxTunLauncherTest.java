@@ -1,12 +1,19 @@
 package com.vlessclient.platform;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.vlessclient.testing.Await;
+import com.vlessclient.testing.FormatLocale;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InterruptedIOException;
@@ -69,6 +76,24 @@ class LinuxTunLauncherTest {
             handle.descendants().forEach(ProcessHandle::destroyForcibly);
             handle.destroyForcibly();
         }
+    }
+
+    /** What the launcher logs during a test. */
+    private final ListAppender<ILoggingEvent> logged = new ListAppender<>();
+
+    @BeforeEach
+    void captureTheLaunchersLog() {
+        logged.start();
+        launcherLog().addAppender(logged);
+    }
+
+    @AfterEach
+    void releaseTheLaunchersLog() {
+        launcherLog().detachAppender(logged);
+    }
+
+    private static Logger launcherLog() {
+        return (Logger) LoggerFactory.getLogger(LinuxTunLauncher.class);
     }
 
     /**
@@ -447,6 +472,103 @@ class LinuxTunLauncherTest {
         assertThat(wrapper).contains("'/tmp/it'\\''s.json'");
     }
 
+    /**
+     * The app's pid reached the fallback's watch through String.format's %d,
+     * which writes the digits of the default format locale. Under fa-IR,
+     * ar-SA, bn-BD and the like the watch read "kill -0 ۱۲۳۴۵", which no shell
+     * takes for a pid, and the loop ended on its first pass: bash stopped the
+     * root core as it started, so every TUN connect failed, and dash mostly
+     * lost that SIGTERM and left the core running with nothing watching it.
+     * A full JDK has those locales; the installers' runtime keeps en and ru.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"/bin/sh", "/bin/bash", "/bin/dash"})
+    @org.junit.jupiter.api.condition.EnabledOnOs({org.junit.jupiter.api.condition.OS.MAC,
+            org.junit.jupiter.api.condition.OS.LINUX})
+    void theFallbackKeepsItsWatchUnderALocaleWithDigitsOfItsOwn(String shell, @TempDir Path dir)
+            throws Exception {
+        Assumptions.assumeTrue(Files.isExecutable(Path.of(shell)), shell + " is not installed");
+        Path core = Files.writeString(dir.resolve("core.sh"), "#!/bin/sh\nexec sleep 60\n");
+        core.toFile().setExecutable(true, true);
+        Path stop = dir.resolve("stop");
+        String wrapper = FormatLocale.in("fa-IR",
+                () -> LinuxTunLauncher.wrapperCommand(core, dir.resolve("c.json"), stop));
+
+        Process sh = new ProcessBuilder(shell, "-c", wrapper).redirectErrorStream(true).start();
+        spawned.add(sh.toHandle());
+
+        assertThat(sh.waitFor(1500, TimeUnit.MILLISECONDS))
+                .as("the wrapper ended its core on its own, with no stop asked for")
+                .isFalse();
+        Files.createFile(stop);   // what SingBoxEngine.signalStop does
+        assertThat(sh.waitFor(5, TimeUnit.SECONDS)).as("the wrapper heeds the stop file").isTrue();
+        assertThat(wrapper).contains("kill -0 " + ProcessHandle.current().pid() + " ");
+    }
+
+    /**
+     * A stop that came before the root wrapper started: Disconnect or Quit
+     * while the PolicyKit dialog was up, and the dialog answered within the
+     * engine's grace. The loop ended on its first pass, and its SIGTERM
+     * reached the core's background child before that had exec'd. Under
+     * dash, Debian's and Ubuntu's /bin/sh, the child still had the wrapper's
+     * TERM trap, which took the signal and lost it at the exec: the root core
+     * ran on with its TUN up, the wrapper waited on it deaf to the stop file
+     * and the app, and Disconnect could not end it.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"/bin/sh", "/bin/bash", "/bin/dash"})
+    @org.junit.jupiter.api.condition.EnabledOnOs({org.junit.jupiter.api.condition.OS.MAC,
+            org.junit.jupiter.api.condition.OS.LINUX})
+    void aStopThatCameBeforeTheWrapperStartedLeavesNoCore(String shell, @TempDir Path dir)
+            throws Exception {
+        Assumptions.assumeTrue(Files.isExecutable(Path.of(shell)), shell + " is not installed");
+        Path started = dir.resolve("started");
+        Path core = coreThatMarks(dir, started);
+        for (int run = 0; run < 10; run++) {
+            Path stop = Files.createFile(dir.resolve("stop-" + run));
+            Process sh = new ProcessBuilder(shell, "-c", LinuxTunLauncher.wrapperCommand(
+                    core, dir.resolve("c.json"), stop)).redirectErrorStream(true).start();
+            spawned.add(sh.toHandle());
+
+            assertThat(sh.waitFor(3, TimeUnit.SECONDS))
+                    .as("run %d: the wrapper ends on a stop that came first", run).isTrue();
+        }
+        assertThat(started).as("a core whose stop came first").doesNotExist();
+    }
+
+    /** The same for an app that died while the dialog was up, answered after. */
+    @ParameterizedTest
+    @ValueSource(strings = {"/bin/sh", "/bin/bash", "/bin/dash"})
+    @org.junit.jupiter.api.condition.EnabledOnOs({org.junit.jupiter.api.condition.OS.MAC,
+            org.junit.jupiter.api.condition.OS.LINUX})
+    void anAppGoneBeforeTheWrapperStartedLeavesNoCore(String shell, @TempDir Path dir)
+            throws Exception {
+        Assumptions.assumeTrue(Files.isExecutable(Path.of(shell)), shell + " is not installed");
+        Path started = dir.resolve("started");
+        Path core = coreThatMarks(dir, started);
+        for (int run = 0; run < 10; run++) {
+            Process sh = new ProcessBuilder(shell, "-c", LinuxTunLauncher.wrapperCommand(
+                    core, dir.resolve("c.json"), dir.resolve("stop-" + run), NO_SUCH_PID))
+                    .redirectErrorStream(true).start();
+            spawned.add(sh.toHandle());
+
+            assertThat(sh.waitFor(3, TimeUnit.SECONDS))
+                    .as("run %d: the wrapper ends when the app is already gone", run).isTrue();
+        }
+        assertThat(started).as("a core whose app was gone").doesNotExist();
+    }
+
+    /** A pid no process has: above every system's pid range. */
+    private static final long NO_SUCH_PID = Integer.MAX_VALUE;
+
+    /** A stand-in core that leaves {@code marker} when it starts, then runs on. */
+    private static Path coreThatMarks(Path dir, Path marker) throws IOException {
+        Path core = Files.writeString(dir.resolve("core.sh"),
+                "#!/bin/sh\n: > '" + marker + "'\nexec sleep 60\n");
+        core.toFile().setExecutable(true, true);
+        return core;
+    }
+
     /** A core that failed reached the app as "exited with code 0". */
     @Test
     @org.junit.jupiter.api.condition.EnabledOnOs({org.junit.jupiter.api.condition.OS.MAC,
@@ -547,5 +669,123 @@ class LinuxTunLauncherTest {
                 .isInstanceOf(IOException.class);
         assertThat(runner.calls).extracting(List::getFirst).doesNotContain("elevator-that-must-not-launch")
                 .allMatch(tools.getFirst().resolve("getcap").toString()::equals);
+    }
+
+    /**
+     * Up to 1.24 a system-wide core, root's and runnable by every account, got
+     * the grant all the same: the chmod failed and setcap still ran. An
+     * administrator's own {@code setcap cap_net_admin+ep} reads back exactly
+     * the same ({@code cap_net_admin=ep}; "= cap_net_admin+ep" before libcap
+     * 2.27), so Tunl cannot tell whose a grant on such a core is. It leaves
+     * the grant in place, runs nothing as root, and starts the core through
+     * it as before, at a reconnect too; the log, which said such a core "gets
+     * no capability", now says once what every account can do with it and how
+     * to remove it.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {" cap_net_admin=ep", " = cap_net_admin+ep",
+            " cap_net_admin,cap_net_raw=ep"})
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+    void aGrantOnACoreThisUserCannotRestrictIsUsedAndLeftInPlace(String getcapSays,
+            @TempDir Path dir) throws Exception {
+        Path core = coreThisUserCannotRestrict(dir);
+        Path asked = dir.resolve("asked-to-elevate");
+        List<Path> tools = toolsIn(dir);
+        FakeRunner caps = new FakeRunner(cmd -> new CommandRunner.Result(0,
+                core.toAbsolutePath() + getcapSays + "\n"));
+        LinuxTunLauncher launcher =
+                new LinuxTunLauncher(caps, recordingElevator(dir, asked).toString(), tools);
+
+        for (String start : List.of("the connect", "a reconnect")) {
+            TunLauncher.Launched launched = launcher.launch(core, dir.resolve("config.json"),
+                    new TunLauncher.Prompt("setup", "each connect"));
+            spawned.add(launched.process().toHandle());
+            assertThat(launched.process().waitFor(10, TimeUnit.SECONDS)).isTrue();
+
+            assertThat(launched.promptsEachLaunch()).as(start + " goes through the grant")
+                    .isFalse();
+        }
+        assertThat(asked).as("nothing was run as root: no grant, and none taken off")
+                .doesNotExist();
+        assertThat(caps.calls).as("what ran").extracting(List::getFirst)
+                .containsOnly(tools.getFirst().resolve("getcap").toString());
+        assertThat(sharedCapabilityWarnings()).as("said once a run").singleElement()
+                .asString().startsWith(core.toAbsolutePath() + " carries cap_net_admin")
+                .contains("sudo setcap -r '" + core.toAbsolutePath() + "'");
+    }
+
+    /** Without a grant such a core elevates per connect, as since 1.25. */
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+    void aCoreThisUserCannotRestrictAndNoGrantElevatesEachConnect(@TempDir Path dir)
+            throws Exception {
+        Path core = coreThisUserCannotRestrict(dir);
+        Path asked = dir.resolve("asked-to-elevate");
+        List<Path> tools = toolsIn(dir);
+        FakeRunner caps = new FakeRunner(cmd -> new CommandRunner.Result(0, ""));
+        LinuxTunLauncher launcher =
+                new LinuxTunLauncher(caps, recordingElevator(dir, asked).toString(), tools);
+
+        TunLauncher.Launched launched = launcher.launch(core, dir.resolve("config.json"),
+                new TunLauncher.Prompt("setup", "each connect"));
+        spawned.add(launched.process().toHandle());
+        assertThat(launched.process().waitFor(10, TimeUnit.SECONDS)).isTrue();
+
+        assertThat(launched.promptsEachLaunch()).isTrue();
+        List<String> elevated = Files.readAllLines(asked);
+        assertThat(elevated.subList(0, 2)).containsExactly("/bin/sh", "-c");
+        assertThat(elevated.get(2)).as("the root wrapper, and nothing before it")
+                .startsWith("SBSTOP=");
+        assertThat(caps.calls).as("no grant was asked for").extracting(List::getFirst)
+                .containsOnly(tools.getFirst().resolve("getcap").toString());
+        assertThat(sharedCapabilityWarnings()).isEmpty();
+    }
+
+    /** A core this user alone can run holds its grant for this user alone: nothing to say. */
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+    void theOwnersOwnCoreStartsThroughItsGrantWithoutTheWarning(@TempDir Path dir)
+            throws Exception {
+        Path core = Files.writeString(dir.resolve("sing-box"), "#!/bin/sh\nexit 0\n");
+        FakeRunner caps = new FakeRunner(cmd -> new CommandRunner.Result(0,
+                core.toAbsolutePath() + " cap_net_admin=ep\n"));
+        LinuxTunLauncher launcher =
+                new LinuxTunLauncher(caps, "elevator-that-must-not-launch", toolsIn(dir));
+
+        TunLauncher.Launched launched = launcher.launch(core, dir.resolve("config.json"),
+                new TunLauncher.Prompt("setup", "each connect"));
+        spawned.add(launched.process().toHandle());
+        assertThat(launched.process().waitFor(10, TimeUnit.SECONDS)).isTrue();
+
+        assertThat(launched.promptsEachLaunch()).isFalse();
+        assertThat(sharedCapabilityWarnings()).isEmpty();
+    }
+
+    /** What the launcher has warned of a capability other accounts hold. */
+    private List<String> sharedCapabilityWarnings() {
+        return logged.list.stream()
+                .filter(event -> event.getLevel() == Level.WARN)
+                .map(ILoggingEvent::getFormattedMessage)
+                .filter(message -> message.contains("every account that can run it"))
+                .toList();
+    }
+
+    /**
+     * A core whose permissions this user cannot change, as with root's own
+     * {@code /usr/bin/sing-box}: here a link to a file that is not there, so
+     * the chmod fails whoever runs the test.
+     */
+    private static Path coreThisUserCannotRestrict(Path dir) throws IOException {
+        Path core = Files.createSymbolicLink(dir.resolve("sing-box"), dir.resolve("root-owned"));
+        assertThat(LinuxTunLauncher.restrictToOwner(core)).isFalse();
+        return core;
+    }
+
+    /** A stand-in for pkexec that writes the command it was asked to run, one argument a line. */
+    private static Path recordingElevator(Path dir, Path record) throws IOException {
+        Path elevator = Files.writeString(dir.resolve("elevator"),
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" + record + "'\n");
+        elevator.toFile().setExecutable(true, true);
+        return elevator;
     }
 }
