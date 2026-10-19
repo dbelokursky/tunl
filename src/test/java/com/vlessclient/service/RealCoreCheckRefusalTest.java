@@ -27,8 +27,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * A pick of a server the bundled core's own check refuses, which
- * {@link CoreSettings#refusal} lets through: VLESS with REALITY over QUIC,
- * "uTLS is required by reality client". The start leaves it out, and the
+ * {@link CoreSettings#refusal} lets through. The start leaves it out, and the
  * pick is refused before anything stops, also after a refresh hands the
  * server out with another name, REALITY short ID and server name, as 3x-ui
  * and Marzban do at each hand-out. The refusal was kept for the server as it
@@ -36,7 +35,13 @@ import org.junit.jupiter.api.io.TempDir;
  * and the pick stopped the working tunnel for a start the core refused.
  *
  * <p>The core's {@code check} is the bundled binary's; its run is a loop,
- * which no test here lets touch a route or a port it does not own.</p>
+ * which no test here lets touch a route or a port it does not own. The
+ * server was REALITY over QUIC ("uTLS is required by reality client") until
+ * {@link CoreSettings#refusal} learned to refuse that too, and no REALITY
+ * server the core refuses is left that it lets through. So the check is
+ * handed Frankfurt's outbound with a uTLS fingerprint the core does not
+ * know, as a core that dropped one would refuse it, and the refusal is still
+ * the bundled core's own, in its words and for its outbound.</p>
  */
 @ExtendWith(FxToolkitExtension.class)
 @EnabledOnOs({OS.MAC, OS.LINUX})
@@ -56,8 +61,8 @@ class RealCoreCheckRefusalTest {
     /** Frankfurt as its panel hands it out, name, short ID and server name included. */
     private static ServerConfig frankfurt(String name, String shortId, String serverName) {
         ServerConfig server = new ShareLinkParser().parse("vless://" + UUID
-                + "@203.0.113.11:443?type=quic&security=reality&sni=" + serverName
-                + "&fp=chrome&pbk=" + PBK + "&sid=" + shortId + "#" + name);
+                + "@203.0.113.11:443?type=tcp&security=reality&sni=" + serverName
+                + "&fp=firefox&pbk=" + PBK + "&sid=" + shortId + "#" + name);
         server.setId("srv-frankfurt");
         server.setSubscriptionId("sub-1");
         return server;
@@ -68,7 +73,13 @@ class RealCoreCheckRefusalTest {
         Path real = BundledCore.locate();
         Path core = dir.resolve("sing-box");
         Files.writeString(core, "#!/bin/bash\n"
-                + "if [ \"$1\" = check ]; then exec '" + real + "' \"$@\"; fi\n"
+                // Frankfurt's is the one outbound with uTLS: Tokyo has no TLS.
+                + "if [ \"$1\" = check ]; then\n"
+                + "  checked=\"$(dirname \"$0\")/checked.json\"\n"
+                + "  sed -E 's/(\"fingerprint\"[[:space:]]*:[[:space:]]*\")firefox\"/"
+                + "\\1firefox_next\"/' \"$3\" > \"$checked\"\n"
+                + "  exec '" + real + "' check -c \"$checked\" --disable-color\n"
+                + "fi\n"
                 + "trap 'exit 0' TERM\n"
                 + "echo 'sing-box started'\n"
                 + "while true; do sleep 0.1; done\n");
@@ -134,7 +145,7 @@ class RealCoreCheckRefusalTest {
         FxExecutor.run(() -> store.setActiveServer("srv-frankfurt"));
         assertThatThrownBy(service::switchToActiveServer)
                 .isInstanceOf(ConfigRejectedException.class)
-                .hasMessageContaining("uTLS is required by reality client");
+                .hasMessageContaining("unknown uTLS fingerprint: firefox_next");
 
         assertThat(engine.isRunning()).as("the working tunnel after the pick").isTrue();
         assertThat(store.getServerById("srv-tokyo").orElseThrow().isActive())
