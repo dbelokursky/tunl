@@ -31,6 +31,11 @@ import org.slf4j.LoggerFactory;
  * deleted. The rules here follow sing-box 1.14's own answers, and
  * {@code SingBoxRealBinarySmokeTest} checks that they still agree with the
  * pinned core.</p>
+ *
+ * <p>Three answers: {@link #problem}, what the core refuses, which alone
+ * leaves a stored rule out of the configuration; {@link #refusal}, what a
+ * new rule is refused for, a problem or a regex no name can match; and
+ * {@link #hint}, what the core takes but may not do as the rule says.</p>
  */
 public final class RoutingRuleCheck {
 
@@ -408,13 +413,14 @@ public final class RoutingRuleCheck {
      * and (?i) lets upper case through from where it stands to the end of its
      * group, alternatives after it included.
      *
-     * <p>The expression is read as Go's parser reads it, which
-     * {@link #problem} has found Java's to agree with, for whether every way
-     * through it reads such a letter. An alternative without one, or a part
-     * that may be left out, still matches: "\.(ru|рф)$" matches every .ru
-     * name and "^m\.(VK|vk)\.com$" m.vk.com. Such a rule was refused and,
-     * stored by 1.25, left out of the configuration, as one that could never
-     * match.</p>
+     * <p>The expression, one {@link #problem} finds nothing in that Go
+     * refuses, is read as Go's parser, the core's, reads it, for whether
+     * every way through it reads such a letter; where Java reads it apart, as
+     * "X(?i){0}y", whose X Go repeats none times, Go is followed. An
+     * alternative without one, or a part that may be left out, still
+     * matches: "\.(ru|рф)$" matches every .ru name and "^m\.(VK|vk)\.com$"
+     * m.vk.com. Such a rule was refused and, stored by 1.25, left out of the
+     * configuration, as one that could never match.</p>
      */
     private static final class Letters {
 

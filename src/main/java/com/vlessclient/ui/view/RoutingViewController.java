@@ -445,14 +445,18 @@ public class RoutingViewController {
                 () -> RoutingRuleCheck.hint(typeCombo.getValue(), valueField.getText().strip()),
                 typeCombo.valueProperty(), valueField.textProperty());
         InvalidationListener explain = obs -> {
+            // Both read every time: a binding left unread stays invalid, and
+            // tells this listener of no further change.
+            Optional<String> refusal = problem.get();
+            Optional<String> warning = hint.get();
             // A blank value is left to the disabled OK: nothing to explain yet.
             boolean blank = valueField.getText().isBlank();
-            boolean refused = !blank && problem.get().isPresent();
+            boolean refused = !blank && refusal.isPresent();
             valueField.getStyleClass().remove("field-error");
             if (refused) {
                 valueField.getStyleClass().add("field-error");
             }
-            String reason = blank ? "" : problem.get().or(hint::get).orElse("");
+            String reason = blank ? "" : refusal.or(() -> warning).orElse("");
             problemLabel.getStyleClass().removeAll("routing-rule-problem", "routing-rule-hint");
             problemLabel.getStyleClass().add(refused || reason.isEmpty()
                     ? "routing-rule-problem" : "routing-rule-hint");
