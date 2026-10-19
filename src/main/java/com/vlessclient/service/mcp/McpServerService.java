@@ -47,7 +47,7 @@ public class McpServerService {
     private McpHttpServer httpServer;
     private int runningPort = -1;
     private SingBoxEngine loggedEngine;
-    private String lastStartError;
+    private StartFailure lastStartFailure;
 
     /**
      * Creates the service wired to the given config store and control facade.
@@ -120,7 +120,7 @@ public class McpServerService {
         int desiredPort = settings.getMcpPort();
 
         if (!shouldRun) {
-            lastStartError = null;
+            lastStartFailure = null;
             stop();
             return;
         }
@@ -135,12 +135,12 @@ public class McpServerService {
             httpServer = new McpHttpServer(desiredPort, token, server, mapper, notifier);
             httpServer.start();
             runningPort = desiredPort;
-            lastStartError = null;
+            lastStartFailure = null;
         } catch (Exception e) {
             log.error("Failed to start MCP server on port {}", desiredPort, e);
             httpServer = null;
             runningPort = -1;
-            lastStartError = describeStartFailure(e, desiredPort);
+            lastStartFailure = describeStartFailure(e, desiredPort);
 
             // After a click, "Enabled" must describe a server that is
             // actually listening. If startup fails, retaining the desired
@@ -157,14 +157,40 @@ public class McpServerService {
     }
 
     /**
-     * Returns the most recent startup failure in a form suitable for the
-     * Settings status label.
-     *
-     * @return the failure description, or {@code null} after a successful
-     *         start or an explicit stop
+     * Why a start failed, kept as what happened rather than as words: the
+     * Settings status line words it in the language the window is in. It was
+     * English text made here when the bind failed, which at launch is before
+     * the saved language is applied, and a language picked later never
+     * reached it.
      */
-    public synchronized String getLastStartError() {
-        return lastStartError;
+    public sealed interface StartFailure {
+
+        /**
+         * The port is taken: binding it failed.
+         *
+         * @param port the port the server tried to bind
+         */
+        record PortInUse(int port) implements StartFailure {
+        }
+
+        /**
+         * Any other failure, in its own words.
+         *
+         * @param message the exception's message, or its class name when it
+         *                has none
+         */
+        record Other(String message) implements StartFailure {
+        }
+    }
+
+    /**
+     * Returns why the most recent start failed, for the Settings status line.
+     *
+     * @return the failure, or {@code null} after a successful start or an
+     *         explicit stop
+     */
+    public synchronized StartFailure getLastStartFailure() {
+        return lastStartFailure;
     }
 
     /** Stops the server if it is running. */
@@ -174,25 +200,27 @@ public class McpServerService {
             httpServer = null;
             runningPort = -1;
         }
-        lastStartError = null;
+        lastStartFailure = null;
     }
 
     public synchronized boolean isRunning() {
         return httpServer != null && httpServer.isRunning();
     }
 
-    private static String describeStartFailure(Exception failure, int port) {
+    private static StartFailure describeStartFailure(Exception failure, int port) {
         Throwable cause = failure;
         while (cause != null) {
             if (cause instanceof BindException) {
-                return "port " + port + " is already in use";
+                return new StartFailure.PortInUse(port);
             }
             cause = cause.getCause();
         }
+        // The exception's own message, which no bundle has a translation
+        // for: the status line shows it as it came, usually in English.
         String message = failure.getMessage();
-        return message == null || message.isBlank()
+        return new StartFailure.Other(message == null || message.isBlank()
                 ? failure.getClass().getSimpleName()
-                : message;
+                : message);
     }
 
     /**

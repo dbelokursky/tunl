@@ -45,8 +45,8 @@ class McpServerServiceTest {
 
             assertThat(service.isRunning()).isFalse();
             assertThat(settings.isMcpEnabled()).isFalse();
-            assertThat(service.getLastStartError())
-                    .isEqualTo("port " + blockedPort + " is already in use");
+            assertThat(service.getLastStartFailure())
+                    .isEqualTo(new McpServerService.StartFailure.PortInUse(blockedPort));
             assertThat(new ConfigStore(tempDir).getSettings().isMcpEnabled()).isFalse();
         }
 
@@ -56,7 +56,7 @@ class McpServerServiceTest {
 
         assertThat(service.isRunning()).isTrue();
         assertThat(settings.isMcpEnabled()).isTrue();
-        assertThat(service.getLastStartError()).isNull();
+        assertThat(service.getLastStartFailure()).isNull();
     }
 
     /**
@@ -81,8 +81,8 @@ class McpServerServiceTest {
             service.applyAtLaunch();
 
             assertThat(service.isRunning()).isFalse();
-            assertThat(service.getLastStartError())
-                    .isEqualTo("port " + blockedPort + " is already in use");
+            assertThat(service.getLastStartFailure())
+                    .isEqualTo(new McpServerService.StartFailure.PortInUse(blockedPort));
             assertThat(settings.isMcpEnabled()).isTrue();
             assertThat(new ConfigStore(tempDir).getSettings().isMcpEnabled()).isTrue();
         }
