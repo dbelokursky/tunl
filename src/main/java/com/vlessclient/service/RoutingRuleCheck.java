@@ -221,14 +221,35 @@ public final class RoutingRuleCheck {
      */
     private static Optional<String> nameProblem(RoutingRule.RuleType type, String value) {
         String name = withoutWildcards(type, value.strip());
-        if (name != null && !name.isEmpty()) {
-            return Optional.empty();
+        if (name == null || name.isEmpty()) {
+            return Optional.of(switch (type) {
+                case DOMAIN -> I18n.get("routing.rule.problem.name.domain");
+                case DOMAIN_SUFFIX -> I18n.get("routing.rule.problem.name.suffix");
+                default -> I18n.get("routing.rule.problem.name.keyword");
+            });
         }
-        return Optional.of(switch (type) {
-            case DOMAIN -> I18n.get("routing.rule.problem.name.domain");
-            case DOMAIN_SUFFIX -> I18n.get("routing.rule.problem.name.suffix");
-            default -> I18n.get("routing.rule.problem.name.keyword");
-        });
+        // "*.ru" is every name under ru to the bypass list, a suffix; read as
+        // a keyword it became "ru", which the core finds anywhere in a name:
+        // a Direct rule stored as "*.ru", which matched nothing before, sent
+        // rutracker.org and crunchyroll.com around the tunnel, and a Block
+        // "*.cn" blocked cnn.com. It says to use Domain suffix instead.
+        if (type == RoutingRule.RuleType.DOMAIN_KEYWORD && isSuffixPattern(value.strip())) {
+            return Optional.of(I18n.get("routing.rule.problem.name.keyword.suffix", name));
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * A star, or stars, then a dot, and no star at the end, as in
+     * "*.example.com": the bypass list's way to say every name under
+     * example.com.
+     */
+    private static boolean isSuffixPattern(String keyword) {
+        int from = 0;
+        while (from < keyword.length() && keyword.charAt(from) == '*') {
+            from++;
+        }
+        return from > 0 && keyword.startsWith(".", from) && !keyword.endsWith("*");
     }
 
     /**

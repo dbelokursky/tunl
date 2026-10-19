@@ -835,6 +835,40 @@ class SingBoxConfigGeneratorRoutingTest {
                 .doesNotContain("*");
     }
 
+    /**
+     * A keyword stored as "*.ru" matched nothing in 1.25.1, the core taking
+     * the star literally; read the bypass list's way, without the star and
+     * the dot beside it, it became "ru", which the core finds anywhere in a
+     * name: a Direct rule sent rutracker.org and every name with "ru" around
+     * the tunnel and resolved it with the direct resolver, and a Block "*.cn"
+     * blocked cnn.com. Such a rule is left out now, and its row says to use
+     * Domain suffix; a keyword with stars at both ends is still written.
+     */
+    @Test
+    void aKeywordStoredAsASuffixIsLeftOutRatherThanFoundAnywhere() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_KEYWORD, "*.ru",
+                        RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_KEYWORD, "*.cn",
+                        RoutingRule.RuleAction.BLOCK),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_KEYWORD, "*tracker*",
+                        RoutingRule.RuleAction.BLOCK)));
+        AppSettings tun = new AppSettings();
+        tun.setProxyMode(com.vlessclient.model.ProxyMode.TUN);
+
+        JsonNode root = parse(generator.generate(createVlessServer(), tun, routingConfig));
+        List<String> keywords = new java.util.ArrayList<>();
+        for (String section : List.of("route", "dns")) {
+            for (JsonNode rule : root.get(section).get("rules")) {
+                rule.path("domain_keyword").forEach(keyword -> keywords.add(
+                        section + " " + keyword.asString()));
+            }
+        }
+
+        assertThat(keywords).containsExactly("route tracker");
+    }
+
     /** The repository names its lists in lower case: "Google" was a 404, and no core. */
     @Test
     void aListNameIsWrittenInLowerCase() throws Exception {

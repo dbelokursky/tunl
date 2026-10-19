@@ -271,6 +271,31 @@ class RoutingRuleCheckTest {
         assertThat(RoutingRuleCheck.coreName(RuleType.DOMAIN_KEYWORD, ".")).isEqualTo(".");
     }
 
+    /**
+     * "*.ru" is every name under ru to the bypass list, a suffix. Read as a
+     * keyword it became "ru", which the core finds anywhere in a name, so a
+     * stored Direct "*.ru", which matched nothing before, sent rutracker.org
+     * around the tunnel, and a Block "*.cn" blocked cnn.com. It is refused,
+     * with the type that says it; stars at both ends, or none in front, stay
+     * a keyword, as in the bypass list.
+     */
+    @Test
+    void aKeywordWrittenAsASuffixIsRefusedWithTheTypeForIt() {
+        for (String value : List.of("*.ru", "*.cn", "**.co.uk", "*.Example.com.")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_KEYWORD, value))
+                    .as("keyword %s", value)
+                    .hasValueSatisfying(reason -> assertThat(reason).contains("Domain suffix"));
+        }
+        assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_KEYWORD, "*.ru"))
+                .hasValueSatisfying(reason -> assertThat(reason).contains(" ru:"));
+        for (String value : List.of("*.vk.com*", "*tracker", "tracker*", "*.ru*", ".ru")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_KEYWORD, value))
+                    .as("keyword %s", value).isEmpty();
+        }
+        // The same text is a suffix rule's own way to say it.
+        assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_SUFFIX, "*.ru")).isEmpty();
+    }
+
     /** The core takes a space in a domain, but no hostname has one: the rule never matched. */
     @Test
     void aDomainWithASpaceIsRefused() {
