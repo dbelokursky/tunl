@@ -22,7 +22,9 @@ import javafx.scene.layout.Priority;
  * never needs more width than its widest child. A child with
  * {@code HBox.hgrow} counts at its minimum width when the lines are drawn up,
  * the width an HBox would shrink it to, and a child wider than the row is
- * given the row's width.</p>
+ * given the row's width. A row inside a row moves as one, whether it grows or
+ * not: it counts at the width its children need on one line, and breaks up
+ * only on a line of its own that is narrower than that.</p>
  *
  * <p>Every page is mounted in {@link ContentScrollPane}, which has no
  * horizontal scroll bar, so a row that was wider than the page was cut off
@@ -173,9 +175,29 @@ public class WrappingRow extends Pane {
         return lines;
     }
 
-    /** What a child takes up on a line: its minimum if it grows, else its preferred width. */
+    /**
+     * What a child takes up on a line: its minimum if it grows, else its
+     * preferred width. A row that grows counts at the width it needs to keep
+     * its own children on one line, not at its minimum, which is its widest
+     * child: it goes on to the next line as one, rather than staying beside
+     * the others to break up in what room they leave it.
+     */
     private static double basis(Node child) {
-        return grows(child) ? child.minWidth(-1) : preferredWidth(child);
+        if (!grows(child)) {
+            return preferredWidth(child);
+        }
+        return child instanceof WrappingRow row ? row.oneLineWidth() : child.minWidth(-1);
+    }
+
+    /** The width this row needs to hold its children on one line, each at its basis. */
+    private double oneLineWidth() {
+        List<Node> children = getManagedChildren();
+        double sum = 0;
+        for (Node child : children) {
+            sum += snapSizeX(basis(child));
+        }
+        return snappedLeftInset() + sum + snapSpaceX(hgap) * Math.max(0, children.size() - 1)
+                + snappedRightInset();
     }
 
     private static double preferredWidth(Node child) {

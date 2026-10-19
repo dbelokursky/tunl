@@ -187,15 +187,20 @@
              button go on to the next: pinned in one HBox, at 150% the row
              made the page wider than the window and hid every combo's
              arrow. The label wraps only where the row is narrower than the
-             gutter, at 200%. -->
+             gutter, at 200%. The button goes under the ID only where a line
+             is too short for the two, and is cut only where it is too short
+             for the button alone: pinned to its width, at 225% in the
+             smallest window in Russian it made the page wider than the
+             window again. -->
         <WrappingRow hgap="10" vgap="6">
             <Label fx:id="deviceIdLabel" text="Device ID for subscriptions"
                    styleClass="form-label, settings-gutter" wrapText="true"/>
-            <HBox spacing="10" alignment="CENTER_LEFT" HBox.hgrow="ALWAYS">
-                <Label fx:id="deviceIdValue" text="" styleClass="stats-value" minWidth="0"/>
+            <WrappingRow hgap="10" vgap="6" HBox.hgrow="ALWAYS">
+                <Label fx:id="deviceIdValue" text="" styleClass="stats-value" minWidth="0"
+                       HBox.hgrow="ALWAYS"/>
                 <Button fx:id="deviceIdResetButton" text="Reset…" styleClass="secondary-button"
-                        minWidth="-Infinity" onAction="#onResetDeviceId"/>
-            </HBox>
+                        onAction="#onResetDeviceId"/>
+            </WrappingRow>
         </WrappingRow>
         <Label fx:id="deviceIdHint" styleClass="hint-label" wrapText="true" maxWidth="520"
                text="Sent to subscription providers."/>

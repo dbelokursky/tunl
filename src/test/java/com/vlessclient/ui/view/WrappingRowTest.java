@@ -99,6 +99,37 @@ class WrappingRowTest {
     }
 
     /**
+     * The device ID's row: a label, then the ID and its Reset button as one
+     * group that grows. The group goes under the label whole where the two
+     * do not fit on one line, and the button keeps its width on any line
+     * that holds it. Counted at its minimum, its widest child, the group
+     * stayed beside the label in what room it left, and the button was cut
+     * to that room on a line of the group's own.
+     */
+    @Test
+    void aGrowingRowInsideARowGoesOnToTheNextLineAsOne() {
+        onFx(() -> {
+            Region label = box(10, 100, 100, 20);
+            Region id = box(0, 300, 300, 20);
+            HBox.setHgrow(id, Priority.ALWAYS);
+            Region reset = box(20, 80, 80, 30);
+            WrappingRow group = row(id, reset);
+            HBox.setHgrow(group, Priority.ALWAYS);
+            WrappingRow row = row(label, group);
+            row.resize(180, row.prefHeight(180));
+            row.layout();
+
+            assertThat(bounds(group)).as("under the label, the whole row wide")
+                    .isEqualTo(new double[] {0, 26, 180, 30});
+            assertThat(bounds(id)).isEqualTo(new double[] {0, 5, 90, 20});
+            assertThat(bounds(reset)).as("its own width").isEqualTo(new double[] {100, 0, 80, 30});
+            assertThat(row.minWidth(-1)).as("the widest minimum, the button's own")
+                    .isEqualTo(20);
+            return null;
+        });
+    }
+
+    /**
      * Windows' display scalings of 125%, 150%, 175%, 225%, 300% and 350%
      * snap a width to a multiple of 0.8, 0.666..., 0.571..., 0.444...,
      * 0.333... or 0.285..., which a double cannot hold exactly. A row inside a

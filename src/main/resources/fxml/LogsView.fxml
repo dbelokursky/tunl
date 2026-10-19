@@ -46,10 +46,14 @@
         <TextField fx:id="searchField" promptText="Search logs..." minWidth="40"
                    HBox.hgrow="ALWAYS" styleClass="form-field"/>
 
-        <!-- Together, so they move as one when the line runs out. -->
+        <!-- Together, so they move as one when the line runs out. The check
+             box keeps its width on any line that holds it, and is cut only
+             on one too short for it alone: pinned to that width, at 225% in
+             the smallest window in Russian it made the page wider than the
+             window, and Clear was out of reach again. -->
         <WrappingRow hgap="10" vgap="6">
             <CheckBox fx:id="autoScrollCheckBox" text="Auto-scroll" selected="true"
-                      minWidth="-Infinity" styleClass="form-checkbox"/>
+                      styleClass="form-checkbox"/>
 
             <Button fx:id="downloadButton" styleClass="icon-button" minWidth="-Infinity"
                     onAction="#onDownloadClicked"/>

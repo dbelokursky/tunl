@@ -61,6 +61,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       "..." and "И...", which could no longer be told apart.</li>
  *   <li>The MCP server's status shared a line with its port: at 125% it read
  *       "○ stop...", and at 150% "○ ..." whether the server ran or not.</li>
+ *   <li>At 225%, the largest size Windows offers, the Logs check box and the
+ *       device ID's Reset button, each pinned to its width, made the page
+ *       wider than the smallest window again.</li>
  * </ul>
  *
  * <p>Each page is mounted in MainView, sidebar and all, at each size, text
@@ -75,8 +78,12 @@ public class LargerTextFitTest extends ApplicationTest {
     /** The window VlessClientApp opens, and the smallest it lets the user make. */
     private static final int[][] WINDOWS = {{820, 500}, {760, 460}};
 
-    /** Windows' usual text size and its larger steps, up to the largest it offers here. */
-    private static final double[] TEXT_SIZES = {1.0, 1.25, 1.5, 2.0};
+    /**
+     * Windows' usual text size and its larger steps, up to 225%, the largest
+     * its Text size slider offers. At that size the sidebar leaves the page
+     * about 220 pixels in the smallest window.
+     */
+    private static final double[] TEXT_SIZES = {1.0, 1.25, 1.5, 2.0, 2.25};
 
     /** The largest of {@link #TEXT_SIZES}. */
     private static final double LARGEST_TEXT_SIZE = TEXT_SIZES[TEXT_SIZES.length - 1];
@@ -114,12 +121,11 @@ public class LargerTextFitTest extends ApplicationTest {
     }
 
     /**
-     * The device ID's label and its Reset button whole at every size, as
-     * d181492 made them at 125%; the MCP command's two buttons up to 150%,
-     * where they go one under the other. At 200% in the smaller windows each
-     * of those two is wider than the whole card, and is cut where it is. The
-     * MCP server's status whole at every size: it goes under the port, and
-     * wraps.
+     * The device ID's label and its Reset button whole up to 200%, as d181492
+     * made them at 125%; the MCP command's two buttons up to 150%, where they
+     * go one under the other. Past those sizes, in the smaller windows, each
+     * of them is wider than the whole card, and is cut where it is. The MCP
+     * server's status whole at every size: it goes under the port, and wraps.
      */
     @Test
     void settingsFitsTheWindowAtEveryTextSize() {
