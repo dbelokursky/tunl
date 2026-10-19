@@ -1,13 +1,19 @@
 package com.vlessclient.platform;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.vlessclient.testing.Await;
 import com.vlessclient.testing.FormatLocale;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InterruptedIOException;
@@ -70,6 +76,24 @@ class LinuxTunLauncherTest {
             handle.descendants().forEach(ProcessHandle::destroyForcibly);
             handle.destroyForcibly();
         }
+    }
+
+    /** What the launcher logs during a test. */
+    private final ListAppender<ILoggingEvent> logged = new ListAppender<>();
+
+    @BeforeEach
+    void captureTheLaunchersLog() {
+        logged.start();
+        launcherLog().addAppender(logged);
+    }
+
+    @AfterEach
+    void releaseTheLaunchersLog() {
+        launcherLog().detachAppender(logged);
+    }
+
+    private static Logger launcherLog() {
+        return (Logger) LoggerFactory.getLogger(LinuxTunLauncher.class);
     }
 
     /**
@@ -649,18 +673,20 @@ class LinuxTunLauncherTest {
 
     /**
      * Up to 1.24 a system-wide core, root's and runnable by every account, got
-     * the grant all the same: the chmod failed and setcap still ran. Such a
-     * core gets no grant since, but an upgraded install still carried the old
-     * one: the launch read it and took the promptless path on a CAP_NET_ADMIN
-     * every account could use, while the log said the core got none. It
-     * elevates per connect now, and that elevated start takes the earlier
-     * grant off before it starts the core. libcap before 2.27 printed the
-     * same grant as "= cap_net_admin+ep".
+     * the grant all the same: the chmod failed and setcap still ran. An
+     * administrator's own {@code setcap cap_net_admin+ep} reads back exactly
+     * the same ({@code cap_net_admin=ep}; "= cap_net_admin+ep" before libcap
+     * 2.27), so Tunl cannot tell whose a grant on such a core is. It leaves
+     * the grant in place, runs nothing as root, and starts the core through
+     * it as before, at a reconnect too; the log, which said such a core "gets
+     * no capability", now says once what every account can do with it and how
+     * to remove it.
      */
     @ParameterizedTest
-    @ValueSource(strings = {" cap_net_admin=ep", " = cap_net_admin+ep"})
+    @ValueSource(strings = {" cap_net_admin=ep", " = cap_net_admin+ep",
+            " cap_net_admin,cap_net_raw=ep"})
     @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
-    void aSystemCoreAnEarlierTunlGrantedElevatesAndLosesTheGrant(String getcapSays,
+    void aGrantOnACoreThisUserCannotRestrictIsUsedAndLeftInPlace(String getcapSays,
             @TempDir Path dir) throws Exception {
         Path core = coreThisUserCannotRestrict(dir);
         Path asked = dir.resolve("asked-to-elevate");
@@ -670,37 +696,35 @@ class LinuxTunLauncherTest {
         LinuxTunLauncher launcher =
                 new LinuxTunLauncher(caps, recordingElevator(dir, asked).toString(), tools);
 
-        TunLauncher.Launched launched = launcher.launch(core, dir.resolve("config.json"),
-                new TunLauncher.Prompt("setup", "each connect"));
-        spawned.add(launched.process().toHandle());
-        assertThat(launched.process().waitFor(10, TimeUnit.SECONDS)).isTrue();
+        for (String start : List.of("the connect", "a reconnect")) {
+            TunLauncher.Launched launched = launcher.launch(core, dir.resolve("config.json"),
+                    new TunLauncher.Prompt("setup", "each connect"));
+            spawned.add(launched.process().toHandle());
+            assertThat(launched.process().waitFor(10, TimeUnit.SECONDS)).isTrue();
 
-        assertThat(launched.promptsEachLaunch())
-                .as("a capability every account can use is not this user's to start on")
-                .isTrue();
-        List<String> elevated = Files.readAllLines(asked);
-        assertThat(elevated.subList(0, 2)).containsExactly("/bin/sh", "-c");
-        assertThat(elevated.get(2)).startsWith("'" + tools.getFirst().resolve("setcap") + "' -r '"
-                + core.toAbsolutePath() + "' 2>/dev/null; SBSTOP=");
-        assertThat(caps.calls).as("no new grant was asked for")
-                .noneMatch(cmd -> cmd.contains("cap_net_admin+ep"));
+            assertThat(launched.promptsEachLaunch()).as(start + " goes through the grant")
+                    .isFalse();
+        }
+        assertThat(asked).as("nothing was run as root: no grant, and none taken off")
+                .doesNotExist();
+        assertThat(caps.calls).as("what ran").extracting(List::getFirst)
+                .containsOnly(tools.getFirst().resolve("getcap").toString());
+        assertThat(sharedCapabilityWarnings()).as("said once a run").singleElement()
+                .asString().startsWith(core.toAbsolutePath() + " carries cap_net_admin")
+                .contains("sudo setcap -r '" + core.toAbsolutePath() + "'");
     }
 
-    /**
-     * Capabilities Tunl never gave, such as an administrator's own broader
-     * grant, are left as they are; the connect still elevates rather than
-     * run on them.
-     */
+    /** Without a grant such a core elevates per connect, as since 1.25. */
     @Test
     @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
-    void aSystemCoreWithCapabilitiesTunlNeverGaveElevatesAndKeepsThem(@TempDir Path dir)
+    void aCoreThisUserCannotRestrictAndNoGrantElevatesEachConnect(@TempDir Path dir)
             throws Exception {
         Path core = coreThisUserCannotRestrict(dir);
         Path asked = dir.resolve("asked-to-elevate");
-        FakeRunner caps = new FakeRunner(cmd -> new CommandRunner.Result(0,
-                core.toAbsolutePath() + " cap_net_admin,cap_net_raw=ep\n"));
-        LinuxTunLauncher launcher = new LinuxTunLauncher(caps,
-                recordingElevator(dir, asked).toString(), toolsIn(dir));
+        List<Path> tools = toolsIn(dir);
+        FakeRunner caps = new FakeRunner(cmd -> new CommandRunner.Result(0, ""));
+        LinuxTunLauncher launcher =
+                new LinuxTunLauncher(caps, recordingElevator(dir, asked).toString(), tools);
 
         TunLauncher.Launched launched = launcher.launch(core, dir.resolve("config.json"),
                 new TunLauncher.Prompt("setup", "each connect"));
@@ -708,23 +732,42 @@ class LinuxTunLauncherTest {
         assertThat(launched.process().waitFor(10, TimeUnit.SECONDS)).isTrue();
 
         assertThat(launched.promptsEachLaunch()).isTrue();
-        assertThat(Files.readAllLines(asked).get(2)).startsWith("SBSTOP=").doesNotContain(" -r ");
+        List<String> elevated = Files.readAllLines(asked);
+        assertThat(elevated.subList(0, 2)).containsExactly("/bin/sh", "-c");
+        assertThat(elevated.get(2)).as("the root wrapper, and nothing before it")
+                .startsWith("SBSTOP=");
+        assertThat(caps.calls).as("no grant was asked for").extracting(List::getFirst)
+                .containsOnly(tools.getFirst().resolve("getcap").toString());
+        assertThat(sharedCapabilityWarnings()).isEmpty();
     }
 
+    /** A core this user alone can run holds its grant for this user alone: nothing to say. */
     @Test
-    void onlyTheExactGrantAnEarlierTunlMadeCountsAsIts() {
-        Path core = Path.of("/usr/local/bin/my tools/sing-box");
-        // getcap prints the absolute path, which on a Windows build host carries a drive letter.
-        String path = core.toAbsolutePath().toString();
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
+    void theOwnersOwnCoreStartsThroughItsGrantWithoutTheWarning(@TempDir Path dir)
+            throws Exception {
+        Path core = Files.writeString(dir.resolve("sing-box"), "#!/bin/sh\nexit 0\n");
+        FakeRunner caps = new FakeRunner(cmd -> new CommandRunner.Result(0,
+                core.toAbsolutePath() + " cap_net_admin=ep\n"));
+        LinuxTunLauncher launcher =
+                new LinuxTunLauncher(caps, "elevator-that-must-not-launch", toolsIn(dir));
 
-        assertThat(LinuxTunLauncher.isEarlierGrant(core, path + " cap_net_admin=ep\n")).isTrue();
-        assertThat(LinuxTunLauncher.isEarlierGrant(core, path + " = cap_net_admin+ep")).isTrue();
-        assertThat(LinuxTunLauncher.isEarlierGrant(core, path + " cap_net_admin=eip")).isFalse();
-        assertThat(LinuxTunLauncher.isEarlierGrant(core,
-                path + " cap_net_admin,cap_net_bind_service=ep")).isFalse();
-        assertThat(LinuxTunLauncher.isEarlierGrant(core, "")).isFalse();
-        assertThat(LinuxTunLauncher.isEarlierGrant(core, "/other/sing-box cap_net_admin=ep"))
-                .isFalse();
+        TunLauncher.Launched launched = launcher.launch(core, dir.resolve("config.json"),
+                new TunLauncher.Prompt("setup", "each connect"));
+        spawned.add(launched.process().toHandle());
+        assertThat(launched.process().waitFor(10, TimeUnit.SECONDS)).isTrue();
+
+        assertThat(launched.promptsEachLaunch()).isFalse();
+        assertThat(sharedCapabilityWarnings()).isEmpty();
+    }
+
+    /** What the launcher has warned of a capability other accounts hold. */
+    private List<String> sharedCapabilityWarnings() {
+        return logged.list.stream()
+                .filter(event -> event.getLevel() == Level.WARN)
+                .map(ILoggingEvent::getFormattedMessage)
+                .filter(message -> message.contains("every account that can run it"))
+                .toList();
     }
 
     /**

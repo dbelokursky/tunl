@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.core.JacksonException;
@@ -86,6 +87,8 @@ public final class LinuxTunLauncher implements TunLauncher {
     private final List<Path> toolDirs;
     /** Where else getcap and setcap are looked for; see {@link #findTool}. */
     private final List<Path> searchDirs;
+    /** The cores {@link #warnOfSharedCapability} has warned of in this run. */
+    private final Set<Path> sharedCapabilitiesTold = ConcurrentHashMap.newKeySet();
 
     public LinuxTunLauncher() {
         this(CommandRunner.system(PROMPT_TIMEOUT), "pkexec");
@@ -132,15 +135,13 @@ public final class LinuxTunLauncher implements TunLauncher {
             grantNetAdminCapability(binary);
         }
 
-        // Nor is a capability every account can use this user's to start on.
-        // Up to 1.24 such a core got the grant all the same, and after an
-        // upgrade the launch found it and took the promptless path, while the
-        // log said the core got no capability. It elevates per connect, as
-        // a fresh install does, and that elevated start removes the grant.
-        String capabilities = capabilitiesOf(binary);
-        boolean capable = capabilities.contains("cap_net_admin");
-        boolean direct = ownersAlone && capable;
-        String revoke = !ownersAlone && capable ? revokeEarlierGrant(binary, capabilities) : "";
+        // A core this user cannot restrict may carry the capability all the
+        // same. It is used as it is and left in place; see
+        // warnOfSharedCapability for why, and for what the log says.
+        boolean direct = hasNetAdminCapability(binary);
+        if (direct && !ownersAlone) {
+            warnOfSharedCapability(binary);
+        }
         // An interrupt is the start being called off (at quit the recovery
         // scheduler and the MCP server interrupt their threads). It used to
         // fail getcap and the grant, which read as "no capability", and the
@@ -153,7 +154,7 @@ public final class LinuxTunLauncher implements TunLauncher {
         }
         String wrapper = direct
                 ? directWrapperCommand(binary, configFile)
-                : revoke + wrapperCommand(binary, configFile, stopSignalFile);
+                : wrapperCommand(binary, configFile, stopSignalFile);
         ProcessBuilder pb = direct
                 ? new ProcessBuilder("/bin/sh", "-c", wrapper)
                 : new ProcessBuilder(elevator, "/bin/sh", "-c", wrapper);
@@ -185,7 +186,7 @@ public final class LinuxTunLauncher implements TunLauncher {
         } catch (UnsupportedOperationException e) {
             return true;
         } catch (IOException e) {
-            log.warn("Could not restrict {} to its owner, so it gets no capability: {}",
+            log.warn("Could not restrict {} to its owner, so Tunl grants it no capability: {}",
                     binary, e.getMessage());
             return false;
         }
@@ -207,80 +208,48 @@ public final class LinuxTunLauncher implements TunLauncher {
      * survives restarts but not file replacement (core updates).
      */
     boolean hasNetAdminCapability(Path binary) throws InterruptedIOException {
-        return capabilitiesOf(binary).contains("cap_net_admin");
-    }
-
-    /**
-     * What getcap prints for the binary: its path and the capabilities it
-     * carries, or empty when it carries none or getcap cannot tell.
-     */
-    private String capabilitiesOf(Path binary) throws InterruptedIOException {
         Optional<Path> getcap = tool("getcap");
         if (getcap.isEmpty()) {
             log.debug("getcap not found in {} or {}", toolDirs, searchDirs);
-            return "";
+            return false;
         }
         try {
             CommandRunner.Result result = runner.run(List.of(
                     getcap.get().toString(), binary.toAbsolutePath().toString()));
-            return result.exitCode() == 0 ? result.output() : "";
+            return result.exitCode() == 0 && result.output().contains("cap_net_admin");
         } catch (InterruptedIOException e) {
             throw e;
         } catch (IOException e) {
             log.debug("getcap unavailable: {}", e.getMessage());
-            return "";
-        }
-    }
-
-    /**
-     * The root wrapper's first command for a core that carries a capability
-     * every account can use: remove the grant an earlier Tunl gave it. The
-     * per-connect start runs as root anyway, so this costs no prompt of its
-     * own. Capabilities Tunl never gave are left alone.
-     *
-     * @param binary       the core
-     * @param getcapOutput what getcap printed for it
-     * @return the command, or empty when there is nothing of Tunl's to remove
-     */
-    private String revokeEarlierGrant(Path binary, String getcapOutput) {
-        if (!isEarlierGrant(binary, getcapOutput)) {
-            log.warn("{} carries capabilities every account on this machine can use ({});"
-                    + " they are not Tunl's, so it leaves them and elevates each connect",
-                    binary, getcapOutput.strip());
-            return "";
-        }
-        Optional<Path> setcap = tool("setcap");
-        if (setcap.isEmpty()) {
-            log.warn("{} carries the cap_net_admin grant an earlier Tunl gave it, which every"
-                    + " account on this machine can use; setcap was not found to remove it",
-                    binary);
-            return "";
-        }
-        log.warn("{} carries the cap_net_admin grant an earlier Tunl gave it, which every"
-                + " account on this machine can use; the elevated start removes it", binary);
-        return shellQuote(setcap.get().toString()) + " -r "
-                + shellQuote(binary.toAbsolutePath().toString()) + " 2>/dev/null; ";
-    }
-
-    /**
-     * Whether getcap's line for {@code binary} shows exactly the grant Tunl
-     * made up to 1.24, {@code setcap cap_net_admin+ep}: libcap 2.27 and later
-     * print it as {@code cap_net_admin=ep}, earlier ones as
-     * {@code = cap_net_admin+ep}. Any other set, such as an administrator's
-     * own, is not Tunl's to remove.
-     *
-     * @param binary       the core, by the path getcap was given
-     * @param getcapOutput what getcap printed for it
-     * @return true for that grant alone
-     */
-    static boolean isEarlierGrant(Path binary, String getcapOutput) {
-        String line = getcapOutput.strip();
-        String path = binary.toAbsolutePath().toString();
-        if (!line.startsWith(path + " ")) {
             return false;
         }
-        String caps = line.substring(path.length()).strip();
-        return caps.equals("cap_net_admin=ep") || caps.equals("= cap_net_admin+ep");
+    }
+
+    /**
+     * Says, once a run for each core, that a core this user cannot make
+     * owner-only carries cap_net_admin, which every account that can run it
+     * holds through it, and how to remove it.
+     *
+     * <p>Up to 1.24 Tunl granted it to such a core all the same. The launch
+     * starts the core through that grant, as it did then, but the log said
+     * the core "gets no capability", and nothing said that every account
+     * could use the one it had. The grant is not Tunl's to take off: an
+     * administrator's own {@code setcap cap_net_admin+ep} reads back exactly
+     * like it, and other accounts or services may rely on it. Nor would
+     * starting the core as root instead keep the capability from anyone; it
+     * would only cost a PolicyKit prompt at every connect, restart and
+     * auto-connect, and TUN itself where no PolicyKit agent runs.</p>
+     */
+    private void warnOfSharedCapability(Path binary) {
+        Path core = binary.toAbsolutePath();
+        if (sharedCapabilitiesTold.add(core)) {
+            log.warn("{} carries cap_net_admin and this user cannot make it owner-only, so"
+                    + " every account that can run it holds that capability. Tunl starts the"
+                    + " core through it and leaves it in place: it may be a grant like the one"
+                    + " Tunl up to 1.24 made on such a core, or an administrator's own. If"
+                    + " nothing else needs it, remove it with: sudo setcap -r {} (every TUN"
+                    + " connect then asks for elevation)", core, shellQuote(core.toString()));
+        }
     }
 
     /** {@code name} by absolute path, where {@link #findTool} finds it. */
