@@ -44,7 +44,6 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
-import javafx.scene.control.ListCell;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
@@ -132,6 +131,16 @@ public class DashboardViewController implements ViewShownAware {
      */
     private final javafx.beans.property.StringProperty pendingReason =
             new javafx.beans.property.SimpleStringProperty("dashboard.pending.changes");
+
+    /**
+     * Whether a comparison of the running core with the settings is under
+     * way, whether a repaint asked for another meanwhile, and how many times
+     * the tunnel has been down: an answer read from a run that has ended is
+     * not shown. FX thread only.
+     */
+    private boolean pendingChecking;
+    private boolean pendingCheckAgain;
+    private long pendingRun;
 
     /**
      * Set only while {@link #onViewShown()} copies persisted settings into the
@@ -583,20 +592,10 @@ public class DashboardViewController implements ViewShownAware {
 
     private void initProxyModeCombo() {
         proxyModeCombo.getItems().addAll(ProxyMode.values());
-        proxyModeCombo.setCellFactory(cb -> new ListCell<>() {
-            @Override
-            protected void updateItem(ProxyMode item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : formatProxyMode(item));
-            }
-        });
-        proxyModeCombo.setButtonCell(new ListCell<>() {
-            @Override
-            protected void updateItem(ProxyMode item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : formatProxyMode(item));
-            }
-        });
+        // Drawn again on a language switch, value untouched. Cells of its own
+        // drew each item once, so the closed combo and a list opened before
+        // the switch said "System Proxy" in a Russian window until a restart.
+        ComboLabels.follow(proxyModeCombo, this::formatProxyMode);
 
         proxyModeCombo.setValue(ServiceLocator.find(AppSettings.class)
                 .map(AppSettings::getProxyMode)
@@ -634,20 +633,9 @@ public class DashboardViewController implements ViewShownAware {
         }
         serverSelectionLabel.textProperty().bind(I18n.binding("dashboard.selection"));
         serverSelectionCombo.getItems().addAll(ServerSelection.values());
-        serverSelectionCombo.setCellFactory(cb -> new ListCell<>() {
-            @Override
-            protected void updateItem(ServerSelection item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : formatSelection(item));
-            }
-        });
-        serverSelectionCombo.setButtonCell(new ListCell<>() {
-            @Override
-            protected void updateItem(ServerSelection item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : formatSelection(item));
-            }
-        });
+        // As the mode combo: setting the value again to redraw it would be
+        // taken for a pick, which restarts a connected tunnel.
+        ComboLabels.follow(serverSelectionCombo, this::formatSelection);
 
         serverSelectionCombo.setValue(ServiceLocator.find(AppSettings.class)
                 .map(AppSettings::getServerSelection)
@@ -1022,9 +1010,64 @@ public class DashboardViewController implements ViewShownAware {
             case IPV6_LOST -> "dashboard.network.ipv6.lost";
             case NONE -> "dashboard.pending.changes";
         });
-        boolean pending = connected
-                && (network != ConnectionService.NetworkChange.NONE
-                        || !service.runsCurrentSettings());
+        if (!connected) {
+            // A run that ended is not the one a comparison under way read.
+            pendingRun++;
+            showPendingChanges(false);
+            return;
+        }
+        if (network != ConnectionService.NetworkChange.NONE) {
+            showPendingChanges(true);
+            return;
+        }
+        // runsCurrentSettings generates the whole configuration again, from
+        // every server, and compares it with the running one. On this thread
+        // that took 84 ms at 10,000 servers, and up to 225, at every repaint
+        // while connected: each state change, health verdict and live switch
+        // froze the window. One asked for while one runs is made once it ends.
+        if (pendingChecking) {
+            pendingCheckAgain = true;
+            return;
+        }
+        checkPendingChanges(service);
+    }
+
+    /**
+     * Compares the running core with the settings off the FX thread, and
+     * shows the answer if the run it read is still the one connected on the
+     * network it started on. The answer shows even when asked again meanwhile,
+     * before the next comparison: asked for faster than one takes, the offer
+     * would never be shown.
+     */
+    private void checkPendingChanges(ConnectionService service) {
+        pendingChecking = true;
+        pendingCheckAgain = false;
+        long run = pendingRun;
+        Thread.startVirtualThread(() -> {
+            boolean pending;
+            try {
+                pending = !service.runsCurrentSettings();
+            } catch (RuntimeException e) {
+                log.debug("Could not compare the running core with the settings", e);
+                pending = false;
+            }
+            boolean offer = pending;
+            Platform.runLater(() -> {
+                pendingChecking = false;
+                if (run == pendingRun && currentConnectionState() == ConnectionState.CONNECTED
+                        && service.networkChangeProperty().get()
+                                == ConnectionService.NetworkChange.NONE) {
+                    showPendingChanges(offer);
+                }
+                if (pendingCheckAgain) {
+                    pendingCheckAgain = false;
+                    refreshPendingChanges(currentConnectionState());
+                }
+            });
+        });
+    }
+
+    private void showPendingChanges(boolean pending) {
         pendingChangesBanner.setVisible(pending);
         pendingChangesBanner.setManaged(pending);
     }

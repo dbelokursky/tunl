@@ -102,7 +102,7 @@ public class ServersViewController {
     @FXML private VBox emptyState;
     @FXML private Label emptyStateTitle;
     @FXML private Label emptyStateHint;
-    @FXML private HBox filterBar;
+    @FXML private WrappingRow filterBar;
     @FXML private TextField searchField;
     @FXML private ComboBox<ServerSort> sortCombo;
     @FXML private Button measureButton;

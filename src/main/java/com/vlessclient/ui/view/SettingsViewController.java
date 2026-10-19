@@ -638,9 +638,11 @@ public class SettingsViewController implements ViewShownAware {
         // adjacent buttons at their natural widths read as two actions, which
         // is what they are. They were pinned to a shared width while they
         // stood a row apart, where unequal widths read as two different
-        // controls instead of one used twice.
-        ButtonLabels.bind(checkUpdatesButton, "settings.updates.check");
-        ButtonLabels.bind(appUpdateButton, "settings.update.restart");
+        // controls instead of one used twice. Not pinned to it either: their
+        // labels never change, and at 200% text size the pin made "Check for
+        // updates" wider than the card and the page wider than the window.
+        ButtonLabels.bindStatic(checkUpdatesButton, "settings.updates.check");
+        ButtonLabels.bindStatic(appUpdateButton, "settings.update.restart");
         advancedLabel.textProperty().bind(I18n.binding("settings.advanced"));
         proxyDnsLabel.textProperty().bind(I18n.binding("settings.proxy.dns"));
         directDnsLabel.textProperty().bind(I18n.binding("settings.direct.dns"));

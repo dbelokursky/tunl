@@ -10,6 +10,7 @@ import com.vlessclient.service.CountryResolver;
 import com.vlessclient.service.SingBoxEngine;
 import com.vlessclient.ui.view.Flags;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import javafx.application.Platform;
@@ -367,7 +368,15 @@ public final class StatusPresenter {
         if (resolver == null) {
             return;
         }
-        resolver.countryOf(server).ifPresent(this::paintStatusFlag);
+        // Asked only when the country is not known, as the server list asks:
+        // a known one came back from the lookup at once, and the task queued
+        // with it built a second flag over the first, at every repaint while
+        // connected.
+        Optional<String> known = resolver.countryOf(server);
+        if (known.isPresent()) {
+            paintStatusFlag(known.get());
+            return;
+        }
         resolver.resolveAsync(server, code -> Platform.runLater(() -> {
             // Only paint if this is still the server we are connected to.
             if (routed() == server

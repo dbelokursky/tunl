@@ -17,6 +17,7 @@ import javafx.stage.Stage;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testfx.framework.junit5.ApplicationTest;
+import org.testfx.util.WaitForAsyncUtils;
 
 import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
@@ -85,11 +86,18 @@ public class DashboardConnectDelegationTest extends ApplicationTest {
         assertThat(recording.called.await(10, TimeUnit.SECONDS)).isTrue();
 
         // The STARTED branch hops back to the FX thread to name the server; give
-        // that runLater a chance to land before sampling the label.
-        Label serverName = lookup("#serverNameLabel").query();
+        // that runLater a chance to land before sampling the label. The lookup
+        // and the reads run on the FX thread: the Dashboard keeps changing its
+        // scene graph after a start, and a lookup walked from this thread met a
+        // child list mid-change (a NullPointerException on the Windows runner).
+        Label serverName = WaitForAsyncUtils.waitFor(WaitForAsyncUtils.asyncFx(
+                () -> lookup("#serverNameLabel").<Label>query()));
         Await.until("the server name to reach the label",
-                () -> "Tokyo".equals(serverName.getText()), Duration.ofSeconds(5));
-        assertThat(serverName.getText()).isEqualTo("Tokyo");
+                () -> "Tokyo".equals(
+                        WaitForAsyncUtils.waitFor(WaitForAsyncUtils.asyncFx(serverName::getText))),
+                Duration.ofSeconds(5));
+        assertThat(WaitForAsyncUtils.waitFor(WaitForAsyncUtils.asyncFx(serverName::getText)))
+                .isEqualTo("Tokyo");
     }
 
     /** Stands in for the real flow: records the call and reports success. */
