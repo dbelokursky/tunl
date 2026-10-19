@@ -23,6 +23,27 @@ class TunSettingsTest {
         assertThat(TunSettings.isIpv4Network("tun/30")).isFalse();
     }
 
+    /**
+     * The core reads the address with Go's netip, which refuses a field with a
+     * leading zero, an address of three fields and a prefix with a sign or a
+     * leading zero. Java's literal parser and Integer.parseInt took each, so
+     * the value was stored, and every TUN start failed over it.
+     */
+    static final java.util.List<String> NETWORKS_THE_CORE_REFUSES = java.util.List.of(
+            "172.19.0.01/30", "172.019.0.1/30", "172.19.1/30", "10.1/30", "172.19.0.1/030",
+            "172.19.0.1/+30", "172.19.0.1/ 30", "172.19.0.1 /30", "0172.19.0.1/30");
+
+    @Test
+    void anIpv4NetworkIsReadAsTheCoreReadsIt() {
+        for (String network : NETWORKS_THE_CORE_REFUSES) {
+            assertThat(TunSettings.isIpv4Network(network)).as(network).isFalse();
+        }
+        for (String network : java.util.List.of("10.66.0.1/30", "172.19.0.1/30", "10.0.0.1/8",
+                "192.168.100.1/24")) {
+            assertThat(TunSettings.isIpv4Network(network)).as(network).isTrue();
+        }
+    }
+
     /** macOS names a TUN device utunN, and the core refuses any other name there. */
     @Test
     void macOsTakesOnlyUtunNames() {

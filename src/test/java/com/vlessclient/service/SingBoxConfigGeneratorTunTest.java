@@ -241,12 +241,17 @@ class SingBoxConfigGeneratorTunTest {
         assertThat(servers.get(2).get("tag").asString()).isEqualTo("local-dns");
         assertThat(servers.get(2).get("type").asString()).isEqualTo("local");
 
+        // localhost and .local first, the LAN's own suffixes last, below
+        // whatever rules the user has.
         JsonNode dnsRules = dns.get("rules");
         assertThat(dnsRules).isNotNull();
-        assertThat(dnsRules.size()).isEqualTo(1);
+        assertThat(dnsRules.size()).isEqualTo(2);
         assertThat(dnsRules.get(0).get("domain").get(0).asString()).isEqualTo("localhost");
         assertThat(dnsRules.get(0).get("domain_suffix").get(0).asString()).isEqualTo(".local");
         assertThat(dnsRules.get(0).get("server").asString()).isEqualTo("local-dns");
+        assertThat(dnsRules.get(1).get("domain_suffix").toString())
+                .isEqualTo("[\".lan\",\".home.arpa\",\".internal\"]");
+        assertThat(dnsRules.get(1).get("server").asString()).isEqualTo("local-dns");
 
         // sing-box 1.13 uses dns.final instead of a match-all rule
         assertThat(dns.get("final").asString()).isEqualTo("proxy-dns");
@@ -369,6 +374,80 @@ class SingBoxConfigGeneratorTunTest {
                     .as("%s: the system resolver, Direct DNS's default", address)
                     .isEqualTo("local");
         }
+    }
+
+    /**
+     * Only the scheme was checked. Two resolvers, the primary and secondary
+     * every OS dialog asks for, reached the core as one server named
+     * "1.1.1.1, 8.8.8.8": it started, and every lookup through it failed
+     * while the card said Connected. A port past 65535 made it refuse the
+     * whole configuration. Such a value is asked for as the field's default.
+     */
+    @Test
+    void tunMode_aDnsFieldHoldingMoreOrLessThanOneAddressIsAskedForAsTheDefault()
+            throws Exception {
+        for (String address : List.of("1.1.1.1, 8.8.8.8", "1.1.1.1,8.8.8.8", "1.1.1.1 8.8.8.8",
+                "1.1.1.1; 8.8.8.8", "https://1.1.1.1/dns-query,https://8.8.8.8/dns-query",
+                "udp:// 1.1.1.1", "\"1.1.1.1\"", "https://", "local", "fakeip",
+                "https://днс.example/dns-query", "udp://1.1.1.1:99999", "1.1.1.1:99999",
+                "1.1.1.1:0", "01.1.1.1", "1.1.1.256", "1.1.1", "dns..google")) {
+            AppSettings settings = tunSettings();
+            settings.setProxyDns(address);
+            settings.setDirectDns(address);
+
+            JsonNode servers = parse(generator.generate(createVlessServer(), settings))
+                    .get("dns").get("servers");
+
+            assertThat(servers.get(0).toString()).as(address)
+                    .isEqualTo("{\"tag\":\"proxy-dns\",\"type\":\"https\",\"server\":\"1.1.1.1\","
+                            + "\"path\":\"/dns-query\",\"detour\":\"proxy\"}");
+            assertThat(servers.get(1).toString()).as(address)
+                    .isEqualTo("{\"tag\":\"direct-dns\",\"type\":\"local\"}");
+        }
+    }
+
+    /**
+     * A cleared DNS field shows what it stands for: "system" under Direct DNS,
+     * Cloudflare's DoH under Proxy DNS. Both were asked as plain UDP to
+     * 1.1.1.1: the names the rules send direct went to Cloudflare in the clear
+     * from the user's own address, not to the network's resolver.
+     */
+    @Test
+    void tunMode_aClearedDnsFieldMeansWhatItShows() throws Exception {
+        for (String blank : java.util.Arrays.asList("", "  ", null)) {
+            AppSettings settings = tunSettings();
+            settings.setProxyDns(blank);
+            settings.setDirectDns(blank);
+
+            JsonNode servers = parse(generator.generate(createVlessServer(), settings))
+                    .get("dns").get("servers");
+
+            assertThat(servers.get(0).toString()).as("proxy [%s]", blank)
+                    .isEqualTo("{\"tag\":\"proxy-dns\",\"type\":\"https\",\"server\":\"1.1.1.1\","
+                            + "\"path\":\"/dns-query\",\"detour\":\"proxy\"}");
+            assertThat(servers.get(1).toString()).as("direct [%s]", blank)
+                    .isEqualTo("{\"tag\":\"direct-dns\",\"type\":\"local\"}");
+        }
+    }
+
+    /**
+     * MCP stored the value untrimmed, and a space around one address is not a
+     * second one. A path is the core's only for DNS over HTTPS: written for
+     * {@code quic://}, the core refused the whole configuration over it.
+     */
+    @Test
+    void tunMode_aDnsAddressIsReadWithoutTheSpaceAroundIt() throws Exception {
+        AppSettings settings = tunSettings();
+        settings.setProxyDns(" tls://9.9.9.9:853 ");
+        settings.setDirectDns("quic://dns.adguard-dns.com/dns-query ");
+
+        JsonNode servers = parse(generator.generate(createVlessServer(), settings))
+                .get("dns").get("servers");
+
+        assertThat(servers.get(0).toString()).isEqualTo("{\"tag\":\"proxy-dns\",\"type\":\"tls\","
+                + "\"server\":\"9.9.9.9\",\"server_port\":853,\"detour\":\"proxy\"}");
+        assertThat(servers.get(1).toString()).isEqualTo("{\"tag\":\"direct-dns\",\"type\":\"quic\","
+                + "\"server\":\"dns.adguard-dns.com\",\"domain_resolver\":\"local-dns\"}");
     }
 
     /** "8.8.8.8:53" reached the core as a name, which nothing could resolve. */
@@ -584,14 +663,104 @@ class SingBoxConfigGeneratorTunTest {
     @Test
     void tunMode_theLansOwnNamesResolveOnTheLan() throws Exception {
         for (RoutingConfig routingConfig : java.util.Arrays.asList(null, new RoutingConfig())) {
-            JsonNode dnsRules = parse(generator.generate(createVlessServer(), tunSettings(),
-                    routingConfig)).get("dns").get("rules");
+            JsonNode dns = parse(generator.generate(createVlessServer(), tunSettings(),
+                    routingConfig)).get("dns");
 
-            JsonNode local = dnsRules.get(0);
-            assertThat(local.get("server").asString()).isEqualTo("local-dns");
-            assertThat(local.get("domain_suffix").valueStream().map(JsonNode::asString))
-                    .contains(".local", ".lan", ".home.arpa", ".internal");
+            for (String name : List.of("localhost", "printer.local", "openwrt.lan",
+                    "router.home.arpa", "nas.internal")) {
+                assertThat(resolverFor(dns, name)).as(name).isEqualTo("local-dns");
+            }
+            assertThat(resolverFor(dns, "example.com")).isEqualTo("proxy-dns");
         }
+    }
+
+    /**
+     * The LAN's suffixes went to its resolver ahead of every rule of the
+     * user's: a Proxy rule for corp.internal sent the connection into the
+     * tunnel, and the name was asked of the LAN's resolver, which does not
+     * know it, so nothing connected. A name the user's rule names itself is
+     * asked where the route sends it; one sent direct stays the LAN's, which
+     * knows it where a Direct DNS such as 8.8.8.8 does not.
+     */
+    @Test
+    void tunMode_aNameTheUserSendsThroughTheTunnelIsResolvedThereUnderALanSuffixToo()
+            throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "corp.internal",
+                        RoutingRule.RuleAction.PROXY),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN, "vpn.home.arpa",
+                        RoutingRule.RuleAction.PROXY),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "nas.lan",
+                        RoutingRule.RuleAction.DIRECT)));
+        AppSettings settings = tunSettings();
+        settings.setDirectDns("8.8.8.8");
+
+        JsonNode dns = parse(generator.generate(createVlessServer(), settings,
+                routingConfig)).get("dns");
+
+        assertThat(resolverFor(dns, "db.corp.internal")).isEqualTo("proxy-dns");
+        assertThat(resolverFor(dns, "vpn.home.arpa")).isEqualTo("proxy-dns");
+        assertThat(resolverFor(dns, "nas.lan")).isEqualTo("local-dns");
+        assertThat(resolverFor(dns, "other.internal")).isEqualTo("local-dns");
+        assertThat(resolverFor(dns, "printer.local")).isEqualTo("local-dns");
+    }
+
+    /**
+     * Only a name a rule of the user's names itself is taken from the LAN: a
+     * keyword, a regex or a list says nothing of the LAN's own names, and the
+     * bypass list's "*.lan" sends them direct, which the LAN answers. Put
+     * above the LAN's suffixes, every rule of the user's took them: a Proxy
+     * keyword "home" sent router.home.arpa to the remote resolver, and with a
+     * Direct DNS of 8.8.8.8 the NAS was asked of Google. Where two rules name
+     * the same name, the first decides, as in the route.
+     */
+    @Test
+    void tunMode_aRuleThatDoesNotNameALanNameLeavesItToTheLan() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setBypassList(List.of("*.lan"));
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_KEYWORD, "home",
+                        RoutingRule.RuleAction.PROXY),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN, "db.corp.internal",
+                        RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "internal",
+                        RoutingRule.RuleAction.PROXY)));
+        AppSettings settings = tunSettings();
+        settings.setDirectDns("8.8.8.8");
+
+        JsonNode dns = parse(generator.generate(createVlessServer(), settings,
+                routingConfig)).get("dns");
+
+        assertThat(resolverFor(dns, "nas.lan")).isEqualTo("local-dns");
+        assertThat(resolverFor(dns, "router.home.arpa")).isEqualTo("local-dns");
+        assertThat(resolverFor(dns, "db.corp.internal")).isEqualTo("local-dns");
+        assertThat(resolverFor(dns, "wiki.corp.internal")).isEqualTo("proxy-dns");
+    }
+
+    /**
+     * The server the core asks for {@code name}: the first rule whose domain,
+     * domain suffix or keyword names it, as the core reads them, or dns.final.
+     */
+    private static String resolverFor(JsonNode dns, String name) {
+        for (JsonNode rule : dns.get("rules")) {
+            boolean matches = false;
+            for (JsonNode domain : rule.path("domain")) {
+                matches |= domain.asString().equals(name);
+            }
+            for (JsonNode suffix : rule.path("domain_suffix")) {
+                String s = suffix.asString();
+                matches |= s.startsWith(".") ? name.endsWith(s)
+                        : name.equals(s) || name.endsWith("." + s);
+            }
+            for (JsonNode keyword : rule.path("domain_keyword")) {
+                matches |= name.contains(keyword.asString());
+            }
+            if (matches) {
+                return rule.get("server").asString();
+            }
+        }
+        return dns.get("final").asString();
     }
 
     /**

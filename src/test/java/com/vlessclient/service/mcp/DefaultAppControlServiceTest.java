@@ -355,6 +355,74 @@ class DefaultAppControlServiceTest {
         assertThat(routing.getConfig().getRules()).isEmpty();
     }
 
+    /**
+     * The runetfreedom "ru-blocked" lists, which the generator fetches from
+     * runetfreedom: an agent asked to tunnel what is blocked in Russia was
+     * told there is no such list.
+     */
+    @Test
+    void addRoutingRule_takesTheRuBlockedLists() throws Exception {
+        RoutingService routing = com.vlessclient.service.TestRoutingServices.at(
+                tempDir.resolve("routing"));
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, null,
+                routing, null, null, new ShareLinkParser(),
+                new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        svc.addRoutingRule("geosite", "ru-blocked", "proxy");
+        svc.addRoutingRule("geoip", "ru-blocked", "proxy");
+
+        assertThat(routing.getConfig().getRules())
+                .extracting(rule -> rule.getType() + " " + rule.getValue())
+                .containsExactly("GEOSITE ru-blocked", "GEOIP ru-blocked");
+    }
+
+    /**
+     * An agent's regex that matches through one alternative is added, as in
+     * the dialog; one no name can match is refused with the letter that does
+     * nothing. Both were refused.
+     */
+    @Test
+    void addRoutingRule_takesARegexThatMatchesThroughAnAlternative() throws Exception {
+        RoutingService routing = com.vlessclient.service.TestRoutingServices.at(
+                tempDir.resolve("routing"));
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, null,
+                routing, null, null, new ShareLinkParser(),
+                new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        svc.addRoutingRule("domain_regex", "^m\\.(VK|vk)\\.com$", "direct");
+        assertThatThrownBy(() -> svc.addRoutingRule("domain_regex", "^Mail\\.", "direct"))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining(" M ");
+
+        assertThat(routing.getConfig().getRules()).extracting(rule -> rule.getValue())
+                .containsExactly("^m\\.(VK|vk)\\.com$");
+    }
+
+    /**
+     * A Geosite list this version does not know may be newer, and the dialog
+     * adds it after saying so; but one that does not exist stops the core for
+     * every server, and an agent's guess at a name is the likelier miss. The
+     * agent is told so, and where the user can add it.
+     */
+    @Test
+    void addRoutingRule_refusesAGeositeListThisVersionDoesNotKnow() throws Exception {
+        RoutingService routing = com.vlessclient.service.TestRoutingServices.at(
+                tempDir.resolve("routing"));
+        DefaultAppControlService svc = new DefaultAppControlService(store, null, null,
+                routing, null, null, new ShareLinkParser(),
+                new SingBoxEngine(tempDir.resolve("sing-box")));
+
+        assertThatThrownBy(() -> svc.addRoutingRule("geosite", "A-List-Newer-Than-This-Build",
+                "proxy"))
+                .isInstanceOf(McpToolException.class)
+                .hasMessage(com.vlessclient.app.I18n.get("routing.rule.agent.geosite",
+                        "a-list-newer-than-this-build"));
+        svc.addRoutingRule("geosite", "youtube", "proxy");
+
+        assertThat(routing.getConfig().getRules()).extracting(rule -> rule.getValue())
+                .containsExactly("youtube");
+    }
+
     @Test
     void addServer_parsesShareLinkAndPersists() throws Exception {
         DefaultAppControlService svc = new DefaultAppControlService(store, null, null,
@@ -492,8 +560,11 @@ class DefaultAppControlServiceTest {
                 .isInstanceOf(McpToolException.class).hasMessageContaining("true or false");
         assertThatThrownBy(() -> service.setSetting("server_selection", stringNode("fastest")))
                 .isInstanceOf(McpToolException.class).hasMessageContaining("single, auto_best");
+        // The core's netip also refuses a dropped octet, a leading zero and a
+        // prefix with a sign or a leading zero; each was stored.
         for (String network : new String[] {"172.20.0.1", "172.20.0.1/31", "fd00::1/126",
-                "tun0/30", "172.20.0.1/x"}) {
+                "tun0/30", "172.20.0.1/x", "172.20.1/30", "172.20.0.01/30", "172.20.0.1/030",
+                "172.20.0.1/+30"}) {
             assertThatThrownBy(() -> service.setSetting("tun_ipv4_address", stringNode(network)))
                     .as(network)
                     .isInstanceOf(McpToolException.class).hasMessageContaining("IPv4 network");
@@ -505,6 +576,37 @@ class DefaultAppControlServiceTest {
         assertThat(store.getSettings().isAutoConnect()).isFalse();
         assertThat(store.getSettings().getServerSelection())
                 .isEqualTo(com.vlessclient.model.ServerSelection.SINGLE);
+    }
+
+    /**
+     * Any text was stored as a resolver: two of them reached the core as one
+     * server name, and every lookup through it failed, and a port past 65535
+     * made the core refuse the whole configuration.
+     */
+    @Test
+    void setSetting_aDnsServerIsOneAddressTheCoreCanUse() throws Exception {
+        for (String key : List.of("proxy_dns", "direct_dns")) {
+            for (String address : List.of("1.1.1.1, 8.8.8.8", "1.1.1.1 8.8.8.8",
+                    "udp://1.1.1.1:99999", "dhcp://auto", "https://", "fakeip")) {
+                assertThatThrownBy(() -> service.setSetting(key, stringNode(address)))
+                        .as("%s %s", key, address)
+                        .isInstanceOf(McpToolException.class)
+                        .hasMessageContaining("one DNS server");
+            }
+        }
+        assertThatThrownBy(() -> service.setSetting("proxy_dns", stringNode("system")))
+                .isInstanceOf(McpToolException.class);
+        assertThat(store.getSettings().getProxyDns()).isEqualTo("https://1.1.1.1/dns-query");
+        assertThat(store.getSettings().getDirectDns())
+                .isEqualTo(com.vlessclient.model.AppSettings.SYSTEM_DNS);
+
+        // The address alone, without the space an agent sent around it.
+        SettingsInfo info = service.setSetting("proxy_dns", stringNode(" tls://9.9.9.9:853 "));
+        service.setSetting("direct_dns", stringNode("System"));
+
+        assertThat(info.proxyDns()).startsWith("tls://9.9.9.9:853");
+        assertThat(store.getSettings().getProxyDns()).isEqualTo("tls://9.9.9.9:853");
+        assertThat(store.getSettings().getDirectDns()).isEqualTo("System");
     }
 
     @Test

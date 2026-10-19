@@ -183,6 +183,77 @@ public class FormDialogsWaitForInputTest extends ApplicationTest {
     }
 
     /**
+     * A regex the core takes but with a letter it never sees in one
+     * alternative is explained as a hint, and OK adds it: it still matches
+     * through the others. It was refused as one that could never match. A
+     * regex no name can match is still refused.
+     */
+    @Test
+    void theRuleFormHintsAtALetterTheCoreNeverSeesAndAddsTheRule() {
+        RoutingService routing = TestRoutingServices.at(freshDir("routing"));
+        ServiceLocator.register(RoutingService.class, routing);
+        mount("RoutingView");
+        DialogPane form = open(button("#addRuleButton")::fire);
+        setRuleType(form, RoutingRule.RuleType.DOMAIN_REGEX);
+
+        setRuleValue(form, "^Mail\\.");
+        assertThat(okDisabled(form)).as("OK with a regex no name can match").isTrue();
+        assertThat(problemShown(form)).as("why, under the value")
+                .isEqualTo(RoutingRuleCheck.refusal(RoutingRule.RuleType.DOMAIN_REGEX, "^Mail\\.")
+                        .orElseThrow());
+
+        setRuleValue(form, "\\.(ru|рф)$");
+        assertThat(okDisabled(form)).as("OK with a regex that matches every .ru name").isFalse();
+        assertThat(problemShown(form)).as("a refusal").isNull();
+        assertThat(hintShown(form)).as("the hint under the value")
+                .isEqualTo(RoutingRuleCheck.hint(RoutingRule.RuleType.DOMAIN_REGEX, "\\.(ru|рф)$")
+                        .orElseThrow());
+        assertThat(onFx(() -> {
+            Label hint = (Label) form.lookup(".routing-rule-hint");
+            return hint.getHeight() + 0.5 >= hint.prefHeight(hint.getWidth());
+        })).as("the hint as tall as its lines, in the dialog it grew").isTrue();
+        pressOk(form);
+
+        Await.until("the rule to be added",
+                () -> routing.getConfig().getRules().stream()
+                        .map(RoutingRule::getValue)
+                        .anyMatch("\\.(ru|рф)$"::equals),
+                PATIENCE);
+    }
+
+    /**
+     * A Geosite list this version does not know may be newer than its index:
+     * the form says what happens if there is no such list, and OK adds the
+     * rule. It refused the name as one nobody publishes, so a list published
+     * after the build could not be added at all.
+     */
+    @Test
+    void theRuleFormWarnsOfAListThisVersionDoesNotKnowAndAddsTheRule() {
+        RoutingService routing = TestRoutingServices.at(freshDir("routing"));
+        ServiceLocator.register(RoutingService.class, routing);
+        mount("RoutingView");
+        DialogPane form = open(button("#addRuleButton")::fire);
+        setRuleType(form, RoutingRule.RuleType.GEOSITE);
+
+        setRuleValue(form, "a-list-newer-than-this-build");
+        assertThat(okDisabled(form)).as("OK with a list this version does not know").isFalse();
+        assertThat(problemShown(form)).as("a refusal").isNull();
+        assertThat(hintShown(form)).as("the hint under the value")
+                .isEqualTo(RoutingRuleCheck.hint(RoutingRule.RuleType.GEOSITE,
+                        "a-list-newer-than-this-build").orElseThrow());
+        setRuleValue(form, "youtube");
+        assertThat(hintShown(form)).as("the hint for a list the index has").isNull();
+        setRuleValue(form, "a-list-newer-than-this-build");
+        pressOk(form);
+
+        Await.until("the rule to be added",
+                () -> routing.getConfig().getRules().stream()
+                        .map(RoutingRule::getValue)
+                        .anyMatch("a-list-newer-than-this-build"::equals),
+                PATIENCE);
+    }
+
+    /**
      * OK was enabled by a check on the value without Unicode spaces around it,
      * but the rule was stored with them (trim() leaves an em space), so the
      * store refused it on the FX thread and the rule was lost without a word.
@@ -218,6 +289,12 @@ public class FormDialogsWaitForInputTest extends ApplicationTest {
     private String problemShown(DialogPane form) {
         return onFx(() -> form.lookup(".routing-rule-problem") instanceof Label reason
                 && reason.isVisible() ? reason.getText() : null);
+    }
+
+    /** The hint shown under the rule's value, or null while none is shown. */
+    private String hintShown(DialogPane form) {
+        return onFx(() -> form.lookup(".routing-rule-hint") instanceof Label hint
+                && hint.isVisible() ? hint.getText() : null);
     }
 
     /**

@@ -11,6 +11,7 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -265,7 +266,37 @@ public class ServiceReachabilityChecker {
             log.warn("Reachability probe skipped for '{}': invalid url '{}'", name, url);
             return new ProbeResult(name, url, false, -1, "invalid url");
         }
+        if (hasPortNoConnectionHas(uri)) {
+            log.warn("Reachability probe skipped for '{}': invalid port in '{}'", name, url);
+            return new ProbeResult(name, url, false, -1, "invalid port");
+        }
         return attempt(name, url, () -> headStatus(uri, scheme.equals("https"), probePort));
+    }
+
+    /**
+     * Whether an http(s) target names a port past 65535, which no connection
+     * has. The CONNECT carries the port in two bytes, so
+     * "https://example.com:70000", saved before the add-service dialog refused
+     * it, was asked as example.com:4464, and whatever answered there read as
+     * the site.
+     *
+     * @param url the target as stored
+     * @return true for a URL whose port is past 65535
+     */
+    public static boolean hasPortNoConnectionHas(String url) {
+        if (url == null) {
+            return false;
+        }
+        try {
+            return hasPortNoConnectionHas(new URI(url.trim()));
+        } catch (URISyntaxException unparsable) {
+            return false;
+        }
+    }
+
+    private static boolean hasPortNoConnectionHas(URI uri) {
+        // A port of 0 is asked as the scheme's own, as it always was.
+        return uri.getPort() > 65535;
     }
 
     /**

@@ -17,6 +17,7 @@ import com.vlessclient.service.LatencyTester;
 import com.vlessclient.service.PersistenceState;
 import com.vlessclient.service.ProxyGroupMonitor;
 import com.vlessclient.service.Redact;
+import com.vlessclient.service.RoutingRuleCheck;
 import com.vlessclient.service.RoutingService;
 import com.vlessclient.service.ShareLinkParser;
 import com.vlessclient.service.SingBoxEngine;
@@ -787,6 +788,14 @@ public final class DefaultAppControlService implements AppControlService {
         }
         RoutingRule rule = new RoutingRule(parseRuleType(type), value.strip(),
                 parseRuleAction(action));
+        // A Geosite list this version does not know may be newer, and the
+        // Routing dialog adds it after saying so; but if it does not exist,
+        // the core does not start, for any server. An agent cannot weigh that
+        // for the user, and its guess at a list's name is the likelier miss.
+        if (!RoutingRuleCheck.isKnownList(rule.getType(), rule.getValue())) {
+            throw new McpToolException(I18n.get("routing.rule.agent.geosite",
+                    RoutingRuleCheck.ruleSetName(rule.getValue())));
+        }
         try {
             routingService.addRule(rule);
         } catch (IllegalArgumentException refused) {

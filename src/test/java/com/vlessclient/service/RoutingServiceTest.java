@@ -90,6 +90,31 @@ class RoutingServiceTest {
     }
 
     /**
+     * A null among the rules, from a hand edit or another tool, read as no
+     * rule at all, and asking it for its type threw a NullPointerException out
+     * of the constructor: the app, autostart included, exited before a window
+     * appeared, every time, until routing.json was found and deleted by hand.
+     */
+    @Test
+    void aNullRuleIsSkippedAndReportedAndTheAppStarts() throws Exception {
+        java.nio.file.Files.writeString(tempDir.resolve("routing.json"), """
+                { "config_version": 1, "rules": [
+                    { "id": "r-1", "type": "domain_suffix", "value": "example.com",
+                      "action": "direct" },
+                    null ],
+                  "bypass_list": [] }""");
+        PersistenceState persistence = new PersistenceState();
+
+        RoutingConfig config = new RoutingService(tempDir, persistence).getConfig();
+
+        assertThat(config.getRules()).extracting(RoutingRule::getId).containsExactly("r-1");
+        assertThat(persistence.unreadableEntries()).containsEntry(RoutingService.ROUTING_FILE, 1);
+
+        java.nio.file.Files.writeString(tempDir.resolve("routing.json"), "{\"rules\": [null]}");
+        assertThat(new RoutingService(tempDir).getConfig().getRules()).isEmpty();
+    }
+
+    /**
      * Pre-port installs wrote routing.json mac-style on every OS. Moving to
      * PlatformPaths must carry that file over, or a Windows/Linux user silently
      * starts from empty routing rules.
@@ -242,6 +267,42 @@ class RoutingServiceTest {
         assertThat(routingService.getConfig().getRules()).isEmpty();
         assertThat(new RoutingService(tempDir).getConfig().getRules())
                 .as("the file").isEmpty();
+    }
+
+    /**
+     * A regex no name can match, as the core compares names, is refused; one
+     * that matches through another alternative is added. Both were refused,
+     * so "\.(ru|рф)$", which matches every .ru name, could not be added.
+     */
+    @Test
+    void addRule_refusesARegexNoNameCanMatchAndAddsOneThatMatchesThroughAnother() {
+        RoutingRule never = new RoutingRule(RoutingRule.RuleType.DOMAIN_REGEX, "^Mail\\.",
+                RoutingRule.RuleAction.PROXY);
+        RoutingRule partly = new RoutingRule(RoutingRule.RuleType.DOMAIN_REGEX, "\\.(ru|рф)$",
+                RoutingRule.RuleAction.DIRECT);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> routingService.addRule(never))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(RoutingRuleCheck.refusal(never.getType(), never.getValue())
+                        .orElseThrow());
+        routingService.addRule(partly);
+
+        assertThat(new RoutingService(tempDir).getConfig().getRules()).as("the file")
+                .extracting(RoutingRule::getValue).containsExactly("\\.(ru|рф)$");
+    }
+
+    /**
+     * The Routing dialog adds a Geosite list this version does not know once
+     * it has said so: the list may be newer than the index. It was refused
+     * here, so the dialog could not add it whatever it said.
+     */
+    @Test
+    void addRule_addsAGeositeListThisVersionDoesNotKnow() {
+        routingService.addRule(new RoutingRule(RoutingRule.RuleType.GEOSITE,
+                "a-list-newer-than-this-build", RoutingRule.RuleAction.PROXY));
+
+        assertThat(new RoutingService(tempDir).getConfig().getRules()).as("the file")
+                .extracting(RoutingRule::getValue).containsExactly("a-list-newer-than-this-build");
     }
 
     @Test
