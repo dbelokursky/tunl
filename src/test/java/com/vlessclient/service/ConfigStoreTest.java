@@ -305,6 +305,63 @@ class ConfigStoreTest {
     }
 
     /**
+     * Settings and MCP stored a TUN address the core refuses, such as
+     * "172.19.0.01/30" or a dropped octet, "172.19.1/30", and every TUN start
+     * after it failed. Such an address, from an earlier version or a hand
+     * edit, is read as the default, which the Settings page then shows; an
+     * address the core takes stays.
+     */
+    @Test
+    void aTunAddressTheCoreRefusesIsReadAsTheDefault(@TempDir Path dirs) throws Exception {
+        for (String stored : java.util.List.of("172.19.0.01/30", "172.19.1/30",
+                "172.19.0.1/+30")) {
+            Path dir = dirs.resolve(String.valueOf(stored.hashCode()));
+            java.nio.file.Files.createDirectories(dir);
+            java.nio.file.Files.writeString(dir.resolve("settings.json"),
+                    "{\"config_version\": 1, \"tun_ipv4_address\": \"" + stored + "\"}");
+
+            assertThat(new ConfigStore(dir).getSettings().getTunIpv4Address()).as(stored)
+                    .isEqualTo("172.19.0.1/30");
+        }
+        java.nio.file.Files.createDirectories(dirs.resolve("chosen"));
+        java.nio.file.Files.writeString(dirs.resolve("chosen").resolve("settings.json"),
+                "{\"config_version\": 1, \"tun_ipv4_address\": \"10.66.0.1/30\"}");
+        assertThat(new ConfigStore(dirs.resolve("chosen")).getSettings().getTunIpv4Address())
+                .isEqualTo("10.66.0.1/30");
+        // A hand edit's space around an address the core takes: the core is
+        // given the setting as it is, and refuses the space.
+        java.nio.file.Files.createDirectories(dirs.resolve("padded"));
+        java.nio.file.Files.writeString(dirs.resolve("padded").resolve("settings.json"),
+                "{\"config_version\": 1, \"tun_ipv4_address\": \" 10.66.0.1/30 \"}");
+        assertThat(new ConfigStore(dirs.resolve("padded")).getSettings().getTunIpv4Address())
+                .isEqualTo("10.66.0.1/30");
+    }
+
+    /**
+     * A health target saved before the add-service dialog refused a port past
+     * 65535 was probed on that port's low 16 bits: it never asked what the
+     * user typed, and as the only target it read as a broken tunnel and had
+     * it restarted again and again. It is left out at load, as a null entry
+     * from a hand edit is, which the dashboard's rows could not draw; the
+     * other targets stay as they were.
+     */
+    @Test
+    void aHealthTargetWithAPortNoConnectionHasIsLeftOutAtLoad(@TempDir Path dir)
+            throws Exception {
+        java.nio.file.Files.writeString(dir.resolve("settings.json"), """
+                {"config_version": 1, "health_check_targets": [
+                  {"name": "Typo", "url": "https://example.com:70000/"},
+                  null,
+                  {"name": "Google", "url": "https://www.google.com/generate_204"},
+                  {"name": "Site", "url": "http://site.example:8080/"},
+                  {"name": "DNS", "url": "1.1.1.1:53"}]}""");
+
+        assertThat(new ConfigStore(dir).getSettings().getHealthCheckTargets())
+                .extracting(com.vlessclient.model.HealthCheckTarget::getName)
+                .containsExactly("Google", "Site", "DNS");
+    }
+
+    /**
      * A new install spoke English whatever the system's language, while its
      * theme already followed the system; most people who install Tunl read
      * Russian. It now takes the system's language when that is one the app

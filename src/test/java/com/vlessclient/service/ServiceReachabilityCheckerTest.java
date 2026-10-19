@@ -254,6 +254,31 @@ class ServiceReachabilityCheckerTest {
         }
     }
 
+    /**
+     * A port past 65535 is not asked for. The CONNECT carries the port in two
+     * bytes, so "http://example.com:70000/", saved before the add-service
+     * dialog refused it, was asked as example.com:4464, and whatever answered
+     * there read as the site.
+     */
+    @Test
+    void aTargetWithAPortNoConnectionHasIsUnreachableAndNotAsked() throws Exception {
+        try (FakeProbeInbound inbound = new FakeProbeInbound(
+                FakeProbeInbound.CARRIED, "HTTP/1.1 204 No Content")) {
+            checker = new ServiceReachabilityChecker();
+
+            List<ProbeResult> results = checker
+                    .checkAll(List.of(new HealthCheckTarget("Typo", "http://example.com:70000/")),
+                            inbound.port())
+                    .get(20, TimeUnit.SECONDS);
+
+            assertThat(results).singleElement().satisfies(result -> {
+                assertThat(result.reachable()).isFalse();
+                assertThat(result.detail()).isEqualTo("invalid port");
+            });
+            assertThat(inbound.connects).as("asked of the tunnel").isEmpty();
+        }
+    }
+
     @Test
     void aPlainHttpTargetTheTunnelDidNotCarryIsUnreachable() throws Exception {
         try (FakeProbeInbound inbound = new FakeProbeInbound(

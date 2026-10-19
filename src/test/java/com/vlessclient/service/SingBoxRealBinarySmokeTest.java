@@ -536,6 +536,44 @@ class SingBoxRealBinarySmokeTest {
         }
     }
 
+    /**
+     * A regex with a letter the core never sees in one alternative, or in a
+     * part that may be left out, still matches through the rest: the add-rule
+     * check takes it, and a stored one stays in the configuration. It was
+     * refused, and left out, as one that could never match. The pinned core
+     * is asked, as it compares names; and one the check refuses matches none.
+     */
+    @Test
+    void aRegexTheCheckTakesDespiteALetterMatchesThroughItsOtherWays() throws Exception {
+        var regex = com.vlessclient.model.RoutingRule.RuleType.DOMAIN_REGEX;
+        java.util.Map<String, String> matches = new java.util.LinkedHashMap<>();
+        matches.put("\\.(ru|рф)$", "www.example.ru");
+        matches.put("^m\\.(VK|vk)\\.com$", "m.vk.com");
+        matches.put("^(www\\.)?(Example|example)\\.com$", "example.com");
+        matches.put("(\\.рф|\\.xn--p1ai)$", "xn--80aswg.xn--p1ai");
+        matches.put("(?:Mail)?\\.example\\.org$", "www.example.org");
+        matches.put("A(?i)b|C", "c.example");
+        matches.put("^Mail\\.", "MAIL.example.com");
+
+        for (var entry : matches.entrySet()) {
+            Path ruleSet = Files.createTempFile("smoke-rule-set-", ".json");
+            try {
+                Files.writeString(ruleSet, "{\"version\":3,\"rules\":[{\"domain_regex\":["
+                        + tools.jackson.databind.json.JsonMapper.builder().build()
+                                .writeValueAsString(entry.getKey()) + "]}]}");
+                ProcessResult result = run(binary, "rule-set", "match", "-f", "source",
+                        ruleSet.toString(), entry.getValue());
+                boolean taken = RoutingRuleCheck.refusal(regex, entry.getKey()).isEmpty();
+                assertThat(result.output().contains("match rules.[0]"))
+                        .as("%s on %s, which the check %s: %s", entry.getKey(), entry.getValue(),
+                                taken ? "takes" : "refuses", result.output().strip())
+                        .isEqualTo(taken);
+            } finally {
+                Files.deleteIfExists(ruleSet);
+            }
+        }
+    }
+
     private static ServerConfig withPlugin(String name, String plugin, String options) {
         return with(shadowsocksServer(name, "aes-256-gcm"), server -> {
             server.setPlugin(plugin);
@@ -631,7 +669,12 @@ class SingBoxRealBinarySmokeTest {
                 // Not addresses the core takes: asked for as the default.
                 "dhcp://auto",
                 "http://1.1.1.1/dns-query",
-                "system");
+                "system",
+                // A port past 65535, and a path for a server that has none:
+                // the core refused the whole configuration over either.
+                "udp://1.1.1.1:99999",
+                "quic://dns.adguard-dns.com/dns-query",
+                "1.1.1.1, 8.8.8.8");
 
         for (String address : addresses) {
             AppSettings settings = new AppSettings();
@@ -640,6 +683,29 @@ class SingBoxRealBinarySmokeTest {
             settings.setDirectDns(address);
 
             assertCheckPasses(generator.generate(serverFor(Protocol.VLESS), settings), address);
+        }
+    }
+
+    /**
+     * The Settings field and MCP store a TUN address TunSettings takes, and
+     * the core is given it as it is: what one takes, the other has to. A
+     * leading zero, a dropped octet or a signed prefix passed the check, and
+     * every TUN start failed over it.
+     */
+    @Test
+    void tunSettingsTakesTheAddressesTheCoreTakes() throws Exception {
+        for (String network : List.of("172.19.0.1/30", "10.66.0.1/30", "10.0.0.1/8",
+                "192.168.100.1/24", "172.19.0.01/30", "172.019.0.1/30", "172.19.1/30",
+                "10.1/30", "172.19.0.1/030", "172.19.0.1/+30")) {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(ProxyMode.TUN);
+            settings.setTunIpv4Address(network);
+
+            boolean coreAccepts = checkPasses(generator.generate(serverFor(Protocol.VLESS),
+                    settings));
+            assertThat(com.vlessclient.model.TunSettings.isIpv4Network(network))
+                    .as("%s: sing-box check %s it", network, coreAccepts ? "accepts" : "refuses")
+                    .isEqualTo(coreAccepts);
         }
     }
 
@@ -759,7 +825,12 @@ class SingBoxRealBinarySmokeTest {
         RoutingConfig routing = new RoutingConfig();
         routing.setBypassList(List.of("192.168.1.256", "10.0.0.0/33", "192.168.01.1",
                 "cafe::/200", "1:2:3:4:5:6:7:8:9", "dead:beef", ".", "*.", "example.com",
-                "10.0.0.0/8"));
+                "10.0.0.0/8", "02001:db8::/32",
+                // Globs carrying what IDN cannot convert: an invisible mark from
+                // right-to-left text, a character outside the BMP.
+                "mail.*.example.com‏", "‏mail.*.example.org‎",
+                "*.example.*​", "mail.*.‫example‬.net",
+                "mail.*.󰀀.com", "mail.*.☃א.com"));
         for (ProxyMode mode : ProxyMode.values()) {
             AppSettings settings = new AppSettings();
             settings.setProxyMode(mode);

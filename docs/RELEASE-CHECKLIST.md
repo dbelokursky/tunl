@@ -83,6 +83,11 @@ On a pushed `v*` tag:
 - [ ] **Core pin**: `singbox.properties` holds the core you mean to ship —
       `singbox.release` names Tunl's build (`core-v<version>-tunl<N>`) of
       `singbox.version`, and it moves only with app releases.
+- [ ] **Geosite index**: `scripts/update-geosite-lists.sh --check` passes;
+      if it lists lists published or removed upstream, run it without
+      `--check` and commit `src/main/resources/geosite-lists.txt`. The
+      Routing dialog warns of a Geosite list the file lacks, and MCP refuses
+      it to agents, so a stale file ships warnings for lists that exist.
 - [ ] **Desktop checks** below, on the `dev-latest` build of the release
       commit, for the paths CI cannot exercise.
 - [ ] **Release notes** in English, written into the annotated tag (layout

@@ -29,7 +29,15 @@ class RoutingRuleCheckTest {
             "^xn--\\x{30}{2}", "(?:\\x{41}){1000}", "((a{500}){0}){3}",
             "((a{500}){0}|a{300}){3}", "(?:(a{600}){0}b{2}){3}", "a{2}{01}", "a{01000}",
             // The inline flags Go has.
-            "(?im)a", "(?s-m)a", "(?U)a", "(?-i)a", "(?iU-ms:a)");
+            "(?im)a", "(?s-m)a", "(?U)a", "(?-i)a", "(?iU-ms:a)",
+            // A repeat of what an assertion, a group or a quote holds, and
+            // POSIX classes Go has.
+            "x(?i){2}", "^{2}", "\\b{2}", "\\Qab\\E{2}", "(?:){2}", "(|a)", "a{2}(?i){3}",
+            "^(www\\.)?example\\.com$", "[[:alnum:]]+", "[[:^alpha:]]", "[[:word:]-]",
+            "[]a]", "[^]a]",
+            // Letters the core never sees in a name: it takes the expression,
+            // and a stored rule with one stays in the configuration.
+            "^Mail\\.", "\\.рф$", "\\.(ru|рф)$", "^m\\.(VK|vk)\\.com$");
 
     static final List<String> REGEXES_THE_CORE_REFUSES = List.of(
             "(", "[a", "a{2,1}", "*a", "(?=a)", "(?!a)", "(?<=a)b", "(?<!a)b", "(?>a)",
@@ -43,18 +51,32 @@ class RoutingRuleCheckTest {
             "a{2}{3}", "a*{2}", "\\™", "\\é", "((a{500}){0}|a{400}){3}",
             "((a{600}){0,}){2}",
             // Inline flags Java alone has, and a "-" with no flag after it.
-            "(?x)a b", "(?u)a", "(?d)a", "(?c)a", "(?ix)a", "(?x:a)", "(?-)a", "(?i-:a)");
+            "(?x)a b", "(?u)a", "(?d)a", "(?c)a", "(?ix)a", "(?x:a)", "(?-)a", "(?i-:a)",
+            // A repeat with nothing before it to repeat, a POSIX class Go does
+            // not have, and \Q inside a class.
+            "{1,3}\\.example\\.org$", "(www|{2})\\.example\\.com$", "(?i){2}example\\.com$",
+            "(?:{2})", "(?i:{2})", "a|{2}", "\\Q\\E{2}", "(?i)(?s){2}",
+            "^[[:alnum_:]]+\\.example\\.com$", "[[:ALPHA:]]", "[a[:b]c:]]",
+            "[\\Q.\\E]example\\.com$",
+            // A class inside a class, which Java has and Go reads as a "[":
+            // the range a-[, or what Java read inside it read by Go outside.
+            "^(?P<sub>[a-[\\-]z]+)\\.example\\.com$", "[a-[b]]", "[a-[:alpha:]]", "[]-[b]]",
+            "[a[b]+*]", "[a[b]**]", "[a[b](]", "[a[b])]");
 
     static final List<String> CIDRS_THE_CORE_TAKES = List.of(
             "10.0.0.0/8", "10.0.0.1", "10.0.0.1/32", "0.0.0.0/0", "2001:db8::/32",
             "2001:db8::1", "::/0", "::ffff:10.0.0.1/128", "fe80::1%en0", "fe80::1%en0/64",
-            "2001:0db8:0000::/48");
+            "2001:0db8:0000::/48", "0002:db8::/32", "FE80::A/10", "1:2:3:4:5:6:1.2.3.4",
+            "::1.2.3.4");
 
     static final List<String> CIDRS_THE_CORE_REFUSES = List.of(
             "999.1.1.1/8", "010.0.0.0/8", "10.0.0.0/08", "10.0.0.0/+8", "10.0.0/24",
             "10.0.0.0.0/8", "10.0.0.256/32", "10.0.0.0/", "/8", "10.0.0.0/33",
             "2001:db8::/129", "2001:db8:::1/64", "g::1/64", "[2001:db8::]/32", "1.2.3.4/32/5",
-            " 10.0.0.0/8", "10.0.0.0/8 ", "example.com");
+            " 10.0.0.0/8", "10.0.0.0/8 ", "example.com",
+            // A group of five digits, a dotted quad with a leading zero, an
+            // empty zone: Java's literal parser takes each, netip does not.
+            "02001:db8::/32", "00000::1", "::ffff:010.0.0.1/128", "::01.2.3.4", "fe80::1%");
 
     @Test
     void aRegularExpressionIsCheckedAsGoReadsIt() {
@@ -64,6 +86,109 @@ class RoutingRuleCheckTest {
         for (String regex : REGEXES_THE_CORE_REFUSES) {
             assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_REGEX, regex)).as(regex)
                     .isPresent();
+        }
+    }
+
+    /**
+     * The core matches a regex against the name in lower case and in
+     * punycode, the way SNI, DNS and a browser's CONNECT carry it: "^Mail\."
+     * or "\.рф$" passed here, the core took it, and the rule matched nothing.
+     * A new one is refused. The core itself takes it, so it is no problem: a
+     * stored one stays in the configuration, where it does no harm, and its
+     * row says why it does nothing.
+     */
+    @Test
+    void aRegexTheCoreCanNeverMatchIsRefused() {
+        for (String regex : List.of("^Mail\\.", "Gosuslugi\\.ru$", "(?-i)Mail", "\\QMail\\E",
+                "(?s:Mail)", "(?P<Sub>Mail)\\.ru", "(?i:mail)\\.Ru$", "(?:Mail|Post)\\.ru",
+                "\\QMail\\E?", "M{1,2}ail", "(?i)a(?-i)B", "(?:(?i)a|b)C")) {
+            assertThat(RoutingRuleCheck.refusal(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .hasValueSatisfying(reason -> assertThat(reason).contains("(?i)"));
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .isEmpty();
+            assertThat(RoutingRuleCheck.hint(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .isEqualTo(RoutingRuleCheck.refusal(RuleType.DOMAIN_REGEX, regex));
+        }
+        assertThat(RoutingRuleCheck.refusal(RuleType.DOMAIN_REGEX, "^mail\\.Example"))
+                .hasValueSatisfying(reason -> assertThat(reason).contains(" E "));
+        for (String regex : List.of("\\.рф$", "яндекс", "^\\Qпочта\\E\\.", "(?i)\\.РФ$")) {
+            assertThat(RoutingRuleCheck.refusal(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .hasValueSatisfying(reason -> assertThat(reason).contains("punycode"));
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .isEmpty();
+        }
+        // Upper case where it is not a letter of the name, and (?i).
+        for (String regex : List.of("(?i)^Mail\\.", "(?i:Mail)\\.ru$", "(?im)^Mail",
+                "[A-Za-z]+\\.ru$", "[[:upper:]a-z]+", "^\\D+\\.example$", "\\p{Lu}", "\\PL",
+                "\\x4A", "\\x{4A}", "(?P<Sub>mail)\\.ru", "(?<Sub>mail)", "(?U)a+",
+                "\\.xn--p1ai$", "[а-яa-z]+\\.ru$", "\\x{0440}\\x{0444}", "\\101",
+                // The Kelvin sign, which (?i) folds to k in Go as in Java.
+                "(?i)K\\.example$")) {
+            assertThat(RoutingRuleCheck.refusal(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .isEmpty();
+            assertThat(RoutingRuleCheck.hint(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .isEmpty();
+        }
+    }
+
+    /**
+     * A letter the core never sees in one alternative, or in a part that may
+     * be left out, leaves the rest to match: "\.(ru|рф)$" matches every .ru
+     * name and "^m\.(VK|vk)\.com$" m.vk.com, as the pinned core says. They
+     * were refused as rules that could never match, and one stored by 1.25
+     * was left out of the configuration; now the dialog takes them and says
+     * which letter does nothing. The expression is read as Go reads it: (?i)
+     * holds to the end of its group, alternatives after it included, and a
+     * repeat after flags takes the atom before them.
+     */
+    @Test
+    void aRegexWithALetterTheCoreNeverSeesOnSomeOfItsWaysIsTakenWithAHint() {
+        java.util.Map<String, String> letters = new java.util.LinkedHashMap<>();
+        letters.put("^m\\.(VK|vk)\\.com$", "V");
+        letters.put("(\\.рф|\\.xn--p1ai)$", "р");
+        letters.put("^(?:xn--80asehdb|телеграм)\\.xn--p1ai$", "т");
+        letters.put("^(mail|Mail)\\.example\\.com$", "M");
+        letters.put("\\.(ru|рф)$", "р");
+        letters.put("\\.(ru|su|рф)$", "р");
+        letters.put("^(www\\.)?(Example|example)\\.com$", "E");
+        letters.put("(?:Mail)?\\.ru$", "M");
+        letters.put("M*ail", "M");
+        letters.put("M{0,2}ail", "M");
+        letters.put("A(?i)b|C", "A");
+        // Go repeats the X, none times; Java the flags, and wants the X.
+        letters.put("X(?i){0}y", "X");
+        letters.put("(?:Mail){0}\\.ru", "M");
+        letters.put("\\QMa\\E|mail", "M");
+        for (var entry : letters.entrySet()) {
+            String regex = entry.getKey();
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .isEmpty();
+            assertThat(RoutingRuleCheck.refusal(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .isEmpty();
+            assertThat(RoutingRuleCheck.hint(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .hasValueSatisfying(hint -> assertThat(hint)
+                            .contains(" " + entry.getValue() + " "));
+        }
+    }
+
+    /**
+     * Java reads a "[" inside a class as a class of its own, and Go as the
+     * character: where Go then found the expression broken, the core refused
+     * the whole configuration, and where it did not, the rule meant something
+     * else to the core than it said. Both are refused, with what to write; a
+     * POSIX class and an escaped "[" are Go's own.
+     */
+    @Test
+    void aClassInsideAClassIsRefused() {
+        for (String regex : List.of("[a-z[0-9]]+\\.example\\.com$", "[a[b]]", "[A-[b]]",
+                "[a-z&&[^b]]")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .hasValueSatisfying(reason -> assertThat(reason).contains("\\["));
+        }
+        for (String regex : List.of("[[:alpha:]]+\\.ru$", "[[:digit:][:lower:]]", "[a\\[b]",
+                "[\\[\\]]", "\\[a[b]")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_REGEX, regex)).as(regex)
+                    .isEmpty();
         }
     }
 
@@ -92,6 +217,85 @@ class RoutingRuleCheckTest {
         }
     }
 
+    /**
+     * The core has no wildcard in a domain, a suffix or a keyword: it compares
+     * the text, so "*.example.net" matched nothing while the bypass list on
+     * the same page read it as every name under example.net. A star is read
+     * the bypass list's way where the rule's type can say the same, a final
+     * dot is the root's, and anything else is refused with what to use.
+     */
+    @Test
+    void aWildcardIsReadAsTheBypassListReadsIt() {
+        assertThat(RoutingRuleCheck.coreName(RuleType.DOMAIN_SUFFIX, "*.Example.net"))
+                .isEqualTo("example.net");
+        assertThat(RoutingRuleCheck.coreName(RuleType.DOMAIN_SUFFIX, "*.пример.рф"))
+                .isEqualTo("xn--e1afmkfd.xn--p1ai");
+        assertThat(RoutingRuleCheck.coreName(RuleType.DOMAIN_SUFFIX, "example.org."))
+                .isEqualTo("example.org");
+        assertThat(RoutingRuleCheck.coreName(RuleType.DOMAIN_SUFFIX, ".example.org"))
+                .as("a leading dot is the core's own: every name under it, not itself")
+                .isEqualTo(".example.org");
+        assertThat(RoutingRuleCheck.coreName(RuleType.DOMAIN, "example.org."))
+                .isEqualTo("example.org");
+        assertThat(RoutingRuleCheck.coreName(RuleType.DOMAIN_KEYWORD, "*tracker*"))
+                .isEqualTo("tracker");
+        assertThat(RoutingRuleCheck.coreName(RuleType.DOMAIN_KEYWORD, "*.vk.com*"))
+                .isEqualTo("vk.com");
+        assertThat(RoutingRuleCheck.coreName(RuleType.DOMAIN_KEYWORD, "tracker."))
+                .as("no star: a keyword's dots are its own").isEqualTo("tracker.");
+        for (String value : List.of("*.example.net", "example.org.", ".example.org")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_SUFFIX, value)).as(value)
+                    .isEmpty();
+        }
+        assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_KEYWORD, "*tracker*")).isEmpty();
+        assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN, "example.org.")).isEmpty();
+
+        for (String value : List.of("*.example.net", "mail.*.com", "*example.net", ".example.net",
+                ".", "*")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN, value)).as("domain %s", value)
+                    .isPresent();
+        }
+        for (String value : List.of("*example.net", "example.*", "*.*.example.net",
+                "mail.*.com", "*.", ".", "*")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_SUFFIX, value))
+                    .as("suffix %s", value).isPresent();
+        }
+        // An empty keyword is in every name: the rule would have caught everything.
+        for (String value : List.of("foo*bar", "*", "**", "*.*", "*.")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_KEYWORD, value))
+                    .as("keyword %s", value).isPresent();
+        }
+        // Without a star a keyword is the core's own, a dot as well: it is in
+        // every name with one, and a rule stored with it worked.
+        assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_KEYWORD, ".")).isEmpty();
+        assertThat(RoutingRuleCheck.coreName(RuleType.DOMAIN_KEYWORD, ".")).isEqualTo(".");
+    }
+
+    /**
+     * "*.ru" is every name under ru to the bypass list, a suffix. Read as a
+     * keyword it became "ru", which the core finds anywhere in a name, so a
+     * stored Direct "*.ru", which matched nothing before, sent rutracker.org
+     * around the tunnel, and a Block "*.cn" blocked cnn.com. It is refused,
+     * with the type that says it; stars at both ends, or none in front, stay
+     * a keyword, as in the bypass list.
+     */
+    @Test
+    void aKeywordWrittenAsASuffixIsRefusedWithTheTypeForIt() {
+        for (String value : List.of("*.ru", "*.cn", "**.co.uk", "*.Example.com.")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_KEYWORD, value))
+                    .as("keyword %s", value)
+                    .hasValueSatisfying(reason -> assertThat(reason).contains("Domain suffix"));
+        }
+        assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_KEYWORD, "*.ru"))
+                .hasValueSatisfying(reason -> assertThat(reason).contains(" ru:"));
+        for (String value : List.of("*.vk.com*", "*tracker", "tracker*", "*.ru*", ".ru")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_KEYWORD, value))
+                    .as("keyword %s", value).isEmpty();
+        }
+        // The same text is a suffix rule's own way to say it.
+        assertThat(RoutingRuleCheck.problem(RuleType.DOMAIN_SUFFIX, "*.ru")).isEmpty();
+    }
+
     /** The core takes a space in a domain, but no hostname has one: the rule never matched. */
     @Test
     void aDomainWithASpaceIsRefused() {
@@ -107,13 +311,73 @@ class RoutingRuleCheckTest {
     void aListNameIsReadInLowerCaseAndCheckedForWhatAUrlCannotCarry() {
         assertThat(RoutingRuleCheck.ruleSetName(" Google ")).isEqualTo("google");
         for (String name : List.of("google", "Google", "category-ads-all", "geolocation-!cn",
-                "apple@cn", "ru")) {
+                "apple@cn", "category-ru")) {
             assertThat(RoutingRuleCheck.problem(RuleType.GEOSITE, name)).as(name).isEmpty();
         }
         for (String name : List.of("google ads", "google/ads", "google?x", "#cn")) {
             assertThat(RoutingRuleCheck.problem(RuleType.GEOSITE, name)).as(name).isPresent();
             assertThat(RoutingRuleCheck.problem(RuleType.GEOIP, name)).as(name).isPresent();
         }
+    }
+
+    /**
+     * A list the repositories do not publish was a 404 when the core fetched
+     * it at start, and the core does not start without its rule-sets: a typo
+     * such as "youtub" stopped every server from connecting. sing-geoip
+     * publishes one list per country with addresses of its own, which is
+     * checked exactly. A Geosite name the bundled index lacks is no proof
+     * there is no such list: sing-geosite adds lists every week, and a
+     * release is used for months. It was refused, and a stored rule for it
+     * left out, under a false "there is no geosite list"; now it has a hint,
+     * the dialog adds it, and the generator writes it.
+     */
+    @Test
+    void aGeositeListThisVersionDoesNotKnowHasAHintAndAGeoipCodeWithoutAListAProblem() {
+        // sing-geosite has no list "ru": it is "category-ru".
+        for (String name : List.of("youtub", "ru", "category-ruu", "google@ru",
+                "a-list-newer-than-this-build")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.GEOSITE, name)).as(name).isEmpty();
+            assertThat(RoutingRuleCheck.refusal(RuleType.GEOSITE, name)).as(name).isEmpty();
+            assertThat(RoutingRuleCheck.isKnownList(RuleType.GEOSITE, name)).as(name).isFalse();
+            assertThat(RoutingRuleCheck.hint(RuleType.GEOSITE, name)).as(name)
+                    .hasValueSatisfying(hint -> assertThat(hint).contains(" " + name + " "));
+        }
+        // The country bypass's own lists among them, and runetfreedom's.
+        for (String name : List.of("youtube", "YouTube", "cn", "netflix", "google@cn",
+                "category-ads-all", "category-ru", "category-ir", "ru-blocked")) {
+            assertThat(RoutingRuleCheck.isKnownList(RuleType.GEOSITE, name)).as(name).isTrue();
+            assertThat(RoutingRuleCheck.hint(RuleType.GEOSITE, name)).as(name).isEmpty();
+        }
+        for (String name : List.of("rus", "private", "bv", "category-ru", "zz")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.GEOIP, name)).as(name)
+                    .hasValueSatisfying(reason -> assertThat(reason).contains(name));
+        }
+        for (String name : List.of("ru", "RU", "cn", "us", "ir")) {
+            assertThat(RoutingRuleCheck.problem(RuleType.GEOIP, name)).as(name).isEmpty();
+            assertThat(RoutingRuleCheck.hint(RuleType.GEOIP, name)).as(name).isEmpty();
+        }
+        // A name no URL can carry is still a problem, and says so alone.
+        assertThat(RoutingRuleCheck.problem(RuleType.GEOSITE, "google ads")).isPresent();
+        assertThat(RoutingRuleCheck.hint(RuleType.GEOSITE, "google ads")).isEmpty();
+    }
+
+    /**
+     * "ru-blocked" names the runetfreedom list of what is blocked in Russia,
+     * which the blocked-only mode downloads and the generator fetches from
+     * there for a custom rule too: SagerNet has no such list, and the check
+     * refused the name, so "bypass Russia, but tunnel what is blocked there"
+     * could not be written, and a rule stored by 1.25 was left out.
+     */
+    @Test
+    void theRuBlockedListsAreTakenForBothKinds() {
+        for (RuleType type : List.of(RuleType.GEOSITE, RuleType.GEOIP)) {
+            for (String name : List.of("ru-blocked", "RU-Blocked", " ru-blocked ")) {
+                assertThat(RoutingRuleCheck.problem(type, name)).as("%s %s", type, name)
+                        .isEmpty();
+            }
+        }
+        // Only the two lists the generator fetches from runetfreedom.
+        assertThat(RoutingRuleCheck.problem(RuleType.GEOIP, "ru-blocked-all")).isPresent();
     }
 
     @Test

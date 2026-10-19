@@ -4,6 +4,7 @@ import com.vlessclient.app.I18n;
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
 import com.vlessclient.model.ServerConfig;
+import com.vlessclient.model.TunSettings;
 import com.vlessclient.platform.PlatformPaths;
 import com.vlessclient.platform.SecretSealer;
 import com.vlessclient.platform.SecretSealers;
@@ -1357,6 +1358,33 @@ public class ConfigStore {
                 log.info("Direct DNS moved from the retired default {} to the system resolver",
                         AppSettings.RETIRED_DIRECT_DNS_DEFAULT);
             }
+            // Settings and MCP stored a TUN address the core refuses, such as
+            // "172.19.0.01/30", and every TUN start failed over it. Read as the
+            // default, which the Settings page then shows. The core is given
+            // the address as it is, so space around it goes too.
+            String tunAddress = settings.getTunIpv4Address();
+            if (!TunSettings.isIpv4Network(tunAddress)) {
+                log.warn("TUN IPv4 address {} is not one the core takes; using {}",
+                        tunAddress, AppSettings.DEFAULT_TUN_IPV4_ADDRESS);
+                settings.setTunIpv4Address(AppSettings.DEFAULT_TUN_IPV4_ADDRESS);
+            } else if (!tunAddress.equals(tunAddress.trim())) {
+                settings.setTunIpv4Address(tunAddress.trim());
+            }
+            // A health target saved before the add-service dialog refused a
+            // port past 65535 was probed on that port's low 16 bits: it never
+            // asked what the user typed, and as the only target it read as a
+            // broken tunnel, which was restarted again and again. A null from
+            // a hand edit stopped the dashboard drawing its rows.
+            settings.getHealthCheckTargets().removeIf(target -> {
+                boolean unusable = target == null
+                        || ServiceReachabilityChecker.hasPortNoConnectionHas(target.getUrl());
+                if (unusable) {
+                    log.warn("Leaving out health target {}: {}",
+                            target == null ? null : target.getUrl(),
+                            target == null ? "it is empty" : "its port is past 65535");
+                }
+                return unusable;
+            });
             // Future incompatible versions dispatch their migrations here;
             // saving always stamps the version this build writes.
             settings.setConfigVersion(AppSettings.CURRENT_CONFIG_VERSION);

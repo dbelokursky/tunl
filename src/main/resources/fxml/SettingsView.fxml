@@ -133,6 +133,11 @@
             <TextField fx:id="proxyDnsField" styleClass="form-field" prefWidth="300"
                        promptText="https://1.1.1.1/dns-query"/>
         </HBox>
+        <!-- Why the address above is not the one the VPN core asks: an edit
+             refused, or one stored before the field checked it. The controller
+             fills it, and it takes no room until then. -->
+        <Label fx:id="proxyDnsProblem" styleClass="routing-rule-problem" wrapText="true"
+               maxWidth="520" minHeight="-Infinity" visible="false" managed="false"/>
 
         <HBox spacing="12" alignment="CENTER_LEFT">
             <Label fx:id="directDnsLabel" text="Direct DNS"
@@ -140,6 +145,8 @@
             <TextField fx:id="directDnsField" styleClass="form-field" prefWidth="300"
                        promptText="system"/>
         </HBox>
+        <Label fx:id="directDnsProblem" styleClass="routing-rule-problem" wrapText="true"
+               maxWidth="520" minHeight="-Infinity" visible="false" managed="false"/>
 
         <HBox spacing="12" alignment="CENTER_LEFT">
             <Label fx:id="dnsStrategyLabel" text="DNS Strategy"

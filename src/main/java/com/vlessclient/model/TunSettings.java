@@ -1,9 +1,8 @@
 package com.vlessclient.model;
 
 import com.vlessclient.platform.Platform;
-import java.net.Inet4Address;
-import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -19,6 +18,13 @@ public final class TunSettings {
 
     /** What macOS names a TUN device; the core refuses anything else ("bad tun name"). */
     private static final Pattern MAC_NAME = Pattern.compile("utun\\d+");
+
+    /** An IPv4 address field as Go reads it: 0 to 255, without a leading zero. */
+    private static final String OCTET = "(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9][0-9]|[0-9])";
+
+    /** An IPv4 address with a decimal prefix of its own, neither with a sign nor a leading zero. */
+    private static final Pattern IPV4_NETWORK =
+            Pattern.compile(OCTET + "(?:\\." + OCTET + "){3}/([1-9][0-9]?)");
 
     /** Linux's limit on an interface name, the terminating zero not counted. */
     private static final int LINUX_NAME_BYTES = 15;
@@ -38,18 +44,16 @@ public final class TunSettings {
         if (value == null) {
             return false;
         }
-        String raw = value.trim();
-        int slash = raw.indexOf('/');
-        if (slash <= 0) {
+        // As Go's netip reads it. Java's literal parser also took three
+        // fields ("172.19.1", a dropped octet) and a field with a leading
+        // zero, and Integer.parseInt a prefix of "030" or "+30": stored, each
+        // failed every TUN start, as the core refused it.
+        Matcher network = IPV4_NETWORK.matcher(value.trim());
+        if (!network.matches()) {
             return false;
         }
-        try {
-            InetAddress address = InetAddress.ofLiteral(raw.substring(0, slash));
-            int prefix = Integer.parseInt(raw.substring(slash + 1));
-            return address instanceof Inet4Address && prefix >= 8 && prefix <= 30;
-        } catch (IllegalArgumentException notAnAddressOrPrefix) {
-            return false;
-        }
+        int prefix = Integer.parseInt(network.group(1));
+        return prefix >= 8 && prefix <= 30;
     }
 
     /**

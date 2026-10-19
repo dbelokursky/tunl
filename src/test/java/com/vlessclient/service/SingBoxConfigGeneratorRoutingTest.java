@@ -596,6 +596,90 @@ class SingBoxConfigGeneratorRoutingTest {
     }
 
     /**
+     * A GeoIP rule naming a list sing-geoip does not publish passed sing-box
+     * check, and then the core did not start, whichever server was picked:
+     * its first download of the list was a 404. Such a rule, stored before
+     * the dialog checked the name, is left out. A Geosite rule is written
+     * whatever its name: the index of lists this version knows ages, and a
+     * stored rule for a list published since, such as vatsim, was left out
+     * under a false "there is no geosite list", as was one for a list removed
+     * upstream that the core still loaded from its cache.
+     */
+    @Test
+    void aStoredGeoipRuleWithoutAListIsLeftOutAndAGeositeOneIsWritten() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.GEOSITE, "a-list-newer-than-this-build",
+                        RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.GEOIP, "rus",
+                        RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.GEOSITE, "youtube",
+                        RoutingRule.RuleAction.PROXY)));
+
+        for (com.vlessclient.model.ProxyMode mode : com.vlessclient.model.ProxyMode.values()) {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(mode);
+            JsonNode route = parse(generator.generate(createVlessServer(), settings,
+                    routingConfig)).get("route");
+
+            assertThat(route.toString()).as(mode.name()).doesNotContain("geoip-rus");
+            assertThat(route.get("rules").toString()).as(mode.name())
+                    .contains("{\"rule_set\":[\"geosite-a-list-newer-than-this-build\"],"
+                            + "\"action\":\"route\",\"outbound\":\"direct\"}");
+            assertThat(route.get("rule_set").toString()).as(mode.name())
+                    .contains("\"https://raw.githubusercontent.com/SagerNet/sing-geosite/"
+                            + "rule-set/geosite-a-list-newer-than-this-build.srs\"")
+                    .contains("geosite-youtube.srs");
+        }
+    }
+
+    /**
+     * Russia bypassed, except what is blocked there: custom rules for the
+     * runetfreedom "ru-blocked" lists, which the blocked-only mode downloads
+     * and the generator fetches from runetfreedom for any rule. The check
+     * took them for lists SagerNet does not publish, so a rule stored by 1.25
+     * was left out of every configuration and the blocked sites went direct.
+     */
+    @Test
+    void aCustomRuleForTheRuBlockedListsIsWrittenWithTheirOwnUrl() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setBypassCountries(List.of("ru"));
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.GEOSITE, "ru-blocked",
+                        RoutingRule.RuleAction.PROXY),
+                new RoutingRule(RoutingRule.RuleType.GEOIP, "RU-Blocked",
+                        RoutingRule.RuleAction.PROXY)));
+        String lists = "https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/"
+                + "release/sing-box/";
+
+        for (com.vlessclient.model.RouteMode routeMode : com.vlessclient.model.RouteMode.values()) {
+            routingConfig.setMode(routeMode);
+            for (com.vlessclient.model.ProxyMode mode : com.vlessclient.model.ProxyMode.values()) {
+                AppSettings settings = new AppSettings();
+                settings.setProxyMode(mode);
+                JsonNode route = parse(generator.generate(createVlessServer(), settings,
+                        routingConfig)).get("route");
+                String label = routeMode + ", " + mode;
+
+                assertThat(route.get("rules").toString()).as(label)
+                        .contains("{\"rule_set\":[\"geosite-ru-blocked\"],\"action\":\"route\","
+                                + "\"outbound\":\"proxy\"}")
+                        .contains("{\"rule_set\":[\"geoip-ru-blocked\"],\"action\":\"route\","
+                                + "\"outbound\":\"proxy\"}");
+                List<String> sets = new java.util.ArrayList<>();
+                route.get("rule_set").forEach(set -> sets.add(
+                        set.path("tag").asString() + " " + set.path("url").asString()));
+                assertThat(sets).as(label)
+                        .contains("geosite-ru-blocked " + lists
+                                        + "rule-set-geosite/geosite-ru-blocked.srs",
+                                "geoip-ru-blocked " + lists + "rule-set-geoip/geoip-ru-blocked.srs")
+                        .as("%s: each list once, with the mode's own", label)
+                        .filteredOn(set -> set.contains("ru-blocked")).hasSize(2);
+            }
+        }
+    }
+
+    /**
      * A rule without a type or an action threw a NullPointerException here,
      * so every connect failed. It is left out, and the rules around it stay.
      */
@@ -647,6 +731,173 @@ class SingBoxConfigGeneratorRoutingTest {
                 .contains("\"ads\"")
                 .as("a regex is left alone: lower case would turn \\D into \\d")
                 .contains("^\\\\D+\\\\.Example$");
+    }
+
+    /**
+     * A stored regex the core takes is written whatever its letters. The
+     * check that a letter the core never sees, a capital or a Cyrillic one,
+     * could never match was applied to stored rules too, so "\.(ru|рф)$" was
+     * left out of every configuration although its ".ru" alternative matched:
+     * after the upgrade, every .ru site went through the tunnel instead of
+     * direct. A regex that can never match does no harm written either.
+     */
+    @Test
+    void aStoredRegexTheCoreTakesIsWrittenWhateverItsLetters() throws Exception {
+        List<String> regexes = List.of("\\.(ru|рф)$", "^(www\\.)?(Example|example)\\.com$",
+                "^Mail\\.");
+        RoutingConfig routingConfig = new RoutingConfig();
+        List<RoutingRule> rules = new java.util.ArrayList<>();
+        regexes.forEach(regex -> rules.add(new RoutingRule(RoutingRule.RuleType.DOMAIN_REGEX,
+                regex, RoutingRule.RuleAction.DIRECT)));
+        rules.add(new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "control.example",
+                RoutingRule.RuleAction.DIRECT));
+        routingConfig.setRules(rules);
+
+        for (com.vlessclient.model.ProxyMode mode : com.vlessclient.model.ProxyMode.values()) {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(mode);
+            JsonNode root = parse(generator.generate(createVlessServer(), settings,
+                    routingConfig));
+            List<String> written = new java.util.ArrayList<>();
+            for (JsonNode rule : root.get("route").get("rules")) {
+                rule.path("domain_regex").forEach(regex -> written.add(regex.asString() + " "
+                        + rule.path("outbound").asString()));
+            }
+
+            assertThat(written).as(mode.name()).containsExactly(
+                    "\\.(ru|рф)$ direct", "^(www\\.)?(Example|example)\\.com$ direct",
+                    "^Mail\\. direct");
+            if (mode == com.vlessclient.model.ProxyMode.TUN) {
+                assertThat(root.get("dns").get("rules").toString()).as("the DNS mirror")
+                        .contains("{\"domain_regex\":[\"\\\\.(ru|рф)$\"],"
+                                + "\"server\":\"direct-dns\"}");
+            }
+        }
+    }
+
+    /**
+     * A Direct rule for "straße.de" was written as strasse.de, another
+     * registrable domain: its traffic and lookups went around the tunnel,
+     * while xn--strae-oqa.de, the name browsers send, stayed in it.
+     */
+    @Test
+    void aRuleForANameWithASharpSNamesTheHostBrowsersSend() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "straße.de",
+                        RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN, "ελληνικός.gr",
+                        RoutingRule.RuleAction.BLOCK)));
+        AppSettings tun = new AppSettings();
+        tun.setProxyMode(com.vlessclient.model.ProxyMode.TUN);
+
+        JsonNode root = parse(generator.generate(createVlessServer(), tun, routingConfig));
+        String route = root.get("route").get("rules").toString();
+
+        assertThat(route).contains("\"xn--strae-oqa.de\"").contains("\"xn--qxaegecap6byf.gr\"")
+                .doesNotContain("strasse").doesNotContain("xn--qxaegecap4c9d");
+        assertThat(root.get("dns").get("rules").toString()).contains("\"xn--strae-oqa.de\"")
+                .doesNotContain("strasse");
+    }
+
+    /**
+     * A joiner pasted along with a name, where no browser keeps one, was put
+     * into punycode with it: a stored rule or bypass entry for rutracker.org
+     * with a non-joiner before its dot named xn--rutracker-y69d.org, which
+     * no client sends, and matched nothing, in the route and the DNS mirror.
+     * 1.25.1 dropped the joiner, and the rule worked.
+     */
+    @Test
+    void aStrayJoinerInAStoredNameIsNotPartOfIt() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "rutracker‌.org",
+                        RoutingRule.RuleAction.PROXY),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN, "example.com‍",
+                        RoutingRule.RuleAction.DIRECT)));
+        routingConfig.setBypassList(List.of("*.rutracker‌.net"));
+
+        for (com.vlessclient.model.ProxyMode mode : com.vlessclient.model.ProxyMode.values()) {
+            AppSettings settings = new AppSettings();
+            settings.setProxyMode(mode);
+            String route = parse(generator.generate(createVlessServer(), settings,
+                    routingConfig)).get("route").get("rules").toString();
+
+            assertThat(route).as(mode.name())
+                    .contains("{\"domain_suffix\":[\"rutracker.org\"],\"action\":\"route\"")
+                    .contains("{\"domain\":[\"example.com\"],\"action\":\"route\"")
+                    .contains("\"domain_suffix\":[\"rutracker.net\"]")
+                    .doesNotContain("xn--");
+        }
+    }
+
+    /**
+     * A star or a final dot reached the core as typed, and the core compares
+     * text: "*.example.org" matched nothing while the bypass list on the same
+     * page read it as every name under example.org. A Direct rule left those
+     * sites in the tunnel, and in the blocked-only mode a Proxy rule left a
+     * blocked site and its lookups with the provider. The DNS mirror copied
+     * the same dead values.
+     */
+    @Test
+    void aWildcardInACustomRuleIsWrittenAsTheBypassListReadsIt() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setMode(com.vlessclient.model.RouteMode.BLOCKED_IN_RUSSIA);
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_SUFFIX, "*.example.org",
+                        RoutingRule.RuleAction.PROXY),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_KEYWORD, "*tracker*",
+                        RoutingRule.RuleAction.BLOCK),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN, "example.net.",
+                        RoutingRule.RuleAction.PROXY)));
+        AppSettings tun = new AppSettings();
+        tun.setProxyMode(com.vlessclient.model.ProxyMode.TUN);
+
+        JsonNode root = parse(generator.generate(createVlessServer(), tun, routingConfig));
+        String route = root.get("route").get("rules").toString();
+        String dns = root.get("dns").get("rules").toString();
+
+        assertThat(route).contains("{\"domain_suffix\":[\"example.org\"],\"action\":\"route\"")
+                .contains("{\"domain_keyword\":[\"tracker\"],\"action\":\"reject\"}")
+                .contains("{\"domain\":[\"example.net\"],\"action\":\"route\"")
+                .doesNotContain("*").doesNotContain("example.net.\"");
+        assertThat(dns).contains("{\"domain_suffix\":[\"example.org\"],\"server\":\"proxy-dns\"}")
+                .contains("{\"domain\":[\"example.net\"],\"server\":\"proxy-dns\"}")
+                .doesNotContain("*");
+    }
+
+    /**
+     * A keyword stored as "*.ru" matched nothing in 1.25.1, the core taking
+     * the star literally; read the bypass list's way, without the star and
+     * the dot beside it, it became "ru", which the core finds anywhere in a
+     * name: a Direct rule sent rutracker.org and every name with "ru" around
+     * the tunnel and resolved it with the direct resolver, and a Block "*.cn"
+     * blocked cnn.com. Such a rule is left out now, and its row says to use
+     * Domain suffix; a keyword with stars at both ends is still written.
+     */
+    @Test
+    void aKeywordStoredAsASuffixIsLeftOutRatherThanFoundAnywhere() throws Exception {
+        RoutingConfig routingConfig = new RoutingConfig();
+        routingConfig.setRules(List.of(
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_KEYWORD, "*.ru",
+                        RoutingRule.RuleAction.DIRECT),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_KEYWORD, "*.cn",
+                        RoutingRule.RuleAction.BLOCK),
+                new RoutingRule(RoutingRule.RuleType.DOMAIN_KEYWORD, "*tracker*",
+                        RoutingRule.RuleAction.BLOCK)));
+        AppSettings tun = new AppSettings();
+        tun.setProxyMode(com.vlessclient.model.ProxyMode.TUN);
+
+        JsonNode root = parse(generator.generate(createVlessServer(), tun, routingConfig));
+        List<String> keywords = new java.util.ArrayList<>();
+        for (String section : List.of("route", "dns")) {
+            for (JsonNode rule : root.get(section).get("rules")) {
+                rule.path("domain_keyword").forEach(keyword -> keywords.add(
+                        section + " " + keyword.asString()));
+            }
+        }
+
+        assertThat(keywords).containsExactly("route tracker");
     }
 
     /** The repository names its lists in lower case: "Google" was a 404, and no core. */

@@ -19,8 +19,6 @@ import com.vlessclient.service.outbound.VlessOutboundBuilder;
 import com.vlessclient.service.outbound.VmessOutboundBuilder;
 import com.vlessclient.service.outbound.WireguardEndpointBuilder;
 import java.net.InetAddress;
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -68,6 +66,19 @@ public class SingBoxConfigGenerator {
             List.of("geosite-ru-blocked", "geoip-ru-blocked");
     private static final String BLOCKED_LISTS_URL = "https://raw.githubusercontent.com/"
             + "runetfreedom/russia-v2ray-rules-dat/release/sing-box/";
+
+    /**
+     * Whether a rule-set tag is one of the runetfreedom lists, which this
+     * generator fetches from there rather than from SagerNet: a custom
+     * Geosite or GeoIP rule naming "ru-blocked" gets the same list as the
+     * blocked-only mode.
+     *
+     * @param tag a rule-set tag, such as {@code geoip-ru-blocked}
+     * @return whether its list comes from runetfreedom
+     */
+    static boolean isBlockedInRussiaList(String tag) {
+        return BLOCKED_IN_RUSSIA_LISTS.contains(tag);
+    }
 
     /** Most servers the "Fastest" mode probes. */
     static final int MAX_AUTOMATIC_MEMBERS = 30;
@@ -306,39 +317,31 @@ public class SingBoxConfigGenerator {
     }
 
     private ObjectNode buildDns(AppSettings settings, ObjectNode route, boolean tunIpv6) {
-        // The fields and MCP store any text, and its scheme became the server's
-        // type: "dhcp://auto" or "http://..." made the core refuse the whole
-        // configuration, so TUN mode never started, and "system" as proxy DNS
-        // became a server named "system" that nothing could reach. Such a
-        // value is asked for as the field's default, as the DNS strategy is.
-        String proxyAddress = settings.getProxyDns();
-        if (!isCoreDnsAddress(proxyAddress)) {
-            log.warn("Proxy DNS {} is not an address the core takes; using {}",
-                    proxyAddress, DEFAULT_PROXY_DNS);
-            proxyAddress = DEFAULT_PROXY_DNS;
-        }
+        // The fields and MCP stored any text, and its scheme became the
+        // server's type: "dhcp://auto" or "http://..." made the core refuse the
+        // whole configuration, so TUN mode never started, and "system" as
+        // proxy DNS became a server named "system" that nothing could reach.
+        // Whatever followed the scheme became the server's name, so two
+        // resolvers made one server named "1.1.1.1, 8.8.8.8", and nothing
+        // resolved. Such a value, stored before the fields checked it, is
+        // asked for as the field's default, as the DNS strategy is.
         ObjectNode proxyDns = mapper.createObjectNode();
         proxyDns.put("tag", DnsTags.PROXY);
-        populateDnsServerAddress(proxyDns, proxyAddress);
+        putDnsServer(proxyDns, proxyResolver(settings.getProxyDns()));
         proxyDns.put("detour", OutboundTags.PROXY);
 
         ArrayNode servers = mapper.createArrayNode();
         servers.add(proxyDns);
 
-        boolean systemDirect = isSystemDns(settings.getDirectDns());
-        if (!systemDirect && !isCoreDnsAddress(settings.getDirectDns())) {
-            log.warn("Direct DNS {} is not an address the core takes; using the system's",
-                    settings.getDirectDns());
-            systemDirect = true;
-        }
+        Optional<DnsAddress> directResolver = directResolver(settings.getDirectDns());
         ObjectNode directDns = mapper.createObjectNode();
         directDns.put("tag", DnsTags.DIRECT);
-        if (systemDirect) {
+        if (directResolver.isEmpty()) {
             // The OS resolver: the network's own, from the address the direct
             // connection leaves anyway.
             directDns.put("type", "local");
         } else {
-            populateDnsServerAddress(directDns, settings.getDirectDns());
+            putDnsServer(directDns, directResolver.get());
         }
         // Deliberately NOT setting detour:"direct" here — sing-box 1.13
         // rejects DNS servers that detour to an "empty" direct outbound with
@@ -366,21 +369,36 @@ public class SingBoxConfigGenerator {
         ObjectNode dns = mapper.createObjectNode();
         dns.set("servers", servers);
 
-        // Local names first, in every mode. The LAN's suffixes were added only
-        // where system-proxy mode resolves names before its IP rules, so in
-        // TUN mode, where the core is the system's resolver, openwrt.lan or
-        // router.home.arpa went to the remote resolver: it answered that they
-        // do not exist, and learned them.
+        // localhost and mDNS names first, in every mode, as the route sends
+        // them direct ahead of the user's rules.
         ObjectNode localRule = mapper.createObjectNode();
         localRule.putArray("domain").add("localhost");
-        ArrayNode localSuffixes = localRule.putArray("domain_suffix");
-        LOCAL_NAME_SUFFIXES.forEach(localSuffixes::add);
+        localRule.putArray("domain_suffix").add(".local");
         localRule.put("server", DnsTags.LOCAL);
         ArrayNode dnsRules = mapper.createArrayNode();
         dnsRules.add(localRule);
-        if (route != null) {
-            routeDnsRules(route).forEach(dnsRules::add);
+        List<ObjectNode> mirrored = route == null ? List.of() : routeDnsRules(route);
+        // The names the LAN's own router serves, in every mode, ahead of the
+        // rules that mirror the route. Left to dns.final in TUN mode, where
+        // the core is the system's resolver, openwrt.lan or router.home.arpa
+        // went to the remote resolver: it answered that they do not exist,
+        // and learned them. A name under them that a rule of the user's
+        // names itself comes first, in the route's order: asked of the LAN,
+        // corp.internal, which the user sends through the tunnel, was not
+        // known, and nothing under it connected. One sent direct stays the
+        // LAN's, which a Direct DNS such as 8.8.8.8 does not know.
+        for (ObjectNode rule : mirrored) {
+            ObjectNode named = lanNamesOf(rule);
+            if (named != null) {
+                dnsRules.add(named);
+            }
         }
+        ObjectNode lanRule = mapper.createObjectNode();
+        ArrayNode lanSuffixes = lanRule.putArray("domain_suffix");
+        LAN_NAME_SUFFIXES.forEach(lanSuffixes::add);
+        lanRule.put("server", DnsTags.LOCAL);
+        dnsRules.add(lanRule);
+        mirrored.forEach(dnsRules::add);
         dns.set("rules", dnsRules);
 
         // In sing-box 1.13 the dns.rules[].outbound match-all form and
@@ -408,9 +426,45 @@ public class SingBoxConfigGenerator {
     private static final List<String> DNS_NAME_MATCHERS =
             List.of("domain", "domain_suffix", "domain_keyword", "domain_regex");
 
-    /** The names the LAN's own resolver answers: mDNS, and the suffixes routers serve. */
-    private static final List<String> LOCAL_NAME_SUFFIXES =
-            List.of(".local", ".lan", ".home.arpa", ".internal");
+    /** The suffixes the LAN's own router serves names under. */
+    private static final List<String> LAN_NAME_SUFFIXES =
+            List.of(".lan", ".home.arpa", ".internal");
+
+    /**
+     * The names under the LAN's suffixes that a mirrored rule names itself,
+     * by domain or domain suffix, with the resolver to ask: the one behind the
+     * tunnel when the route sends them through it, else the LAN's. A keyword,
+     * a regex or a list names none: such a rule leaves the LAN's names to it.
+     *
+     * @return the DNS rule, or null when the rule names none
+     */
+    private ObjectNode lanNamesOf(ObjectNode mirrored) {
+        ObjectNode named = mapper.createObjectNode();
+        for (String matcher : List.of("domain", "domain_suffix")) {
+            ArrayNode values = mapper.createArrayNode();
+            for (JsonNode value : mirrored.path(matcher)) {
+                if (isUnderLanSuffix(value.asString())) {
+                    values.add(value.asString());
+                }
+            }
+            if (!values.isEmpty()) {
+                named.set(matcher, values);
+            }
+        }
+        if (named.isEmpty()) {
+            return null;
+        }
+        named.put("server", DnsTags.PROXY.equals(mirrored.path("server").asString())
+                ? DnsTags.PROXY : DnsTags.LOCAL);
+        return named;
+    }
+
+    /** Whether a domain, or a suffix with its dot or without, is a LAN suffix or under one. */
+    private static boolean isUnderLanSuffix(String name) {
+        String bare = name.startsWith(".") ? name.substring(1) : name;
+        return LAN_NAME_SUFFIXES.stream().anyMatch(suffix ->
+                bare.equals(suffix.substring(1)) || bare.endsWith(suffix));
+    }
 
     /**
      * DNS rules that resolve each name the way the route sends its traffic,
@@ -728,68 +782,58 @@ public class SingBoxConfigGenerator {
     }
 
     /**
-     * Populates a DNS server object using the sing-box 1.13 schema. Accepts
-     * both the legacy URL-style address (e.g. {@code https://1.1.1.1/dns-query})
-     * and bare IPs/hostnames. A bare address is read as a {@code udp://} one,
-     * so a port it carries ({@code 8.8.8.8:53}) is split off; left whole, it
-     * reached the core as a name that nothing could resolve.
+     * Fills a DNS server object in the sing-box 1.13 schema. A bare address
+     * reads as a {@code udp://} one, so a port it carries ({@code 8.8.8.8:53})
+     * is split off; left whole, it reached the core as a name that nothing
+     * could resolve.
      */
-    void populateDnsServerAddress(ObjectNode server, String address) {
-        if (address == null || address.isBlank()) {
-            server.put("type", "udp");
-            server.put("server", "1.1.1.1");
-            return;
+    private static void putDnsServer(ObjectNode server, DnsAddress address) {
+        server.put("type", address.type());
+        server.put("server", address.server());
+        if (address.port() > 0) {
+            server.put("server_port", address.port());
         }
-        String url = address.contains("://") ? address : "udp://" + address;
-        try {
-            URI uri = new URI(url);
-            String scheme = uri.getScheme() != null ? uri.getScheme().toLowerCase() : "udp";
-            String host = uri.getHost();
-            if (host == null || host.isBlank()) {
-                server.put("type", "udp");
-                server.put("server", address);
-                return;
-            }
-            server.put("type", scheme);
-            server.put("server", host);
-            if (uri.getPort() > 0) {
-                server.put("server_port", uri.getPort());
-            }
-            if ("https".equals(scheme) || "h3".equals(scheme) || "quic".equals(scheme)) {
-                String path = uri.getRawPath();
-                if (path != null && !path.isEmpty()) {
-                    server.put("path", path);
-                }
-            }
-        } catch (URISyntaxException e) {
-            log.warn("Could not parse DNS address {}, falling back to UDP", address);
-            server.put("type", "udp");
-            server.put("server", address);
+        if (!address.path().isEmpty()) {
+            server.put("path", address.path());
         }
     }
 
-    /** Proxy DNS as Settings has it by default. */
+    /** Proxy DNS as Settings has it by default, and shows in the field when it is empty. */
     private static final String DEFAULT_PROXY_DNS = "https://1.1.1.1/dns-query";
 
-    /** The DNS server types the core takes as a URL scheme; an address without one is udp. */
-    private static final Set<String> DNS_SCHEMES =
-            Set.of("udp", "tcp", "tls", "https", "h3", "quic");
+    /**
+     * The resolver Proxy DNS names, or the default when it names none the
+     * core can use: see {@link DnsAddress}. An empty field shows the default,
+     * and was asked as plain UDP to 1.1.1.1.
+     */
+    private static DnsAddress proxyResolver(String stored) {
+        if (stored == null || stored.isBlank()) {
+            return DnsAddress.parse(DEFAULT_PROXY_DNS).orElseThrow();
+        }
+        return DnsAddress.parse(stored).orElseGet(() -> {
+            log.warn("Proxy DNS {} is not one address the core can use; using {}",
+                    stored, DEFAULT_PROXY_DNS);
+            return DnsAddress.parse(DEFAULT_PROXY_DNS).orElseThrow();
+        });
+    }
 
     /**
-     * Whether the core can use a DNS address as {@link #populateDnsServerAddress}
-     * writes it: one of the core's own schemes, or none, which reads as udp;
-     * blank stands for the default. The {@link AppSettings#SYSTEM_DNS} word is
-     * not an address: only Direct DNS takes it, and asks for it before this.
+     * The resolver Direct DNS names, or empty for the system's: the setting
+     * says {@link AppSettings#SYSTEM_DNS}, is empty, which the field shows as
+     * "system", or names no resolver the core can use, as {@link DnsAddress}
+     * reads it. An empty field was asked as plain UDP to 1.1.1.1, so the names
+     * the rules send direct went to Cloudflare, not to the network's resolver.
      */
-    static boolean isCoreDnsAddress(String address) {
-        if (address == null || address.isBlank()) {
-            return true;
+    private static Optional<DnsAddress> directResolver(String stored) {
+        if (stored == null || stored.isBlank() || isSystemDns(stored)) {
+            return Optional.empty();
         }
-        int scheme = address.indexOf("://");
-        return scheme < 0
-                ? !isSystemDns(address)
-                : DNS_SCHEMES.contains(
-                        address.substring(0, scheme).strip().toLowerCase(java.util.Locale.ROOT));
+        Optional<DnsAddress> resolver = DnsAddress.parse(stored);
+        if (resolver.isEmpty()) {
+            log.warn("Direct DNS {} is not one address the core can use; using the system's",
+                    stored);
+        }
+        return resolver;
     }
 
     /** Whether a DNS setting names the OS resolver, {@link AppSettings#SYSTEM_DNS}. */
@@ -1375,6 +1419,16 @@ public class SingBoxConfigGenerator {
                         log.warn("Leaving out bypass entry {}: {}", raw, reason));
                 continue;
             }
+            if (parsed.kind() == BypassPatternParser.Kind.DOMAIN_REGEX) {
+                // A glob's regex the core would refuse took the whole
+                // configuration with it, as a stray invisible mark once did.
+                Optional<String> refused = RoutingRuleCheck.problem(
+                        RoutingRule.RuleType.DOMAIN_REGEX, parsed.value());
+                if (refused.isPresent()) {
+                    log.warn("Leaving out bypass entry {}: {}", raw, refused.get());
+                    continue;
+                }
+            }
             switch (parsed.kind()) {
                 case DOMAIN -> domains.add(parsed.value());
                 case DOMAIN_SUFFIX -> domainSuffixes.add(parsed.value());
@@ -1443,6 +1497,12 @@ public class SingBoxConfigGenerator {
      * every server from connecting until it was found and deleted; the
      * Routing screen and MCP no longer store one, and one stored before is
      * left out of the configuration, with a warning in the log.
+     *
+     * <p>Only the core's own refusals count: a rule the core takes stays,
+     * whatever the add-rule check says of it now. A regex with a capital or a
+     * Cyrillic letter in one alternative, "\.(ru|рф)$", still matches through
+     * the others, and was left out while the rest of its alternatives
+     * worked.</p>
      */
     private static boolean unusable(RoutingRule rule) {
         if (rule.getType() == null || rule.getAction() == null) {
@@ -1462,22 +1522,23 @@ public class SingBoxConfigGenerator {
         // Names as the core compares them, the bypass list's way: it
         // lower-cases the connection's name and not the rule's, and SNI and
         // DNS carry punycode, so "Gosuslugi.ru" or any .рф name typed into a
-        // rule showed in the list and matched nothing. A regex stays as typed:
+        // rule showed in the list and matched nothing; and it has no wildcard,
+        // so "*.example.org" matched nothing either. A regex stays as typed:
         // lower case would turn \D, \S or \W into their opposites.
         switch (rule.getType()) {
             case DOMAIN -> {
                 ArrayNode values = mapper.createArrayNode();
-                values.add(BypassPatternParser.coreName(rule.getValue()));
+                values.add(RoutingRuleCheck.coreName(rule.getType(), rule.getValue()));
                 ruleNode.set("domain", values);
             }
             case DOMAIN_SUFFIX -> {
                 ArrayNode values = mapper.createArrayNode();
-                values.add(BypassPatternParser.coreName(rule.getValue()));
+                values.add(RoutingRuleCheck.coreName(rule.getType(), rule.getValue()));
                 ruleNode.set("domain_suffix", values);
             }
             case DOMAIN_KEYWORD -> {
                 ArrayNode values = mapper.createArrayNode();
-                values.add(BypassPatternParser.coreName(rule.getValue()));
+                values.add(RoutingRuleCheck.coreName(rule.getType(), rule.getValue()));
                 ruleNode.set("domain_keyword", values);
             }
             case DOMAIN_REGEX -> {

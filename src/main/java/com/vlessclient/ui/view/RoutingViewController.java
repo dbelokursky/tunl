@@ -15,6 +15,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import javafx.application.Platform;
+import javafx.beans.InvalidationListener;
 import javafx.beans.binding.Bindings;
 import javafx.beans.binding.ObjectBinding;
 import javafx.beans.value.ChangeListener;
@@ -421,11 +422,13 @@ public class RoutingViewController {
             }
         });
 
-        // Why the core would refuse the value, under it, and OK waits until
-        // there is no reason left. sing-box refuses a whole configuration
-        // over one rule it cannot parse, so a stray bracket in a regular
-        // expression stopped every server from connecting until the rule was
-        // found and deleted.
+        // Why the value is refused, under it, and OK waits until there is no
+        // reason left. sing-box refuses a whole configuration over one rule it
+        // cannot parse, so a stray bracket in a regular expression stopped
+        // every server from connecting until the rule was found and deleted.
+        // What may keep a value the core takes from doing what the rule says
+        // is shown in the warning's colour, and OK stays: a capital in one
+        // alternative of a regex leaves the others to match.
         Label problemLabel = new Label();
         problemLabel.getStyleClass().add("routing-rule-problem");
         problemLabel.setWrapText(true);
@@ -436,28 +439,43 @@ public class RoutingViewController {
         problemLabel.setVisible(false);
         problemLabel.setManaged(false);
         ObjectBinding<Optional<String>> problem = Bindings.createObjectBinding(
-                () -> RoutingRuleCheck.problem(typeCombo.getValue(), valueField.getText().strip()),
+                () -> RoutingRuleCheck.refusal(typeCombo.getValue(), valueField.getText().strip()),
                 typeCombo.valueProperty(), valueField.textProperty());
-        problem.addListener((obs, was, now) -> {
+        ObjectBinding<Optional<String>> hint = Bindings.createObjectBinding(
+                () -> RoutingRuleCheck.hint(typeCombo.getValue(), valueField.getText().strip()),
+                typeCombo.valueProperty(), valueField.textProperty());
+        InvalidationListener explain = obs -> {
+            // Both read every time: a binding left unread stays invalid, and
+            // tells this listener of no further change.
+            Optional<String> refusal = problem.get();
+            Optional<String> warning = hint.get();
             // A blank value is left to the disabled OK: nothing to explain yet.
-            String reason = valueField.getText().isBlank() ? "" : now.orElse("");
-            problemLabel.setText(reason);
-            boolean show = !reason.isEmpty();
+            boolean blank = valueField.getText().isBlank();
+            boolean refused = !blank && refusal.isPresent();
             valueField.getStyleClass().remove("field-error");
-            if (show) {
+            if (refused) {
                 valueField.getStyleClass().add("field-error");
             }
-            if (show == problemLabel.isVisible()) {
+            String reason = blank ? "" : refusal.or(() -> warning).orElse("");
+            problemLabel.getStyleClass().removeAll("routing-rule-problem", "routing-rule-hint");
+            problemLabel.getStyleClass().add(refused || reason.isEmpty()
+                    ? "routing-rule-problem" : "routing-rule-hint");
+            boolean show = !reason.isEmpty();
+            if (show == problemLabel.isVisible() && reason.equals(problemLabel.getText())) {
                 return;
             }
+            problemLabel.setText(reason);
             problemLabel.setVisible(show);
             problemLabel.setManaged(show);
-            // A shown dialog keeps the size it opened with.
+            // A shown dialog keeps the size it opened with, and a reason
+            // longer than the one before needs the room.
             Window window = dialog.getDialogPane().getScene().getWindow();
             if (window.isShowing()) {
                 window.sizeToScene();
             }
-        });
+        };
+        problem.addListener(explain);
+        hint.addListener(explain);
 
         grid.add(new Label(I18n.get("form.type") + ":"), 0, 0);
         grid.add(typeCombo, 1, 0);
@@ -631,7 +649,30 @@ public class RoutingViewController {
             deleteBtn.setOnAction(e -> deleteRule(rule));
 
             row.getChildren().addAll(typeLabel, valueLabel, spacer, actionBadge, deleteBtn);
-            setGraphic(row);
+            // A rule the core cannot use, stored before the add-rule check
+            // knew it, is left out of the configuration so that every other
+            // server and rule still connects; it was listed like any other,
+            // and the user had no way to know it did nothing. Say why. A rule
+            // the core is given may still not do what it says, as a regex
+            // with a capital in one alternative: that is said too, as a hint.
+            Optional<String> problem = RoutingRuleCheck.problem(rule.getType(), rule.getValue());
+            Optional<String> hint = RoutingRuleCheck.hint(rule.getType(), rule.getValue());
+            if (problem.isEmpty() && hint.isEmpty()) {
+                setGraphic(row);
+                return;
+            }
+            Label notice = new Label(problem
+                    .map(reason -> I18n.get("routing.rule.unused", reason))
+                    .orElseGet(hint::get));
+            notice.getStyleClass().add(problem.isPresent()
+                    ? "routing-rule-problem" : "routing-rule-hint");
+            notice.setWrapText(true);
+            // As wide as the row, not as the sentence: asked for its whole
+            // length, the list widened every row and put Delete out of view.
+            notice.setPrefWidth(0);
+            notice.setMaxWidth(Double.MAX_VALUE);
+            notice.setMinHeight(Region.USE_PREF_SIZE);
+            setGraphic(new VBox(4, row, notice));
         }
     }
 }

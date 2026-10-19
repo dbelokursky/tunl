@@ -4,6 +4,7 @@ import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.CoreLogLevel;
 import com.vlessclient.model.ServerSelection;
 import com.vlessclient.model.TunSettings;
+import com.vlessclient.service.DnsAddress;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -48,8 +49,8 @@ final class McpSettings {
         WRITERS.put("http_port", (s, v, k) -> s.setHttpPort(port(v, k)));
         WRITERS.put("clash_api_port", (s, v, k) -> s.setClashApiPort(port(v, k)));
         WRITERS.put("server_selection", (s, v, k) -> s.setServerSelection(selection(v, k)));
-        WRITERS.put("proxy_dns", (s, v, k) -> s.setProxyDns(text(v, k)));
-        WRITERS.put("direct_dns", (s, v, k) -> s.setDirectDns(text(v, k)));
+        WRITERS.put("proxy_dns", (s, v, k) -> s.setProxyDns(dns(v, k, false)));
+        WRITERS.put("direct_dns", (s, v, k) -> s.setDirectDns(dns(v, k, true)));
         WRITERS.put("dns_strategy",
                 (s, v, k) -> s.setDnsStrategy(oneOf(v, k, AppSettings.DNS_STRATEGIES)));
         WRITERS.put("system_proxy_auto_config",
@@ -179,6 +180,25 @@ final class McpSettings {
         throw new McpToolException("Setting '" + key + "' expects one of: "
                 + String.join(", ", java.util.Arrays.stream(ServerSelection.values())
                         .map(ServerSelection::getValue).toList()) + ".");
+    }
+
+    /**
+     * One DNS server the core can use, or blank for the field's default; for
+     * Direct DNS also {@code system}. Any text was stored, untrimmed: two
+     * resolvers reached the core as one server name and every lookup through
+     * it failed, and a port past 65535 made it refuse the whole configuration.
+     */
+    private static String dns(JsonNode value, String key, boolean direct)
+            throws McpToolException {
+        String raw = text(value, key).strip();
+        if (direct ? !DnsAddress.isDirectSetting(raw) : !DnsAddress.isProxySetting(raw)) {
+            throw new McpToolException("Setting '" + key + "' expects one DNS server: an IP"
+                    + " address or a host name, with udp://, tcp://, tls://, https://, h3:// or"
+                    + " quic:// before it or none, and a port (1-65535) if any, such as"
+                    + " https://1.1.1.1/dns-query or 8.8.8.8:53"
+                    + (direct ? "; or 'system' for the system's resolver." : "."));
+        }
+        return raw;
     }
 
     /**
