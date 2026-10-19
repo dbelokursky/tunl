@@ -2,6 +2,7 @@ package com.vlessclient.service;
 
 import com.vlessclient.model.AppSettings;
 import com.vlessclient.model.Protocol;
+import com.vlessclient.model.ProxyMode;
 import com.vlessclient.model.ServerConfig;
 import java.io.IOException;
 import java.net.http.HttpClient;
@@ -278,6 +279,31 @@ class DataFileSurvivalTest {
         assertThat(com.vlessclient.service.outbound.CoreSettings.refusal(servers.get(1)))
                 .get().extracting(com.vlessclient.service.outbound.CoreSettings.Refusal::reason)
                 .isEqualTo(com.vlessclient.app.I18n.get("refusal.protocol"));
+    }
+
+    /**
+     * "proxy_mode": null, from a hand edit or a merge tool, never reached the
+     * reading that takes any value it does not know for the system proxy: it
+     * loaded as no mode, and every connect threw on it until the file was
+     * fixed by hand.
+     */
+    @Test
+    @DisplayName("a settings.json whose proxy_mode is null starts in the system proxy mode")
+    void aNullProxyModeReadsAsTheDefault() throws IOException {
+        Files.writeString(dir.resolve("settings.json"),
+                "{\"config_version\":1,\"proxy_mode\":null,\"socks_port\":7890}",
+                StandardCharsets.UTF_8);
+
+        ConfigStore store = new ConfigStore(dir);
+        AppSettings settings = store.getSettings();
+
+        assertThat(settings.getProxyMode()).isEqualTo(ProxyMode.SYSTEM_PROXY);
+        assertThat(settings.getSocksPort()).as("the other settings, as read").isEqualTo(7890);
+        assertThat(store.getPersistenceState().setAsideLocations()).isEmpty();
+        assertThatCode(() -> new SingBoxConfigGenerator().generate(server("known"), settings))
+                .as("what each connect generates").doesNotThrowAnyException();
+        store.saveSettings(settings);
+        assertThat(read("settings.json").path("proxy_mode").asString()).isEqualTo("system_proxy");
     }
 
     @Test
