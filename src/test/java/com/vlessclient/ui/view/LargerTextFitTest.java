@@ -63,7 +63,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>Each page is mounted in MainView, sidebar and all, at each size, text
  * size and language, in a scene of its own, and measured by the bounds its
- * controls have in that scene.</p>
+ * controls have in that scene. The rows that wrap are laid out at Windows'
+ * fractional display scalings as well, where at the usual text size they
+ * must not wrap.</p>
  */
 @UiTest
 public class LargerTextFitTest extends ApplicationTest {
@@ -73,6 +75,12 @@ public class LargerTextFitTest extends ApplicationTest {
 
     /** Windows' usual text size and its larger steps, up to the largest it offers here. */
     private static final double[] TEXT_SIZES = {1.0, 1.25, 1.5, 2.0};
+
+    /**
+     * Windows display scalings whose device pixel no double holds: 0.8,
+     * 0.666..., 0.444... and 0.333... of a layout pixel.
+     */
+    private static final double[] DISPLAY_SCALES = {1.25, 1.5, 2.25, 3.0};
 
     private static final List<Locale> LANGUAGES = List.of(Locale.ENGLISH, Locale.of("ru"));
 
@@ -154,6 +162,44 @@ public class LargerTextFitTest extends ApplicationTest {
                 headerHadRoom |= oneLineWhereItFits(where, servers, "#titleLabel",
                         "#addServerButton", wrapped);
                 oneLine(where, servers, "#searchField", "#measureButton", wrapped);
+            }
+        }
+
+        assertThat(headerHadRoom)
+                .as("the Servers header had room for one line in no window, so the check"
+                        + " proved nothing")
+                .isTrue();
+        assertThat(wrapped)
+                .withFailMessage("rows that wrap at the usual text size:%n  %s",
+                        String.join("\n  ", wrapped))
+                .isEmpty();
+    }
+
+    /**
+     * The same at Windows' fractional display scalings, the usual setting of
+     * a laptop. A width there snaps to a multiple of 0.8 or 0.666..., which a
+     * double cannot hold, and the rows inside the Logs toolbar and the
+     * Servers header, each given exactly its preferred width, put Clear and
+     * Add on a line of their own with room to spare. A scene with no window
+     * snaps at 1.0, so each of these is laid out in a stage of that scale.
+     */
+    @Test
+    void atFractionalDisplayScalesTheRowsStayOnOneLine() {
+        List<String> wrapped = new ArrayList<>();
+        boolean headerHadRoom = false;
+        for (double scale : DISPLAY_SCALES) {
+            for (int[] window : WINDOWS) {
+                for (Locale language : LANGUAGES) {
+                    interact(() -> I18n.setLocale(language));
+                    String where = "%dx%d %s at a display scale of %.0f%%".formatted(window[0],
+                            window[1], language, scale * 100);
+                    oneLine(where, mainView(window, 1.0, scale, MainViewController::showLogs),
+                            "#logLevelFilter", "#clearButton", wrapped);
+                    Scene servers = mainView(window, 1.0, scale, MainViewController::showServers);
+                    headerHadRoom |= oneLineWhereItFits(where, servers, "#titleLabel",
+                            "#addServerButton", wrapped);
+                    oneLine(where, servers, "#searchField", "#measureButton", wrapped);
+                }
             }
         }
 
@@ -285,13 +331,20 @@ public class LargerTextFitTest extends ApplicationTest {
         });
     }
 
+    private Scene mainView(int[] window, double size, Consumer<MainViewController> show) {
+        return mainView(window, size, 1.0, show);
+    }
+
     /**
      * MainView at {@code window}, dressed as ThemeManager dresses it at
      * {@code size}, with a page mounted the way its nav button mounts it.
      * Never shown, as in SettingsScrollBarTest: a stage would clamp the size
-     * to the runner's screen. Laid out until it settles.
+     * to the runner's screen. At a display scale other than 1 it is put in a
+     * stage of that render scale, still never shown, which is what a region
+     * snaps its sizes to. Laid out until it settles.
      */
-    private Scene mainView(int[] window, double size, Consumer<MainViewController> show) {
+    private Scene mainView(int[] window, double size, double displayScale,
+                           Consumer<MainViewController> show) {
         Scene[] holder = new Scene[1];
         interact(() -> {
             FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/MainView.fxml"));
@@ -308,6 +361,12 @@ public class LargerTextFitTest extends ApplicationTest {
                 sheets.add(TextScale.dataUrl(TextScale.scaledRules(baseCss, size)));
             }
             scene.getStylesheets().setAll(sheets);
+            if (displayScale != 1.0) {
+                Stage stage = new Stage();
+                stage.setRenderScaleX(displayScale);
+                stage.setRenderScaleY(displayScale);
+                stage.setScene(scene);
+            }
             scene.setRoot(root);
             show.accept(loader.getController());
             root.resize(window[0], window[1]);

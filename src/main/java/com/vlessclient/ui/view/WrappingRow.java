@@ -34,6 +34,13 @@ import javafx.scene.layout.Priority;
  */
 public class WrappingRow extends Pane {
 
+    /**
+     * How far a line may run past the row's width and still be one line: far
+     * below any device pixel, and far above what adding up a few widths
+     * snapped to a fractional scale gets wrong.
+     */
+    private static final double FIT_TOLERANCE = 1e-6;
+
     private double hgap;
     private double vgap;
 
@@ -146,7 +153,13 @@ public class WrappingRow extends Pane {
         Line line = new Line();
         for (Node child : getManagedChildren()) {
             double basis = Math.min(snapSizeX(basis(child)), Math.max(0, width));
-            if (!line.children.isEmpty() && line.used + gap + basis > width) {
+            // Not an exact comparison. At Windows' 125% or 150% display
+            // scaling a snapped width is a multiple of 0.8 or 0.666..., which
+            // a double cannot hold, and the sum here could come out an ulp
+            // above the same widths added up for the preferred width. A row
+            // inside a row, given exactly that width, then put its last child
+            // on a line of its own: the Logs toolbar's Clear at 125%.
+            if (!line.children.isEmpty() && line.used + gap + basis > width + FIT_TOLERANCE) {
                 line.finish(width);
                 lines.add(line);
                 line = new Line();
