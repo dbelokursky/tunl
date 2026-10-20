@@ -7,8 +7,8 @@
 # refuses it to agents. A stored rule is kept whatever its name: a list newer
 # than this file is not missing.
 #
-# From the rule-set branch at ea962e34bf255b69f3a66690e4a53900d48b48ea
-# (2026-10-19). To bring it up to date: scripts/update-geosite-lists.sh
+# From the rule-set branch at a3795b85be650b16ffa9770a836d90afc391baaf
+# (2026-10-20). To bring it up to date: scripts/update-geosite-lists.sh
 0x0
 115
 1337x
@@ -209,6 +209,7 @@ bing@cn
 bitauto
 bitflyer
 bitly
+bitrix
 bitsquare
 bitwarden
 bjyouth

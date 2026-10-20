@@ -425,8 +425,12 @@ else saves on click.
 | Traffic history | Recorded, Clear history… | How much the local traffic record holds and since which day. **Clear history…** deletes all of it after a confirmation in which Enter cancels; nothing in the record expires on its own, and the Dashboard's history panel only reads it |
 | About | Tunl version, sing-box version, Check for updates | The version rows double as update status; **Restart now** appears once an update is staged. The DB-IP attribution for the country flags lives here too |
 
-The DNS and TUN settings only apply in TUN mode: in System Proxy mode the
-core has no DNS section and the OS resolver is used as before.
+The TUN settings only apply in TUN mode. The DNS settings apply in TUN mode,
+and in System Proxy mode once a rule matches by IP address (a bypassed
+country, an IP CIDR or GeoIP rule, the blocked-address list): the core then
+looks each name up through them before it reaches that rule. Without such a
+rule, System Proxy mode has no DNS section and the OS resolver is used as
+before.
 
 Where the data lives (`settings.json`, `servers.json`, `subscriptions.json`,
 `routing.json`, binary cache `bin/`):
