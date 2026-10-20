@@ -31,8 +31,10 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 import javafx.application.Application;
 import javafx.application.Platform;
+import javafx.event.EventHandler;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
@@ -41,6 +43,7 @@ import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.image.Image;
 import javafx.stage.Stage;
+import javafx.stage.WindowEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -350,6 +353,35 @@ public class VlessClientApp extends Application {
         return tray != null && tray.isShowing();
     }
 
+    /**
+     * The main window's close handler: hides the window in the tray, or quits.
+     *
+     * <p>A quit that arrives as JavaFX closing every window quits, whatever the
+     * tray: that is macOS's Quit (the app menu, Cmd+Q, the Dock) whenever
+     * JavaFX rather than AWT answers it, and hiding the window for it left the
+     * app running after the user had quit it ({@link SystemQuit}).</p>
+     *
+     * @param stage the main window
+     * @param tray  the tray service at the moment of the close, or null
+     * @param quit  what quits the app: {@code Platform::exit}, a test's own
+     * @return the handler
+     */
+    static EventHandler<WindowEvent> closeHandler(Stage stage, Supplier<TrayIconService> tray,
+                                                  Runnable quit) {
+        return event -> {
+            if (SystemQuit.isClosingEveryWindow()) {
+                log.info("Quit asked for by the system (app menu, Cmd+Q or Dock) — quitting");
+                quit.run();
+            } else if (closeHidesToTray(tray.get())) {
+                event.consume();
+                stage.hide();
+            } else {
+                log.info("No tray icon to reopen the window from — window close quits the app");
+                quit.run();
+            }
+        };
+    }
+
     @Override
     public void start(Stage primaryStage) throws Exception {
         // The saved language and theme before anything is shown: the sing-box
@@ -385,17 +417,10 @@ public class VlessClientApp extends Application {
         // can fail to install) hiding would strand the app with no way back,
         // so there closing the window quits. Asked at the close rather than
         // at startup: a desktop with a tray whose icon never appeared used to
-        // hide the window anyway.
+        // hide the window anyway. A quit from the system quits either way.
         Platform.setImplicitExit(false);
-        primaryStage.setOnCloseRequest(event -> {
-            if (closeHidesToTray(trayIconService)) {
-                event.consume();
-                primaryStage.hide();
-            } else {
-                log.info("No tray icon to reopen the window from — window close quits the app");
-                Platform.exit();
-            }
-        });
+        primaryStage.setOnCloseRequest(
+                closeHandler(primaryStage, () -> trayIconService, Platform::exit));
 
         primaryStage.show();
         log.info("Tunl started");
