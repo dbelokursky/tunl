@@ -14,9 +14,9 @@ import javafx.scene.layout.HBox;
  * Settings finds out that a new release exists.
  *
  * <p>Split out of the controller because it is self-contained — four controls,
- * four properties on {@link UpdateManager} and one decision — and because that
- * decision is worth testing on its own. It mirrors
- * {@code settings.UpdatesSection}, which does the same job in Settings.</p>
+ * three properties on {@link UpdateManager} and one decision — and because that
+ * decision is worth testing on its own. {@code settings.UpdatesSection} keeps
+ * the details, the download under way among them.</p>
  */
 public class UpdateBannerSection {
 
@@ -30,7 +30,10 @@ public class UpdateBannerSection {
     /** What the dashboard should say about an update, if anything. */
     public enum State {
 
-        /** Nothing newer exists, or there is no updater to ask. */
+        /**
+         * Nothing newer exists, there is no updater to ask, or this install
+         * fetches the newer release itself and has not got it on disk yet.
+         */
         HIDDEN,
 
         /** A newer release exists but this install updates through apt/AUR. */
@@ -47,12 +50,6 @@ public class UpdateBannerSection {
          * user downloads it from the release page.
          */
         INSTALL_MANUALLY,
-
-        /** Newer release seen, and its installer is being fetched right now. */
-        DOWNLOADING,
-
-        /** Seen, but nothing is fetching it at this moment. */
-        AVAILABLE,
 
         /** Verified and staged — one restart away. */
         READY
@@ -77,20 +74,21 @@ public class UpdateBannerSection {
      * Chooses the banner's state. Kept as a pure function of the facts it
      * depends on, so the combinations can be checked without a scene.
      *
-     * <p>{@code downloading} is asked rather than inferred. The banner used to
-     * treat "found but not staged" as proof a download was running and say so;
-     * on a network where the fetch times out — the network this client exists
-     * for — it then announced a background download that had already failed,
-     * and went on announcing it until the next check hours later.</p>
+     * <p>An install that fetches its updates itself says nothing until the
+     * installer is on disk. The banner used to announce the release as soon as
+     * a check found it, then "downloading in the background", then, after a
+     * failed fetch, "not downloaded yet": news with nothing to press, on the
+     * one screen a user cannot avoid, while the app did the fetching and
+     * retried it on its own. The restart is the only step that is the user's,
+     * so the banner appears when it can be taken.</p>
      *
      * @param updateAvailable whether a newer release was found
      * @param staged          whether its installer is already verified on disk
-     * @param downloading     whether that installer is being fetched right now
      * @param hold            what keeps this installation from updating itself
      * @return the state to render
      */
     public static State stateFor(boolean updateAvailable, boolean staged,
-                                 boolean downloading, UpdateApplier.Hold hold) {
+                                 UpdateApplier.Hold hold) {
         if (!updateAvailable) {
             return State.HIDDEN;
         }
@@ -105,13 +103,10 @@ public class UpdateBannerSection {
                 return State.INSTALL_MANUALLY;
             }
             default -> {
-                // Installs itself: what follows is where it has got to.
+                // Installs itself: whether there is anything to say yet.
             }
         }
-        if (staged) {
-            return State.READY;
-        }
-        return downloading ? State.DOWNLOADING : State.AVAILABLE;
+        return staged ? State.READY : State.HIDDEN;
     }
 
     /**
@@ -133,14 +128,11 @@ public class UpdateBannerSection {
         button.setOnAction(e -> onRestartClicked());
         updateManager.updateAvailableProperty().addListener((o, was, is) -> refresh());
         updateManager.latestVersionProperty().addListener((o, was, is) -> refresh());
-        // The one that turns "downloading" into an offer to restart. Without
+        // The one that brings the banner up with its offer to restart. Without
         // it the banner never hears that the download finished: by then the
         // two properties above are already at their final values and fire
         // nothing more.
         updateManager.stagedProperty().addListener((o, was, is) -> refresh());
-        // The fetch starting and stopping is now a fact the banner reads rather
-        // than one it guesses, so it has to hear about both edges.
-        updateManager.downloadingProperty().addListener((o, was, is) -> refresh());
         // The title carries a version number, so it cannot be a plain binding;
         // re-render instead when the language changes under it.
         I18n.localeProperty().addListener((o, was, is) -> refresh());
@@ -155,7 +147,6 @@ public class UpdateBannerSection {
         }
         render(stateFor(updateManager.updateAvailableProperty().get(),
                         updateManager.hasStagedUpdate(),
-                        updateManager.downloadingProperty().get(),
                         updateManager.hold()),
                 updateManager.latestVersionProperty().get());
     }
@@ -185,17 +176,15 @@ public class UpdateBannerSection {
                 ? I18n.get("dashboard.update.ready", version)
                 : I18n.get("dashboard.update.available", version));
         String hintKey = switch (state) {
-            case READY -> "dashboard.update.hint.staged";
             case PACKAGE_MANAGER -> "dashboard.update.hint.packagemanager";
             case MOVE_TO_APPLICATIONS -> "dashboard.update.hint.move";
             case INSTALL_MANUALLY -> "dashboard.update.hint.manual";
-            case AVAILABLE -> "dashboard.update.hint.pending";
-            default -> "dashboard.update.hint.downloading";
+            default -> "dashboard.update.hint.staged";
         };
         hint.setText(I18n.get(hintKey));
 
-        // Only the staged state has anything to press: the download runs on
-        // its own, and a package-managed install is not ours to touch.
+        // Only the staged state has anything to press, and a package-managed
+        // install is not ours to touch.
         boolean actionable = state == State.READY;
         button.setVisible(actionable);
         button.setManaged(actionable);

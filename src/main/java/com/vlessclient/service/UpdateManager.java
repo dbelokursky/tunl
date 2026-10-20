@@ -16,6 +16,8 @@ import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
@@ -160,6 +162,59 @@ public class UpdateManager {
             new java.util.concurrent.atomic.AtomicBoolean();
 
     /**
+     * Runs the next try of a download that failed on the way.
+     *
+     * <p>A failed download used to wait for the next check: six hours, or the
+     * tunnel coming up again, while the Dashboard said the app would try again
+     * and Settings said it could not download. Most failures are the network's,
+     * a tunnel switching over or a link dropping mid-transfer, and the next try
+     * minutes later gets through. A seam, so a test runs the try when it says
+     * instead of waiting for it.</p>
+     */
+    @FunctionalInterface
+    interface RetryTimer {
+
+        /**
+         * Runs {@code task} once, {@code delay} from now.
+         *
+         * @param delay how long to wait
+         * @param task  what to run then
+         * @return a handle that calls it off
+         */
+        Future<?> after(Duration delay, Runnable task);
+    }
+
+    /**
+     * How one download attempt ended.
+     *
+     * @param installer the installer it staged, or null when it staged nothing
+     * @param retry     whether another try could stage it: the transfer or the
+     *                  disk failed, not a check of what arrived
+     */
+    record Fetched(Path installer, boolean retry) {
+
+        /** Refused by a check: the same download would be refused again. */
+        static final Fetched REFUSED = new Fetched(null, false);
+
+        /** Failed on the way: a later try may get through. */
+        static final Fetched FAILED = new Fetched(null, true);
+    }
+
+    /**
+     * Schedules the retries, or null while there is nothing to schedule them
+     * on. {@link #startPeriodicCheck()} sets it, so a manager that runs no
+     * timer, as in every service test, runs no retries in the background
+     * either. Guarded by {@code this}.
+     */
+    private RetryTimer retryTimer;
+
+    /** Downloads that failed on the way in a row; guarded by {@code this}. */
+    private int failedDownloads;
+
+    /** The retry waiting on the timer, or null; guarded by {@code this}. */
+    private Future<?> pendingRetry;
+
+    /**
      * Creates an update manager with a default HTTP client that follows
      * redirects and uses the standard connect timeout.
      */
@@ -204,11 +259,22 @@ public class UpdateManager {
                 DaemonThreads.factory("update-checker"));
     }
 
+    /** Test seam: also when a failed download is tried again. */
+    UpdateManager(HttpClient httpClient, UpdateStaging staging,
+                  Supplier<UpdateApplier> applier, UpdateStaging.ReleaseCheck signatureCheck,
+                  RetryTimer retryTimer) {
+        this(httpClient, staging, applier, signatureCheck);
+        this.retryTimer = retryTimer;
+    }
+
     /**
      * Starts the periodic update check: once immediately, then on the timer.
-     * A tunnel coming up checks too — see {@link #checkAfterEvent()}.
+     * A tunnel coming up checks too — see {@link #checkAfterEvent()}. A
+     * download that fails on the way is tried again on the same thread, after
+     * {@link UpdateDownloadPolicy#retryDelay}.
      */
     public void startPeriodicCheck() {
+        retryOnTheScheduler();
         scheduler.scheduleAtFixedRate(() -> {
             try {
                 if (checkForUpdates() != CheckResult.UNREACHABLE) {
@@ -219,6 +285,14 @@ public class UpdateManager {
                 log.warn("Scheduled update check failed", e);
             }
         }, 0, CHECK_INTERVAL_HOURS, TimeUnit.HOURS);
+    }
+
+    /** Runs retries on the checker thread, unless a test gave its own timer. */
+    private synchronized void retryOnTheScheduler() {
+        if (retryTimer == null) {
+            retryTimer = (delay, task) ->
+                    scheduler.schedule(task, delay.toMillis(), TimeUnit.MILLISECONDS);
+        }
     }
 
     /**
@@ -500,7 +574,13 @@ public class UpdateManager {
             if (isNewerVersion(version, AppVersion.VERSION)) {
                 log.info("Update available: {} -> {}", AppVersion.VERSION, version);
                 candidateAbandoned = version.equals(staging.abandonedVersion());
+                Candidate previous = candidate;
                 candidate = new Candidate(version, installerUrl, asset.digest());
+                if (previous == null || !previous.version().equals(version)) {
+                    // Another release starts its own count: the failures, and
+                    // the wait they had built up, were the last one's.
+                    forgetFailedDownloads();
+                }
                 // FxExecutor rather than a bare runLater: with no toolkit (a
                 // service test) runLater throws, and the catch below turned a
                 // perfectly good answer into "unreachable".
@@ -534,6 +614,7 @@ public class UpdateManager {
      * @param latestReleased the version GitHub now reports as latest
      */
     private void forgetWithdrawn(String latestReleased) {
+        forgetFailedDownloads();
         Candidate previous = candidate;
         candidate = null;
         candidateAbandoned = false;
@@ -594,6 +675,11 @@ public class UpdateManager {
      * file produces bytes that match neither, so the digest check rejects the
      * result and both downloads are wasted.</p>
      *
+     * <p>A download that fails on the way is tried again, after
+     * {@link UpdateDownloadPolicy#retryDelay}, until it is staged, refused, or
+     * the release it was for is no longer the one to fetch. A refusal is
+     * final for that release: the same bytes would be refused again.</p>
+     *
      * @param url            the asset URL to fetch
      * @param expectedDigest {@code sha256:<hex>} for that asset
      * @return the saved file path, or {@code null} if download or verification
@@ -601,34 +687,107 @@ public class UpdateManager {
      */
     Path downloadUpdate(String url, String expectedDigest) {
         if (!downloadInFlight.compareAndSet(false, true)) {
+            // Declined, not failed: the download under way has its own outcome.
             log.info("An installer is already downloading; not starting a second fetch");
             return null;
         }
-        // Wrapped rather than flagged inline: the body returns null from a
-        // dozen places, and a flag left true by any one of them would leave the
-        // UI saying "Downloading…" for the rest of the run.
+        // Wrapped rather than flagged inline: the body returns from a dozen
+        // places, and a flag left true by any one of them would leave the UI
+        // saying "Downloading…" for the rest of the run.
         setDownloading(true);
+        Fetched fetched;
         try {
-            return fetchAndStage(url, expectedDigest);
+            fetched = fetchAndStage(url, expectedDigest);
         } finally {
             setDownloading(false);
             downloadInFlight.set(false);
         }
+        afterAttempt(fetched);
+        return fetched.installer();
     }
 
-    /** The download itself; separated so the gate around it can be tested. */
-    Path fetchAndStage(String url, String expectedDigest) {
+    /**
+     * Schedules the next try of a download that failed on the way, or forgets
+     * the failures once one is staged or refused.
+     *
+     * @param fetched how the attempt ended
+     */
+    private synchronized void afterAttempt(Fetched fetched) {
+        if (!fetched.retry()) {
+            forgetFailedDownloads();
+            return;
+        }
+        failedDownloads++;
+        if (retryTimer == null) {
+            // No timer runs here; the next check tries again.
+            return;
+        }
+        if (pendingRetry != null) {
+            pendingRetry.cancel(false);
+        }
+        Duration delay = UpdateDownloadPolicy.retryDelay(failedDownloads);
+        log.info("Trying the update download again in {} s ({} failed so far)",
+                delay.toSeconds(), failedDownloads);
+        try {
+            pendingRetry = retryTimer.after(delay, this::retryDownload);
+        } catch (RejectedExecutionException e) {
+            // Shutting down: the timer takes no more work.
+            pendingRetry = null;
+        }
+    }
+
+    /** Forgets the downloads that failed, and calls off the retry they scheduled. */
+    private synchronized void forgetFailedDownloads() {
+        failedDownloads = 0;
+        if (pendingRetry != null) {
+            pendingRetry.cancel(false);
+            pendingRetry = null;
+        }
+    }
+
+    /**
+     * Whether a failed download's next try is waiting on the timer.
+     *
+     * @return true while a retry is scheduled and has not run
+     */
+    synchronized boolean retryPending() {
+        return pendingRetry != null && !pendingRetry.isDone();
+    }
+
+    /**
+     * The retry itself: the same decision every check makes, since the release
+     * may have been staged, withdrawn or superseded while it waited.
+     */
+    private void retryDownload() {
+        try {
+            autoDownloadIfAllowed();
+        } catch (RuntimeException e) {
+            // The timer would drop it silently.
+            log.warn("Retrying the update download failed", e);
+        }
+    }
+
+    /**
+     * Downloads, checks and stages the installer, and says whether a failure
+     * is worth another try. The download itself; separated so the gate around
+     * it can be tested.
+     *
+     * @param url            the asset URL to fetch
+     * @param expectedDigest {@code sha256:<hex>} for that asset
+     * @return how the attempt ended
+     */
+    Fetched fetchAndStage(String url, String expectedDigest) {
         if (url == null || url.isBlank()) {
             log.warn("No download URL provided");
-            return null;
+            return Fetched.REFUSED;
         }
         if (!url.startsWith(RELEASE_DOWNLOAD_PREFIX)) {
             log.error("Refusing update download outside {}: {}", RELEASE_DOWNLOAD_PREFIX, url);
-            return null;
+            return Fetched.REFUSED;
         }
         if (expectedDigest == null || !expectedDigest.startsWith("sha256:")) {
             log.error("Refusing update download with no sha256 digest: {}", url);
-            return null;
+            return Fetched.REFUSED;
         }
 
         Path part = null;
@@ -651,9 +810,11 @@ public class UpdateManager {
             HttpResponse<InputStream> response = LongDownload.send(httpClient, request);
 
             if (response.statusCode() != 200) {
+                // The URL came with the check's answer moments ago, so a status
+                // other than 200 is the server's or the way to it, for now.
                 response.body().close();
                 log.error("Download failed with status {}", response.statusCode());
-                return null;
+                return Fetched.FAILED;
             }
 
             String fileName = extractFileName(url);
@@ -673,7 +834,7 @@ public class UpdateManager {
                 // be left where the user could open it.
                 log.error("Update rejected: sha256 mismatch for {} (expected {}, got {})",
                         fileName, expectedDigest, actualDigest);
-                return null;
+                return Fetched.REFUSED;
             }
 
             String signature = "";
@@ -683,7 +844,7 @@ public class UpdateManager {
                 if (signature == null) {
                     // Same rule as a digest mismatch: an installer that fails a
                     // check must not be left where it could still be run.
-                    return null;
+                    return Fetched.REFUSED;
                 }
             }
 
@@ -697,26 +858,33 @@ public class UpdateManager {
                 // ever apply; don't leave it on disk pretending otherwise.
                 Files.deleteIfExists(target);
                 log.error("Failed to stage the downloaded update: {}", e.getMessage());
-                return null;
+                // A disk that could not take the marker may take it later; a
+                // version the marker refuses will be refused again.
+                return e instanceof IOException ? Fetched.FAILED : Fetched.REFUSED;
             }
 
             setStaged(true);
             log.info("Update downloaded, verified and staged: {}", target);
-            return target;
-        } catch (IOException | InterruptedException
-                 | java.security.NoSuchAlgorithmException e) {
+            return new Fetched(target, false);
+        } catch (IOException e) {
             // With the exception, not just its message. A user reported
             // "Failed to download update: closed" — one word, from somewhere
             // inside java.net.http, for a download that succeeded on the same
             // release from the same machine minutes later. The class and the
             // frame it came from are the whole difference between diagnosing
             // that and guessing at it, and this is a failure only a user's
-            // machine tends to produce.
+            // machine tends to produce. It is also the failure worth trying
+            // again: the network's, or the disk's.
             log.error("Failed to download update from {}", url, e);
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
-            return null;
+            return Fetched.FAILED;
+        } catch (InterruptedException e) {
+            // Shutting down; nothing to try again.
+            log.info("Update download from {} interrupted", url);
+            Thread.currentThread().interrupt();
+            return Fetched.REFUSED;
+        } catch (java.security.NoSuchAlgorithmException e) {
+            log.error("Failed to download update from {}", url, e);
+            return Fetched.REFUSED;
         } finally {
             if (part != null) {
                 deleteQuietly(part);
@@ -741,42 +909,40 @@ public class UpdateManager {
      * pointed elsewhere by a tampered API response. A missing signature is a
      * failure, not a reason to skip the check.</p>
      *
+     * <p>A signature that could not be fetched is not one that failed: the
+     * release publishes one beside every installer, so a non-200 or a dropped
+     * connection is the network's, and the download is tried again. Only one
+     * that does not verify refuses the installer.</p>
+     *
      * @param url    the installer asset URL
      * @param digest the {@code sha256:<hex>} of the downloaded bytes
-     * @return true when a valid signature was found
+     * @return the signature when it verifies, or null when it does not
+     * @throws IOException          if the signature could not be fetched
+     * @throws InterruptedException if the thread is interrupted while it is
      */
     private String fetchValidSignature(String url, String version, String assetName,
-                                       String digest) {
+                                       String digest) throws IOException, InterruptedException {
         String signatureUrl = url + ReleaseSignature.MANIFEST_SIGNATURE_SUFFIX;
-        try {
-            HttpResponse<String> response = httpClient.send(
-                    HttpRequest.newBuilder()
-                            .uri(URI.create(signatureUrl))
-                            .timeout(HTTP_TIMEOUT)
-                            .GET()
-                            .build(),
-                    HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = httpClient.send(
+                HttpRequest.newBuilder()
+                        .uri(URI.create(signatureUrl))
+                        .timeout(HTTP_TIMEOUT)
+                        .GET()
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
 
-            if (response.statusCode() != 200) {
-                log.error("Update rejected: no signature at {} (status {})",
-                        signatureUrl, response.statusCode());
-                return null;
-            }
-            if (!signatureCheck.test(version, assetName, digest, response.body())) {
-                log.error("Update rejected: signature does not match {}", url);
-                return null;
-            }
-            // Returned rather than discarded: it is stored with the staged
-            // installer so the check can be repeated before the file is run,
-            // against something the staging directory cannot forge.
-            return response.body();
-        } catch (IOException | InterruptedException e) {
-            log.error("Update rejected: cannot fetch signature: {}", e.getMessage());
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
+        if (response.statusCode() != 200) {
+            throw new IOException("no signature at " + signatureUrl
+                    + " (status " + response.statusCode() + ")");
+        }
+        if (!signatureCheck.test(version, assetName, digest, response.body())) {
+            log.error("Update rejected: signature does not match {}", url);
             return null;
         }
+        // Returned rather than discarded: it is stored with the staged
+        // installer so the check can be repeated before the file is run,
+        // against something the staging directory cannot forge.
+        return response.body();
     }
 
     /**

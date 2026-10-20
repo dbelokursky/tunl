@@ -269,40 +269,14 @@ public final class UpdatesSection {
             // The same follow-through the scheduled check and the tunnel-up
             // check do. Pressing "Check for updates" and being told one exists,
             // while nothing fetches it for up to six hours, was the gap left by
-            // dropping the Download button.
+            // dropping the Download button. The row follows the download through
+            // the downloading and staged properties; a fetch that fails is tried
+            // again by the updater, so it says "available" rather than "could
+            // not download": there was nothing for the user to do about it.
             updateManager.autoDownloadIfAllowed();
-            Platform.runLater(() -> renderDownloadOutcome(result));
         }, "app-update-check");
         t.setDaemon(true);
         t.start();
-    }
-
-    /**
-     * Says so when the download this check kicked off did not land.
-     *
-     * <p>Only for the manual path: the user pressed a button and is watching
-     * the row, so silence reads as "nothing happened". The scheduled checks
-     * leave the row alone — an error raised by a check nobody asked for would
-     * still be sitting there hours later, describing a network that has since
-     * come back.</p>
-     */
-    private void renderDownloadOutcome(UpdateManager.CheckResult result) {
-        if (updateManager == null || result != UpdateManager.CheckResult.UPDATE_AVAILABLE) {
-            return;
-        }
-        // Not downloading, or "nothing staged" is not a verdict yet. A fetch
-        // started by the six-hourly check or by the tunnel coming up can still
-        // be running: this check's own attempt was then declined rather than
-        // failed — one installer at a time — and calling that a failed download
-        // reports an error over a download that is going fine.
-        if (updateManager.hold() == UpdateApplier.Hold.NONE
-                && !updateManager.hasStagedUpdate()
-                && !updateManager.downloadingProperty().get()) {
-            appVersionValue.setText(I18n.get("settings.version.downloadfailed",
-                    AppVersion.VERSION, updateManager.latestVersionProperty().get()));
-            return;
-        }
-        renderAppVersion();
     }
 
     /**

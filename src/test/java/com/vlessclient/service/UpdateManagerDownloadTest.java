@@ -70,10 +70,10 @@ class UpdateManagerDownloadTest {
     void aUrlOutsideTheReleaseHostIsRefusedBeforeAnyRequest(@TempDir Path dir) throws Exception {
         RoutingHttpClient client = new RoutingHttpClient(Map.of());
 
-        Path result = managerFor(dir, client)
+        UpdateManager.Fetched result = managerFor(dir, client)
                 .fetchAndStage("https://example.com/evil.dmg", "sha256:00");
 
-        assertThat(result).isNull();
+        assertThat(result).isEqualTo(UpdateManager.Fetched.REFUSED);
         assertThat(client.requests).as("nothing should be fetched at all").isEmpty();
         assertThat(filesIn(dir)).isEmpty();
     }
@@ -82,8 +82,10 @@ class UpdateManagerDownloadTest {
     void aDownloadWithNoDigestIsRefusedBeforeAnyRequest(@TempDir Path dir) throws Exception {
         RoutingHttpClient client = new RoutingHttpClient(Map.of());
 
-        assertThat(managerFor(dir, client).fetchAndStage(URL, null)).isNull();
-        assertThat(managerFor(dir, client).fetchAndStage(URL, "md5:whatever")).isNull();
+        assertThat(managerFor(dir, client).fetchAndStage(URL, null))
+                .isEqualTo(UpdateManager.Fetched.REFUSED);
+        assertThat(managerFor(dir, client).fetchAndStage(URL, "md5:whatever"))
+                .isEqualTo(UpdateManager.Fetched.REFUSED);
         assertThat(client.requests).isEmpty();
         assertThat(filesIn(dir)).isEmpty();
     }
@@ -93,7 +95,9 @@ class UpdateManagerDownloadTest {
         RoutingHttpClient client = new RoutingHttpClient(
                 Map.of(URL, new Canned(503, new byte[0])));
 
-        assertThat(managerFor(dir, client).fetchAndStage(URL, "sha256:00")).isNull();
+        assertThat(managerFor(dir, client).fetchAndStage(URL, "sha256:00"))
+                .as("the server's failure, for now: worth another try")
+                .isEqualTo(UpdateManager.Fetched.FAILED);
         assertThat(filesIn(dir)).isEmpty();
     }
 
@@ -103,9 +107,11 @@ class UpdateManagerDownloadTest {
         RoutingHttpClient client = new RoutingHttpClient(
                 Map.of(URL, new Canned(200, payload)));
 
-        Path result = managerFor(dir, client).fetchAndStage(URL, "sha256:" + "ab".repeat(32));
+        UpdateManager.Fetched result =
+                managerFor(dir, client).fetchAndStage(URL, "sha256:" + "ab".repeat(32));
 
-        assertThat(result).isNull();
+        assertThat(result).as("the same bytes would be refused again")
+                .isEqualTo(UpdateManager.Fetched.REFUSED);
         assertThat(filesIn(dir))
                 .as("a rejected installer must not be left where the user could open it")
                 .isEmpty();
@@ -120,9 +126,12 @@ class UpdateManagerDownloadTest {
                 URL + ReleaseSignature.MANIFEST_SIGNATURE_SUFFIX,
                 new Canned(404, new byte[0])));
 
-        Path result = managerFor(dir, client).fetchAndStage(URL, sha256Of(payload));
+        UpdateManager.Fetched result =
+                managerFor(dir, client).fetchAndStage(URL, sha256Of(payload));
 
-        assertThat(result).isNull();
+        // The release publishes a signature beside every installer, so one that
+        // cannot be fetched is the network's failure: tried again, not refused.
+        assertThat(result).isEqualTo(UpdateManager.Fetched.FAILED);
         assertThat(filesIn(dir))
                 .as("matching bytes are not authorisation; an unsigned installer must go")
                 .isEmpty();
@@ -162,9 +171,11 @@ class UpdateManagerDownloadTest {
                 URL + ReleaseSignature.MANIFEST_SIGNATURE_SUFFIX,
                 new Canned(200, notASignature.getBytes(StandardCharsets.UTF_8))));
 
-        Path result = managerFor(dir, client).fetchAndStage(URL, sha256Of(payload));
+        UpdateManager.Fetched result =
+                managerFor(dir, client).fetchAndStage(URL, sha256Of(payload));
 
-        assertThat(result).isNull();
+        assertThat(result).as("a signature that does not verify is final")
+                .isEqualTo(UpdateManager.Fetched.REFUSED);
         assertThat(filesIn(dir)).isEmpty();
     }
 
@@ -196,7 +207,9 @@ class UpdateManagerDownloadTest {
         RoutingHttpClient client = new RoutingHttpClient(
                 Map.of(URL, new Canned(200, payload, true)));
 
-        assertThat(managerFor(dir, client).fetchAndStage(URL, sha256Of(payload))).isNull();
+        assertThat(managerFor(dir, client).fetchAndStage(URL, sha256Of(payload)))
+                .as("a dropped link: worth another try")
+                .isEqualTo(UpdateManager.Fetched.FAILED);
 
         assertThat(filesIn(dir)).isEmpty();
     }

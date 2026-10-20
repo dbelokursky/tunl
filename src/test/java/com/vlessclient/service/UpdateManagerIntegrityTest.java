@@ -112,7 +112,7 @@ class UpdateManagerIntegrityTest {
         AtomicInteger fetches = new AtomicInteger();
         UpdateManager manager = new UpdateManager() {
             @Override
-            Path fetchAndStage(String url, String expectedDigest) {
+            Fetched fetchAndStage(String url, String expectedDigest) {
                 fetches.incrementAndGet();
                 inside.countDown();
                 try {
@@ -120,7 +120,7 @@ class UpdateManagerIntegrityTest {
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
-                return null;
+                return Fetched.FAILED;
             }
         };
 
