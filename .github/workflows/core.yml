@@ -51,9 +51,11 @@ concurrency:
 env:
   # What Tunl's configurations use, and nothing it does not: on macOS the
   # core runs as administrator, so tailscale, acme, cloudflared, openvpn and
-  # the like are left out. badlinkname and tfogo_checklinkname0 are upstream's,
-  # for Go's linkname checks. tunl marks the build in `sing-box version`.
-  TAGS: with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0,tunl
+  # the like are left out, and so is with_dhcp: no configuration Tunl writes
+  # has a DHCP DNS server, and DnsAddress refuses dhcp:// in Settings and MCP.
+  # badlinkname and tfogo_checklinkname0 are upstream's, for Go's linkname
+  # checks. tunl marks the build in `sing-box version`.
+  TAGS: with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0,tunl
 
 jobs:
   build:
