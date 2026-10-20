@@ -46,36 +46,33 @@ public class DashboardUpdateBannerTest extends ApplicationTest {
 
     @Test
     void nothingIsAnnouncedWithoutANewerRelease() {
-        assertThat(UpdateBannerSection.stateFor(false, false, false, Hold.NONE))
+        assertThat(UpdateBannerSection.stateFor(false, false, Hold.NONE))
                 .isEqualTo(State.HIDDEN);
         // Staged but not newer cannot happen, and must still stay quiet.
-        assertThat(UpdateBannerSection.stateFor(false, true, false, Hold.NONE))
+        assertThat(UpdateBannerSection.stateFor(false, true, Hold.NONE))
                 .isEqualTo(State.HIDDEN);
     }
 
     @Test
-    void aStagedUpdateIsTheOnlyStateWithSomethingToPress() {
-        assertThat(UpdateBannerSection.stateFor(true, true, false, Hold.NONE))
+    void aStagedUpdateIsAnnouncedWithItsRestart() {
+        assertThat(UpdateBannerSection.stateFor(true, true, Hold.NONE))
                 .isEqualTo(State.READY);
-        // Still downloading: the banner reports it, but there is no action —
-        // the download runs on its own.
-        assertThat(UpdateBannerSection.stateFor(true, false, true, Hold.NONE))
-                .isEqualTo(State.DOWNLOADING);
     }
 
     /**
-     * A download that is not running must not be announced as one.
+     * An install that fetches its updates itself says nothing until the
+     * installer is on disk.
      *
-     * <p>The banner used to read "found but not staged" as proof a fetch was
-     * under way. On a network where the fetch times out — the network this
-     * client exists for — it announced a background download that had already
-     * failed, and kept announcing it until the next check hours later, while
-     * the restart it promised never arrived because nothing was ever staged.</p>
+     * <p>The banner announced the release as soon as a check found it, then
+     * "downloading in the background", then, once a fetch had failed, "not
+     * downloaded yet": three states with nothing to press, while the app did
+     * the fetching and the retrying on its own. The restart is the one step
+     * that is the user's, so the banner comes up when it can be taken.</p>
      */
     @Test
-    void aFetchThatIsNotRunningIsNotReportedAsDownloading() {
-        assertThat(UpdateBannerSection.stateFor(true, false, false, Hold.NONE))
-                .isEqualTo(State.AVAILABLE);
+    void anUpdateThatIsNotOnDiskYetIsNotAnnounced() {
+        assertThat(UpdateBannerSection.stateFor(true, false, Hold.NONE))
+                .isEqualTo(State.HIDDEN);
     }
 
     /**
@@ -87,12 +84,10 @@ public class DashboardUpdateBannerTest extends ApplicationTest {
     @Test
     void aCopyRunningFromTheDownloadIsAskedToMoveToApplications() {
         for (boolean staged : new boolean[] {false, true}) {
-            for (boolean downloading : new boolean[] {false, true}) {
-                assertThat(UpdateBannerSection.stateFor(true, staged, downloading,
+            assertThat(UpdateBannerSection.stateFor(true, staged,
                         Hold.MOVE_TO_APPLICATIONS))
-                        .as("staged=%s downloading=%s", staged, downloading)
-                        .isEqualTo(State.MOVE_TO_APPLICATIONS);
-            }
+                    .as("staged=%s", staged)
+                    .isEqualTo(State.MOVE_TO_APPLICATIONS);
         }
 
         HBox banner = new HBox();
@@ -115,11 +110,9 @@ public class DashboardUpdateBannerTest extends ApplicationTest {
         // the banner must not imply otherwise — even if a stale marker from an
         // earlier platform state claimed something was staged.
         for (boolean staged : new boolean[] {false, true}) {
-            for (boolean downloading : new boolean[] {false, true}) {
-                assertThat(UpdateBannerSection.stateFor(true, staged, downloading, Hold.PACKAGE_MANAGER))
-                        .as("staged=%s downloading=%s", staged, downloading)
-                        .isEqualTo(State.PACKAGE_MANAGER);
-            }
+            assertThat(UpdateBannerSection.stateFor(true, staged, Hold.PACKAGE_MANAGER))
+                    .as("staged=%s", staged)
+                    .isEqualTo(State.PACKAGE_MANAGER);
         }
     }
 
@@ -132,12 +125,10 @@ public class DashboardUpdateBannerTest extends ApplicationTest {
     @Test
     void anUpdateThisInstallCannotApplyPointsAtTheReleasePage() {
         for (boolean staged : new boolean[] {false, true}) {
-            for (boolean downloading : new boolean[] {false, true}) {
-                assertThat(UpdateBannerSection.stateFor(true, staged, downloading,
+            assertThat(UpdateBannerSection.stateFor(true, staged,
                         Hold.INSTALL_MANUALLY))
-                        .as("staged=%s downloading=%s", staged, downloading)
-                        .isEqualTo(State.INSTALL_MANUALLY);
-            }
+                    .as("staged=%s", staged)
+                    .isEqualTo(State.INSTALL_MANUALLY);
         }
 
         HBox banner = new HBox();

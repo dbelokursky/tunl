@@ -2,39 +2,17 @@ package com.vlessclient.service;
 
 import com.vlessclient.platform.PendingUpdate;
 import com.vlessclient.platform.UpdateApplier;
-import java.io.IOException;
-import java.net.Authenticator;
-import java.net.CookieHandler;
-import java.net.ProxySelector;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.KeyPair;
-import java.security.KeyPairGenerator;
-import java.security.MessageDigest;
-import java.security.PrivateKey;
-import java.security.Signature;
-import java.time.Duration;
-import java.util.Base64;
-import java.util.HexFormat;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Flow;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLParameters;
-import javax.net.ssl.SSLSession;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import static com.vlessclient.service.SignedTestRelease.checkWith;
+import static com.vlessclient.service.SignedTestRelease.ed25519;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -59,7 +37,7 @@ class UpdateAcceptanceTest {
     @Test
     void aNewerReleaseSignedForThisInstallerIsDownloadedAndStaged() throws Exception {
         KeyPair release = ed25519();
-        Fixture fixture = new Fixture(release.getPrivate());
+        SignedTestRelease fixture = new SignedTestRelease(VERSION, release.getPrivate());
         UpdateStaging.ReleaseCheck check = checkWith(release);
         UpdateStaging staging = new UpdateStaging(dir.resolve("staging"), check);
         UpdateManager manager = new UpdateManager(fixture.client, staging,
@@ -86,7 +64,7 @@ class UpdateAcceptanceTest {
 
     @Test
     void anInstallerSignedWithAnotherKeyIsNotStaged() throws Exception {
-        Fixture fixture = new Fixture(ed25519().getPrivate());
+        SignedTestRelease fixture = new SignedTestRelease(VERSION, ed25519().getPrivate());
         UpdateStaging.ReleaseCheck check = checkWith(ed25519());
         UpdateStaging staging = new UpdateStaging(dir.resolve("staging"), check);
         UpdateManager manager = new UpdateManager(fixture.client, staging,
@@ -98,212 +76,9 @@ class UpdateAcceptanceTest {
         assertThat(staging.pending()).isEmpty();
     }
 
-    private static KeyPair ed25519() throws Exception {
-        return KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
-    }
-
-    /** The app's check, with the test's public key in place of the release key. */
-    private static UpdateStaging.ReleaseCheck checkWith(KeyPair key) {
-        String publicKey = Base64.getEncoder().encodeToString(key.getPublic().getEncoded());
-        return (version, asset, digest, signature) -> ReleaseSignature.verify(publicKey,
-                ReleaseSignature.manifestFor(version, asset, digest), signature);
-    }
-
-    /** A release of this platform's installer, signed the way release.yml signs it. */
-    private static final class Fixture {
-
-        final byte[] bytes = "an installer".getBytes(StandardCharsets.UTF_8);
-        final String asset = "tunl_" + VERSION + "_" + UpdateManager.currentArchToken()
-                + UpdateManager.installerExtension();
-        final String url = UpdateManager.RELEASE_DOWNLOAD_PREFIX + "v" + VERSION + "/" + asset;
-        final String digest;
-        final ServingClient client = new ServingClient();
-
-        Fixture(PrivateKey signer) throws Exception {
-            digest = "sha256:" + HexFormat.of().formatHex(
-                    MessageDigest.getInstance("SHA-256").digest(bytes));
-            Signature ed = Signature.getInstance("Ed25519");
-            ed.initSign(signer);
-            ed.update(("tunl-release-v1\n" + VERSION + "\n" + asset + "\n" + digest)
-                    .getBytes(StandardCharsets.UTF_8));
-            String signature = Base64.getEncoder().encodeToString(ed.sign());
-            client.serve(url, bytes);
-            client.serve(url + ReleaseSignature.MANIFEST_SIGNATURE_SUFFIX,
-                    signature.getBytes(StandardCharsets.US_ASCII));
-        }
-
-        String releaseJson() {
-            return """
-                    {"tag_name":"v%s","assets":[
-                      {"name":"%s","browser_download_url":"%s","digest":"%s"}]}
-                    """.formatted(VERSION, asset, url, digest);
-        }
-    }
-
-    /** Answers the URLs it was given from memory, and 404 for any other. */
-    private static final class ServingClient extends HttpClient {
-
-        private final Map<URI, byte[]> files = new ConcurrentHashMap<>();
-
-        void serve(String url, byte[] body) {
-            files.put(URI.create(url), body);
-        }
-
-        @Override
-        public <T> HttpResponse<T> send(HttpRequest request,
-                                        HttpResponse.BodyHandler<T> handler) throws IOException {
-            byte[] body = files.get(request.uri());
-            int status = body == null ? 404 : 200;
-            return respond(request, handler, status, body == null ? new byte[0] : body);
-        }
-
-        @Override
-        public <T> CompletableFuture<HttpResponse<T>> sendAsync(
-                HttpRequest request, HttpResponse.BodyHandler<T> handler) {
-            try {
-                return CompletableFuture.completedFuture(send(request, handler));
-            } catch (IOException e) {
-                return CompletableFuture.failedFuture(e);
-            }
-        }
-
-        @Override
-        public <T> CompletableFuture<HttpResponse<T>> sendAsync(
-                HttpRequest request, HttpResponse.BodyHandler<T> handler,
-                HttpResponse.PushPromiseHandler<T> pushes) {
-            return sendAsync(request, handler);
-        }
-
-        private static <T> HttpResponse<T> respond(HttpRequest request,
-                                                   HttpResponse.BodyHandler<T> handler,
-                                                   int status, byte[] bytes) {
-            HttpHeaders headers = HttpHeaders.of(Map.of(), (name, value) -> true);
-            HttpResponse.BodySubscriber<T> subscriber = handler.apply(new HttpResponse.ResponseInfo() {
-                @Override
-                public int statusCode() {
-                    return status;
-                }
-
-                @Override
-                public HttpHeaders headers() {
-                    return headers;
-                }
-
-                @Override
-                public Version version() {
-                    return Version.HTTP_1_1;
-                }
-            });
-            subscriber.onSubscribe(new Flow.Subscription() {
-                private boolean delivered;
-
-                @Override
-                public void request(long n) {
-                    if (!delivered) {
-                        delivered = true;
-                        subscriber.onNext(List.of(ByteBuffer.wrap(bytes)));
-                        subscriber.onComplete();
-                    }
-                }
-
-                @Override
-                public void cancel() {
-                    delivered = true;
-                }
-            });
-            T body = subscriber.getBody().toCompletableFuture().join();
-            return new HttpResponse<>() {
-                @Override
-                public int statusCode() {
-                    return status;
-                }
-
-                @Override
-                public HttpRequest request() {
-                    return request;
-                }
-
-                @Override
-                public Optional<HttpResponse<T>> previousResponse() {
-                    return Optional.empty();
-                }
-
-                @Override
-                public HttpHeaders headers() {
-                    return headers;
-                }
-
-                @Override
-                public T body() {
-                    return body;
-                }
-
-                @Override
-                public Optional<SSLSession> sslSession() {
-                    return Optional.empty();
-                }
-
-                @Override
-                public URI uri() {
-                    return request.uri();
-                }
-
-                @Override
-                public Version version() {
-                    return Version.HTTP_1_1;
-                }
-            };
-        }
-
-        @Override
-        public Optional<CookieHandler> cookieHandler() {
-            return Optional.empty();
-        }
-
-        @Override
-        public Optional<Duration> connectTimeout() {
-            return Optional.empty();
-        }
-
-        @Override
-        public Redirect followRedirects() {
-            return Redirect.NEVER;
-        }
-
-        @Override
-        public Optional<ProxySelector> proxy() {
-            return Optional.empty();
-        }
-
-        @Override
-        public SSLContext sslContext() {
-            return null;
-        }
-
-        @Override
-        public SSLParameters sslParameters() {
-            return new SSLParameters();
-        }
-
-        @Override
-        public Optional<Authenticator> authenticator() {
-            return Optional.empty();
-        }
-
-        @Override
-        public Version version() {
-            return Version.HTTP_1_1;
-        }
-
-        @Override
-        public Optional<Executor> executor() {
-            return Optional.empty();
-        }
-    }
-
     @Test
     void theFixtureServesWhatItWasGiven() throws Exception {
-        ServingClient client = new ServingClient();
+        SignedTestRelease.ServingClient client = new SignedTestRelease.ServingClient();
         client.serve("https://example.invalid/a", "x".getBytes(StandardCharsets.UTF_8));
 
         HttpResponse<String> found = client.send(
