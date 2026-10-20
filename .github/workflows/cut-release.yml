@@ -1,0 +1,123 @@
+name: Cut release
+# Releases a green commit on main without a tag push: makes the annotated
+# vX.Y.Z tag through the API, with the release's title and notes as its
+# message, and starts release.yml on it. For whoever cannot push a tag: a
+# Claude Code cloud session may push branches, not tags.
+#
+# A tag a workflow makes with GITHUB_TOKEN starts no workflow, GitHub's guard
+# against runs starting runs, but a workflow_dispatch it sends does; so this
+# run dispatches release.yml on the new tag itself. release.yml's gate still
+# decides (an annotated vX.Y.Z tag, on main, the four required checks green);
+# this checks the same before it makes the tag, so a mistake leaves no tag to
+# delete.
+#
+#   gh workflow run cut-release.yml -f version=X.Y.Z -f commit=<sha> -F notes=@notes.txt
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, x.y.z'
+        required: true
+        type: string
+      commit:
+        description: 'Full SHA of the commit on main to release'
+        required: true
+        type: string
+      notes:
+        description: 'A title line, a blank line, then the notes; several lines, so pass a file: -F notes=@notes.txt'
+        required: true
+        type: string
+# One at a time: two runs for the same version must not both find no tag.
+concurrency:
+  group: cut-release
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # The tag object and its ref.
+      contents: write
+      # The dispatch of release.yml on the new tag.
+      actions: write
+    steps:
+      - name: Tag the commit and start the release
+        # The inputs reach the script as environment variables, never spliced
+        # into it: the notes are free text.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.commit }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          set -euo pipefail
+          number="${VERSION#v}"
+          if ! [[ "$number" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The version must be x.y.z, not '${VERSION}'."
+            exit 1
+          fi
+          tag="v${number}"
+          if ! [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::The commit must be a full 40-character SHA, not '${COMMIT}'."
+            exit 1
+          fi
+
+          # A file saved on Windows ends its lines in CRLF, and the title
+          # would carry the CR.
+          message="$(printf '%s' "$NOTES" | tr -d '\r')"
+          title="$(printf '%s\n' "$message" | sed -n 1p)"
+          blank="$(printf '%s\n' "$message" | sed -n 2p)"
+          body="$(printf '%s\n' "$message" | tail -n +3)"
+          if [ -z "$title" ] || [ -n "$blank" ] || [ -z "${body//[[:space:]]/}" ]; then
+            echo "::error::The notes must be a title line, a blank line, then the notes."
+            exit 1
+          fi
+
+          # What release.yml's gate checks, before there is a tag to delete.
+          status="$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${COMMIT}" -q '.status')"
+          case "$status" in
+            identical|behind) ;;
+            *)
+              echo "::error::${COMMIT} is not on main (compare says '${status}')."
+              exit 1
+              ;;
+          esac
+          runs="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${COMMIT}/check-runs?per_page=100")"
+          for check in test-macos test-linux test-linux-arm test-windows; do
+            concl="$(printf '%s' "$runs" | jq -r --arg n "$check" \
+              '[.check_runs[] | select(.name == $n)] | sort_by(.completed_at) | last | .conclusion // "missing"')"
+            if [ "$concl" != "success" ]; then
+              echo "::error::Required check '${check}' on ${COMMIT} is '${concl}', not success."
+              exit 1
+            fi
+          done
+          # The release runs release.yml as it is at the tag, and before this
+          # workflow came it could not be started by hand: the dispatch would
+          # fail with the tag already made.
+          if ! gh api "repos/${GITHUB_REPOSITORY}/contents/.github/workflows/release.yml?ref=${COMMIT}" \
+              -H 'Accept: application/vnd.github.raw' | grep -q '^  workflow_dispatch:'; then
+            echo "::error::release.yml at ${COMMIT} cannot be run by hand: release a later commit, or push the tag."
+            exit 1
+          fi
+          if existing="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" 2>&1)"; then
+            echo "::error::${tag} already exists."
+            exit 1
+          elif ! grep -q 'HTTP 404' <<<"$existing"; then
+            echo "::error::Could not tell whether ${tag} exists: ${existing}"
+            exit 1
+          fi
+
+          # The API stores the message as it is given: no '#' line is lost,
+          # as git tag loses them without --cleanup=verbatim.
+          tag_object="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags" \
+            -f tag="$tag" -f message="$message" -f object="$COMMIT" -f type=commit -q '.sha')"
+          gh api "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/tags/${tag}" -f sha="$tag_object" --silent
+          if ! gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$tag"; then
+            echo "::error::${tag} is made, but release.yml did not start: run Release on ${tag} by hand (Actions, Release, Run workflow, the tag under Use workflow from)."
+            exit 1
+          fi
+          echo "Tagged ${COMMIT} as ${tag} (tag object ${tag_object}) and started release.yml on it: ${title}" \
+            | tee -a "$GITHUB_STEP_SUMMARY"

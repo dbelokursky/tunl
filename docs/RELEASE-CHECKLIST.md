@@ -8,7 +8,7 @@ by hand, and lists the steps that are genuinely manual.
 
 ## What `release.yml` automates
 
-On a pushed `v*` tag:
+On a pushed `v*` tag, or when it is run on one (as `cut-release.yml` does):
 
 - **Tag gate** (`prepare-release`): the tag must be annotated with a title, a
   blank line and notes (they become the release's title and body); it must
@@ -119,6 +119,26 @@ Verify what the workflow will actually read, before or after pushing:
 ```sh
 gh api "repos/dbelokursky/tunl/git/tags/$(gh api repos/dbelokursky/tunl/git/ref/tags/vX.Y.Z -q .object.sha)" -q .message
 ```
+
+### Without pushing a tag
+
+Where a tag cannot be pushed (a Claude Code cloud session may push branches,
+not tags), `cut-release.yml` makes the same annotated tag through the API and
+starts `release.yml` on it:
+
+```sh
+gh workflow run cut-release.yml -f version=X.Y.Z -f commit=<full SHA on main> -F notes=@notes.txt
+```
+
+Before it makes the tag it checks what the tag gate checks: the version, the
+commit on `main` with its four required checks green, a title line and a
+blank line in the notes, and no tag of that name yet. So a mistake leaves no
+tag to delete. The API stores the message as given, so no `#` line is lost. A
+tag a workflow makes with `GITHUB_TOKEN` starts no workflow, which is why it
+dispatches `release.yml` itself; `release.yml` can also be run by hand on a
+tag already there (*Actions → Release → Run workflow*, the tag under *Use
+workflow from*). Only commits from `cut-release.yml`'s own on can go out this
+way: before it, `release.yml` could not be run by hand.
 
 `notes.txt` layout (repository release notes are written in English). The first
 line is the title, then a blank line, then the body:
