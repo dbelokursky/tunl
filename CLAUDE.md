@@ -122,5 +122,6 @@ launchers, system-proxy guards, secret sealers, autostart, update appliers);
   makes users repeat the Gatekeeper / SmartScreen unblock. `dev-latest`
   already rebuilds on every merge. A release is an annotated tag
   (`git tag -a --cleanup=verbatim -F notes.txt vX.Y.Z`), notes in English; see
-  `docs/RELEASE-CHECKLIST.md`. A cloud session cannot push a tag: it releases
-  through `cut-release.yml` (*Without pushing a tag* there).
+  `docs/RELEASE-CHECKLIST.md`. A cloud session cannot push a tag or start a
+  workflow: it releases by merging `docs/release-notes/vX.Y.Z.txt`, which
+  `cut-release.yml` tags once Build passes (*Without pushing a tag* there).

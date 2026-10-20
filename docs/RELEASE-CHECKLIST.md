@@ -21,9 +21,11 @@ On a pushed `v*` tag, or when it is run on one (as `cut-release.yml` does):
   tag, or adopts the draft an earlier attempt left (a re-run, or a failed run
   for the same tag) and writes the current tag's title and notes onto it. It
   fails if the tag already has a published release or more than one release
-  object. Every later job only uploads into that draft: in v1.19.0 two jobs
-  created a release at the same moment and left a second, empty draft on the
-  tag. Runs for the same tag queue behind each other rather than overlap, and
+  object. Every later job only uploads into that draft, and reaches it by the
+  id `create-draft` hands on, never by the tag: in v1.19.0 two jobs created a
+  release at the same moment and left a second, empty draft on the tag, and
+  in v1.26.0 gh's lookup of the draft by its tag failed the signing with
+  "release not found" while the draft was there. Runs for the same tag queue behind each other rather than overlap, and
   a run whose tag is pushed again before it publishes does not publish: it
   leaves its draft to the run for the new push, which adopts it.
 - **Per OS** — macOS (Apple Silicon), Windows x64, Linux amd64, Linux arm64:
@@ -59,8 +61,8 @@ On a pushed `v*` tag, or when it is run on one (as `cut-release.yml` does):
   draft. Nothing is pushed to a tap or to the AUR — neither exists
   (`DISTRIBUTION.md`).
 - **Manifest check and publish** (`publish-release`): the tag must have
-  exactly one release object, the draft `create-draft` made, and
-  `gh release view` must resolve the tag to it; it must still be a draft, and
+  exactly one release object, the draft `create-draft` made; it must still be
+  a draft, and
   its assets must be exactly the four installers, their four `.sig` files,
   their four `.manifest.sig` files and the three packaging files — fifteen in
   all, every one fully uploaded. Last, the tag must still be
@@ -90,8 +92,8 @@ On a pushed `v*` tag, or when it is run on one (as `cut-release.yml` does):
       it to agents, so a stale file ships warnings for lists that exist.
 - [ ] **Desktop checks** below, on the `dev-latest` build of the release
       commit, for the paths CI cannot exercise.
-- [ ] **Release notes** in English, written into the annotated tag (layout
-      below).
+- [ ] **Release notes** in English, written into the annotated tag, or into
+      `docs/release-notes/vX.Y.Z.txt` without a tag push (layout below).
 
 ## Cutting the release (tagging)
 
@@ -122,23 +124,31 @@ gh api "repos/dbelokursky/tunl/git/tags/$(gh api repos/dbelokursky/tunl/git/ref/
 
 ### Without pushing a tag
 
-Where a tag cannot be pushed (a Claude Code cloud session may push branches,
-not tags), `cut-release.yml` makes the same annotated tag through the API and
-starts `release.yml` on it:
+A Claude Code cloud session may push branches and merge pull requests, but
+its tag push gets HTTP 403 and its GitHub App may not start a workflow. It
+releases by merging the notes instead, and `cut-release.yml` does the rest:
 
-```sh
-gh workflow run cut-release.yml -f version=X.Y.Z -f commit=<full SHA on main> -F notes=@notes.txt
-```
+1. Add the notes, in the layout below, as `docs/release-notes/vX.Y.Z.txt` in
+   a pull request, and merge it. **The merge is the release.**
+2. When Build passes on the merge commit, `cut-release.yml` makes the
+   annotated `vX.Y.Z` tag on that commit through the API, with the file as
+   its message, and starts `release.yml` on it.
+
+By hand, the same: *Actions → Cut release → Run workflow* with the version
+and the commit, or
+`gh workflow run cut-release.yml -f version=X.Y.Z -f commit=<full SHA on main>`;
+the notes file must be at that commit.
 
 Before it makes the tag it checks what the tag gate checks: the version, the
-commit on `main` with its four required checks green, a title line and a
-blank line in the notes, and no tag of that name yet. So a mistake leaves no
-tag to delete. The API stores the message as given, so no `#` line is lost. A
-tag a workflow makes with `GITHUB_TOKEN` starts no workflow, which is why it
-dispatches `release.yml` itself; `release.yml` can also be run by hand on a
-tag already there (*Actions → Release → Run workflow*, the tag under *Use
-workflow from*). Only commits from `cut-release.yml`'s own on can go out this
-way: before it, `release.yml` could not be run by hand.
+commit on `main` with its four required checks green, a title line that
+starts with the tag, a blank line, and no tag of that name yet. So a mistake
+leaves no tag to delete. A file whose release is tagged stays in the tree and
+is skipped from then on; two untagged files at once are refused. The API
+stores the message as given, so no `#` line is lost. A tag a workflow makes
+with `GITHUB_TOKEN` starts no workflow, which is why it dispatches
+`release.yml` itself; `release.yml` can also be run by hand on a tag already
+there (*Actions → Release → Run workflow*, the tag under *Use workflow
+from*).
 
 `notes.txt` layout (repository release notes are written in English). The first
 line is the title, then a blank line, then the body:

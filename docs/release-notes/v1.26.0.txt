@@ -1,0 +1,188 @@
+v1.26.0 — REALITY with every fingerprint, a Disconnect that stays, and links that carry traffic
+
+## REALITY and the VPN core
+
+- REALITY servers on Xray 26.9.8 and later turned away the `firefox`,
+  `safari`, `edge`, `qq` and `ios` fingerprints: the bundled core sent
+  Firefox 120 and Safari 16.0 hellos, and older ones, without the
+  X25519MLKEM768 key share those servers require. The core is now
+  `core-v1.14.3-tunl3`, which sends Firefox 148 and Safari 26.3 hellos with
+  the share. A REALITY server is sent `safari` for `ios`, and `randomized`
+  for `edge`, `qq`, `360` and `android`, as `random` already was; `360` and
+  `android` offered TLS 1.2 only and never connected over REALITY at all.
+  The stored link keeps its value, plain TLS sends it unchanged, and the
+  server form and the connect log name the substitution.
+
+## Connecting and disconnecting
+
+- A Disconnect now stays disconnected. A server picked in the tray, the
+  list or by an AI agent while or just after disconnecting brought the
+  tunnel back seconds later, in TUN mode with an administrator or UAC
+  prompt, and the tray then said traffic went outside the VPN.
+- A server picked while recovery restarted a dropped tunnel changed the
+  tunnel's mode. Picking another server during a reconnect countdown now
+  starts the countdown over for that server, and Cancel on the countdown
+  cancels only that restart: the tunnel stays on, and a later crash is
+  still recovered.
+- In TUN mode where every start asks for administrator rights (Windows
+  UAC, macOS without the helper rule, the Linux pkexec fallback), a
+  subscription refresh or an agent that removed the server the tunnel runs
+  on raised a surprise prompt. The tunnel now stays on that server and the
+  banner offers Reconnect.
+- Picking a server the core cannot run, for example one with a REALITY
+  short ID longer than 16 hex digits, stopped the working tunnel. A "Could
+  not switch servers" dialog now gives the reason, and the tunnel and the
+  selection stay where they were.
+- Dismissing the administrator prompt of a server switch left the VPN off
+  without a word; the "tunnel dropped" banner now offers Reconnect.
+- With the data volume full or read-only, a failed connect stayed on
+  "Connecting". It now returns to Disconnected with the error.
+- Linux and macOS: pressing Disconnect or Quit while the TUN password or
+  PolicyKit prompt was up, and answering the prompt after, left a root
+  tunnel running that the app could not stop, wherever `/bin/sh` is dash
+  or busybox (Debian, Ubuntu, Mint).
+
+## Share links and servers
+
+- Servers that showed Connected but carried nothing now work: WebSocket and
+  HTTPUpgrade links with Xray's `?ed=` early data (common behind CDNs),
+  HTTP/2 links that list several hosts, ALPN lists with an empty item,
+  VMess with `aes-128-ctr`, VLESS with a space after the flow, and
+  WireGuard through a local relay on 127.0.0.1 or through another network
+  interface than the default route's. Servers stored earlier are fixed
+  without a new import.
+- A WireGuard `.conf` or form entry with space-separated addresses now
+  keeps every address.
+- Seven kinds of server the core always refuses are explained at import
+  and in the server form: REALITY over QUIC, a Shadowsocks 2022 ChaCha20
+  key, a non-numeric v2ray-plugin `mux`, plugin options the core cannot
+  read, a broken `%` in a path, an unreadable WireGuard address, and half
+  of an emoji in a link. Such a server stored earlier is left out of a
+  connect, or named when it is the one picked, instead of failing every
+  connect with the core's raw error.
+- A link whose password holds an unescaped `@` followed by `#`, `?` or `/`
+  could show password fragments as the server's address or name, in the
+  log and in MCP answers. Such a link is now refused when the part read as
+  the server is a name with no dot and no port.
+- Pasting or refreshing a list with a very long link froze the window. A
+  subscription whose lines end in a bare CR, NEL or Unicode line separator
+  now imports every server.
+- Server form: after switching between WireGuard and Hysteria2, the fields
+  showed and saved the other protocol's text; a WireGuard server turned
+  into Hysteria2 was saved with its local address as the obfuscation
+  password.
+
+## Routing and DNS
+
+- Proxy DNS and Direct DNS in Settings, and MCP `set_setting`, take only a
+  server the core can use and refuse anything else with the reason. For a
+  bad value stored earlier the field's default is used, with a notice
+  under the field. An empty Direct DNS means the system resolver.
+- A `quic://` DNS server with a path made the core refuse the whole
+  configuration.
+- TUN mode: names under `.lan`, `.home.arpa` or `.internal` that one of
+  your rules names are resolved where that rule sends them.
+- The Routing dialog and MCP `add_routing_rule` refuse rules the core
+  cannot use, with a specific message: GeoIP names with no list, wildcards
+  the core cannot read, a keyword written as a suffix (`*.ru`), regexes Go
+  refuses or that no name can match, IPv6 typos. The dialog takes a
+  Geosite list newer than the bundled index with a warning; agents are
+  refused it.
+- A stored rule the core would refuse is left out of the configuration,
+  with "Not used: <reason>" under its row, instead of breaking every
+  connect.
+- Names with ß or ς are written in UTS #46 punycode (`straße.de` becomes
+  `xn--strae-oqa.de`).
+- The bundled Geosite index is refreshed: 1,895 lists.
+
+## Data, secrets and backups
+
+- While connected, the core's plain-text config, which holds every
+  server's credentials, sat in the data folder that backups copy and
+  Windows roams. It now lives in a private per-user run folder
+  (`%LOCALAPPDATA%\VlessClient\run` on Windows, the per-user temporary
+  folder on macOS, `$XDG_RUNTIME_DIR` on Linux), so Time Machine and Deja
+  Dup backups and roamed Windows profiles no longer carry it. The first
+  start removes copies that crashes under earlier releases left behind.
+- A hand-damaged data file no longer stops Tunl from starting or
+  connecting: a null entry in `servers.json`, `subscriptions.json` or
+  `traffic-history.json`, a server without a protocol, or
+  `"proxy_mode": null` in `settings.json`.
+- Restoring a broken backup says where it broke, in the app's language,
+  and neither the dialog nor `tunl.log` quotes a password.
+- The subscription dialog keeps OK disabled, and says why, while the URL
+  is not one Tunl can fetch.
+- A subscription whose URL the system keychain did not return at startup
+  (a locked keyring, a closed KeePassXC, a data folder from another
+  machine) says so, instead of calling the URL invalid.
+- Linux with a keyring: a subscription URL over about 6 KiB was cut short.
+  On every OS, credentials saved in plain text while no keychain was
+  available are sealed after the next start that has one.
+- macOS and Windows: a downloaded update for a release GitHub withdrew is
+  discarded.
+- Adding, editing or deleting a subscription froze the window while
+  another save waited on the keychain.
+
+## Platform
+
+- Linux: launch at login silently did nothing, with the box in Settings
+  ticked, when the launcher or Java path held `"`, `%` or a tab, a `'` in
+  systemd-managed GNOME and Plasma sessions, or a `$`, a backquote or a
+  backslash outside them. Tunl now starts at login with such paths; under
+  systemd's autostart, `$`, a backquote or a backslash still cannot be
+  carried by any autostart entry.
+- Linux: for a system-wide sing-box that carries `cap_net_admin` (granted
+  by Tunl 1.24 or older, or by an administrator), the log now says that
+  every account that can run that core holds the capability, and that
+  `sudo setcap -r <path>` removes it. Tunl does not change the file.
+- Windows: TUN works when `TEMP` points at a folder with brackets in its
+  name, and Tunl no longer switches off another proxy tool's system proxy
+  on a neighbouring port, such as 127.0.0.1:10810 when Tunl uses 1081.
+- Windows: a save failed, and the unsaved banner asked to retry it, when a
+  virus scanner, a sync client or another program held the file open at
+  that moment. Tunl now tries again for a moment first.
+- Jar runs under Persian, Arabic, Bengali and similar locales: TUN through
+  the password-prompt fallback works.
+
+## Interface
+
+- At larger Windows text sizes (125 % to 225 %), Settings, Logs and Servers
+  stay inside the window: rows that do not fit go on to a further line
+  instead of being cut off. At the usual text size the layout is as before.
+- The MCP server's status sits under its port and can be read at every
+  size. A failed start gives its reason in full, and a taken port is
+  reported in the window's language.
+- Dashboard: the mode and server boxes follow a language switch without
+  restarting the tunnel, and with thousands of servers the window no
+  longer freezes for up to a second on each status change.
+- macOS: the sing-box installer's `brew install` command is set in Menlo,
+  and dialogs get the Mac styling.
+
+## For AI agents (MCP)
+
+- `select_server` refuses a server the core cannot run and changes
+  nothing. `get_status` names the server the tunnel actually runs when it
+  differs from the active one. `connect` during another start refuses a
+  different server or mode, or waits and answers with that start's tunnel.
+  `get_settings` shows private DNS resolvers redacted, and
+  `set_proxy_mode` without a mode says "'mode' is required".
+
+## Upgrading from 1.25
+
+- The app extracts its VPN core once more after the update, since
+  `core-v1.14.3-tunl3` replaces tunl2. On Linux the first TUN connect then
+  asks for the password once, because the network capability belonged to
+  the old file. macOS and Windows ask nothing new.
+- Servers, routing rules and DNS values stored earlier that the core
+  cannot use are now named instead of failing connects: such a server is
+  left out, such a rule shows "Not used", and such a DNS value falls back
+  to the field's default with a notice.
+
+## Installation
+
+- macOS (Apple Silicon): `tunl_1.26.0.dmg`
+- Windows 10/11 x64: `tunl_1.26.0.msi`
+- Debian/Ubuntu amd64: `tunl_1.26.0_amd64.deb`
+- Debian/Ubuntu arm64: `tunl_1.26.0_arm64.deb`
+- Bundled core: sing-box 1.14.3, GPL-3.0, built as `core-v1.14.3-tunl3`;
+  its release holds the corresponding source
