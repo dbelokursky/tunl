@@ -2,6 +2,10 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # On a tag, by hand or from cut-release.yml: a tag a workflow makes with
+  # GITHUB_TOKEN starts no run of its own. Run on a branch, it stops at the
+  # gate.
+  workflow_dispatch:
 # Runs for one tag queue rather than overlap (a tag deleted and pushed again
 # while its first run is still going). Two overlapping runs would share the
 # tag's draft, overwrite each other's installers with --clobber, and could
@@ -69,6 +73,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          if [ "$GITHUB_REF_TYPE" != tag ]; then
+            echo "::error::Release runs on a tag, not on the ${GITHUB_REF_TYPE} ${GITHUB_REF_NAME}: pick the tag under Use workflow from."
+            exit 1
+          fi
           ref_json="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${GITHUB_REF_NAME}")"
           obj_type="$(printf '%s' "$ref_json" | jq -r '.object.type')"
           obj_sha="$(printf '%s' "$ref_json" | jq -r '.object.sha')"
