@@ -780,7 +780,7 @@ jobs:
   # attestation binds each digest to this workflow run and commit, for
   # `gh attestation verify` (README, "Verify the download").
   upload-installers:
-    needs: [release-macos, release-windows, release-linux, release-linux-arm64]
+    needs: [create-draft, release-macos, release-windows, release-linux, release-linux-arm64]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -838,13 +838,53 @@ jobs:
         with:
           subject-path: 'installers/*'
       - name: Upload the installers into the draft release
-        # --clobber lets a re-run replace the assets an earlier attempt left.
+        # A re-run replaces the assets an earlier attempt left.
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ needs.create-draft.outputs.release_id }}
         run: |
           set -euo pipefail
-          gh release upload "$GITHUB_REF_NAME" installers/* --clobber
+          # The draft is reached by the id create-draft handed on, as in every
+          # job after it, never by its tag: gh release upload and download
+          # look a draft up by tag, and that lookup can miss it ("release not
+          # found" failed v1.26.0's signing). The asset list can lag a moment
+          # behind a write, so a miss is tried again.
+          if ! [[ "$RELEASE_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::create-draft handed on no usable release id (got '${RELEASE_ID}')."
+            exit 1
+          fi
+          # $ENV is jq's, not the shell's (gh's --jq takes no --arg).
+          # shellcheck disable=SC2016
+          asset_id() { # $1 name: the id of the draft's asset of that name, or nothing
+            NAME="$1" gh api --paginate "repos/${GH_REPO}/releases/${RELEASE_ID}/assets?per_page=100" \
+              --jq '.[] | select(.name == $ENV.NAME) | .id'
+          }
+          upload() { # $1 file: uploaded under its own name, in place of an asset of that name
+            local name try id
+            name="$(basename "$1")"
+            if ! [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]]; then
+              echo "::error::${name} is not a name this job uploads unencoded." >&2
+              return 1
+            fi
+            for try in 1 2 3; do
+              id="$(asset_id "$name")" || id=""
+              if [[ "$id" =~ ^[0-9]+$ ]]; then
+                gh api --method DELETE "repos/${GH_REPO}/releases/assets/${id}" --silent || true
+              fi
+              if gh api --method POST -H 'Content-Type: application/octet-stream' \
+                  "https://uploads.github.com/repos/${GH_REPO}/releases/${RELEASE_ID}/assets?name=${name}" \
+                  --input "$1" --silent; then
+                return 0
+              fi
+              if [ "$try" -lt 3 ]; then sleep $((try * 5)); fi
+            done
+            echo "::error::Could not upload ${name} to draft ${RELEASE_ID}." >&2
+            return 1
+          }
+          for installer in installers/*; do
+            upload "$installer"
+          done
 
   # Sign every installer with the project release key, so the in-app updater
   # can tell a build we published from one that merely appeared on the release
@@ -863,8 +903,8 @@ jobs:
   # jobs' outputs above) before a single signature is made, so a file
   # swapped on the draft between upload and signing gets no signature.
   sign-release:
-    needs: [prepare-release, release-macos, release-windows, release-linux, release-linux-arm64,
-            upload-installers]
+    needs: [prepare-release, create-draft, release-macos, release-windows, release-linux,
+            release-linux-arm64, upload-installers]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -877,6 +917,7 @@ jobs:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ needs.create-draft.outputs.release_id }}
           BUILT_DMG_SHA256: ${{ needs.release-macos.outputs.dmg_sha256 }}
           BUILT_MSI_SHA256: ${{ needs.release-windows.outputs.msi_sha256 }}
           BUILT_DEB_AMD64_SHA256: ${{ needs.release-linux.outputs.deb_sha256 }}
@@ -911,6 +952,54 @@ jobs:
           fi
           echo "signing key matches ReleaseSignature.PUBLIC_KEY at ${GITHUB_REF_NAME}"
 
+          # The draft by the id create-draft handed on, never by its tag (see
+          # upload-installers): a miss is tried again.
+          if ! [[ "$RELEASE_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::create-draft handed on no usable release id (got '${RELEASE_ID}')."
+            exit 1
+          fi
+          # $ENV is jq's, not the shell's (gh's --jq takes no --arg).
+          # shellcheck disable=SC2016
+          asset_id() { # $1 name: the id of the draft's asset of that name, or nothing
+            NAME="$1" gh api --paginate "repos/${GH_REPO}/releases/${RELEASE_ID}/assets?per_page=100" \
+              --jq '.[] | select(.name == $ENV.NAME) | .id'
+          }
+          download() { # $1 asset name, $2 the file to write
+            local try id
+            for try in 1 2 3; do
+              id="$(asset_id "$1")" || id=""
+              if [[ "$id" =~ ^[0-9]+$ ]] && gh api -H 'Accept: application/octet-stream' \
+                  "repos/${GH_REPO}/releases/assets/${id}" > "$2"; then
+                return 0
+              fi
+              if [ "$try" -lt 3 ]; then sleep $((try * 5)); fi
+            done
+            echo "::error::Could not download $1 from draft ${RELEASE_ID}." >&2
+            return 1
+          }
+          upload() { # $1 file: uploaded under its own name, in place of an asset of that name
+            local name try id
+            name="$(basename "$1")"
+            if ! [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]]; then
+              echo "::error::${name} is not a name this job uploads unencoded." >&2
+              return 1
+            fi
+            for try in 1 2 3; do
+              id="$(asset_id "$name")" || id=""
+              if [[ "$id" =~ ^[0-9]+$ ]]; then
+                gh api --method DELETE "repos/${GH_REPO}/releases/assets/${id}" --silent || true
+              fi
+              if gh api --method POST -H 'Content-Type: application/octet-stream' \
+                  "https://uploads.github.com/repos/${GH_REPO}/releases/${RELEASE_ID}/assets?name=${name}" \
+                  --input "$1" --silent; then
+                return 0
+              fi
+              if [ "$try" -lt 3 ]; then sleep $((try * 5)); fi
+            done
+            echo "::error::Could not upload ${name} to draft ${RELEASE_ID}." >&2
+            return 1
+          }
+
           V="${GITHUB_REF_NAME#v}"
           assets=(
             "tunl_${V}.dmg"
@@ -937,8 +1026,7 @@ jobs:
                 echo "::error::No builder digest for ${asset} (got '${expected}'). Refusing to sign an asset this run cannot vouch for."
                 exit 1
               fi
-              gh release download "$GITHUB_REF_NAME" -p "$asset" \
-                -O "$RUNNER_TEMP/$asset" --clobber
+              download "$asset" "$RUNNER_TEMP/$asset"
               actual=$(sha256sum "$RUNNER_TEMP/$asset" | awk '{print $1}')
               if [ "$actual" != "$expected" ]; then
                 echo "::error::${asset} on the draft release is not the file its builder job uploaded (built ${expected}, downloaded ${actual}). Not signing."
@@ -959,7 +1047,7 @@ jobs:
               base64 -d "$RUNNER_TEMP/$asset.sig" > "$RUNNER_TEMP/signature.verify"
               openssl pkeyutl -verify -rawin -pubin -inkey "$PUB" \
                 -in "$RUNNER_TEMP/message" -sigfile "$RUNNER_TEMP/signature.verify"
-              gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/$asset.sig" --clobber
+              upload "$RUNNER_TEMP/$asset.sig"
               # The same digest, bound to the version and the asset it belongs
               # to. The digest alone authorised the bytes and said nothing
               # about which release they were: an old signed installer could be
@@ -974,7 +1062,7 @@ jobs:
               base64 -d "$RUNNER_TEMP/$asset.manifest.sig" > "$RUNNER_TEMP/manifest.verify"
               openssl pkeyutl -verify -rawin -pubin -inkey "$PUB" \
                 -in "$RUNNER_TEMP/manifest" -sigfile "$RUNNER_TEMP/manifest.verify"
-              gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/$asset.manifest.sig" --clobber
+              upload "$RUNNER_TEMP/$asset.manifest.sig"
               echo "signed $asset"
           done
 
@@ -983,8 +1071,8 @@ jobs:
   # release. A tap/AUR maintainer copies them into their package repo (see
   # docs/DISTRIBUTION.md); the repo keeps the templates unfilled.
   update-packaging:
-    needs: [prepare-release, release-macos, release-windows, release-linux, release-linux-arm64,
-            upload-installers]
+    needs: [prepare-release, create-draft, release-macos, release-windows, release-linux,
+            release-linux-arm64, upload-installers]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -997,11 +1085,37 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ needs.create-draft.outputs.release_id }}
           BUILT_DMG_SHA256: ${{ needs.release-macos.outputs.dmg_sha256 }}
           BUILT_DEB_AMD64_SHA256: ${{ needs.release-linux.outputs.deb_sha256 }}
           BUILT_DEB_ARM64_SHA256: ${{ needs.release-linux-arm64.outputs.deb_sha256 }}
         run: |
           set -euo pipefail
+          # The draft by the id create-draft handed on, never by its tag (see
+          # upload-installers): a miss is tried again.
+          if ! [[ "$RELEASE_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::create-draft handed on no usable release id (got '${RELEASE_ID}')."
+            exit 1
+          fi
+          # $ENV is jq's, not the shell's (gh's --jq takes no --arg).
+          # shellcheck disable=SC2016
+          asset_id() { # $1 name: the id of the draft's asset of that name, or nothing
+            NAME="$1" gh api --paginate "repos/${GH_REPO}/releases/${RELEASE_ID}/assets?per_page=100" \
+              --jq '.[] | select(.name == $ENV.NAME) | .id'
+          }
+          download() { # $1 asset name, $2 the file to write
+            local try id
+            for try in 1 2 3; do
+              id="$(asset_id "$1")" || id=""
+              if [[ "$id" =~ ^[0-9]+$ ]] && gh api -H 'Accept: application/octet-stream' \
+                  "repos/${GH_REPO}/releases/assets/${id}" > "$2"; then
+                return 0
+              fi
+              if [ "$try" -lt 3 ]; then sleep $((try * 5)); fi
+            done
+            echo "::error::Could not download $1 from draft ${RELEASE_ID}." >&2
+            return 1
+          }
           V="${GITHUB_REF_NAME#v}"
           # The digest stamped into the cask and the PKGBUILD is the one the
           # asset's builder job recorded; the download only confirms the
@@ -1011,7 +1125,8 @@ jobs:
               echo "::error::No builder digest for $1 (got '$2')." >&2
               return 1
             fi
-            gh release download "$GITHUB_REF_NAME" -p "$1" -O "$RUNNER_TEMP/$1" --clobber
+            # Checked here: errexit does not reach into the $(...) this runs in.
+            download "$1" "$RUNNER_TEMP/$1" || return 1
             local actual
             actual=$(sha256sum "$RUNNER_TEMP/$1" | awk '{print $1}')
             if [ "$actual" != "$2" ]; then
@@ -1026,25 +1141,64 @@ jobs:
           scripts/update-packaging.sh "$V" "$DMG" "$DEB_AMD64" "$DEB_ARM64"
       - name: Upload cask, PKGBUILD and .SRCINFO into the draft release
         # GitHub stores an asset uploaded as .SRCINFO under the name
-        # default.SRCINFO. Upload it under that name, so the name --clobber
-        # replaces on a re-run and the name publish-release's manifest expects
-        # are the file's own name rather than a server-side rename.
+        # default.SRCINFO. Upload it under that name, so the name a re-run
+        # replaces and the name publish-release's manifest expects are the
+        # file's own name rather than a server-side rename.
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ needs.create-draft.outputs.release_id }}
         run: |
           set -euo pipefail
+          # The draft by the id create-draft handed on, never by its tag (see
+          # upload-installers): a miss is tried again.
+          if ! [[ "$RELEASE_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::create-draft handed on no usable release id (got '${RELEASE_ID}')."
+            exit 1
+          fi
+          # $ENV is jq's, not the shell's (gh's --jq takes no --arg).
+          # shellcheck disable=SC2016
+          asset_id() { # $1 name: the id of the draft's asset of that name, or nothing
+            NAME="$1" gh api --paginate "repos/${GH_REPO}/releases/${RELEASE_ID}/assets?per_page=100" \
+              --jq '.[] | select(.name == $ENV.NAME) | .id'
+          }
+          upload() { # $1 file: uploaded under its own name, in place of an asset of that name
+            local name try id
+            name="$(basename "$1")"
+            if ! [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]]; then
+              echo "::error::${name} is not a name this job uploads unencoded." >&2
+              return 1
+            fi
+            for try in 1 2 3; do
+              id="$(asset_id "$name")" || id=""
+              if [[ "$id" =~ ^[0-9]+$ ]]; then
+                gh api --method DELETE "repos/${GH_REPO}/releases/assets/${id}" --silent || true
+              fi
+              if gh api --method POST -H 'Content-Type: application/octet-stream' \
+                  "https://uploads.github.com/repos/${GH_REPO}/releases/${RELEASE_ID}/assets?name=${name}" \
+                  --input "$1" --silent; then
+                return 0
+              fi
+              if [ "$try" -lt 3 ]; then sleep $((try * 5)); fi
+            done
+            echo "::error::Could not upload ${name} to draft ${RELEASE_ID}." >&2
+            return 1
+          }
           cp packaging/aur/.SRCINFO "$RUNNER_TEMP/default.SRCINFO"
-          gh release upload "$GITHUB_REF_NAME" packaging/homebrew/tunl.rb \
-            packaging/aur/PKGBUILD "$RUNNER_TEMP/default.SRCINFO" --clobber
+          upload packaging/homebrew/tunl.rb
+          upload packaging/aur/PKGBUILD
+          upload "$RUNNER_TEMP/default.SRCINFO"
 
   # A release is invisible to users until every installer, updater signature,
   # and package-manager file exists. This avoids a public partial release while
   # parallel upload/signing jobs are still running or after one has failed.
-  # The jobs before this one reach the draft by tag, and gh resolves a tag
-  # that carries two release objects to whichever GitHub picks, so the draft
-  # is published by the id create-draft handed on, and only once it is the
-  # tag's one release object and the one the tag resolves to.
+  # The jobs before this one reach the draft by the id create-draft handed on,
+  # and so does this one: it is published by that id, and only once it is the
+  # tag's one release object. They reached it by tag before, through gh, which
+  # resolves a tag that carries two release objects to whichever GitHub picks
+  # and can miss a draft altogether, so this job also had gh resolve the tag;
+  # that lookup was a miss of its own waiting to happen, and nothing went by
+  # tag any more for it to catch.
   publish-release:
     needs: [prepare-release, create-draft, sign-release, update-packaging]
     runs-on: ubuntu-latest
@@ -1083,15 +1237,6 @@ jobs:
                 echo "  extra release ${rid} -> gh api -X DELETE repos/${GH_REPO}/releases/${rid}"
               fi
             done <<< "$ids"
-            exit 1
-          fi
-
-          if ! viewed="$(gh release view "$GITHUB_REF_NAME" --json databaseId --jq .databaseId)"; then
-            echo "::error::gh release view ${GITHUB_REF_NAME} failed."
-            exit 1
-          fi
-          if [ "$viewed" != "$RELEASE_ID" ]; then
-            echo "::error::gh release view ${GITHUB_REF_NAME} resolves to release ${viewed}, not the draft ${RELEASE_ID}: the uploads, signatures and packaging files may have gone to another release."
             exit 1
           fi
 

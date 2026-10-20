@@ -21,9 +21,11 @@ On a pushed `v*` tag, or when it is run on one (as `cut-release.yml` does):
   tag, or adopts the draft an earlier attempt left (a re-run, or a failed run
   for the same tag) and writes the current tag's title and notes onto it. It
   fails if the tag already has a published release or more than one release
-  object. Every later job only uploads into that draft: in v1.19.0 two jobs
-  created a release at the same moment and left a second, empty draft on the
-  tag. Runs for the same tag queue behind each other rather than overlap, and
+  object. Every later job only uploads into that draft, and reaches it by the
+  id `create-draft` hands on, never by the tag: in v1.19.0 two jobs created a
+  release at the same moment and left a second, empty draft on the tag, and
+  in v1.26.0 gh's lookup of the draft by its tag failed the signing with
+  "release not found" while the draft was there. Runs for the same tag queue behind each other rather than overlap, and
   a run whose tag is pushed again before it publishes does not publish: it
   leaves its draft to the run for the new push, which adopts it.
 - **Per OS** — macOS (Apple Silicon), Windows x64, Linux amd64, Linux arm64:
@@ -59,8 +61,8 @@ On a pushed `v*` tag, or when it is run on one (as `cut-release.yml` does):
   draft. Nothing is pushed to a tap or to the AUR — neither exists
   (`DISTRIBUTION.md`).
 - **Manifest check and publish** (`publish-release`): the tag must have
-  exactly one release object, the draft `create-draft` made, and
-  `gh release view` must resolve the tag to it; it must still be a draft, and
+  exactly one release object, the draft `create-draft` made; it must still be
+  a draft, and
   its assets must be exactly the four installers, their four `.sig` files,
   their four `.manifest.sig` files and the three packaging files — fifteen in
   all, every one fully uploaded. Last, the tag must still be
