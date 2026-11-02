@@ -290,7 +290,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.6.0</version>
+                <version>3.6.1</version>
                 <configuration>
                     <!-- @{argLine} lets the JaCoCo agent attach (prepare-agent
                          sets the argLine property); a bare literal here
@@ -375,9 +375,9 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <!-- 0.8.15 reads Java 27 (class file 71) bytecode, but only as
+                <!-- 0.8.16 reads Java 27 (class file 71) bytecode, but only as
                      experimental support; official support comes after it. -->
-                <version>0.8.15</version>
+                <version>0.8.16</version>
                 <executions>
                     <execution>
                         <goals>
@@ -495,7 +495,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
-                <version>3.6.3</version>
+                <version>3.7.0</version>
                 <executions>
                     <execution>
                         <id>enforce-build-environment</id>
